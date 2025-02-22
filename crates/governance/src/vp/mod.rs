@@ -531,18 +531,9 @@ where
                     ));
                 }
 
-                // can't remove and add the same target in the same proposal
-                let are_targets_unique = are_continuous_add_targets_unique
-                    .intersection(&are_continuous_remove_targets_unique)
-                    .count() as u64
-                    == 0;
+                // Should we add a check to the VP for the new data format?
 
-                are_targets_unique.ok_or_else(|| {
-                    Error::new_const(
-                        "One or more payment targets were added and removed \
-                         in the same proposal",
-                    )
-                })
+                Ok(())
             }
             // Default proposal condition are checked already for all other
             // proposals.

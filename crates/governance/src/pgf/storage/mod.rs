@@ -8,12 +8,13 @@ pub mod steward;
 use namada_core::address::Address;
 use namada_core::collections::HashMap;
 use namada_core::dec::Dec;
+use namada_state::collections::lazy_map::Collectable;
 use namada_state::{Result, StorageRead, StorageWrite};
 
 use crate::pgf::parameters::PgfParameters;
 use crate::pgf::storage::keys as pgf_keys;
 use crate::pgf::storage::steward::StewardDetail;
-use crate::storage::proposal::StoragePgfFunding;
+use crate::storage::proposal::ContPgfFundings;
 
 /// Query the current pgf steward set
 pub fn get_stewards<S>(storage: &S) -> Result<Vec<StewardDetail>>
@@ -61,20 +62,11 @@ where
 }
 
 /// Query the current pgf continuous payments
-pub fn get_continuous_pgf_payments<S>(
-    storage: &S,
-) -> Result<Vec<StoragePgfFunding>>
+pub fn get_continuous_pgf_payments<S>(storage: &S) -> Result<ContPgfFundings>
 where
     S: StorageRead,
 {
-    let fundings = pgf_keys::fundings_handle()
-        .iter(storage)?
-        .filter_map(|data| match data {
-            Ok((_, funding)) => Some(funding),
-            Err(_) => None,
-        })
-        .collect::<Vec<StoragePgfFunding>>();
-
+    let fundings = pgf_keys::fundings_handle().collect_map(storage)?;
     Ok(fundings)
 }
 

@@ -19,9 +19,7 @@ use crate::event::GovernanceEvent;
 use crate::pgf::storage::keys as pgf_keys;
 use crate::pgf::storage::steward::StewardDetail;
 use crate::pgf::{ADDRESS as PGF_ADDRESS, storage as pgf_storage};
-use crate::storage::proposal::{
-    AddRemove, PGFAction, PGFTarget, ProposalType, StoragePgfFunding,
-};
+use crate::storage::proposal::{AddRemove, PGFAction, PGFTarget, ProposalType};
 use crate::storage::{keys, load_proposals};
 use crate::utils::{
     ProposalVotes, TallyResult, TallyType, VotePower, compute_proposal_result,
@@ -449,29 +447,38 @@ where
         match funding {
             PGFAction::Continuous(action) => match action {
                 AddRemove::Add(target) => {
-                    pgf_keys::fundings_handle().insert(
-                        storage,
-                        target.target().clone(),
-                        StoragePgfFunding::new(target.clone(), proposal_id),
-                    )?;
                     tracing::info!(
-                        "Added/Updated Continuous PGF from proposal id {}: \
-                         set {} to {}.",
+                        "Adding Continuous PGF for {} from Proposal {} in the \
+                         amount of {} per epoch, {}.",
+                        target.target.target(),
                         proposal_id,
-                        target.amount().to_string_native(),
-                        target.target()
+                        target.target.amount().to_string_native(),
+                        if let Some(ep) = target.end_epoch {
+                            format!("until epoch {}", ep)
+                        } else {
+                            "indefinitely".to_string()
+                        }
                     );
+                    pgf_keys::fundings_handle()
+                        .at(&target.target.target())
+                        .insert(storage, proposal_id, target.clone())?;
                 }
                 AddRemove::Remove(target) => {
-                    pgf_keys::fundings_handle()
-                        .remove(storage, &target.target())?;
                     tracing::info!(
-                        "Removed Continuous PGF from proposal id {}: set {} \
-                         to {}.",
-                        proposal_id,
-                        target.amount().to_string_native(),
-                        target.target()
+                        "Removing Continuous PGF for {} from Proposal {} (set \
+                         to {} native tokens, end epoch: {}).",
+                        target.target.target(),
+                        target.proposal_id,
+                        target.target.amount().to_string_native(),
+                        if let Some(ep) = target.end_epoch {
+                            format!("{}", ep)
+                        } else {
+                            "None".to_string()
+                        }
                     );
+                    pgf_keys::fundings_handle()
+                        .at(&target.target.target())
+                        .remove(storage, &target.proposal_id)?;
                 }
             },
             PGFAction::Retro(target) => {
@@ -525,16 +532,16 @@ where
                 match result {
                     Ok(()) => {
                         tracing::info!(
-                            "Execute Retroactive PGF from proposal id {}: \
-                             sent {} to {}.",
+                            "Execute Retroactive PGF from Proposal {}: {}  \
+                             native tokens transferred to {}.",
                             proposal_id,
                             target.amount().to_string_native(),
                             target.target()
                         );
                     }
                     Err(e) => tracing::warn!(
-                        "Error in Retroactive PGF transfer from proposal id \
-                         {}, amount {} to {}: {}",
+                        "Error in Retroactive PGF transfer from Proposal {}, \
+                         attempt to transfer {} native tokens to {}: {}",
                         proposal_id,
                         target.amount().to_string_native(),
                         target.target(),

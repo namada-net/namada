@@ -4397,10 +4397,10 @@ async fn check_balance_too_low_err<N: Namada>(
 ) -> Result<()> {
     let balance = match balance {
         CheckBalance::Balance(amt) => amt,
-        CheckBalance::Query(ref balance_key) => {
+        CheckBalance::Query(balance_key) => {
             match rpc::query_storage_value::<N::Client, token::Amount>(
                 context.client(),
-                balance_key,
+                &balance_key,
             )
             .await
             {

@@ -316,7 +316,7 @@ where
         S: StorageRead,
     {
         let prefix = self.get_data_key(key);
-        let mut iter = crate::iter_prefix_bytes(storage, &prefix)?;
+        let mut iter = crate::iter_prefix_bytes(storage, prefix)?;
         Ok(iter.next().is_some())
     }
 
@@ -354,7 +354,7 @@ where
     > {
         let iter = crate::iter_prefix_with_filter(
             storage,
-            &self.get_data_prefix(),
+            self.get_data_prefix(),
             |key| self.is_data_sub_key(key),
         )?;
         Ok(iter.map(|key_val_res| {
@@ -372,7 +372,7 @@ where
         S: StorageRead,
     {
         let mut iter =
-            crate::iter_prefix_bytes(storage, &self.get_data_prefix())?;
+            crate::iter_prefix_bytes(storage, self.get_data_prefix())?;
         Ok(iter.next().is_none())
     }
 }
@@ -478,7 +478,7 @@ where
         S: StorageRead,
     {
         let mut iter =
-            crate::iter_prefix_bytes(storage, &self.get_data_prefix())?;
+            crate::iter_prefix_bytes(storage, self.get_data_prefix())?;
         Ok(iter.next().is_none())
     }
 
@@ -492,7 +492,7 @@ where
     where
         S: StorageRead,
     {
-        let iter = crate::iter_prefix_bytes(storage, &self.get_data_prefix())?;
+        let iter = crate::iter_prefix_bytes(storage, self.get_data_prefix())?;
         iter.count().try_into().into_storage_result()
     }
 
@@ -507,7 +507,7 @@ where
         &self,
         storage: &'iter impl StorageRead,
     ) -> Result<impl Iterator<Item = Result<(K, V)>> + 'iter> {
-        let iter = crate::iter_prefix(storage, &self.get_data_prefix())?;
+        let iter = crate::iter_prefix(storage, self.get_data_prefix())?;
         Ok(iter.map(|key_val_res| {
             let (key, val) = key_val_res?;
             let last_key_seg = key

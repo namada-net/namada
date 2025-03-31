@@ -27,7 +27,7 @@ use syn::{ItemEnum, ItemFn, ItemStruct, LitByte, parse_macro_input};
 pub fn transaction(_attr: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as ItemFn);
     let ident = &ast.sig.ident;
-    let gen = quote! {
+    let r#gen = quote! {
         // Use `rlsf` as the global allocator.
         #[global_allocator]
         static ALLOC: rlsf::SmallGlobalTlsf = rlsf::SmallGlobalTlsf::new();
@@ -35,7 +35,7 @@ pub fn transaction(_attr: TokenStream, input: TokenStream) -> TokenStream {
         #ast
 
         // The module entrypoint callable by wasm runtime
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         extern "C" fn _apply_tx(tx_data_ptr: u64, tx_data_len: u64) -> u64 {
             let slice = unsafe {
                 core::slice::from_raw_parts(
@@ -64,7 +64,7 @@ pub fn transaction(_attr: TokenStream, input: TokenStream) -> TokenStream {
             }
         }
     };
-    TokenStream::from(gen)
+    TokenStream::from(r#gen)
 }
 
 /// Generate WASM binding for validity predicate main entrypoint function.
@@ -87,7 +87,7 @@ pub fn validity_predicate(
 ) -> TokenStream {
     let ast = parse_macro_input!(input as ItemFn);
     let ident = &ast.sig.ident;
-    let gen = quote! {
+    let r#gen = quote! {
         // Use `rlsf` as the global allocator.
         #[global_allocator]
         static ALLOC: rlsf::SmallGlobalTlsf = rlsf::SmallGlobalTlsf::new();
@@ -95,7 +95,7 @@ pub fn validity_predicate(
         #ast
 
         // The module entrypoint callable by wasm runtime
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         extern "C" fn _validate_tx(
             // VP's account's address
             addr_ptr: u64,
@@ -156,7 +156,7 @@ pub fn validity_predicate(
             }
         }
     };
-    TokenStream::from(gen)
+    TokenStream::from(r#gen)
 }
 
 #[proc_macro_derive(StorageKeys)]

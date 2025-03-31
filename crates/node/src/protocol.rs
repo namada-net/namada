@@ -385,7 +385,7 @@ where
             },
             gas_meter_kind,
         ) {
-            Err(Error::GasError(ref msg)) => {
+            Err(Error::GasError(msg)) => {
                 // Gas error aborts the execution of the entire batch
                 tx_result.insert_inner_tx_result(
                     wrapper_hash,

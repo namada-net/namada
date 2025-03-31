@@ -173,7 +173,7 @@ where
     where
         S: StorageRead,
     {
-        let mut iter = crate::iter_prefix_bytes(storage, &self.key)?;
+        let mut iter = crate::iter_prefix_bytes(storage, self.key.clone())?;
         Ok(iter.next().is_none())
     }
 
@@ -187,7 +187,7 @@ where
     where
         S: StorageRead,
     {
-        let iter = crate::iter_prefix_bytes(storage, &self.key)?;
+        let iter = crate::iter_prefix_bytes(storage, self.key.clone())?;
         iter.count().try_into().into_storage_result()
     }
 
@@ -201,7 +201,7 @@ where
         &self,
         storage: &'iter impl StorageRead,
     ) -> Result<impl Iterator<Item = Result<K>> + 'iter> {
-        let iter = crate::iter_prefix(storage, &self.key)?;
+        let iter = crate::iter_prefix(storage, self.key.clone())?;
         Ok(iter.map(|key_val_res| {
             let (key, ()) = key_val_res?;
             let last_key_seg = key

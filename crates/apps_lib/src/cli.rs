@@ -603,7 +603,7 @@ pub mod cmds {
         }
 
         fn parse(matches: &ArgMatches) -> Option<Self> {
-            let gen = SubCmd::parse(matches).map(Self::KeyGen);
+            let r#gen = SubCmd::parse(matches).map(Self::KeyGen);
             let derive = SubCmd::parse(matches).map(Self::KeyDerive);
             let pay_addr_gen = SubCmd::parse(matches).map(Self::PayAddrGen);
             let key_addr_list = SubCmd::parse(matches).map(Self::KeyAddrList);
@@ -614,7 +614,8 @@ pub mod cmds {
             let key_addr_add = SubCmd::parse(matches).map(Self::KeyAddrAdd);
             let key_addr_remove =
                 SubCmd::parse(matches).map(Self::KeyAddrRemove);
-            gen.or(derive)
+            r#gen
+                .or(derive)
                 .or(pay_addr_gen)
                 .or(key_addr_list)
                 .or(key_addr_find)
@@ -1090,12 +1091,12 @@ pub mod cmds {
 
         fn parse(matches: &ArgMatches) -> Option<Self> {
             matches.subcommand_matches(Self::CMD).and_then(|matches| {
-                let gen = SubCmd::parse(matches).map(Self::Gen);
+                let r#gen = SubCmd::parse(matches).map(Self::Gen);
                 let validator_cfg = SubCmd::parse(matches)
                     .map(Self::UpdateValidatorLocalConfig);
                 let local_cfg =
                     SubCmd::parse(matches).map(Self::UpdateLocalConfig);
-                gen.or(validator_cfg).or(local_cfg)
+                r#gen.or(validator_cfg).or(local_cfg)
             })
         }
 

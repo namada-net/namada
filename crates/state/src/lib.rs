@@ -233,13 +233,13 @@ macro_rules! impl_storage_read {
                 // try to read from the write log first
                 let (log_val, gas) = self.write_log().read(key)?;
                 self.charge_gas(gas).into_storage_result()?;
-                match log_val {
+                match &log_val {
                     Some(write_log::StorageModification::Write { value }) => {
                         Ok(Some(value.clone()))
                     }
                     Some(write_log::StorageModification::Delete) => Ok(None),
                     Some(write_log::StorageModification::InitAccount {
-                        ref vp_code_hash,
+                        vp_code_hash,
                     }) => Ok(Some(vp_code_hash.to_vec())),
                     None => {
                         // when not found in write log try to read from the storage
@@ -1209,13 +1209,14 @@ mod tests {
                 }
                 Level::TxWriteLog(WlMod::DeletePrefix) => {
                     // Find keys matching the prefix
-                    let keys = namada_storage::iter_prefix_bytes(s, key)
-                        .unwrap()
-                        .map(|res| {
-                            let (key, _val) = res.unwrap();
-                            key
-                        })
-                        .collect::<Vec<storage::Key>>();
+                    let keys =
+                        namada_storage::iter_prefix_bytes(s, key.clone())
+                            .unwrap()
+                            .map(|res| {
+                                let (key, _val) = res.unwrap();
+                                key
+                            })
+                            .collect::<Vec<storage::Key>>();
                     // Delete the matching keys
                     for key in keys {
                         // Skip validity predicates which cannot be deleted

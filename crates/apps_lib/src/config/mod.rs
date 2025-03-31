@@ -859,7 +859,7 @@ mod tests {
         .unwrap();
 
         let moniker = "moniker_from_env";
-        env::set_var("NAMADA_LEDGER__COMETBFT__MONIKER", moniker);
+        unsafe { env::set_var("NAMADA_LEDGER__COMETBFT__MONIKER", moniker) };
         let config = Config::load(&base_dir, &chain_id, None);
 
         assert_eq!(config.ledger.cometbft.moniker.as_ref(), moniker);

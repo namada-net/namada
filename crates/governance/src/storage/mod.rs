@@ -200,7 +200,7 @@ where
 {
     let vote_prefix_key =
         governance_keys::get_proposal_vote_prefix_key(proposal_id);
-    let vote_iter = iter_prefix::<ProposalVote>(storage, &vote_prefix_key)?;
+    let vote_iter = iter_prefix::<ProposalVote>(storage, vote_prefix_key)?;
 
     let votes = vote_iter
         .filter_map(|vote_result| {
@@ -344,7 +344,7 @@ where
     let mut ids = BTreeSet::<u64>::new();
     let proposals_key =
         governance_keys::get_commiting_proposals_prefix(current_epoch.0);
-    for key_val in namada_state::iter_prefix_bytes(storage, &proposals_key)? {
+    for key_val in namada_state::iter_prefix_bytes(storage, proposals_key)? {
         let (key, _) = key_val?;
         let activation_epoch = governance_keys::get_commit_proposal_epoch(&key)
             .expect("this key segment should correspond to an epoch number");

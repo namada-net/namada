@@ -97,7 +97,7 @@ where
 
     fn read_bytes(&self, key: &Key) -> Result<Option<Vec<u8>>> {
         match self.store.get(key) {
-            Some(StorageModification::Write { ref value }) => {
+            Some(StorageModification::Write { value }) => {
                 let gas = checked!(key.len() + value.len())? as u64;
                 self.ctx.ctx.charge_gas(
                     checked!(gas * MEMORY_ACCESS_GAS_PER_BYTE)?.into(),

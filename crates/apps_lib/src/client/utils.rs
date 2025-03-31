@@ -1088,8 +1088,8 @@ pub async fn sign_offline(
             signature.pubkey,
         );
 
-        let signature_path = match output_folder_path {
-            Some(ref path) => path.join(filename).to_string_lossy().to_string(),
+        let signature_path = match &output_folder_path {
+            Some(path) => path.join(filename).to_string_lossy().to_string(),
             None => filename,
         };
 
@@ -1111,8 +1111,8 @@ pub async fn sign_offline(
             "offline_wrapper_signature_{}.sig",
             header_hash.to_string().to_lowercase()
         );
-        let signature_path = match output_folder_path {
-            Some(ref path) => path.join(filename).to_string_lossy().to_string(),
+        let signature_path = match &output_folder_path {
+            Some(path) => path.join(filename).to_string_lossy().to_string(),
             None => filename,
         };
 

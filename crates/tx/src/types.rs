@@ -679,10 +679,8 @@ impl Tx {
         hash: namada_core::hash::Hash,
         tag: Option<String>,
     ) -> namada_core::hash::Hash {
-        let sechash = self
-            .add_section(Section::ExtraData(Code::from_hash(hash, tag)))
-            .get_hash();
-        sechash
+        self.add_section(Section::ExtraData(Code::from_hash(hash, tag)))
+            .get_hash()
     }
 
     /// Add an extra section to the tx builder by code

@@ -90,7 +90,7 @@ fn wallet_encrypted_key_cmds_env_var() -> Result<()> {
     let key_alias = "Test_Key_1";
     let password = "VeRySeCuR3";
 
-    env::set_var("NAMADA_WALLET_PASSWORD", password);
+    unsafe { env::set_var("NAMADA_WALLET_PASSWORD", password) };
 
     // 1. key gen
     let mut cmd =

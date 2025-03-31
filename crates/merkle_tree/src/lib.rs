@@ -748,14 +748,10 @@ impl<H: StorageHasher + Default> MerkleTree<H> {
             StringKey::try_from_bytes(sub_key.to_string().as_bytes())?;
         let mut nep = self.ibc.non_membership_proof(&string_key)?;
         // Replace the values and the leaf op for the verification
-        if let Some(ref mut nep) = nep.proof {
+        if let Some(nep) = &mut nep.proof {
             match nep {
-                Ics23Proof::Nonexist(ref mut ep) => {
-                    let NonExistenceProof {
-                        ref mut left,
-                        ref mut right,
-                        ..
-                    } = ep;
+                Ics23Proof::Nonexist(ep) => {
+                    let NonExistenceProof { left, right, .. } = ep;
                     if let Some(left) = left.as_mut() {
                         left.leaf = Some(ibc_leaf_spec::<H>());
                     }

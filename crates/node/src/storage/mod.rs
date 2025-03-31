@@ -789,7 +789,7 @@ mod tests {
         }
 
         // Then try to iterate over their prefix
-        let iter = state::iter_prefix(&state, &prefix)
+        let iter = state::iter_prefix(&state, prefix.clone())
             .unwrap()
             .map(Result::unwrap);
 
@@ -804,7 +804,7 @@ mod tests {
         state.commit_block().unwrap();
 
         // Again, try to iterate over their prefix
-        let iter = state::iter_prefix(&state, &prefix)
+        let iter = state::iter_prefix(&state, prefix.clone())
             .unwrap()
             .map(Result::unwrap);
         itertools::assert_equal(iter, expected);
@@ -822,7 +822,7 @@ mod tests {
             state.write(&key, i / 2).unwrap();
         }
 
-        let iter = state::iter_prefix(&state, &prefix)
+        let iter = state::iter_prefix(&state, prefix.clone())
             .unwrap()
             .map(Result::unwrap);
 
@@ -842,7 +842,7 @@ mod tests {
         }
 
         // Check that iter_prefix doesn't return deleted keys anymore
-        let iter = state::iter_prefix(&state, &prefix)
+        let iter = state::iter_prefix(&state, prefix.clone())
             .unwrap()
             .map(Result::unwrap);
         let expected = merged
@@ -855,7 +855,7 @@ mod tests {
         state.commit_block().unwrap();
 
         // And check again
-        let iter = state::iter_prefix(&state, &prefix)
+        let iter = state::iter_prefix(&state, prefix.clone())
             .unwrap()
             .map(Result::unwrap);
         itertools::assert_equal(iter, expected);

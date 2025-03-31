@@ -30,7 +30,7 @@ members = [
 
 [workspace.package]
 authors = ["Heliax AG <hello@heliax.dev>"]
-edition = "2021"
+edition = "2024"
 license = "GPL-3.0"
 version = "0.251.0"
 

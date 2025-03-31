@@ -733,7 +733,7 @@ mod test_token_transfer_actions {
     /// limit of inputs and outputs.
     #[test]
     fn test_transparent_transfer_validation_exceeding_limit() {
-        fn gen(id: usize) -> (Account, DenominatedAmount) {
+        fn r#gen(id: usize) -> (Account, DenominatedAmount) {
             let id = u64::try_from(id).unwrap();
             let addr = {
                 let mut addr = [0u8; 20];
@@ -751,10 +751,10 @@ mod test_token_transfer_actions {
         }
 
         let sources: BTreeMap<_, _> =
-            (0..TRANSFER_INOUT_SINK_UNIQUE).map(gen).collect();
+            (0..TRANSFER_INOUT_SINK_UNIQUE).map(r#gen).collect();
         let targets: BTreeMap<_, _> = (TRANSFER_INOUT_SINK_UNIQUE..)
             .take(TRANSFER_INOUT_SINK_UNIQUE + 1)
-            .map(gen)
+            .map(r#gen)
             .collect();
 
         assert_eq!(sources.len() + targets.len(), TRANSFER_INOUT_LIMIT + 1);

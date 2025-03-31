@@ -133,7 +133,9 @@ impl<T> HostRef<RoAccess, T> {
     /// is valid and non-null.
     pub unsafe fn new(host_structure: &T) -> Self {
         Self {
-            data: NonNull::new_unchecked(host_structure as *const _ as *mut _),
+            data: unsafe {
+                NonNull::new_unchecked(host_structure as *const _ as *mut _)
+            },
             _access: PhantomData,
         }
     }
@@ -145,7 +147,7 @@ impl<T> HostRef<RoAccess, T> {
     /// The caller must ensure the reference to the VM environment
     /// is still valid.
     pub unsafe fn get<'a>(&self) -> &'a T {
-        self.data.as_ref()
+        unsafe { self.data.as_ref() }
     }
 }
 
@@ -158,7 +160,7 @@ impl<T> HostRef<RwAccess, T> {
     /// is valid and non-null.
     pub unsafe fn new(host_structure: &mut T) -> Self {
         Self {
-            data: NonNull::new_unchecked(host_structure as *mut _),
+            data: unsafe { NonNull::new_unchecked(host_structure as *mut _) },
             _access: PhantomData,
         }
     }
@@ -170,7 +172,7 @@ impl<T> HostRef<RwAccess, T> {
     /// The caller must ensure the reference to the VM environment
     /// is still valid.
     pub unsafe fn get<'a>(&self) -> &'a T {
-        self.data.as_ref()
+        unsafe { self.data.as_ref() }
     }
 
     /// Get a mutable reference from the VM environment.
@@ -181,7 +183,7 @@ impl<T> HostRef<RwAccess, T> {
     /// is still valid. Moreover, the caller must guarantee that the
     /// returned reference is not aliased, to avoid data races.
     pub unsafe fn get_mut<'a>(&self) -> &'a mut T {
-        &mut *self.data.as_ptr()
+        unsafe { &mut *self.data.as_ptr() }
     }
 }
 

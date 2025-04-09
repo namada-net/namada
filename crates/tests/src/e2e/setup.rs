@@ -1577,7 +1577,7 @@ pub fn setup_cosmos(chain_type: CosmosChainType) -> Result<Test> {
 
     // initialize
     let args = ["--chain-id", &chain_id, "init", &chain_id];
-    let mut cosmos = run_cosmos_cmd(&test, args, Some(10))?;
+    let mut cosmos = run_cosmos_cmd(&test, args, Some(5))?;
     cosmos.assert_success();
 
     for role in [

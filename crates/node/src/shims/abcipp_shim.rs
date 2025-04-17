@@ -6,12 +6,10 @@ use std::task::{Context, Poll};
 use futures::future::FutureExt;
 use namada_apps_lib::state::DbError;
 use namada_sdk::chain::BlockHeight;
-use namada_sdk::hash::Hash;
 use namada_sdk::migrations::ScheduledMigration;
 use namada_sdk::state::ProcessProposalCachedResult;
 use namada_sdk::tendermint::abci::response::ProcessProposal;
 use namada_sdk::time::{DateTimeUtc, Utc};
-use namada_sdk::tx::data::hash_tx;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedSender;
 use tower::Service;
@@ -19,9 +17,7 @@ use tower::Service;
 use super::abcipp_shim_types::shim::request::{
     CheckProcessProposal, FinalizeBlock, ProcessedTx,
 };
-use super::abcipp_shim_types::shim::{
-    Error, Request, Response, TakeSnapshot, TxBytes,
-};
+use super::abcipp_shim_types::shim::{Error, Request, Response, TakeSnapshot};
 use crate::config;
 use crate::config::{Action, ActionAtHeight};
 use crate::shell::{EthereumOracleChannels, Shell};
@@ -35,8 +31,6 @@ use crate::tower_abci::BoxError;
 #[derive(Debug)]
 pub struct AbcippShim {
     service: Shell,
-    begin_block_request: Option<request::BeginBlock>,
-    delivered_txs: Vec<TxBytes>,
     shell_recv: std::sync::mpsc::Receiver<(
         Req,
         tokio::sync::oneshot::Sender<Result<Resp, BoxError>>,
@@ -81,8 +75,6 @@ impl AbcippShim {
                     vp_wasm_compilation_cache,
                     tx_wasm_compilation_cache,
                 ),
-                begin_block_request: None,
-                delivered_txs: vec![],
                 shell_recv,
                 snapshot_task: None,
                 snapshots_to_keep,
@@ -98,12 +90,12 @@ impl AbcippShim {
         )
     }
 
-    /// Get the hash of the txs in the block
-    pub fn get_hash(&self) -> Hash {
-        let bytes: Vec<u8> =
-            self.delivered_txs.iter().flat_map(Clone::clone).collect();
-        hash_tx(bytes.as_slice())
-    }
+    // /// Get the hash of the txs in the block
+    // pub fn get_hash(&self) -> Hash {
+    //     let bytes: Vec<u8> =
+    //         self.delivered_txs.iter().flat_map(Clone::clone).collect();
+    //     hash_tx(bytes.as_slice())
+    // }
 
     /// Run the shell's blocking loop that receives messages from the
     /// [`AbciService`].
@@ -118,48 +110,32 @@ impl AbcippShim {
                     )
                     .map_err(Error::from)
                     .and_then(|resp| resp.try_into()),
-                Req::BeginBlock(block) => {
-                    // we save this data to be forwarded to finalize later
-                    self.begin_block_request = Some(block);
-                    Ok(Resp::BeginBlock(Default::default()))
-                }
-                Req::DeliverTx(tx) => {
-                    self.delivered_txs.push(tx.tx);
-                    Ok(Resp::DeliverTx(Default::default()))
-                }
-                Req::EndBlock(_) => {
-                    let begin_block_request =
-                        self.begin_block_request.take().unwrap();
-
-                    match self.get_process_proposal_result(
-                        begin_block_request.clone(),
-                    ) {
+                Req::FinalizeBlock(mut request) => {
+                    match self.get_process_proposal_result(request.clone()) {
                         ProcessProposalCachedResult::Accepted(tx_results) => {
-                            let mut txs =
-                                Vec::with_capacity(self.delivered_txs.len());
-                            let delivered =
-                                std::mem::take(&mut self.delivered_txs);
-                            for (result, tx) in tx_results
-                                .into_iter()
-                                .zip(delivered.into_iter())
-                            {
+                            let mut txs = Vec::with_capacity(tx_results.len());
+                            for (result, tx) in tx_results.into_iter().zip(
+                                std::mem::take(&mut request.txs).into_iter(),
+                            ) {
                                 txs.push(ProcessedTx {
                                     tx,
                                     result: result.into(),
                                 });
                             }
-                            let mut end_block_request: FinalizeBlock =
-                                begin_block_request.into();
-                            end_block_request.txs = txs;
+                            let mut request: FinalizeBlock = request.into();
+                            request.txs = txs;
                             self.service
-                        .call(Request::FinalizeBlock(end_block_request), &self.namada_version)
-                        .map_err(Error::from)
-                        .and_then(|res| match res {
-                            Response::FinalizeBlock(resp) => {
-                                Ok(Resp::EndBlock(crate::tendermint_proto::abci::ResponseEndBlock::from(resp).try_into().unwrap()))
-                            }
-                            _ => Err(Error::ConvertResp(res)),
-                        })
+                                .call(
+                                    Request::FinalizeBlock(request),
+                                    &self.namada_version,
+                                )
+                                .map_err(Error::from)
+                                .and_then(|res| match res {
+                                    Response::FinalizeBlock(resp) => {
+                                        Ok(Resp::FinalizeBlock(resp.into()))
+                                    }
+                                    _ => Err(Error::ConvertResp(res)),
+                                })
                         }
                         ProcessProposalCachedResult::Rejected => {
                             Err(Error::Shell(
@@ -267,9 +243,9 @@ impl AbcippShim {
     // compute it if missing
     fn get_process_proposal_result(
         &mut self,
-        begin_block_request: request::BeginBlock,
+        request: request::FinalizeBlock,
     ) -> ProcessProposalCachedResult {
-        match namada_sdk::hash::Hash::try_from(begin_block_request.hash) {
+        match namada_sdk::hash::Hash::try_from(request.hash) {
             Ok(block_hash) => {
                 match self
                     .service
@@ -284,11 +260,8 @@ impl AbcippShim {
                     None => {
                         // Need to run process proposal to extract the data we
                         // need for finalize block (tx results)
-                        let process_req =
-                            CheckProcessProposal::from(begin_block_request)
-                                .cast_to_tendermint_req(
-                                    self.delivered_txs.clone(),
-                                );
+                        let process_req = CheckProcessProposal::from(request)
+                            .cast_to_tendermint_req();
 
                         let (process_resp, res) =
                             self.service.process_proposal(process_req.into());
@@ -316,9 +289,8 @@ impl AbcippShim {
             Err(_) => {
                 // Need to run process proposal to extract the data we need for
                 // finalize block (tx results)
-                let process_req =
-                    CheckProcessProposal::from(begin_block_request)
-                        .cast_to_tendermint_req(self.delivered_txs.clone());
+                let process_req = CheckProcessProposal::from(request)
+                    .cast_to_tendermint_req();
 
                 // Do not cache the result in this case since we
                 // don't have the hash of the block
@@ -486,17 +458,15 @@ impl AbciService {
     fn get_action(&self, req: &Req) -> Option<CheckAction> {
         match req {
             Req::PrepareProposal(req) => {
-                Some(CheckAction::Check(req.height.into()))
+                Some(CheckAction::Check(req.height.into())) // TODO switch to u64?
             }
             Req::ProcessProposal(req) => {
                 Some(CheckAction::Check(req.height.into()))
             }
-            Req::EndBlock(req) => Some(CheckAction::Check(req.height)),
-            Req::BeginBlock(_)
-            | Req::DeliverTx(_)
-            | Req::InitChain(_)
-            | Req::CheckTx(_)
-            | Req::Commit => {
+            Req::FinalizeBlock(req) => {
+                Some(CheckAction::Check(req.height.into()))
+            }
+            Req::InitChain(_) | Req::CheckTx(_) | Req::Commit => {
                 if self.suspended {
                     Some(CheckAction::AlreadySuspended)
                 } else {

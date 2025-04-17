@@ -68,7 +68,7 @@ use crate::tendermint::abci::response;
 use crate::tower_abci::{Server, split};
 pub mod tower_abci {
     pub use tower_abci::BoxError;
-    pub use tower_abci::v037::*;
+    pub use tower_abci::v038::*;
 }
 
 /// Env. var to set a number of Tokio RT worker threads

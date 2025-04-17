@@ -124,7 +124,7 @@ pub mod shim {
         ProcessProposal(response::ProcessProposal),
         RevertProposal(response::RevertProposal),
         FinalizeBlock(response::FinalizeBlock),
-        EndBlock(tm_response::EndBlock),
+        // EndBlock(tm_response::EndBlock),
         Commit(tm_response::Commit, TakeSnapshot),
         Flush,
         Echo(tm_response::Echo),
@@ -217,43 +217,44 @@ pub mod shim {
             time: Time,
             next_validators_hash: namada_sdk::tendermint::Hash,
             proposer_address: Id,
+            txs: Vec<Bytes>,
         }
 
-        impl From<tm_request::BeginBlock> for FinalizeBlock {
-            fn from(req: tm_request::BeginBlock) -> FinalizeBlock {
-                let header = req.header;
+        impl From<tm_request::FinalizeBlock> for FinalizeBlock {
+            fn from(req: tm_request::FinalizeBlock) -> FinalizeBlock {
                 FinalizeBlock {
                     header: BlockHeader {
                         #[allow(clippy::disallowed_methods)]
-                        hash: Hash::try_from(header.app_hash.as_bytes())
+                        hash: Hash::try_from(req.hash.as_bytes())
                             .unwrap_or_default(),
-                        time: DateTimeUtc::try_from(header.time).unwrap(),
-                        next_validators_hash: header
+                        time: DateTimeUtc::try_from(req.time).unwrap(),
+                        next_validators_hash: req
                             .next_validators_hash
                             .try_into()
                             .unwrap(),
                     },
                     block_hash: req.hash.try_into().unwrap(),
-                    byzantine_validators: req.byzantine_validators,
-                    txs: vec![],
-                    proposer_address: header.proposer_address.into(),
-                    height: header.height,
-                    decided_last_commit: req.last_commit_info,
+                    byzantine_validators: req.misbehavior,
+                    txs: vec![], // TODO  missing result here, it's filled in
+                    // `AbcippShim::run` with the attached results
+                    proposer_address: req.proposer_address.into(),
+                    height: req.height,
+                    decided_last_commit: req.decided_last_commit,
                 }
             }
         }
 
-        impl From<tm_request::BeginBlock> for CheckProcessProposal {
-            fn from(req: tm_request::BeginBlock) -> CheckProcessProposal {
-                let header = req.header;
+        impl From<tm_request::FinalizeBlock> for CheckProcessProposal {
+            fn from(req: tm_request::FinalizeBlock) -> CheckProcessProposal {
                 CheckProcessProposal {
-                    proposed_last_commit: Some(req.last_commit_info),
-                    misbehavior: req.byzantine_validators,
+                    proposed_last_commit: Some(req.decided_last_commit),
+                    misbehavior: req.misbehavior,
                     hash: req.hash,
-                    height: header.height,
-                    time: header.time,
-                    next_validators_hash: header.next_validators_hash,
-                    proposer_address: header.proposer_address,
+                    height: req.height,
+                    time: req.time,
+                    next_validators_hash: req.next_validators_hash,
+                    proposer_address: req.proposer_address,
+                    txs: req.txs,
                 }
             }
         }
@@ -261,9 +262,9 @@ pub mod shim {
         impl CheckProcessProposal {
             pub(crate) fn cast_to_tendermint_req(
                 self,
-                txs: Vec<Bytes>,
             ) -> tm_request::ProcessProposal {
                 let Self {
+                    txs,
                     proposed_last_commit,
                     misbehavior,
                     hash,
@@ -320,14 +321,12 @@ pub mod shim {
     /// Custom types for response payloads
     pub mod response {
         use namada_sdk::events::Event;
+        use namada_sdk::tendermint;
 
+        use crate::tendermint::abci::Event as TmEvent;
         pub use crate::tendermint::abci::response::{
             PrepareProposal, ProcessProposal,
         };
-        use crate::tendermint_proto::abci::{
-            Event as TmEvent, ValidatorUpdate,
-        };
-        use crate::tendermint_proto::types::ConsensusParams;
 
         #[derive(Debug, Default)]
         pub struct VerifyHeader;
@@ -344,11 +343,13 @@ pub mod shim {
         #[derive(Debug, Default)]
         pub struct FinalizeBlock {
             pub events: Vec<Event>,
-            pub validator_updates: Vec<ValidatorUpdate>,
-            pub consensus_param_updates: Option<ConsensusParams>,
+            pub validator_updates: Vec<tendermint::validator::Update>,
+            pub consensus_param_updates: Option<tendermint::consensus::Params>,
+            pub tx_results: Vec<tendermint::abci::types::ExecTxResult>,
+            pub app_hash: tendermint::AppHash,
         }
 
-        impl From<FinalizeBlock> for crate::tendermint_proto::abci::ResponseEndBlock {
+        impl From<FinalizeBlock> for tendermint::abci::response::FinalizeBlock {
             fn from(resp: FinalizeBlock) -> Self {
                 Self {
                     events: resp
@@ -358,6 +359,8 @@ pub mod shim {
                         .collect(),
                     validator_updates: resp.validator_updates,
                     consensus_param_updates: resp.consensus_param_updates,
+                    tx_results: resp.tx_results,
+                    app_hash: resp.app_hash,
                 }
             }
         }

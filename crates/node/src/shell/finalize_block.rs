@@ -32,7 +32,6 @@ use super::*;
 use crate::protocol::{DispatchArgs, DispatchError};
 use crate::shell::stats::InternalStats;
 use crate::tendermint::abci::types::VoteInfo;
-use crate::tendermint_proto;
 
 impl<D, H> Shell<D, H>
 where
@@ -250,11 +249,10 @@ where
         // Apply validator set update
         response.validator_updates = self
             .get_abci_validator_updates(false, |pk, power| {
-                let pub_key = tendermint_proto::crypto::PublicKey {
-                    sum: Some(key_to_tendermint(&pk).unwrap()),
-                };
-                let pub_key = Some(pub_key);
-                tendermint_proto::abci::ValidatorUpdate { pub_key, power }
+                let pub_key = tendermint::PublicKey::from(pk);
+                // TODO use u64
+                let power = tendermint::vote::Power::try_from(power).unwrap();
+                tendermint::validator::Update { pub_key, power }
             })
             .expect("Must be able to update validator set");
     }
@@ -792,7 +790,20 @@ where
             let consumed_gas = tx_gas_meter.get_consumed_gas();
 
             // save the gas cost
-            self.update_tx_gas(tx_hash, consumed_gas);
+            self.update_tx_gas(tx_hash, consumed_gas.clone());
+
+            // The number of the `tx_results` has to match the number of txs in
+            // request, otherwise Comet crashes consensus with "failed to apply
+            // block; error expected tx results length to match size of
+            // transactions in block."
+            response
+                .tx_results
+                .push(tendermint::abci::types::ExecTxResult {
+                    code: result_code.into(),
+                    gas_used: i64::try_from(u64::from(consumed_gas))
+                        .unwrap_or_default(),
+                    ..Default::default()
+                });
 
             if let Some(wrapper_cache) = self.evaluate_tx_result(
                 response,
@@ -1272,6 +1283,7 @@ mod test_finalize_block {
     use namada_apps_lib::wallet::defaults::albert_keypair;
     use namada_replay_protection as replay_protection;
     use namada_sdk::address;
+    use namada_sdk::borsh::BorshSerializeExt;
     use namada_sdk::collections::{HashMap, HashSet};
     use namada_sdk::dec::{Dec, POS_DECIMAL_PRECISION};
     use namada_sdk::eth_bridge::MinimumConfirmations;

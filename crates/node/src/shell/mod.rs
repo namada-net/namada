@@ -33,7 +33,7 @@ use std::rc::Rc;
 
 use namada_apps_lib::wallet::{self, ValidatorData, ValidatorKeys};
 use namada_sdk::address::Address;
-use namada_sdk::borsh::{BorshDeserialize, BorshSerializeExt};
+use namada_sdk::borsh::BorshDeserialize;
 use namada_sdk::chain::{BlockHeight, ChainId};
 use namada_sdk::collections::HashMap;
 use namada_sdk::eth_bridge::protocol::validation::bridge_pool_roots::validate_bp_roots_vext;
@@ -80,24 +80,10 @@ use crate::shims::abcipp_shim_types::shim::TakeSnapshot;
 use crate::shims::abcipp_shim_types::shim::response::TxResult;
 use crate::tendermint::abci::{request, response};
 use crate::tendermint::{self, validator};
-use crate::tendermint_proto::crypto::public_key;
 use crate::{protocol, storage, tendermint_node};
 
 /// A cap on a number of tx sections
 pub const MAX_TX_SECTIONS_LEN: usize = 10_000;
-
-fn key_to_tendermint(
-    pk: &common::PublicKey,
-) -> std::result::Result<public_key::Sum, ParsePublicKeyError> {
-    match pk {
-        common::PublicKey::Ed25519(_) => ed25519::PublicKey::try_from_pk(pk)
-            .map(|pk| public_key::Sum::Ed25519(pk.serialize_to_vec())),
-        common::PublicKey::Secp256k1(_) => {
-            secp256k1::PublicKey::try_from_pk(pk)
-                .map(|pk| public_key::Sum::Secp256k1(pk.serialize_to_vec()))
-        }
-    }
-}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -2111,6 +2097,7 @@ mod shell_tests {
     use eth_bridge::storage::eth_bridge_queries::is_bridge_comptime_enabled;
     use namada_apps_lib::state::StorageWrite;
     use namada_sdk::address;
+    use namada_sdk::borsh::BorshSerializeExt;
     use namada_sdk::chain::Epoch;
     use namada_sdk::token::read_denom;
     use namada_sdk::tx::data::Fee;

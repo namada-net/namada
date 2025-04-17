@@ -5,8 +5,8 @@ set -Eo pipefail
 # an example download-url
 # https://github.com/tendermint/tendermint/releases/download/v0.34.13/tendermint_0.34.13_linux_amd64.tar.gz
 # https://github.com/heliaxdev/tendermint/releases/download/v0.1.1-abcipp/tendermint_0.1.0-abcipp_darwin_amd64.tar.gz
-CMT_MAJORMINOR="0.37"
-CMT_PATCH="15"
+CMT_MAJORMINOR="0.38"
+CMT_PATCH="17"
 
 CMT_REPO="https://github.com/cometbft/cometbft"
 

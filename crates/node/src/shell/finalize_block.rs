@@ -32,7 +32,6 @@ use super::*;
 use crate::protocol::{DispatchArgs, DispatchError};
 use crate::shell::stats::InternalStats;
 use crate::tendermint::abci::types::VoteInfo;
-use crate::tendermint_proto;
 
 impl<D, H> Shell<D, H>
 where
@@ -250,11 +249,10 @@ where
         // Apply validator set update
         response.validator_updates = self
             .get_abci_validator_updates(false, |pk, power| {
-                let pub_key = tendermint_proto::crypto::PublicKey {
-                    sum: Some(key_to_tendermint(&pk).unwrap()),
-                };
-                let pub_key = Some(pub_key);
-                tendermint_proto::abci::ValidatorUpdate { pub_key, power }
+                let pub_key = tendermint::PublicKey::from(pk);
+                // TODO use u64
+                let power = tendermint::vote::Power::try_from(power).unwrap();
+                tendermint::validator::Update { pub_key, power }
             })
             .expect("Must be able to update validator set");
     }
@@ -647,6 +645,16 @@ where
 
             let result_code = ResultCode::from_u32(processed_tx.result.code)
                 .expect("Result code conversion should not fail");
+            // The number of the `tx_results` has to match the number of txs in
+            // request, otherwise Comet crashes consensus with "failed to apply
+            // block; error expected tx results length to match size of
+            // transactions in block."
+            response
+                .tx_results
+                .push(tendermint::abci::types::ExecTxResult {
+                    code: result_code.into(),
+                    ..Default::default()
+                });
 
             let tx_header = tx.header();
             // If [`process_proposal`] rejected a Tx, emit an event here and
@@ -1289,6 +1297,7 @@ mod test_finalize_block {
     use namada_apps_lib::wallet::defaults::albert_keypair;
     use namada_replay_protection as replay_protection;
     use namada_sdk::address;
+    use namada_sdk::borsh::BorshSerializeExt;
     use namada_sdk::collections::{HashMap, HashSet};
     use namada_sdk::dec::{Dec, POS_DECIMAL_PRECISION};
     use namada_sdk::eth_bridge::MinimumConfirmations;

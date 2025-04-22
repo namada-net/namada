@@ -209,6 +209,7 @@ where
         self.event_log_mut().emit_many(response.events.clone());
         tracing::debug!("End finalize_block {height} of epoch {current_epoch}");
 
+        debug_assert_eq!(req.txs.len(), response.tx_results.len());
         Ok(response)
     }
 

@@ -76,7 +76,6 @@ use super::ethereum_oracle::{self as oracle, last_processed_block};
 use crate::config::{self, TendermintMode, ValidatorLocalConfig, genesis};
 use crate::protocol::ShellParams;
 use crate::shims::abcipp_shim_types::shim;
-use crate::shims::abcipp_shim_types::shim::TakeSnapshot;
 use crate::shims::abcipp_shim_types::shim::response::TxResult;
 use crate::tendermint::abci::{request, response};
 use crate::tendermint::{self, validator};
@@ -789,7 +788,7 @@ where
 
     /// Commit a block. Persist the application state and return the Merkle root
     /// hash.
-    pub fn commit(&mut self) -> shim::Response {
+    pub fn commit(&mut self) -> response::Commit {
         self.bump_last_processed_eth_block();
         let height_to_commit = self.state.in_mem().block.height;
 
@@ -822,23 +821,19 @@ where
         );
 
         self.broadcast_queued_txs();
-        let take_snapshot = self.check_snapshot_required();
 
-        shim::Response::Commit(
-            response::Commit {
-                // NB: by passing 0, we forbid CometBFT from deleting
-                // data pertaining to past blocks
-                retain_height: tendermint::block::Height::from(0_u32),
-                // NB: current application hash
-                data: merkle_root.0.to_vec().into(),
-            },
-            take_snapshot,
-        )
+        response::Commit {
+            // NB: by passing 0, we forbid CometBFT from deleting
+            // data pertaining to past blocks
+            retain_height: tendermint::block::Height::from(0_u32),
+            // NB: current application hash
+            data: merkle_root.0.to_vec().into(),
+        }
     }
 
     /// Check if we have reached a block height at which we should take a
     /// snapshot
-    fn check_snapshot_required(&self) -> TakeSnapshot {
+    pub fn check_snapshot_required(&self) -> TakeSnapshot {
         let committed_height = self.state.in_mem().get_last_block_height();
         let take_snapshot = match self.blocks_between_snapshots {
             Some(b) => committed_height.0 % b == 0,
@@ -1441,6 +1436,25 @@ where
     /// within the current epoch.
     pub fn is_deciding_offset_within_epoch(&self, height_offset: u64) -> bool {
         self.state.is_deciding_offset_within_epoch(height_offset)
+    }
+}
+
+#[derive(Debug, Clone)]
+/// Indicate whether a state snapshot should be created
+/// at a certain point in time
+pub enum TakeSnapshot {
+    No,
+    Yes(PathBuf, BlockHeight),
+}
+
+impl<T: AsRef<std::path::Path>> From<Option<(T, BlockHeight)>>
+    for TakeSnapshot
+{
+    fn from(value: Option<(T, BlockHeight)>) -> Self {
+        match value {
+            None => TakeSnapshot::No,
+            Some(p) => TakeSnapshot::Yes(p.0.as_ref().to_path_buf(), p.1),
+        }
     }
 }
 

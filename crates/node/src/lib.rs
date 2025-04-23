@@ -170,7 +170,7 @@ impl Shell {
             }
             Request::Commit => {
                 tracing::debug!("Request Commit");
-                Ok(self.commit())
+                Ok(Response::Commit(self.commit()))
             }
             Request::Flush => Ok(Response::Flush),
             Request::Echo(msg) => Ok(Response::Echo(response::Echo {

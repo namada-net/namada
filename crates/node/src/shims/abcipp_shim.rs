@@ -17,10 +17,10 @@ use tower::Service;
 use super::abcipp_shim_types::shim::request::{
     CheckProcessProposal, FinalizeBlock, ProcessedTx,
 };
-use super::abcipp_shim_types::shim::{Error, Request, Response, TakeSnapshot};
+use super::abcipp_shim_types::shim::{Error, Request, Response};
 use crate::config;
 use crate::config::{Action, ActionAtHeight};
-use crate::shell::{EthereumOracleChannels, Shell};
+use crate::shell::{EthereumOracleChannels, Shell, TakeSnapshot};
 use crate::storage::DbSnapshot;
 use crate::tendermint::abci::{Request as Req, Response as Resp, request};
 use crate::tower_abci::BoxError;
@@ -148,7 +148,9 @@ impl AbcippShim {
                     .service
                     .call(Request::Commit, &self.namada_version)
                 {
-                    Ok(Response::Commit(res, take_snapshot)) => {
+                    Ok(Response::Commit(res)) => {
+                        let take_snapshot =
+                            self.service.check_snapshot_required();
                         self.update_snapshot_task(take_snapshot);
                         Ok(Resp::Commit(res))
                     }

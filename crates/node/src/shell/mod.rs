@@ -10,11 +10,13 @@ mod finalize_block;
 mod init_chain;
 pub use init_chain::InitChainValidation;
 use namada_apps_lib::config::NodeLocalConfig;
+use namada_sdk::state;
 use namada_sdk::state::StateRead;
 use namada_vm::wasm::run::check_tx_allowed;
 pub mod prepare_proposal;
 use namada_sdk::ibc;
-use namada_sdk::state::State;
+use namada_sdk::state::{DbError, ProcessProposalCachedResult, State};
+pub mod abci;
 pub mod process_proposal;
 pub(super) mod queries;
 mod snapshots;
@@ -77,6 +79,7 @@ use crate::config::{self, TendermintMode, ValidatorLocalConfig, genesis};
 use crate::protocol::ShellParams;
 use crate::shims::abcipp_shim_types::shim;
 use crate::shims::abcipp_shim_types::shim::response::TxResult;
+use crate::storage::DbSnapshot;
 use crate::tendermint::abci::{request, response};
 use crate::tendermint::{self, validator};
 use crate::{protocol, storage, tendermint_node};
@@ -376,6 +379,8 @@ where
     /// When set, indicates after how many blocks a new snapshot
     /// will be taken (counting from the first block)
     pub blocks_between_snapshots: Option<NonZeroU64>,
+    snapshot_task: Option<std::thread::JoinHandle<Result<(), DbError>>>,
+    snapshots_to_keep: u64,
     /// Data for a node downloading and apply snapshots as part of
     /// the fast sync protocol.
     pub syncing: Option<SnapshotSync>,
@@ -644,6 +649,8 @@ where
             }
         }
 
+        let snapshots_to_keep =
+            config.shell.snapshots_to_keep.map(|n| n.get()).unwrap_or(1);
         let mut shell = Self {
             chain_id,
             state,
@@ -667,6 +674,8 @@ where
             event_log: EventLog::default(),
             scheduled_migration,
             blocks_between_snapshots: config.shell.blocks_between_snapshots,
+            snapshot_task: None,
+            snapshots_to_keep,
             syncing: None,
         };
         shell.update_eth_oracle(&Default::default());
@@ -833,7 +842,7 @@ where
 
     /// Check if we have reached a block height at which we should take a
     /// snapshot
-    pub fn check_snapshot_required(&self) -> TakeSnapshot {
+    fn check_snapshot_required(&self) -> TakeSnapshot {
         let committed_height = self.state.in_mem().get_last_block_height();
         let take_snapshot = match self.blocks_between_snapshots {
             Some(b) => committed_height.0 % b == 0,
@@ -1436,6 +1445,140 @@ where
     /// within the current epoch.
     pub fn is_deciding_offset_within_epoch(&self, height_offset: u64) -> bool {
         self.state.is_deciding_offset_within_epoch(height_offset)
+    }
+
+    // Retrieve the cached result of process proposal for the given block or
+    // compute it if missing
+    fn get_process_proposal_result(
+        &mut self,
+        request: request::FinalizeBlock,
+    ) -> ProcessProposalCachedResult {
+        match namada_sdk::hash::Hash::try_from(request.hash) {
+            Ok(block_hash) => {
+                match self
+                    .state
+                    .in_mem_mut()
+                    .block_proposals_cache
+                    .get(&block_hash)
+                {
+                    // We already have the result of process proposal for
+                    // this block cached in memory
+                    Some(res) => res.to_owned(),
+                    None => {
+                        // Need to run process proposal to extract the data we
+                        // need for finalize block (tx results)
+                        let process_req =
+                            shim::request::CheckProcessProposal::from(request)
+                                .cast_to_tendermint_req();
+
+                        let (process_resp, res) =
+                            self.process_proposal(process_req.into());
+                        let result = if let response::ProcessProposal::Accept =
+                            process_resp
+                        {
+                            ProcessProposalCachedResult::Accepted(
+                                res.into_iter().map(|res| res.into()).collect(),
+                            )
+                        } else {
+                            ProcessProposalCachedResult::Rejected
+                        };
+
+                        // Cache the result
+                        self.state
+                            .in_mem_mut()
+                            .block_proposals_cache
+                            .put(block_hash.to_owned(), result.clone());
+
+                        result
+                    }
+                }
+            }
+            Err(_) => {
+                // Need to run process proposal to extract the data we need for
+                // finalize block (tx results)
+                let process_req =
+                    shim::request::CheckProcessProposal::from(request)
+                        .cast_to_tendermint_req();
+
+                // Do not cache the result in this case since we
+                // don't have the hash of the block
+                let (process_resp, res) =
+                    self.process_proposal(process_req.into());
+                if let response::ProcessProposal::Accept = process_resp {
+                    ProcessProposalCachedResult::Accepted(
+                        res.into_iter().map(|res| res.into()).collect(),
+                    )
+                } else {
+                    ProcessProposalCachedResult::Rejected
+                }
+            }
+        }
+    }
+
+    fn update_snapshot_task(&mut self, take_snapshot: TakeSnapshot) {
+        let snapshot_taken =
+            self.snapshot_task.as_ref().map(|t| t.is_finished());
+        match snapshot_taken {
+            Some(true) => {
+                let task = self.snapshot_task.take().unwrap();
+                match task.join() {
+                    Ok(Err(e)) => tracing::error!(
+                        "Failed to create snapshot with error: {:?}",
+                        e
+                    ),
+                    Err(e) => tracing::error!(
+                        "Failed to join thread creating snapshot: {:?}",
+                        e
+                    ),
+                    _ => {}
+                }
+            }
+            Some(false) => {
+                // if a snapshot task is still running,
+                // we don't start a new one. This is not
+                // expected to happen if snapshots are spaced
+                // far enough apart.
+                tracing::warn!(
+                    "Previous snapshot task was still running when a new \
+                     snapshot was scheduled"
+                );
+                return;
+            }
+            _ => {}
+        }
+
+        let TakeSnapshot::Yes(db_path, height) = take_snapshot else {
+            return;
+        };
+        // Ensure that the DB is flushed before making a checkpoint
+        state::DB::flush(self.state.db(), true).unwrap();
+        let base_dir = self.base_dir.clone();
+
+        let (snap_send, snap_recv) = tokio::sync::oneshot::channel();
+
+        let snapshots_to_keep = self.snapshots_to_keep;
+        let snapshot_task = std::thread::spawn(move || {
+            let db = crate::storage::open(db_path, true, None)
+                .expect("Could not open DB");
+            let snapshot = db.checkpoint(base_dir.clone(), height)?;
+            // signal to main thread that the snapshot has finished
+            snap_send.send(()).unwrap();
+            DbSnapshot::cleanup(height, &base_dir, snapshots_to_keep)
+                .map_err(|e| DbError::DBError(e.to_string()))?;
+            snapshot
+                .package()
+                .map_err(|e| DbError::DBError(e.to_string()))
+        });
+
+        // it's important that the thread is
+        // blocked until the snapshot is created so that no writes
+        // happen to the db while snapshotting. We want the db frozen
+        // at this specific point in time.
+        if snap_recv.blocking_recv().is_err() {
+            tracing::error!("Failed to start snapshot task.")
+        } else {
+            self.snapshot_task.replace(snapshot_task);
+        }
     }
 }
 

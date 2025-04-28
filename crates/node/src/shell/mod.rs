@@ -33,6 +33,10 @@ use std::path::{Path, PathBuf};
 #[allow(unused_imports)]
 use std::rc::Rc;
 
+use abci::TxResult;
+pub use finalize_block::{
+    Request as FinalizeBlockRequest, Response as FinalizeBlockResponse,
+};
 use namada_apps_lib::wallet::{self, ValidatorData, ValidatorKeys};
 use namada_sdk::address::Address;
 use namada_sdk::borsh::BorshDeserialize;
@@ -77,8 +81,6 @@ use tokio::sync::mpsc::{Receiver, UnboundedSender};
 use super::ethereum_oracle::{self as oracle, last_processed_block};
 use crate::config::{self, TendermintMode, ValidatorLocalConfig, genesis};
 use crate::protocol::ShellParams;
-use crate::shims::abcipp_shim_types::shim;
-use crate::shims::abcipp_shim_types::shim::response::TxResult;
 use crate::storage::DbSnapshot;
 use crate::tendermint::abci::{request, response};
 use crate::tendermint::{self, validator};
@@ -124,6 +126,11 @@ pub enum Error {
     RejectedBlockProposal,
     #[error("Received an invalid block proposal")]
     InvalidBlockProposal,
+    #[error("Unexpected block height, expected: {expected}, got: {got}")]
+    UnexpectedBlockHeight {
+        expected: BlockHeight,
+        got: BlockHeight,
+    },
 }
 
 impl From<Error> for TxResult {
@@ -1468,8 +1475,7 @@ where
                         // Need to run process proposal to extract the data we
                         // need for finalize block (tx results)
                         let process_req =
-                            shim::request::CheckProcessProposal::from(request)
-                                .cast_to_tendermint_req();
+                            abci::finalize_block_to_process_proposal(request);
 
                         let (process_resp, res) =
                             self.process_proposal(process_req.into());
@@ -1497,8 +1503,7 @@ where
                 // Need to run process proposal to extract the data we need for
                 // finalize block (tx results)
                 let process_req =
-                    shim::request::CheckProcessProposal::from(request)
-                        .cast_to_tendermint_req();
+                    abci::finalize_block_to_process_proposal(request);
 
                 // Do not cache the result in this case since we
                 // don't have the hash of the block
@@ -1715,24 +1720,21 @@ pub mod test_utils {
     use data_encoding::HEXUPPER;
     use namada_sdk::ethereum_events::Uint;
     use namada_sdk::events::Event;
-    use namada_sdk::hash::Hash;
     use namada_sdk::keccak::KeccakHash;
     use namada_sdk::key::*;
     use namada_sdk::proof_of_stake::parameters::PosParams;
     use namada_sdk::proof_of_stake::storage::validator_consensus_key_handle;
     use namada_sdk::state::mockdb::MockDB;
     use namada_sdk::state::{LastBlock, StorageWrite};
-    use namada_sdk::storage::{BlockHeader, Epoch};
+    use namada_sdk::storage::Epoch;
     use namada_sdk::tendermint::abci::types::VoteInfo;
+    use namada_sdk::time::Duration;
     use tempfile::tempdir;
     use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
     use super::*;
     use crate::config::ethereum_bridge::ledger::ORACLE_CHANNEL_BUFFER_SIZE;
-    use crate::shims::abcipp_shim_types;
-    use crate::shims::abcipp_shim_types::shim::request::{
-        FinalizeBlock, ProcessedTx,
-    };
+    use crate::shell::abci::ProcessedTx;
     use crate::tendermint::abci::types::Misbehavior;
     use crate::tendermint_proto::abci::{
         RequestPrepareProposal, RequestProcessProposal,
@@ -1977,19 +1979,16 @@ pub mod test_utils {
         /// the events created for each transaction
         pub fn finalize_block(
             &mut self,
-            req: FinalizeBlock,
+            req: finalize_block::Request,
         ) -> ShellResult<Vec<Event>> {
-            match self.shell.finalize_block(req) {
-                Ok(resp) => Ok(resp.events),
-                Err(err) => Err(err),
-            }
+            self.shell.finalize_block(req).map(|resp| resp.events)
         }
 
         /// Forward a PrepareProposal request
         pub fn prepare_proposal(
             &self,
             mut req: RequestPrepareProposal,
-        ) -> abcipp_shim_types::shim::response::PrepareProposal {
+        ) -> response::PrepareProposal {
             req.proposer_address = HEXUPPER
                 .decode(
                     wallet::defaults::validator_keypair()
@@ -2007,26 +2006,29 @@ pub mod test_utils {
             self.state.in_mem_mut().next_epoch_min_start_height =
                 self.state.in_mem().get_last_block_height() + num_blocks;
             self.state.in_mem_mut().next_epoch_min_start_time = {
-                #[allow(clippy::disallowed_methods)]
-                DateTimeUtc::now()
+                ({
+                    #[allow(clippy::disallowed_methods)]
+                    DateTimeUtc::now()
+                }) - Duration::seconds(1)
             };
         }
 
         /// Simultaneously call the `FinalizeBlock` and
         /// `Commit` handlers.
-        pub fn finalize_and_commit(&mut self, req: Option<FinalizeBlock>) {
-            let mut req = req.unwrap_or_default();
-            req.header.time = {
-                #[allow(clippy::disallowed_methods)]
-                DateTimeUtc::now()
-            };
-
+        pub fn finalize_and_commit(
+            &mut self,
+            req: Option<finalize_block::Request>,
+        ) {
+            let req = req.unwrap_or_default();
             self.finalize_block(req).expect("Test failed");
             self.commit();
         }
 
         /// Immediately change to the next epoch.
-        pub fn start_new_epoch(&mut self, req: Option<FinalizeBlock>) -> Epoch {
+        pub fn start_new_epoch(
+            &mut self,
+            req: Option<finalize_block::Request>,
+        ) -> Epoch {
             self.start_new_epoch_in(1);
 
             let next_epoch_min_start_height =
@@ -2159,37 +2161,6 @@ pub mod test_utils {
         setup_with_cfg(SetupCfg::<u64>::default())
     }
 
-    /// This is just to be used in testing. It is not
-    /// a meaningful default.
-    impl Default for FinalizeBlock {
-        fn default() -> Self {
-            FinalizeBlock {
-                header: BlockHeader {
-                    hash: Hash([0; 32]),
-                    #[allow(clippy::disallowed_methods)]
-                    time: DateTimeUtc::now(),
-                    next_validators_hash: Hash([0; 32]),
-                },
-                block_hash: Hash([0; 32]),
-                byzantine_validators: vec![],
-                txs: vec![],
-                proposer_address: HEXUPPER
-                    .decode(
-                        wallet::defaults::validator_keypair()
-                            .to_public()
-                            .tm_raw_hash()
-                            .as_bytes(),
-                    )
-                    .unwrap(),
-                height: 0u8.into(),
-                decided_last_commit: tendermint::abci::types::CommitInfo {
-                    round: 0u8.into(),
-                    votes: vec![],
-                },
-            }
-        }
-    }
-
     /// Set the Ethereum bridge to be inactive
     pub fn deactivate_bridge(shell: &mut TestShell) {
         use eth_bridge::storage::active_key;
@@ -2224,14 +2195,14 @@ pub mod test_utils {
         votes: Vec<VoteInfo>,
         byzantine_validators: Option<Vec<Misbehavior>>,
     ) {
-        // Let the header time be always ahead of the next epoch min start time
-        let header = BlockHeader {
+        let mut req = finalize_block::Request {
+            // Let the header time be always ahead of the next epoch min start
+            // time
             time: shell.state.in_mem().next_epoch_min_start_time.next_second(),
-            ..Default::default()
-        };
-        let mut req = FinalizeBlock {
-            header,
-            proposer_address,
+            proposer_address: tendermint::account::Id::try_from(
+                proposer_address,
+            )
+            .unwrap(),
             decided_last_commit: tendermint::abci::types::CommitInfo {
                 round: 0u8.into(),
                 votes,
@@ -2239,7 +2210,7 @@ pub mod test_utils {
             ..Default::default()
         };
         if let Some(byz_vals) = byzantine_validators {
-            req.byzantine_validators = byz_vals;
+            req.misbehavior = byz_vals;
         }
         shell.finalize_block(req).unwrap();
         shell.commit();

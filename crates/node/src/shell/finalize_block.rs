@@ -33,6 +33,43 @@ use crate::protocol::{DispatchArgs, DispatchError};
 use crate::shell::stats::InternalStats;
 use crate::tendermint::abci::types::VoteInfo;
 
+#[derive(Debug, Clone)]
+pub struct Request {
+    /// List of transactions committed as part of the block.
+    pub txs: Vec<abci::ProcessedTx>,
+    /// Information about the last commit, obtained from the block that was
+    /// just decided.
+    ///
+    /// This includes the round, the list of validators, and which validators
+    /// signed the last block.
+    pub decided_last_commit: tendermint::abci::types::CommitInfo,
+    /// Evidence of validator misbehavior.
+    pub misbehavior: Vec<Misbehavior>,
+    /// Merkle root hash of the fields of the decided block.
+    pub hash: Hash,
+    /// The height of the finalized block.
+    pub height: BlockHeight,
+    /// Timestamp of the finalized block.
+    pub time: DateTimeUtc,
+    /// Merkle root of the next validator set.
+    pub next_validators_hash: Hash,
+    /// The address of the public key of the original proposer of the block.
+    pub proposer_address: tendermint::account::Id,
+}
+
+#[derive(Clone, Debug)]
+pub struct Response {
+    /// Set of block events emitted as part of executing the block
+    pub events: Vec<Event>,
+    /// The result of executing each transaction including the events
+    /// the particular transaction emitted. This should match the order
+    /// of the transactions delivered in the block itself
+    pub tx_results: Vec<tendermint::abci::types::ExecTxResult>,
+    /// A list of updates to the validator set.
+    /// These will reflect the validator set at current height + 2.
+    pub validator_updates: Vec<validator::Update>,
+}
+
 impl<D, H> Shell<D, H>
 where
     D: DB + for<'iter> DBIter<'iter> + Sync + 'static,
@@ -43,14 +80,35 @@ where
     /// etc. as necessary.
     ///
     /// Apply the transactions included in the block.
-    pub fn finalize_block(
-        &mut self,
-        req: shim::request::FinalizeBlock,
-    ) -> ShellResult<shim::response::FinalizeBlock> {
-        let mut response = shim::response::FinalizeBlock::default();
+    pub fn finalize_block(&mut self, req: Request) -> ShellResult<Response> {
+        let Request {
+            txs,
+            decided_last_commit,
+            misbehavior,
+            hash,
+            height: expected_height,
+            time,
+            next_validators_hash,
+            proposer_address,
+        } = req;
+        let mut tx_results: Vec<tendermint::abci::types::ExecTxResult> = vec![];
+        let mut validator_updates = vec![];
+        let mut events: Vec<Event> = vec![];
 
         // Begin the new block and check if a new epoch has begun
-        let (height, new_epoch) = self.update_state(req.header);
+        let header = BlockHeader {
+            hash,
+            time,
+            next_validators_hash,
+        };
+        let (height, new_epoch) = self.update_state(header);
+        if expected_height != height {
+            #[cfg(not(test))]
+            return Err(Error::UnexpectedBlockHeight {
+                expected: expected_height,
+                got: height,
+            });
+        }
         let masp_epoch_multiplier =
             parameters::read_masp_epoch_multiplier_parameter(&self.state)
                 .expect("Must have parameters");
@@ -85,10 +143,10 @@ where
             self.state.in_mem().update_epoch_blocks_delay
         );
 
-        let emit_events = &mut response.events;
+        let emit_events = &mut events;
         // Get the actual votes from cometBFT in the preferred format
         let votes =
-            pos_votes_from_abci(&self.state, &req.decided_last_commit.votes);
+            pos_votes_from_abci(&self.state, &decided_last_commit.votes);
         let validator_set_update_epoch =
             self.get_validator_set_update_epoch(current_epoch);
         let gas_scale = get_gas_scale(&self.state)
@@ -114,7 +172,7 @@ where
             new_epoch,
             validator_set_update_epoch,
             votes,
-            req.byzantine_validators,
+            misbehavior,
         )?;
         // - IBC
         ibc::finalize_block(&mut self.state, emit_events, new_epoch)?;
@@ -127,8 +185,7 @@ where
         let mut stats = InternalStats::default();
 
         let native_block_proposer_address = {
-            let tm_raw_hash_string =
-                tm_raw_hash_to_string(req.proposer_address);
+            let tm_raw_hash_string = tm_raw_hash_to_string(proposer_address);
             find_validator_by_raw_hash(&self.state, tm_raw_hash_string)
                 .unwrap()
                 .expect(
@@ -144,21 +201,22 @@ where
         // Execute wrapper and protocol transactions
         let successful_wrappers = self.retrieve_and_execute_transactions(
             &native_block_proposer_address,
-            &req.txs,
+            &txs,
             gas_scale,
             ExecutionArgs {
-                response: &mut response,
+                events: &mut events,
                 changed_keys: &mut changed_keys,
                 stats: &mut stats,
                 height,
             },
+            &mut tx_results,
         );
 
         // Execute inner transactions
         self.execute_tx_batches(
             successful_wrappers,
             ExecutionArgs {
-                response: &mut response,
+                events: &mut events,
                 changed_keys: &mut changed_keys,
                 stats: &mut stats,
                 height,
@@ -195,7 +253,7 @@ where
         }
 
         if update_for_tendermint {
-            self.update_epoch(&mut response);
+            validator_updates = self.update_epoch();
             // send the latest oracle configs. These may have changed due to
             // governance.
             self.update_eth_oracle(&changed_keys);
@@ -206,11 +264,16 @@ where
             native_block_proposer_address,
         )?;
 
-        self.event_log_mut().emit_many(response.events.clone());
+        self.event_log_mut().emit_many(events.clone());
         tracing::debug!("End finalize_block {height} of epoch {current_epoch}");
 
-        debug_assert_eq!(req.txs.len(), response.tx_results.len());
-        Ok(response)
+        debug_assert_eq!(txs.len(), tx_results.len());
+
+        Ok(Response {
+            events,
+            tx_results,
+            validator_updates,
+        })
     }
 
     /// Sets the metadata necessary for a new block, including the height,
@@ -246,16 +309,15 @@ where
 
     /// If a new epoch begins, we update the response to include
     /// changes to the validator sets and consensus parameters
-    fn update_epoch(&mut self, response: &mut shim::response::FinalizeBlock) {
+    fn update_epoch(&mut self) -> Vec<tendermint::validator::Update> {
         // Apply validator set update
-        response.validator_updates = self
-            .get_abci_validator_updates(false, |pk, power| {
-                let pub_key = tendermint::PublicKey::from(pk);
-                // TODO use u64
-                let power = tendermint::vote::Power::try_from(power).unwrap();
-                tendermint::validator::Update { pub_key, power }
-            })
-            .expect("Must be able to update validator set");
+        self.get_abci_validator_updates(false, |pk, power| {
+            let pub_key = tendermint::PublicKey::from(pk);
+            // TODO use u64
+            let power = tendermint::vote::Power::try_from(power).unwrap();
+            tendermint::validator::Update { pub_key, power }
+        })
+        .expect("Must be able to update validator set")
     }
 
     /// Calculate the new inflation rate, mint the new tokens to the PoS
@@ -336,7 +398,7 @@ where
     // batch execution
     fn evaluate_tx_result(
         &mut self,
-        response: &mut shim::response::FinalizeBlock,
+        events: &mut Vec<Event>,
         extended_dispatch_result: std::result::Result<
             namada_sdk::tx::data::TxResult<protocol::Error>,
             Box<DispatchError>,
@@ -369,7 +431,7 @@ where
                                 // Take the events from the batch result to
                                 // avoid emitting them again after the exection
                                 // of the entire batch
-                                response.events.emit_many(
+                                events.emit_many(
                                     std::mem::take(&mut batched_result.events)
                                         .into_iter()
                                         .map(|event| {
@@ -390,7 +452,7 @@ where
                     });
                 }
                 _ => self.handle_inner_tx_results(
-                    response,
+                    events,
                     tx_result,
                     tx_data,
                     &mut tx_logs,
@@ -455,7 +517,7 @@ where
                         .extend(Code(ResultCode::WasmRuntimeError));
 
                     self.handle_batch_error(
-                        response,
+                        events,
                         &msg,
                         tx_result,
                         tx_data,
@@ -465,7 +527,7 @@ where
             },
         }
 
-        response.events.emit(tx_logs.tx_event);
+        events.emit(tx_logs.tx_event);
         None
     }
 
@@ -473,7 +535,7 @@ where
     // the storage changes, update stats and event, manage replay protection.
     fn handle_inner_tx_results(
         &mut self,
-        response: &mut shim::response::FinalizeBlock,
+        events: &mut Vec<Event>,
         mut tx_result: namada_sdk::tx::data::TxResult<protocol::Error>,
         tx_data: TxData<'_>,
         tx_logs: &mut TxLogs<'_>,
@@ -490,7 +552,7 @@ where
             .block
             .results
             .accept(tx_data.tx_index);
-        temp_log.commit(tx_logs, response);
+        temp_log.commit(tx_logs, events);
 
         // Atomic successful batches or non-atomic batches (even if the
         // inner txs failed) are marked as Ok
@@ -517,7 +579,7 @@ where
 
     fn handle_batch_error(
         &mut self,
-        response: &mut shim::response::FinalizeBlock,
+        events: &mut Vec<Event>,
         msg: &Error,
         mut tx_result: namada_sdk::tx::data::TxResult<protocol::Error>,
         tx_data: TxData<'_>,
@@ -549,7 +611,7 @@ where
                 .block
                 .results
                 .accept(tx_data.tx_index);
-            temp_log.commit(tx_logs, response);
+            temp_log.commit(tx_logs, events);
             // Commit the successful inner transactions before the error. Drop
             // the current tx write log which might be still populated with data
             // to be discarded (this is the case when we propagate an error
@@ -603,14 +665,15 @@ where
     fn retrieve_and_execute_transactions(
         &mut self,
         native_block_proposer_address: &Address,
-        processed_txs: &[shim::request::ProcessedTx],
+        processed_txs: &[abci::ProcessedTx],
         gas_scale: u64,
         ExecutionArgs {
-            response,
+            events,
             changed_keys,
             stats,
             height,
         }: ExecutionArgs<'_>,
+        tx_results: &mut Vec<tendermint::abci::types::ExecTxResult>,
     ) -> Vec<WrapperCache> {
         let mut successful_wrappers = vec![];
 
@@ -654,7 +717,7 @@ where
                     },
                     _ => new_tx_event(&tx, height.0),
                 };
-                response.events.emit(
+                events.emit(
                     base_event
                         .with(Code(result_code))
                         .with(Info(format!(
@@ -678,7 +741,7 @@ where
                         match wrapper.gas_limit.as_scaled_gas(gas_scale) {
                             Ok(value) => value,
                             Err(_) => {
-                                response.events.emit(
+                                events.emit(
                                     new_tx_event(&tx, height.0)
                                         .with(Code(ResultCode::InvalidTx))
                                         .with(Info(
@@ -793,21 +856,21 @@ where
             // save the gas cost
             self.update_tx_gas(tx_hash, consumed_gas.clone());
 
+            #[allow(clippy::disallowed_methods)]
+            let gas_used =
+                i64::try_from(u64::from(consumed_gas)).unwrap_or_default();
             // The number of the `tx_results` has to match the number of txs in
             // request, otherwise Comet crashes consensus with "failed to apply
             // block; error expected tx results length to match size of
             // transactions in block."
-            response
-                .tx_results
-                .push(tendermint::abci::types::ExecTxResult {
-                    code: result_code.into(),
-                    gas_used: i64::try_from(u64::from(consumed_gas))
-                        .unwrap_or_default(),
-                    ..Default::default()
-                });
+            tx_results.push(tendermint::abci::types::ExecTxResult {
+                code: result_code.into(),
+                gas_used,
+                ..Default::default()
+            });
 
             if let Some(wrapper_cache) = self.evaluate_tx_result(
-                response,
+                events,
                 dispatch_result,
                 TxData {
                     is_atomic_batch,
@@ -836,7 +899,7 @@ where
         &mut self,
         successful_wrappers: Vec<WrapperCache>,
         ExecutionArgs {
-            response,
+            events,
             changed_keys,
             stats,
             height,
@@ -881,7 +944,7 @@ where
             self.update_tx_gas(tx_hash, consumed_gas);
 
             self.evaluate_tx_result(
-                response,
+                events,
                 dispatch_result,
                 TxData {
                     is_atomic_batch,
@@ -903,7 +966,7 @@ where
 }
 
 struct ExecutionArgs<'finalize> {
-    response: &'finalize mut shim::response::FinalizeBlock,
+    events: &'finalize mut Vec<Event>,
     changed_keys: &'finalize mut BTreeSet<Key>,
     stats: &'finalize mut InternalStats,
     height: BlockHeight,
@@ -970,15 +1033,11 @@ impl TempTxLogs {
 impl<'finalize> TempTxLogs {
     // Consumes the temporary logs and merges them to confirmed ones. Pushes ibc
     // and eth events to the finalize block response
-    fn commit(
-        self,
-        logs: &mut TxLogs<'finalize>,
-        response: &mut shim::response::FinalizeBlock,
-    ) {
+    fn commit(self, logs: &mut TxLogs<'finalize>, events: &mut Vec<Event>) {
         logs.tx_event.merge(self.tx_event);
         logs.stats.merge(self.stats);
         logs.changed_keys.extend(self.changed_keys);
-        response.events.extend(self.response_events);
+        events.extend(self.response_events);
     }
 
     // Consumes the temporary logs and merges the statistics to confirmed ones.
@@ -1272,6 +1331,37 @@ where
     )
 }
 
+// This is just to be used in testing. It is not a meaningful default.
+#[cfg(any(test, feature = "testing"))]
+impl Default for Request {
+    fn default() -> Self {
+        Request {
+            hash: Hash([0; 32]),
+            #[allow(clippy::disallowed_methods)]
+            time: DateTimeUtc::now(),
+            next_validators_hash: Default::default(),
+            misbehavior: Default::default(),
+            txs: Default::default(),
+            proposer_address: tendermint::account::Id::try_from(
+                HEXUPPER
+                    .decode(
+                        wallet::defaults::validator_keypair()
+                            .to_public()
+                            .tm_raw_hash()
+                            .as_bytes(),
+                    )
+                    .unwrap(),
+            )
+            .unwrap(),
+            decided_last_commit: tendermint::abci::types::CommitInfo {
+                round: 0u8.into(),
+                votes: vec![],
+            },
+            height: Default::default(),
+        }
+    }
+}
+
 /// We test the failure cases of [`finalize_block`]. The happy flows
 /// are covered by the e2e tests.
 #[allow(clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
@@ -1349,10 +1439,9 @@ mod test_finalize_block {
 
     use super::*;
     use crate::oracle::control::Command;
+    use crate::shell::FinalizeBlockRequest;
+    use crate::shell::abci::ProcessedTx;
     use crate::shell::test_utils::*;
-    use crate::shims::abcipp_shim_types::shim::request::{
-        FinalizeBlock, ProcessedTx,
-    };
     use crate::tendermint::abci::types::Validator;
 
     const WRAPPER_GAS_LIMIT: u64 = 10_000_000;
@@ -1509,7 +1598,7 @@ mod test_finalize_block {
 
         // check that the correct events were created
         for event in shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs.clone(),
                 ..Default::default()
             })
@@ -1551,7 +1640,7 @@ mod test_finalize_block {
         .sign(&protocol_key, shell.chain_id.clone())
         .to_bytes();
 
-        let req = FinalizeBlock {
+        let req = FinalizeBlockRequest {
             txs: vec![ProcessedTx {
                 tx: tx.into(),
                 result: TxResult {
@@ -1633,7 +1722,7 @@ mod test_finalize_block {
 
         // ---- This protocol tx is accepted
         let [result]: [Event; 1] = shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -1692,7 +1781,7 @@ mod test_finalize_block {
 
         // ---- This protocol tx is accepted
         let [result]: [Event; 1] = shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -1752,7 +1841,7 @@ mod test_finalize_block {
                 info: "".into(),
             },
         };
-        let req = FinalizeBlock {
+        let req = FinalizeBlockRequest {
             txs: vec![processed_tx],
             ..Default::default()
         };
@@ -2043,9 +2132,12 @@ mod test_finalize_block {
                 txs.push(processed_tx);
             }
 
-            let req = FinalizeBlock {
+            let req = FinalizeBlockRequest {
                 txs,
-                proposer_address: proposer_address.clone(),
+                proposer_address: tendermint::account::Id::try_from(
+                    proposer_address.clone(),
+                )
+                .unwrap(),
                 decided_last_commit: tendermint::abci::types::CommitInfo {
                     round: 0u8.into(),
                     votes: votes.clone(),
@@ -3158,7 +3250,7 @@ mod test_finalize_block {
         let root_pre = shell.shell.state.in_mem().block.tree.root();
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -3227,7 +3319,7 @@ mod test_finalize_block {
             .protocol_write(&commitment_key, "random_data".serialize_to_vec())
             .unwrap();
         shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![],
                 ..Default::default()
             })
@@ -3317,7 +3409,7 @@ mod test_finalize_block {
         let root_pre = shell.shell.state.in_mem().block.tree.root();
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
@@ -3445,7 +3537,7 @@ mod test_finalize_block {
         let root_pre = shell.shell.state.in_mem().block.tree.root();
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
@@ -3574,7 +3666,7 @@ mod test_finalize_block {
         let root_pre = shell.shell.state.in_mem().block.tree.root();
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
@@ -3729,7 +3821,7 @@ mod test_finalize_block {
         let root_pre = shell.shell.state.in_mem().block.tree.root();
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
@@ -3806,7 +3898,7 @@ mod test_finalize_block {
         };
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -3878,7 +3970,7 @@ mod test_finalize_block {
         assert!(fee_amount > initial_balance);
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -3966,7 +4058,7 @@ mod test_finalize_block {
         };
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -4050,9 +4142,12 @@ mod test_finalize_block {
         };
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
-                proposer_address,
+                proposer_address: tendermint::account::Id::try_from(
+                    proposer_address,
+                )
+                .unwrap(),
                 ..Default::default()
             })
             .expect("Test failed")[0];
@@ -5726,11 +5821,12 @@ mod test_finalize_block {
         );
 
         // we advance forward to the next epoch
-        let mut req = FinalizeBlock::default();
-        req.header.time = {
+        let req = FinalizeBlockRequest {
             #[allow(clippy::disallowed_methods)]
-            namada_sdk::time::DateTimeUtc::now()
+            time: namada_sdk::time::DateTimeUtc::now(),
+            ..Default::default()
         };
+
         let current_decision_height = shell.get_current_decision_height();
         if let Some(b) = shell.state.in_mem_mut().last_block.as_mut() {
             b.height = current_decision_height + 11;
@@ -5784,7 +5880,7 @@ mod test_finalize_block {
             mk_tx_batch(&shell, &sk, false, false, false);
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -5832,7 +5928,7 @@ mod test_finalize_block {
         let (batch, processed_tx) = mk_tx_batch(&shell, &sk, true, true, false);
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -5891,7 +5987,7 @@ mod test_finalize_block {
             mk_tx_batch(&shell, &sk, false, true, false);
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -5968,7 +6064,7 @@ mod test_finalize_block {
         let (batch, processed_tx) = mk_tx_batch(&shell, &sk, true, false, true);
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -6026,7 +6122,7 @@ mod test_finalize_block {
             mk_tx_batch(&shell, &sk, false, false, true);
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -6128,7 +6224,7 @@ mod test_finalize_block {
         }];
 
         let mut events = shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
@@ -6210,7 +6306,7 @@ mod test_finalize_block {
         }];
 
         let mut events = shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
@@ -6287,7 +6383,7 @@ mod test_finalize_block {
         }];
 
         let mut events = shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
@@ -6358,7 +6454,7 @@ mod test_finalize_block {
         }];
 
         let mut events = shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })

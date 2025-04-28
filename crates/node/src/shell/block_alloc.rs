@@ -357,7 +357,7 @@ mod tests {
         BuildingNormalTxBatch, BuildingProtocolTxBatch, NextState, TryAlloc,
     };
     use super::*;
-    use crate::shims::abcipp_shim_types::shim::TxBytes;
+    use crate::shell::abci::TxBytes;
 
     /// Convenience alias for a block space allocator at a state with protocol
     /// txs.

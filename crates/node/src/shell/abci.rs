@@ -262,7 +262,7 @@ enum CheckAction {
     /// No check necessary.
     NoAction,
     /// Check a given block height.
-    Check(i64),
+    Check(u64),
     /// The action been taken.
     AlreadySuspended,
 }
@@ -302,10 +302,8 @@ impl Service {
         mut shutdown_recv: broadcast::Receiver<()>,
     ) -> (bool, Option<<Self as tower::Service<Request>>::Future>) {
         let hght = match check {
-            CheckAction::AlreadySuspended => BlockHeight::from(u64::MAX),
-            CheckAction::Check(hght) => BlockHeight::from(
-                u64::try_from(hght).expect("Height cannot be negative"),
-            ),
+            CheckAction::AlreadySuspended => BlockHeight(u64::MAX),
+            CheckAction::Check(hght) => BlockHeight(hght),
             CheckAction::NoAction => BlockHeight::default(),
         };
         match action_at_height {
@@ -417,7 +415,7 @@ impl Service {
     fn get_action(&self, req: &Request) -> Option<CheckAction> {
         match req {
             Request::PrepareProposal(req) => {
-                Some(CheckAction::Check(req.height.into())) // TODO switch to u64?
+                Some(CheckAction::Check(req.height.into()))
             }
             Request::ProcessProposal(req) => {
                 Some(CheckAction::Check(req.height.into()))

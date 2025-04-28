@@ -9,9 +9,9 @@ use namada_vote_ext::ethereum_tx_data_variants;
 
 use super::block_alloc::{BlockGas, BlockSpace};
 use super::*;
+use crate::shell::abci::TxBytes;
+use crate::shell::abci::response::ProcessProposal;
 use crate::shell::block_alloc::{AllocFailure, TxBin};
-use crate::shims::abcipp_shim_types::shim::TxBytes;
-use crate::shims::abcipp_shim_types::shim::response::ProcessProposal;
 use crate::tendermint_proto::abci::RequestProcessProposal;
 
 /// Validation metadata, to keep track of used resources or
@@ -45,14 +45,6 @@ where
     D: DB + for<'iter> DBIter<'iter> + Sync + 'static,
     H: StorageHasher + Sync + 'static,
 {
-    /// INVARIANT: This method must be stateless.
-    pub fn verify_header(
-        &self,
-        _req: shim::request::VerifyHeader,
-    ) -> shim::response::VerifyHeader {
-        Default::default()
-    }
-
     /// Check all the txs in a block. Some txs may be incorrect,
     /// but we only reject the entire block if the order of the
     /// included txs violates the order decided upon in the previous
@@ -555,13 +547,6 @@ where
             }
         }
     }
-
-    pub fn revert_proposal(
-        &mut self,
-        _req: shim::request::RevertProposal,
-    ) -> shim::response::RevertProposal {
-        Default::default()
-    }
 }
 
 fn process_proposal_fee_check<D, H, CA>(
@@ -617,11 +602,11 @@ mod test_process_proposal {
     use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
     use super::*;
+    use crate::shell::abci::ProcessedTx;
     use crate::shell::test_utils::{
         ProcessProposal, TestError, TestShell, deactivate_bridge, gen_keypair,
         get_bp_bytes_to_sign,
     };
-    use crate::shims::abcipp_shim_types::shim::request::ProcessedTx;
 
     const GAS_LIMIT: u64 = 100_000;
 

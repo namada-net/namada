@@ -21,7 +21,6 @@ mod dry_run_tx;
 pub mod ethereum_oracle;
 pub mod protocol;
 pub mod shell;
-pub mod shims;
 pub mod storage;
 pub mod tendermint_node;
 pub mod utils;

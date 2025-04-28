@@ -4,24 +4,18 @@ use std::task::{Context, Poll};
 
 use futures::future::FutureExt;
 use namada_sdk::chain::BlockHeight;
+use namada_sdk::hash::Hash;
 use namada_sdk::state::ProcessProposalCachedResult;
-use namada_sdk::tendermint::abci::request::CheckTxKind;
-use namada_sdk::tendermint::abci::response::ProcessProposal;
 use namada_sdk::time::{DateTimeUtc, Utc};
 use tokio::sync::broadcast;
 
 use super::ShellMode;
 use crate::config::{Action, ActionAtHeight};
-use crate::shell::{Error, MempoolTxType, Shell};
-use crate::shims::abcipp_shim_types::shim::request::{
-    FinalizeBlock, ProcessedTx,
-};
-use crate::shims::abcipp_shim_types::shim::{
-    Error as ShimErr, Request, Response,
-};
-use crate::tendermint::abci::{Request as Req, Response as Resp, response};
+use crate::shell::{Error, MempoolTxType, Shell, finalize_block};
+use crate::tendermint::abci::{Request, Response};
+pub use crate::tendermint::abci::{request, response};
 use crate::tower_abci::BoxError;
-use crate::{config, shims};
+use crate::{config, tendermint};
 
 /// Run the shell's blocking loop that receives messages from the receiver.
 pub fn shell_loop(
@@ -30,79 +24,38 @@ pub fn shell_loop(
     namada_version: &str,
 ) {
     while let Some((req, resp_sender)) = shell_recv.blocking_recv() {
-        let resp = match req {
-            Req::ProcessProposal(proposal) => process_request(
-                &mut shell,
-                Request::ProcessProposal(proposal),
-                namada_version,
-            )
-            .map_err(ShimErr::from)
-            .and_then(|resp| resp.try_into()),
-            Req::FinalizeBlock(mut request) => {
-                match shell.get_process_proposal_result(request.clone()) {
-                    ProcessProposalCachedResult::Accepted(tx_results) => {
-                        let mut txs = Vec::with_capacity(tx_results.len());
-                        for (result, tx) in tx_results
-                            .into_iter()
-                            .zip(std::mem::take(&mut request.txs).into_iter())
-                        {
-                            txs.push(ProcessedTx {
-                                tx,
-                                result: result.into(),
-                            });
-                        }
-                        let mut request: FinalizeBlock = request.into();
-                        request.txs = txs;
-                        process_request(
-                            &mut shell,
-                            Request::FinalizeBlock(request),
-                            namada_version,
-                        )
-                        .map_err(ShimErr::from)
-                        .and_then(|res| match res {
-                            Response::FinalizeBlock(resp) => {
-                                Ok(Resp::FinalizeBlock(resp.into()))
-                            }
-                            _ => Err(ShimErr::ConvertResp(res)),
-                        })
-                    }
-                    ProcessProposalCachedResult::Rejected => {
-                        Err(ShimErr::Shell(
-                            crate::shell::Error::RejectedBlockProposal,
-                        ))
-                    }
-                }
-            }
-            Req::Commit => {
-                match process_request(
-                    &mut shell,
-                    Request::Commit,
-                    namada_version,
-                ) {
-                    Ok(Response::Commit(res)) => {
-                        let take_snapshot = shell.check_snapshot_required();
-                        shell.update_snapshot_task(take_snapshot);
-                        Ok(Resp::Commit(res))
-                    }
-                    Ok(resp) => Err(ShimErr::ConvertResp(resp)),
-                    Err(e) => Err(ShimErr::Shell(e)),
-                }
-            }
-            _ => match Request::try_from(req.clone()) {
-                Ok(request) => {
-                    process_request(&mut shell, request, namada_version)
-                        .map(Resp::try_from)
-                        .map_err(ShimErr::Shell)
-                        .and_then(|inner| inner)
-                }
-                Err(err) => Err(err),
-            },
-        };
-
-        let resp = resp.map_err(|e| e.into());
+        let resp = process_request(&mut shell, req, namada_version)
+            .map_err(|e| e.into());
         if resp_sender.send(resp).is_err() {
             tracing::info!("ABCI response channel is closed")
         }
+    }
+}
+
+pub type TxBytes = prost::bytes::Bytes;
+
+/// A Tx and the result of calling Process Proposal on it
+#[derive(Debug, Clone)]
+pub struct ProcessedTx {
+    pub tx: TxBytes,
+    pub result: TxResult,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct TxResult {
+    pub code: u32,
+    pub info: String,
+}
+
+impl From<(u32, String)> for TxResult {
+    fn from((code, info): (u32, String)) -> Self {
+        Self { code, info }
+    }
+}
+
+impl From<TxResult> for (u32, String) {
+    fn from(TxResult { code, info }: TxResult) -> Self {
+        (code, info)
     }
 }
 
@@ -137,9 +90,6 @@ fn process_request(
                 shell.prepare_proposal(block.into()),
             ))
         }
-        Request::VerifyHeader(_req) => {
-            Ok(Response::VerifyHeader(shell.verify_header(_req)))
-        }
         Request::ProcessProposal(block) => {
             tracing::debug!("Request ProcessProposal");
             // TODO: use TM domain type in the handler
@@ -153,7 +103,8 @@ fn process_request(
             // Cache the response in case of future calls from Namada. If
             // hash conversion fails avoid caching
             if let Ok(block_hash) = block_hash {
-                let result = if let ProcessProposal::Accept = response {
+                let result = if let response::ProcessProposal::Accept = response
+                {
                     ProcessProposalCachedResult::Accepted(
                         tx_results.into_iter().map(|res| res.into()).collect(),
                     )
@@ -169,18 +120,83 @@ fn process_request(
             }
             Ok(Response::ProcessProposal(response))
         }
-        Request::RevertProposal(_req) => {
-            Ok(Response::RevertProposal(shell.revert_proposal(_req)))
-        }
-        Request::FinalizeBlock(finalize) => {
+        Request::FinalizeBlock(request) => {
             tracing::debug!("Request FinalizeBlock");
 
-            try_recheck_process_proposal(shell, &finalize)?;
-            shell.finalize_block(finalize).map(Response::FinalizeBlock)
+            match shell.get_process_proposal_result(request.clone()) {
+                ProcessProposalCachedResult::Accepted(tx_results) => {
+                    try_recheck_process_proposal(shell, &request)?;
+
+                    let request::FinalizeBlock {
+                        txs,
+                        decided_last_commit,
+                        misbehavior,
+                        hash,
+                        height,
+                        time,
+                        next_validators_hash,
+                        proposer_address,
+                    } = request;
+
+                    let mut processed_txs =
+                        Vec::with_capacity(tx_results.len());
+                    for (result, tx) in
+                        tx_results.into_iter().zip(txs.into_iter())
+                    {
+                        processed_txs.push(ProcessedTx {
+                            tx,
+                            result: result.into(),
+                        });
+                    }
+
+                    #[allow(clippy::disallowed_methods)]
+                    let hash =
+                        Hash::try_from(hash.as_bytes()).unwrap_or_default();
+                    #[allow(clippy::disallowed_methods)]
+                    let time = DateTimeUtc::try_from(time).unwrap();
+                    let next_validators_hash =
+                        next_validators_hash.try_into().unwrap();
+                    let height = BlockHeight::from(height);
+                    let request = finalize_block::Request {
+                        txs: processed_txs,
+                        decided_last_commit,
+                        misbehavior,
+                        hash,
+                        height,
+                        time,
+                        next_validators_hash,
+                        proposer_address,
+                    };
+                    shell.finalize_block(request).map(
+                        |finalize_block::Response {
+                             events,
+                             tx_results,
+                             validator_updates,
+                         }| {
+                            Response::FinalizeBlock(response::FinalizeBlock {
+                                events: events
+                                    .into_iter()
+                                    .map(tendermint::abci::Event::from)
+                                    .collect(),
+                                tx_results,
+                                validator_updates,
+                                consensus_param_updates: None,
+                                app_hash: Default::default(),
+                            })
+                        },
+                    )
+                }
+                ProcessProposalCachedResult::Rejected => {
+                    Err(Error::RejectedBlockProposal)
+                }
+            }
         }
         Request::Commit => {
             tracing::debug!("Request Commit");
-            Ok(Response::Commit(shell.commit()))
+            let response = shell.commit();
+            let take_snapshot = shell.check_snapshot_required();
+            shell.update_snapshot_task(take_snapshot);
+            Ok(Response::Commit(response))
         }
         Request::Flush => Ok(Response::Flush),
         Request::Echo(msg) => Ok(Response::Echo(response::Echo {
@@ -188,8 +204,10 @@ fn process_request(
         })),
         Request::CheckTx(tx) => {
             let mempool_tx_type = match tx.kind {
-                CheckTxKind::New => MempoolTxType::NewTransaction,
-                CheckTxKind::Recheck => MempoolTxType::RecheckTransaction,
+                request::CheckTxKind::New => MempoolTxType::NewTransaction,
+                request::CheckTxKind::Recheck => {
+                    MempoolTxType::RecheckTransaction
+                }
             };
             let r#type = mempool_tx_type;
             Ok(Response::CheckTx(shell.mempool_validate(&tx.tx, r#type)))
@@ -206,6 +224,16 @@ fn process_request(
         Request::ApplySnapshotChunk(req) => Ok(Response::ApplySnapshotChunk(
             shell.apply_snapshot_chunk(req),
         )),
+        Request::ExtendVote(_req) => {
+            Ok(Response::ExtendVote(response::ExtendVote {
+                vote_extension: bytes::Bytes::new(),
+            }))
+        }
+        Request::VerifyVoteExtension(_verify_vote_extension) => {
+            Ok(Response::VerifyVoteExtension(
+                response::VerifyVoteExtension::Reject,
+            ))
+        }
     }
 }
 
@@ -222,7 +250,10 @@ pub struct Service {
     action_at_height: Option<ActionAtHeight>,
 }
 
-pub type ReqMsg = (Req, tokio::sync::oneshot::Sender<Result<Resp, BoxError>>);
+pub type ReqMsg = (
+    Request,
+    tokio::sync::oneshot::Sender<Result<Response, BoxError>>,
+);
 
 /// Indicates how [`Service`] should check whether or not it needs to take
 /// action.
@@ -269,7 +300,7 @@ impl Service {
         action_at_height: Option<ActionAtHeight>,
         check: CheckAction,
         mut shutdown_recv: broadcast::Receiver<()>,
-    ) -> (bool, Option<<Self as tower::Service<Req>>::Future>) {
+    ) -> (bool, Option<<Self as tower::Service<Request>>::Future>) {
         let hght = match check {
             CheckAction::AlreadySuspended => BlockHeight::from(u64::MAX),
             CheckAction::Check(hght) => BlockHeight::from(
@@ -337,12 +368,12 @@ impl Service {
     /// normally.
     fn forward_request(
         &mut self,
-        req: Req,
-    ) -> <Self as tower::Service<Req>>::Future {
+        req: Request,
+    ) -> <Self as tower::Service<Request>>::Future {
         let (resp_send, recv) = tokio::sync::oneshot::channel();
         let result = self.shell_send.send((req.clone(), resp_send));
         async move {
-            let genesis_time = if let Req::InitChain(ref init) = req {
+            let genesis_time = if let Request::InitChain(ref init) = req {
                 Some(
                     DateTimeUtc::try_from(init.time)
                         .expect("Should be able to parse genesis time."),
@@ -383,18 +414,18 @@ impl Service {
 
     /// Given the type of request, determine if we need to check
     /// to possibly take an action.
-    fn get_action(&self, req: &Req) -> Option<CheckAction> {
+    fn get_action(&self, req: &Request) -> Option<CheckAction> {
         match req {
-            Req::PrepareProposal(req) => {
+            Request::PrepareProposal(req) => {
                 Some(CheckAction::Check(req.height.into())) // TODO switch to u64?
             }
-            Req::ProcessProposal(req) => {
+            Request::ProcessProposal(req) => {
                 Some(CheckAction::Check(req.height.into()))
             }
-            Req::FinalizeBlock(req) => {
+            Request::FinalizeBlock(req) => {
                 Some(CheckAction::Check(req.height.into()))
             }
-            Req::InitChain(_) | Req::CheckTx(_) | Req::Commit => {
+            Request::InitChain(_) | Request::CheckTx(_) | Request::Commit => {
                 if self.suspended {
                     Some(CheckAction::AlreadySuspended)
                 } else {
@@ -407,12 +438,13 @@ impl Service {
 }
 
 /// The ABCI tower service implementation sends and receives messages to and
-/// from the [`AbcippShim`] for requests from Tendermint.
-impl tower::Service<Req> for Service {
+/// from the [`Service`] for requests from Tendermint.
+impl tower::Service<Request> for Service {
     type Error = BoxError;
-    type Future =
-        Pin<Box<dyn Future<Output = Result<Resp, BoxError>> + Send + 'static>>;
-    type Response = Resp;
+    type Future = Pin<
+        Box<dyn Future<Output = Result<Response, BoxError>> + Send + 'static>,
+    >;
+    type Response = Response;
 
     fn poll_ready(
         &mut self,
@@ -422,7 +454,7 @@ impl tower::Service<Req> for Service {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Req) -> Self::Future {
+    fn call(&mut self, req: Request) -> Self::Future {
         let action = self.get_action(&req);
         if let Some(action) = action {
             let (suspended, fut) = Self::maybe_take_action(
@@ -442,7 +474,7 @@ impl tower::Service<Req> for Service {
 // (recheck) and, in case, performs it. Clears the cache before returning
 fn try_recheck_process_proposal(
     shell: &mut Shell,
-    finalize_req: &shims::abcipp_shim_types::shim::request::FinalizeBlock,
+    finalize_req: &tendermint::abci::request::FinalizeBlock,
 ) -> Result<(), Error> {
     let recheck_process_proposal = match shell.mode {
         ShellMode::Validator {
@@ -463,19 +495,17 @@ fn try_recheck_process_proposal(
             .state
             .in_mem_mut()
             .block_proposals_cache
-            .get(&finalize_req.block_hash)
+            .get(&Hash::try_from(finalize_req.hash).unwrap())
         {
             // We already have the result of process proposal for this block
             // cached in memory
             Some(res) => res.to_owned(),
             None => {
-                let process_req = finalize_req
-                    .clone()
-                    .cast_to_process_proposal_req()
-                    .map_err(|_| Error::InvalidBlockProposal)?;
+                let process_req =
+                    finalize_block_to_process_proposal(finalize_req.clone());
                 // No need to cache the result since this is the last step
                 // before finalizing the block
-                if let ProcessProposal::Accept =
+                if let response::ProcessProposal::Accept =
                     shell.process_proposal(process_req.into()).0
                 {
                     ProcessProposalCachedResult::Accepted(vec![])
@@ -494,4 +524,29 @@ fn try_recheck_process_proposal(
     shell.state.in_mem_mut().block_proposals_cache.clear();
 
     Ok(())
+}
+
+pub fn finalize_block_to_process_proposal(
+    req: request::FinalizeBlock,
+) -> request::ProcessProposal {
+    let request::FinalizeBlock {
+        txs,
+        decided_last_commit,
+        misbehavior,
+        hash,
+        height,
+        time,
+        next_validators_hash,
+        proposer_address,
+    } = req;
+    request::ProcessProposal {
+        txs,
+        proposed_last_commit: Some(decided_last_commit),
+        misbehavior,
+        hash,
+        height,
+        time,
+        next_validators_hash,
+        proposer_address,
+    }
 }

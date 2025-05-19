@@ -88,7 +88,7 @@ pub fn convert_to_address(ibc_trace: impl AsRef<str>) -> Result<Address> {
 pub fn is_ibc_denom(denom: impl AsRef<str>) -> Option<(TracePath, String)> {
     let prefixed_denom = PrefixedDenom::from_str(denom.as_ref()).ok()?;
     let base_denom = prefixed_denom.base_denom.to_string();
-    if prefixed_denom.trace_path.is_empty() || base_denom.contains('/') {
+    if prefixed_denom.trace_path.is_empty() {
         // The denom is just a token or an NFT trace
         return None;
     }

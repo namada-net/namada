@@ -500,8 +500,7 @@ pub fn ibc_trace_key(
     addr: impl AsRef<str>,
     token_hash: impl AsRef<str>,
 ) -> Key {
-    // Remove '/' because IBC denom could have '/'
-    ibc_trace_key_prefix(Some(addr.as_ref().replace('/', "")))
+    ibc_trace_key_prefix(Some(addr.as_ref().to_string()))
         .push(&token_hash.as_ref().to_string().to_db_key())
         .expect("Cannot obtain a storage key")
 }

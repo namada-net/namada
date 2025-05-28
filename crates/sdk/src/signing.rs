@@ -77,25 +77,112 @@ pub struct SigningTxData {
     pub threshold: u8,
     /// The public keys to index map associated to an account
     pub account_public_keys_map: Option<AccountPublicKeysMap>,
-    /// The fee payer, either a tuple with the public key to sign the wrapper
-    /// tx and a flag for the generation of a disposable fee payer or a
-    /// serialized signature
-    pub fee_payer: either::Either<(common::PublicKey, bool), Vec<u8>>,
     /// ID of the Transaction needing signing
     pub shielded_hash: Option<MaspTxId>,
     /// List of serialized signatures to attach to the transaction
     pub signatures: Vec<Vec<u8>>,
 }
 
-impl SigningTxData {
+/// The fee's authorization
+#[derive(Clone)]
+pub enum FeeAuthorization {
+    /// A wrapper signer
+    Signer {
+        /// The wrapper signer
+        pubkey: common::PublicKey,
+        /// Flag to mark a disposable fee payer
+        disposable_fee_payer: bool,
+    },
+    /// A serialized signature
+    Signature(Vec<u8>),
+}
+
+// FIXME: remove this after fixing the interface of build_batch
+impl PartialEq for FeeAuthorization {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            // Compare only the public key ignoring the disposable flag
+            (
+                FeeAuthorization::Signer {
+                    pubkey,
+                    disposable_fee_payer: _,
+                },
+                FeeAuthorization::Signer {
+                    pubkey: other_pubkey,
+                    disposable_fee_payer: _,
+                },
+            ) => pubkey == other_pubkey,
+            (
+                FeeAuthorization::Signature(vec),
+                FeeAuthorization::Signature(other_vec),
+            ) => vec == other_vec,
+            _ => false,
+        }
+    }
+}
+
+/// A structure holding the signing data for a wrapper transaction
+#[derive(Clone, PartialEq)]
+pub struct SigningWrapperData {
+    /// The signing data for each one of the inner transactions of this batch
+    pub signing_data: Vec<SigningTxData>,
+    /// The signing data for the wrapper itself
+    pub fee_auth: FeeAuthorization,
+}
+
+impl SigningWrapperData {
     /// Returns the fee payer's public key if provided, otherwise returns an
     /// error.
     pub fn fee_payer_or_err(&self) -> Result<&common::PublicKey, Error> {
-        self.fee_payer
-            .as_ref()
-            .left()
-            .map(|(fee_payer, _)| fee_payer)
-            .ok_or_else(|| Error::Other("Missing gas payer".to_string()))
+        match &self.fee_auth {
+            FeeAuthorization::Signer { pubkey, .. } => Ok(pubkey),
+            FeeAuthorization::Signature(_) => Err(Error::Other(
+                "Expected wrapper signer, found wrapper signature".to_string(),
+            )),
+        }
+    }
+
+    /// Returns whether fees will be paid from a disposable address
+    pub fn disposable_fee_payer(&self) -> bool {
+        match self.fee_auth {
+            FeeAuthorization::Signer {
+                pubkey: _,
+                disposable_fee_payer,
+            } => disposable_fee_payer,
+            FeeAuthorization::Signature(_) => false,
+        }
+    }
+}
+
+#[allow(missing_docs)]
+#[derive(Clone, PartialEq)]
+pub enum SigningData {
+    Inner(SigningTxData),
+    Wrapper(SigningWrapperData),
+}
+
+impl SigningData {
+    fn into_components(self) -> (Vec<SigningTxData>, Option<FeeAuthorization>) {
+        match self {
+            SigningData::Inner(signing_tx_data) => {
+                (vec![signing_tx_data], None)
+            }
+            SigningData::Wrapper(signing_wrapper_data) => (
+                signing_wrapper_data.signing_data,
+                Some(signing_wrapper_data.fee_auth),
+            ),
+        }
+    }
+
+    /// Returns a reference to the inner [`SigningTxData`]. In case of multiple
+    /// instances it returns the first one (if any)
+    pub fn signing_tx_data(&self) -> Option<&SigningTxData> {
+        match self {
+            SigningData::Inner(signing_tx_data) => Some(signing_tx_data),
+            SigningData::Wrapper(signing_wrapper_data) => {
+                signing_wrapper_data.signing_data.first()
+            }
+        }
     }
 }
 
@@ -187,8 +274,6 @@ pub async fn tx_signers(
 
     // Now actually fetch the signing key and apply it
     match signer {
-        // No signature needed if the source is MASP
-        Some(MASP) => Ok(Default::default()),
         Some(signer) => Ok([find_pk(context, &signer).await?].into()),
         None => other_err(
             "All transactions must be signed; please either specify the key \
@@ -239,8 +324,7 @@ fn mock_hw_sig(tx: &mut Tx, pk: common::PublicKey, signable: Signable) {
         }
         CommonPublicKey::Secp256k1(_) => {
             // this key has no effect other than to satisfy api constraints
-            const SECRET_KEY_HEX: &str =
-                "c2c72dfbff11dfb4e9d5b0a20c620c58b15bb7552753601f043db91331b0db15";
+            const SECRET_KEY_HEX: &str = "c2c72dfbff11dfb4e9d5b0a20c620c58b15bb7552753601f043db91331b0db15";
             let sk_bytes = HEXLOWER.decode(SECRET_KEY_HEX.as_bytes()).unwrap();
             let kp =
                 secp256k1::SecretKey::try_from_slice(&sk_bytes[..]).unwrap();
@@ -262,8 +346,7 @@ fn mock_hw_sig(tx: &mut Tx, pk: common::PublicKey, signable: Signable) {
 /// If no explicit signer given, use the `default`. If no `default` is given,
 /// Error.
 ///
-/// It also takes a second, optional keypair to sign the wrapper header
-/// separately.
+/// Optionally sign the wrapper header separately.
 ///
 /// If this is not a dry run, the tx is put in a wrapper and returned along with
 /// hashes needed for monitoring the tx on chain.
@@ -273,7 +356,7 @@ pub async fn sign_tx<D, F, U>(
     wallet: &RwLock<Wallet<U>>,
     args: &args::Tx,
     tx: &mut Tx,
-    signing_data: SigningTxData,
+    signing_data: SigningData,
     sign: impl Fn(Tx, common::PublicKey, Signable, D) -> F,
     user_data: D,
 ) -> Result<(), Error>
@@ -282,83 +365,107 @@ where
     U: WalletIo,
     F: std::future::Future<Output = Result<Tx, Error>>,
 {
-    let mut used_pubkeys = HashSet::new();
+    let (signing_data, fee_auth) = signing_data.into_components();
+    for signing_tx_data in signing_data {
+        let mut used_pubkeys = HashSet::new();
 
-    // First try to sign the raw header with the supplied signatures
-    if !signing_data.signatures.is_empty() {
-        let signatures = signing_data
-            .signatures
-            .iter()
-            .map(|bytes| {
-                let sigidx =
-                    SignatureIndex::try_from_json_bytes(bytes).unwrap();
-                used_pubkeys.insert(sigidx.pubkey.clone());
-                sigidx
-            })
-            .collect();
-        tx.add_signatures(signatures);
-    }
+        // First try to sign the raw header with the supplied signatures
+        if !signing_tx_data.signatures.is_empty() {
+            let signatures = signing_tx_data
+                .signatures
+                .iter()
+                .map(|bytes| {
+                    let sigidx =
+                        SignatureIndex::try_from_json_bytes(bytes).unwrap();
+                    used_pubkeys.insert(sigidx.pubkey.clone());
+                    sigidx
+                })
+                .collect();
+            tx.add_signatures(signatures);
+        }
 
-    // Then try to sign the raw header with private keys in the software wallet
-    if let Some(account_public_keys_map) = signing_data.account_public_keys_map
-    {
-        let mut wallet = wallet.write().await;
-        let mut signing_tx_keypairs = vec![];
+        // Then try to sign the raw header with private keys in the software
+        // wallet
+        if let Some(account_public_keys_map) =
+            signing_tx_data.account_public_keys_map
+        {
+            let mut wallet = wallet.write().await;
+            let mut signing_tx_keypairs = vec![];
 
-        for public_key in &signing_data.public_keys {
-            if !used_pubkeys.contains(public_key) {
-                let Ok(secret_key) =
-                    find_key_by_pk(&mut wallet, args, public_key)
-                else {
-                    // If the secret key is not found, continue because the
-                    // hardware wallet may still be able to sign this
-                    continue;
+            for public_key in &signing_tx_data.public_keys {
+                if !used_pubkeys.contains(public_key) {
+                    let Ok(secret_key) =
+                        find_key_by_pk(&mut wallet, args, public_key)
+                    else {
+                        // If the secret key is not found, continue because the
+                        // hardware wallet may still be able to sign this
+                        continue;
+                    };
+                    used_pubkeys.insert(public_key.clone());
+                    signing_tx_keypairs.push(secret_key);
+                }
+            }
+
+            if !signing_tx_keypairs.is_empty() {
+                if args.dry_run || args.dry_run_wrapper {
+                    tx.mock(
+                        signing_tx_keypairs,
+                        account_public_keys_map,
+                        signing_tx_data.owner,
+                    )
+                } else {
+                    tx.sign_raw(
+                        signing_tx_keypairs,
+                        account_public_keys_map,
+                        signing_tx_data.owner,
+                    )
                 };
-                used_pubkeys.insert(public_key.clone());
-                signing_tx_keypairs.push(secret_key);
             }
         }
 
-        if !signing_tx_keypairs.is_empty() {
-            if args.dry_run || args.dry_run_wrapper {
-                tx.mock(
-                    signing_tx_keypairs,
-                    account_public_keys_map,
-                    signing_data.owner,
-                )
-            } else {
-                tx.sign_raw(
-                    signing_tx_keypairs,
-                    account_public_keys_map,
-                    signing_data.owner,
-                )
-            };
-        }
-    }
-
-    // Then try to sign the raw header using the hardware wallet
-    for pubkey in &signing_data.public_keys {
-        if !used_pubkeys.contains(pubkey) {
-            match &signing_data.fee_payer {
-                either::Either::Left((fee_payer, _)) if pubkey == fee_payer => {
-                }
-                _ => {
-                    if args.dry_run || args.dry_run_wrapper {
-                        mock_hw_sig(tx, pubkey.clone(), Signable::RawHeader);
-                        used_pubkeys.insert(pubkey.clone());
-                    } else if let Ok(ntx) = sign(
-                        tx.clone(),
-                        pubkey.clone(),
-                        Signable::RawHeader,
-                        user_data.clone(),
-                    )
-                    .await
-                    {
-                        *tx = ntx;
-                        used_pubkeys.insert(pubkey.clone());
+        // Then try to sign the raw header using the hardware wallet
+        for pubkey in &signing_tx_data.public_keys {
+            if !used_pubkeys.contains(pubkey) {
+                match &fee_auth {
+                    Some(FeeAuthorization::Signer {
+                        pubkey: fee_payer,
+                        ..
+                    }) if pubkey == fee_payer => {}
+                    _ => {
+                        if args.dry_run || args.dry_run_wrapper {
+                            mock_hw_sig(
+                                tx,
+                                pubkey.clone(),
+                                Signable::RawHeader,
+                            );
+                            used_pubkeys.insert(pubkey.clone());
+                        } else if let Ok(ntx) = sign(
+                            tx.clone(),
+                            pubkey.clone(),
+                            Signable::RawHeader,
+                            user_data.clone(),
+                        )
+                        .await
+                        {
+                            *tx = ntx;
+                            used_pubkeys.insert(pubkey.clone());
+                        }
                     }
                 }
             }
+        }
+
+        // Then make sure that the number of public keys used exceeds the
+        // threshold
+        let used_pubkeys_len = used_pubkeys
+            .len()
+            .try_into()
+            .expect("Public keys associated with account exceed 127");
+        if used_pubkeys_len < signing_tx_data.threshold {
+            return Err(Error::from(TxSubmitError::MissingSigningKeys(
+                signing_tx_data.threshold,
+                used_pubkeys_len,
+            )));
         }
     }
 
@@ -366,17 +473,20 @@ where
     // (including duplicated raw signatures)
     tx.prune_duplicated_sections();
 
-    // Then try signing the wrapper header (fee payer). Check if there's a
-    // provided wrapper signature, otherwise sign with the software wallet or
-    // use the fallback
-    match &signing_data.fee_payer {
-        either::Either::Left((fee_payer, _)) => {
+    // Then try signing the wrapper header (fee payer) if requested. Check if
+    // there's a provided wrapper signature, otherwise sign with the
+    // software wallet or use the fallback
+    match &fee_auth {
+        Some(FeeAuthorization::Signer {
+            pubkey,
+            disposable_fee_payer: _,
+        }) => {
             let key = {
                 // Lock the wallet just long enough to extract a key from it
                 // without interfering with the sign closure
                 // call
                 let mut wallet = wallet.write().await;
-                find_key_by_pk(&mut *wallet, args, fee_payer)
+                find_key_by_pk(&mut *wallet, args, pubkey)
             };
             match key {
                 Ok(fee_payer_keypair) => {
@@ -388,55 +498,47 @@ where
                 }
                 Err(_) => {
                     if args.dry_run || args.dry_run_wrapper {
-                        mock_hw_sig(
-                            tx,
-                            fee_payer.clone(),
-                            Signable::FeeRawHeader,
-                        );
+                        mock_hw_sig(tx, pubkey.clone(), Signable::FeeRawHeader);
                     } else {
                         *tx = sign(
                             tx.clone(),
-                            fee_payer.clone(),
+                            pubkey.clone(),
                             Signable::FeeRawHeader,
                             user_data,
                         )
                         .await?;
                     }
-                    if signing_data.public_keys.contains(fee_payer) {
-                        used_pubkeys.insert(fee_payer.clone());
-                    }
+                    // //FIXME: I need to add this to hte used pubkeys
+                    // //FIXME: actually what's the point of this?
+                    // if signing_wrapper_data
+                    //     .signing_data
+                    //     .public_keys
+                    //     .contains(pubkey)
+                    // {
+                    //     used_pubkeys.insert(pubkey.clone());
+                    // }
                 }
             }
         }
-        either::Either::Right(sig_bytes) => {
+        Some(FeeAuthorization::Signature(sig_bytes)) => {
             let auth = serde_json::from_slice(sig_bytes).map_err(|e| {
                 Error::Encode(EncodingError::Serde(e.to_string()))
             })?;
             tx.add_section(Section::Authorization(auth));
         }
+        _ => (),
     }
     // Remove redundant sections now that the signing process is complete.
     // Though this call might be redundant in circumstances, it is placed here
     // as a safeguard to prevent the transmission of private data to the
     // network.
     tx.protocol_filter();
-    // Then make sure that the number of public keys used exceeds the threshold
-    let used_pubkeys_len = used_pubkeys
-        .len()
-        .try_into()
-        .expect("Public keys associated with account exceed 127");
-    if used_pubkeys_len < signing_data.threshold {
-        Err(Error::from(TxSubmitError::MissingSigningKeys(
-            signing_data.threshold,
-            used_pubkeys_len,
-        )))
-    } else {
-        Ok(())
-    }
+
+    Ok(())
 }
 
 /// Return the necessary data regarding an account to be able to generate a
-/// signature section
+/// signature section for both the inner transaction and the wrapper
 #[allow(clippy::too_many_arguments)]
 pub async fn aux_signing_data(
     context: &impl Namada,
@@ -447,7 +549,7 @@ pub async fn aux_signing_data(
     is_shielded_source: bool,
     signatures: Vec<Vec<u8>>,
     wrapper_signature: Option<Vec<u8>>,
-) -> Result<SigningTxData, Error> {
+) -> Result<SigningWrapperData, Error> {
     let mut public_keys =
         tx_signers(context, args, default_signer.clone(), &signatures).await?;
     public_keys.extend(extra_public_keys.clone());
@@ -483,17 +585,23 @@ pub async fn aux_signing_data(
     };
 
     let fee_payer = match &wrapper_signature {
-        Some(signature) => either::Right(signature.to_owned()),
+        Some(signature) => FeeAuthorization::Signature(signature.to_owned()),
         None => match &args.wrapper_fee_payer {
-            Some(pubkey) => either::Left((pubkey.clone(), false)),
+            Some(pubkey) => FeeAuthorization::Signer {
+                pubkey: pubkey.clone(),
+                disposable_fee_payer: false,
+            },
             None => {
                 if let Some(pubkey) = public_keys.first() {
-                    either::Left((pubkey.to_owned(), false))
+                    FeeAuthorization::Signer {
+                        pubkey: pubkey.to_owned(),
+                        disposable_fee_payer: false,
+                    }
                 } else if is_shielded_source {
-                    either::Left((
-                        gen_disposable_signing_key(context).await,
-                        true,
-                    ))
+                    FeeAuthorization::Signer {
+                        pubkey: gen_disposable_signing_key(context).await,
+                        disposable_fee_payer: true,
+                    }
                 } else {
                     return Err(Error::Tx(TxSubmitError::InvalidFeePayer));
                 }
@@ -501,12 +609,70 @@ pub async fn aux_signing_data(
         },
     };
 
+    let signing_inner_data = SigningTxData {
+        owner,
+        public_keys,
+        threshold,
+        account_public_keys_map,
+        shielded_hash: None,
+        signatures,
+    };
+
+    Ok(SigningWrapperData {
+        signing_data: vec![signing_inner_data],
+        fee_auth: fee_payer,
+    })
+}
+
+/// Return the necessary data regarding an account to be able to generate a
+/// signature section for the inner transaction only
+pub async fn aux_inner_signing_data(
+    context: &impl Namada,
+    args: &args::Tx<SdkTypes>,
+    owner: Option<Address>,
+    default_signer: Option<Address>,
+    extra_public_keys: Vec<common::PublicKey>,
+    signatures: Vec<Vec<u8>>,
+) -> Result<SigningTxData, Error> {
+    let mut public_keys =
+        tx_signers(context, args, default_signer.clone(), &signatures).await?;
+    public_keys.extend(extra_public_keys.clone());
+
+    let (account_public_keys_map, threshold) = match &owner {
+        Some(owner @ Address::Established(_)) => {
+            let account =
+                rpc::get_account_info(context.client(), owner).await?;
+            if let Some(account) = account {
+                (Some(account.clone().public_keys_map), account.threshold)
+            } else {
+                return Err(Error::from(TxSubmitError::InvalidAccount(
+                    owner.encode(),
+                )));
+            }
+        }
+        Some(Address::Implicit(_)) => (
+            Some(AccountPublicKeysMap::from_iter(public_keys.clone())),
+            1u8,
+        ),
+        Some(owner @ Address::Internal(internal)) => match internal {
+            InternalAddress::Masp => (None, 0u8),
+            _ => {
+                return Err(Error::from(TxSubmitError::InvalidAccount(
+                    owner.encode(),
+                )));
+            }
+        },
+        None => (
+            Some(AccountPublicKeysMap::from_iter(public_keys.clone())),
+            0u8,
+        ),
+    };
+
     Ok(SigningTxData {
         owner,
         public_keys,
         threshold,
         account_public_keys_map,
-        fee_payer,
         shielded_hash: None,
         signatures,
     })
@@ -2323,6 +2489,7 @@ mod test_signing {
             wallet_alias_force: false,
             fee_amount: None,
             wrapper_fee_payer: None,
+            wrap_it: false,
             fee_token: Address::Internal(InternalAddress::Governance),
             gas_limit: namada_tx::data::GasLimit::from(2),
             expiration: Default::default(),
@@ -2641,21 +2808,26 @@ mod test_signing {
             >());
         let public_key_fee = secret_key_fee.to_public();
         let mut tx = Tx::new(ChainId::default(), None);
-        let signing_data = SigningTxData {
-            owner: None,
-            public_keys: [public_key.clone()].into(),
-            threshold: 1,
-            account_public_keys_map: Some(Default::default()),
-            fee_payer: either::Either::Left((public_key_fee.clone(), false)),
-            shielded_hash: None,
-            signatures: vec![],
+        let signing_data = SigningWrapperData {
+            signing_data: vec![SigningTxData {
+                owner: None,
+                public_keys: [public_key.clone()].into(),
+                threshold: 1,
+                account_public_keys_map: Some(Default::default()),
+                shielded_hash: None,
+                signatures: vec![],
+            }],
+            fee_auth: FeeAuthorization::Signer {
+                pubkey: public_key_fee.clone(),
+                disposable_fee_payer: false,
+            },
         };
 
         let Error::Tx(TxSubmitError::MissingSigningKeys(1, 0)) = sign_tx(
             &RwLock::new(wallet),
             &args,
             &mut tx,
-            signing_data,
+            SigningData::Wrapper(signing_data),
             |tx, pk, _, _| {
                 let pkf = public_key_fee.clone();
                 async move {
@@ -2678,20 +2850,25 @@ mod test_signing {
         // This should now work
         let wallet =
             Wallet::<TestWalletUtils>::new(TestWalletUtils, Default::default());
-        let signing_data = SigningTxData {
-            owner: None,
-            public_keys: [public_key.clone()].into(),
-            threshold: 1,
-            account_public_keys_map: Some(Default::default()),
-            fee_payer: either::Left((public_key.clone(), false)),
-            shielded_hash: None,
-            signatures: vec![],
+        let signing_data = SigningWrapperData {
+            signing_data: vec![SigningTxData {
+                owner: None,
+                public_keys: [public_key.clone()].into(),
+                threshold: 1,
+                account_public_keys_map: Some(Default::default()),
+                shielded_hash: None,
+                signatures: vec![],
+            }],
+            fee_auth: FeeAuthorization::Signer {
+                pubkey: public_key.clone(),
+                disposable_fee_payer: false,
+            },
         };
         sign_tx(
             &RwLock::new(wallet),
             &args,
             &mut tx,
-            signing_data,
+            SigningData::Wrapper(signing_data),
             |tx, _, _, _| async { Ok(tx) },
             (),
         )

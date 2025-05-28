@@ -4,7 +4,6 @@ use std::str::FromStr;
 
 use color_eyre::eyre::Result;
 use color_eyre::owo_colors::OwoColorize;
-use itertools::Either;
 use masp_primitives::convert::AllowedConversion;
 use masp_primitives::merkle_tree::CommitmentTree;
 use masp_primitives::sapling::Node;
@@ -21,7 +20,9 @@ use namada_node::shell::testing::node::NodeResults;
 use namada_node::shell::testing::utils::{Bin, CapturedOutput};
 use namada_sdk::account::AccountPublicKeysMap;
 use namada_sdk::masp::fs::FsShieldedUtils;
-use namada_sdk::signing::SigningTxData;
+use namada_sdk::signing::{
+    FeeAuthorization, SigningData, SigningTxData, SigningWrapperData,
+};
 use namada_sdk::state::{StorageRead, StorageWrite};
 use namada_sdk::time::DateTimeUtc;
 use namada_sdk::token::storage_key::{
@@ -6951,15 +6952,21 @@ fn identical_output_descriptions() -> Result<()> {
     let mut tx_clone = tx.clone();
     tx_clone.add_memo(&[1, 2, 3]);
 
-    let signing_data = SigningTxData {
-        owner: None,
-        public_keys: [adam_key.to_public()].into(),
-        threshold: 1,
-        account_public_keys_map: None,
-        fee_payer: Either::Left((adam_key.to_public(), false)),
-        shielded_hash: None,
-        signatures: vec![],
-    };
+    let signing_data = SigningData::Wrapper(SigningWrapperData {
+        signing_data: vec![SigningTxData {
+            owner: None,
+            public_keys: [adam_key.to_public()].into(),
+            threshold: 1,
+            account_public_keys_map: None,
+            shielded_hash: None,
+            signatures: vec![],
+        }],
+
+        fee_auth: FeeAuthorization::Signer {
+            pubkey: adam_key.to_public(),
+            disposable_fee_payer: false,
+        },
+    });
 
     let (mut batched_tx, _signing_data) = namada_sdk::tx::build_batch(vec![
         (tx, signing_data.clone()),
@@ -7261,7 +7268,6 @@ fn masp_batch() -> Result<()> {
         public_keys: [adam_key.to_public()].into(),
         threshold: 1,
         account_public_keys_map: None,
-        fee_payer: Either::Left((adam_key.to_public(), false)),
         shielded_hash: None,
         signatures: vec![],
     };
@@ -7277,17 +7283,29 @@ fn masp_batch() -> Result<()> {
             namada_sdk::tx::build_batch(vec![
                 (
                     tx0.clone(),
-                    SigningTxData {
-                        shielded_hash: get_shielded_hash(&tx0),
-                        ..signing_data.clone()
-                    },
+                    SigningData::Wrapper(SigningWrapperData {
+                        signing_data: vec![SigningTxData {
+                            shielded_hash: get_shielded_hash(&tx0),
+                            ..signing_data.clone()
+                        }],
+                        fee_auth: FeeAuthorization::Signer {
+                            pubkey: adam_key.to_public(),
+                            disposable_fee_payer: false,
+                        },
+                    }),
                 ),
                 (
                     tx1.clone(),
-                    SigningTxData {
-                        shielded_hash: get_shielded_hash(&tx1),
-                        ..signing_data.clone()
-                    },
+                    SigningData::Wrapper(SigningWrapperData {
+                        signing_data: vec![SigningTxData {
+                            shielded_hash: get_shielded_hash(&tx1),
+                            ..signing_data.clone()
+                        }],
+                        fee_auth: FeeAuthorization::Signer {
+                            pubkey: adam_key.to_public(),
+                            disposable_fee_payer: false,
+                        },
+                    }),
                 ),
             ])
             .unwrap();
@@ -7517,7 +7535,6 @@ fn masp_atomic_batch() -> Result<()> {
         public_keys: [adam_key.to_public()].into(),
         threshold: 1,
         account_public_keys_map: None,
-        fee_payer: Either::Left((adam_key.to_public(), false)),
         shielded_hash: None,
         signatures: vec![],
     };
@@ -7533,17 +7550,29 @@ fn masp_atomic_batch() -> Result<()> {
             namada_sdk::tx::build_batch(vec![
                 (
                     tx0.clone(),
-                    SigningTxData {
-                        shielded_hash: get_shielded_hash(&tx0),
-                        ..signing_data.clone()
-                    },
+                    SigningData::Wrapper(SigningWrapperData {
+                        signing_data: vec![SigningTxData {
+                            shielded_hash: get_shielded_hash(&tx0),
+                            ..signing_data.clone()
+                        }],
+                        fee_auth: FeeAuthorization::Signer {
+                            pubkey: adam_key.to_public(),
+                            disposable_fee_payer: false,
+                        },
+                    }),
                 ),
                 (
                     tx1.clone(),
-                    SigningTxData {
-                        shielded_hash: get_shielded_hash(&tx1),
-                        ..signing_data.clone()
-                    },
+                    SigningData::Wrapper(SigningWrapperData {
+                        signing_data: vec![SigningTxData {
+                            shielded_hash: get_shielded_hash(&tx1),
+                            ..signing_data.clone()
+                        }],
+                        fee_auth: FeeAuthorization::Signer {
+                            pubkey: adam_key.to_public(),
+                            disposable_fee_payer: false,
+                        },
+                    }),
                 ),
             ])
             .unwrap();
@@ -7861,7 +7890,6 @@ fn masp_failing_atomic_batch() -> Result<()> {
         public_keys: [adam_key.to_public()].into(),
         threshold: 1,
         account_public_keys_map: None,
-        fee_payer: Either::Left((adam_key.to_public(), false)),
         shielded_hash: None,
         signatures: vec![],
     };
@@ -7869,17 +7897,29 @@ fn masp_failing_atomic_batch() -> Result<()> {
     let (mut batched_tx, _signing_data) = namada_sdk::tx::build_batch(vec![
         (
             tx0.clone(),
-            SigningTxData {
-                shielded_hash: get_shielded_hash(&tx0),
-                ..signing_data.clone()
-            },
+            SigningData::Wrapper(SigningWrapperData {
+                signing_data: vec![SigningTxData {
+                    shielded_hash: get_shielded_hash(&tx0),
+                    ..signing_data.clone()
+                }],
+                fee_auth: FeeAuthorization::Signer {
+                    pubkey: adam_key.to_public(),
+                    disposable_fee_payer: false,
+                },
+            }),
         ),
         (
             tx1.clone(),
-            SigningTxData {
-                shielded_hash: get_shielded_hash(&tx1),
-                ..signing_data.clone()
-            },
+            SigningData::Wrapper(SigningWrapperData {
+                signing_data: vec![SigningTxData {
+                    shielded_hash: get_shielded_hash(&tx1),
+                    ..signing_data.clone()
+                }],
+                fee_auth: FeeAuthorization::Signer {
+                    pubkey: adam_key.to_public(),
+                    disposable_fee_payer: false,
+                },
+            }),
         ),
     ])
     .unwrap();
@@ -8770,7 +8810,6 @@ fn masp_events() -> Result<()> {
         public_keys: [cooper_pk.clone()].into(),
         threshold: 1,
         account_public_keys_map: None,
-        fee_payer: Either::Left((cooper_pk.clone(), false)),
         shielded_hash: None,
         signatures: vec![],
     };
@@ -8778,17 +8817,29 @@ fn masp_events() -> Result<()> {
     let (batched_tx, _signing_data) = namada_sdk::tx::build_batch(vec![
         (
             tx0.clone(),
-            SigningTxData {
-                shielded_hash: get_shielded_hash(&tx0),
-                ..signing_data.clone()
-            },
+            SigningData::Wrapper(SigningWrapperData {
+                signing_data: vec![SigningTxData {
+                    shielded_hash: get_shielded_hash(&tx0),
+                    ..signing_data.clone()
+                }],
+                fee_auth: FeeAuthorization::Signer {
+                    pubkey: cooper_pk.clone(),
+                    disposable_fee_payer: false,
+                },
+            }),
         ),
         (
             tx1.clone(),
-            SigningTxData {
-                shielded_hash: get_shielded_hash(&tx1),
-                ..signing_data.clone()
-            },
+            SigningData::Wrapper(SigningWrapperData {
+                signing_data: vec![SigningTxData {
+                    shielded_hash: get_shielded_hash(&tx1),
+                    ..signing_data.clone()
+                }],
+                fee_auth: FeeAuthorization::Signer {
+                    pubkey: cooper_pk.clone(),
+                    disposable_fee_payer: false,
+                },
+            }),
         ),
     ])
     .unwrap();

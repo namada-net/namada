@@ -62,7 +62,6 @@ pub use namada_token::masp::{ShieldedUtils, ShieldedWallet};
 use namada_tx::Tx;
 use namada_tx::data::wrapper::GasLimit;
 use rpc::{denominate_amount, format_denominated_amount, query_native_token};
-use signing::SigningTxData;
 use token::{DenominatedAmount, NATIVE_MAX_DECIMAL_PLACES};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tx::{
@@ -140,6 +139,7 @@ pub trait Namada: NamadaIo {
             wallet_alias_force: false,
             fee_amount: None,
             wrapper_fee_payer: None,
+            wrap_it: false,
             fee_token: self.native_token(),
             gas_limit: GasLimit::from(DEFAULT_GAS_LIMIT),
             expiration: Default::default(),
@@ -605,7 +605,7 @@ pub trait Namada: NamadaIo {
         &self,
         tx: &mut Tx,
         args: &args::Tx,
-        signing_data: SigningTxData,
+        signing_data: signing::SigningData,
         with: impl Fn(Tx, common::PublicKey, signing::Signable, D) -> F
         + MaybeSend
         + MaybeSync,
@@ -717,6 +717,7 @@ where
                 wallet_alias_force: false,
                 fee_amount: None,
                 wrapper_fee_payer: None,
+                wrap_it: false,
                 fee_token: native_token,
                 gas_limit: GasLimit::from(DEFAULT_GAS_LIMIT),
                 expiration: Default::default(),

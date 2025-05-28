@@ -7735,6 +7735,7 @@ pub mod args {
                     .chain_id
                     .or_else(|| Some(ctx.config.ledger.chain_id.clone())),
                 wrapper_fee_payer: self.wrapper_fee_payer.map(|x| ctx.get(&x)),
+                wrap_it: self.wrap_it,
                 memo: self.memo,
                 use_device: self.use_device,
                 device_transport: self.device_transport,
@@ -7881,6 +7882,8 @@ pub mod args {
             let password = None;
             let memo = MEMO_OPT.parse(matches).map(String::into_bytes);
             let wrapper_fee_payer = FEE_PAYER_OPT.parse(matches);
+            // Wrap the transaction unless we want to dump the raw
+            let wrap_it = !dump_tx;
             let output_folder = OUTPUT_FOLDER_PATH.parse(matches);
             let use_device = USE_DEVICE.parse(matches);
             let no_expiration = NO_EXPIRATION.parse(matches);
@@ -7912,6 +7915,7 @@ pub mod args {
                 password,
                 chain_id,
                 wrapper_fee_payer,
+                wrap_it,
                 output_folder,
                 memo,
                 use_device,

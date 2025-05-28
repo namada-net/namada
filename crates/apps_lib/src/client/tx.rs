@@ -26,6 +26,7 @@ use namada_sdk::ibc::convert_masp_tx_to_ibc_memo;
 use namada_sdk::io::{Io, display_line, edisplay_line};
 use namada_sdk::key::*;
 use namada_sdk::rpc::{InnerTxResult, TxBroadcastData, TxResponse};
+use namada_sdk::signing::SigningData;
 use namada_sdk::state::EPOCH_SWITCH_BLOCKS_DELAY;
 use namada_sdk::tx::data::compute_inner_tx_hash;
 use namada_sdk::tx::{CompressedAuthorization, Section, Signer, Tx};
@@ -62,31 +63,32 @@ const MAX_HW_CONVERT: usize = 15;
 // introduced.
 const MAX_HW_OUTPUT: usize = 15;
 
-/// Wrapper around `signing::aux_signing_data` that stores the optional
-/// disposable address to the wallet
-pub async fn aux_signing_data(
-    context: &impl Namada,
-    args: &args::Tx,
-    owner: Option<Address>,
-    default_signer: Option<Address>,
-    disposable_signing_key: bool,
-    signatures: Vec<Vec<u8>>,
-    wrapper_signature: Option<Vec<u8>>,
-) -> Result<signing::SigningTxData, error::Error> {
-    let signing_data = signing::aux_signing_data(
-        context,
-        args,
-        owner,
-        default_signer,
-        vec![],
-        disposable_signing_key,
-        signatures,
-        wrapper_signature,
-    )
-    .await?;
+// FIXME: remove if unused, or review the docs
+// /// Wrapper around `signing::aux_signing_data` that stores the optional
+// /// disposable address to the wallet
+// pub async fn aux_signing_data(
+//     context: &impl Namada,
+//     args: &args::Tx,
+//     owner: Option<Address>,
+//     default_signer: Option<Address>,
+//     disposable_signing_key: bool,
+//     signatures: Vec<Vec<u8>>,
+//     wrapper_signature: Option<Vec<u8>>,
+// ) -> Result<signing::SigningTxData, error::Error> {
+//     let signing_data = signing::aux_signing_data(
+//         context,
+//         args,
+//         owner,
+//         default_signer,
+//         vec![],
+//         disposable_signing_key,
+//         signatures,
+//         wrapper_signature,
+//     )
+//     .await?;
 
-    Ok(signing_data)
-}
+//     Ok(signing_data)
+// }
 
 pub async fn with_hardware_wallet<U, T>(
     mut tx: Tx,
@@ -188,7 +190,7 @@ pub async fn sign<N: Namada>(
     context: &N,
     tx: &mut Tx,
     args: &args::Tx,
-    signing_data: SigningTxData,
+    signing_data: SigningData,
 ) -> Result<(), error::Error> {
     // Setup a reusable context for signing transactions using the Ledger
     if args.use_device {
@@ -219,7 +221,7 @@ pub async fn submit_reveal_aux(
     context: &impl Namada,
     args: &args::Tx,
     address: &Address,
-) -> Result<Option<(Tx, SigningTxData)>, error::Error> {
+) -> Result<Option<(Tx, SigningData)>, error::Error> {
     if args.dump_tx || args.dump_wrapper_tx {
         return Ok(None);
     }
@@ -250,11 +252,15 @@ async fn batch_opt_reveal_pk_and_submit<N: Namada>(
     namada: &N,
     args: &args::Tx,
     owners: &[&Address],
-    mut tx_data: (Tx, SigningTxData),
+    mut tx_data: (Tx, SigningData),
 ) -> Result<ProcessTxResponse, error::Error>
 where
     <N::Client as namada_sdk::io::Client>::Error: std::fmt::Display,
 {
+    if !matches!(tx_data.1, SigningData::Wrapper(_)) {
+        panic!("Expected wrapper signing data to submit the transaction");
+    }
+
     let mut batched_tx_data = vec![];
 
     for owner in owners {
@@ -270,7 +276,7 @@ where
     if args.use_device {
         // Sign each transaction separately
         for (tx, sig_data) in &mut batched_tx_data {
-            sign(namada, tx, args, sig_data.clone()).await?;
+            sign(namada, tx, args, sig_data.to_owned()).await?;
         }
         sign(namada, &mut tx_data.0, args, tx_data.1).await?;
         // Then submit each transaction separately
@@ -327,6 +333,7 @@ where
         return tx::dump_tx(namada.io(), &args.tx, tx);
     }
     if args.tx.dump_wrapper_tx {
+        // FIXME: here we attach the inner signatures when dumping the wrapper
         // Attach the provided inner signatures to the tx (if any)
         let signatures = args
             .signatures
@@ -1246,10 +1253,12 @@ pub async fn submit_shielded_transfer(
     )
     .await?;
     let (mut tx, signing_data) =
-        args.clone().build(namada, &mut bparams, false).await?;
-    let disposable_fee_payer = match signing_data.fee_payer {
-        either::Either::Left((_, disposable_fee_payer)) => disposable_fee_payer,
-        either::Either::Right(_) => unreachable!(),
+        args.clone().build(namada, &mut bparams).await?;
+    let disposable_fee_payer = match signing_data {
+        SigningData::Inner(_) => false,
+        SigningData::Wrapper(ref signing_wrapper_data) => {
+            signing_wrapper_data.disposable_fee_payer()
+        }
     };
     if !disposable_fee_payer {
         display_line!(
@@ -1261,7 +1270,15 @@ pub async fn submit_shielded_transfer(
              fees via the MASP with a disposable gas payer.",
         );
     }
-    masp_sign(&mut tx, &args.tx, &signing_data, shielded_hw_keys).await?;
+    masp_sign(
+        &mut tx,
+        &args.tx,
+        signing_data
+            .signing_tx_data()
+            .expect("Missing expected signing data"),
+        shielded_hw_keys,
+    )
+    .await?;
 
     let masp_section = tx
         .sections
@@ -1409,10 +1426,12 @@ pub async fn submit_unshielding_transfer(
     )
     .await?;
     let (mut tx, signing_data) =
-        args.clone().build(namada, &mut bparams, false).await?;
-    let disposable_fee_payer = match signing_data.fee_payer {
-        either::Either::Left((_, disposable_fee_payer)) => disposable_fee_payer,
-        either::Either::Right(_) => unreachable!(),
+        args.clone().build(namada, &mut bparams).await?;
+    let disposable_fee_payer = match signing_data {
+        SigningData::Inner(_) => false,
+        SigningData::Wrapper(ref signing_wrapper_data) => {
+            signing_wrapper_data.disposable_fee_payer()
+        }
     };
     if !disposable_fee_payer {
         display_line!(
@@ -1424,7 +1443,15 @@ pub async fn submit_unshielding_transfer(
              gas fees via the MASP with a disposable gas payer.",
         );
     }
-    masp_sign(&mut tx, &args.tx, &signing_data, shielded_hw_keys).await?;
+    masp_sign(
+        &mut tx,
+        &args.tx,
+        signing_data
+            .signing_tx_data()
+            .expect("Missing signing data"),
+        shielded_hw_keys,
+    )
+    .await?;
 
     let masp_section = tx
         .sections
@@ -1493,12 +1520,14 @@ where
     // If transaction building fails for any reason, then abort the process
     // blaming MASP build parameter generation if that had also failed.
     let (mut tx, signing_data, _) = args
-        .build(namada, &mut bparams, false)
+        .build(namada, &mut bparams)
         .await
         .map_err(|e| bparams_err.unwrap_or(e))?;
-    let disposable_fee_payer = match signing_data.fee_payer {
-        either::Either::Left((_, disposable_fee_payer)) => disposable_fee_payer,
-        either::Either::Right(_) => unreachable!(),
+    let disposable_fee_payer = match signing_data {
+        SigningData::Inner(_) => false,
+        SigningData::Wrapper(ref signing_wrapper_data) => {
+            signing_wrapper_data.disposable_fee_payer()
+        }
     };
     if args.source.spending_key().is_some() && !disposable_fee_payer {
         display_line!(
@@ -1513,7 +1542,15 @@ where
     // Any effects of a MASP build parameter generation failure would have
     // manifested during transaction building. So we discount that as a root
     // cause from now on.
-    masp_sign(&mut tx, &args.tx, &signing_data, shielded_hw_keys).await?;
+    masp_sign(
+        &mut tx,
+        &args.tx,
+        signing_data
+            .signing_tx_data()
+            .expect("Missing expected signing data"),
+        shielded_hw_keys,
+    )
+    .await?;
 
     let opt_masp_section =
         tx.sections.iter().find_map(|section| section.masp_tx());

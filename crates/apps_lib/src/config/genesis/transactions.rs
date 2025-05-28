@@ -20,7 +20,7 @@ use namada_sdk::dec::Dec;
 use namada_sdk::key::common::PublicKey;
 use namada_sdk::key::{RefTo, SerializeWithBorsh, SigScheme, common, ed25519};
 use namada_sdk::proof_of_stake::types::ValidatorMetaData;
-use namada_sdk::signing::{SigningTxData, sign_tx};
+use namada_sdk::signing::{SigningTxData, SigningWrapperData, sign_tx};
 use namada_sdk::string_encoding::StringEncoded;
 use namada_sdk::time::DateTimeUtc;
 use namada_sdk::token;
@@ -90,6 +90,7 @@ fn get_tx_args(use_device: bool) -> TxArgs {
         wallet_alias_force: false,
         fee_amount: None,
         wrapper_fee_payer: None,
+        wrap_it: false,
         fee_token: genesis_fee_token_address(),
         gas_limit: 0.into(),
         expiration: Default::default(),
@@ -764,15 +765,23 @@ impl<T> Signed<T> {
     {
         let (pks, threshold) = self.data.get_pks(established_accounts);
         let owner = self.data.get_owner().address();
-        let signing_data = SigningTxData {
-            owner: Some(owner),
-            account_public_keys_map: Some(pks.iter().cloned().collect()),
-            public_keys: pks.clone(),
-            threshold,
-            fee_payer: Either::Left((genesis_fee_payer_pk(), false)),
-            shielded_hash: None,
-            signatures: vec![],
-        };
+        let signing_data =
+            namada_sdk::signing::SigningData::Wrapper(SigningWrapperData {
+                signing_data: vec![SigningTxData {
+                    owner: Some(owner),
+                    account_public_keys_map: Some(
+                        pks.iter().cloned().collect(),
+                    ),
+                    public_keys: pks.clone(),
+                    threshold,
+                    shielded_hash: None,
+                    signatures: vec![],
+                }],
+                fee_auth: namada_sdk::signing::FeeAuthorization::Signer {
+                    pubkey: genesis_fee_payer_pk(),
+                    disposable_fee_payer: false,
+                },
+            });
 
         let mut tx = self.data.tx_to_sign();
 

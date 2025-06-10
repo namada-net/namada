@@ -404,8 +404,11 @@ where
         for (masp_indexed_tx, stx_batch) in self.cache.fetched.take() {
             let needs_witness_map_update =
                 self.client.capabilities().needs_witness_map_update();
-            self.ctx
-                .save_shielded_spends(&stx_batch, needs_witness_map_update);
+            self.ctx.save_shielded_spends(
+                &stx_batch,
+                needs_witness_map_update,
+                Some(masp_indexed_tx.indexed_tx),
+            )?;
             if needs_witness_map_update
                 && Some(&masp_indexed_tx) > last_witnessed_tx.as_ref()
             {
@@ -430,6 +433,7 @@ where
                     .unwrap_or_default()
                 {
                     self.ctx.save_decrypted_shielded_outputs(
+                        masp_indexed_tx.indexed_tx,
                         vk,
                         first_note_pos + note_pos_offset,
                         note,

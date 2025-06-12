@@ -13,12 +13,15 @@ use namada_apps_lib::wallet::defaults::{
 };
 use namada_core::address::Address;
 use namada_core::dec::Dec;
-use namada_core::masp::{MaspTxId, Precision, TokenMap, encode_asset_type};
+use namada_core::masp::{
+    AssetData, MaspTxId, Precision, TokenMap, encode_asset_type,
+};
 use namada_node::shell::ResultCode;
 use namada_node::shell::testing::client::run;
 use namada_node::shell::testing::node::NodeResults;
 use namada_node::shell::testing::utils::{Bin, CapturedOutput};
 use namada_sdk::account::AccountPublicKeysMap;
+use namada_sdk::collections::HashMap;
 use namada_sdk::masp::fs::FsShieldedUtils;
 use namada_sdk::signing::{
     FeeAuthorization, SigningData, SigningTxData, SigningWrapperData,
@@ -30,8 +33,10 @@ use namada_sdk::token::storage_key::{
     masp_reward_precision_key, masp_scheduled_base_native_precision_key,
     masp_scheduled_reward_precision_key, masp_token_map_key,
 };
-use namada_sdk::token::{self, Amount, DenominatedAmount, MaspEpoch};
-use namada_sdk::tx::{Section, Tx};
+use namada_sdk::token::{
+    self, Amount, DenominatedAmount, MaspDigitPos, MaspEpoch,
+};
+use namada_sdk::tx::{IndexedTx, Section, Tx};
 use namada_sdk::{DEFAULT_GAS_LIMIT, tx};
 use test_log::test;
 
@@ -8268,14 +8273,22 @@ fn tricky_masp_txs() -> Result<()> {
 }
 
 // Test generation of transactions and querying balance with the speculative
-// context
+// context. Also checks that the shielded history is not updated when in a
+// speculative context.
 #[test]
 fn speculative_context() -> Result<()> {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
     // This address doesn't matter for tests. But an argument is required.
     let validator_one_rpc = "http://127.0.0.1:26567";
     // Download the shielded pool parameters before starting node
     let _ = FsShieldedUtils::new(PathBuf::new());
     let (mut node, _services) = setup::setup()?;
+    // Generate the shielded wallet in a fixed path to retrieve it later
+    let mut shielded_wallet = FsShieldedUtils::new(node.genesis_dir());
+    // Assert that the shielded history is empty
+    assert!(shielded_wallet.shielded_history.is_empty());
+
     _ = node.next_masp_epoch();
 
     // 1. Shield some tokens in two steps two generate two different output
@@ -8334,6 +8347,62 @@ fn speculative_context() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains("nam: 200"));
 
+    let native_token = node
+        .shell
+        .lock()
+        .unwrap()
+        .state
+        .in_mem()
+        .native_token
+        .clone();
+    // Load the updated shielded wallet
+    rt.block_on(shielded_wallet.load_confirmed());
+    // Assert that the shielded history has been updated with the corresponding
+    // entries
+    assert_eq!(shielded_wallet.shielded_history.len(), 1);
+    let aa_history = shielded_wallet.shielded_history.first().unwrap().1;
+    assert_eq!(aa_history.len(), 2);
+    let first_aa_history_entry = aa_history
+        .get(&IndexedTx {
+            block_height: 11.into(),
+            block_index: 0.into(),
+            batch_index: 0.into(),
+        })
+        .unwrap();
+    assert!(first_aa_history_entry.inputs.is_empty());
+    let expected_outputs: HashMap<AssetData, Amount> = [(
+        AssetData {
+            token: native_token.clone(),
+            denom: 6.into(),
+            position: MaspDigitPos::Zero,
+            epoch: MaspEpoch::zero().next(),
+        },
+        Amount::from(100_000_000),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(expected_outputs, first_aa_history_entry.outputs);
+    let second_aa_history_entry = aa_history
+        .get(&IndexedTx {
+            block_height: 13.into(),
+            block_index: 0.into(),
+            batch_index: 0.into(),
+        })
+        .unwrap();
+    assert!(second_aa_history_entry.inputs.is_empty());
+    let expected_outputs: HashMap<AssetData, Amount> = [(
+        AssetData {
+            token: native_token.clone(),
+            denom: 6.into(),
+            position: MaspDigitPos::Zero,
+            epoch: MaspEpoch::zero().next(),
+        },
+        Amount::from(100_000_000),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(expected_outputs, second_aa_history_entry.outputs);
+
     // 3. Spend an amount of tokens which is less than the amount of every
     //    single note
     let captured = CapturedOutput::of(|| {
@@ -8381,6 +8450,12 @@ fn speculative_context() -> Result<()> {
     // The speculative context invalidates the entire note spent so we expect to
     // see the balance coming only from the second unspent note
     assert!(captured.contains("nam: 100"));
+    // Load the updated shielded wallet
+    rt.block_on(shielded_wallet.load_confirmed());
+    // Assert that the shielded history has not been updated
+    assert_eq!(shielded_wallet.shielded_history.len(), 1);
+    let aa_history = shielded_wallet.shielded_history.first().unwrap().1;
+    assert_eq!(aa_history.len(), 2);
 
     // 5. Try to spend some amount from the remaining note with a tx that will
     //    fail
@@ -8431,6 +8506,12 @@ fn speculative_context() -> Result<()> {
     });
     assert!(captured.result.is_ok());
     assert!(captured.contains("nam: 100"));
+    // Load the updated shielded wallet
+    rt.block_on(shielded_wallet.load_confirmed());
+    // Assert that the shielded history has not been updated
+    assert_eq!(shielded_wallet.shielded_history.len(), 1);
+    let aa_history = shielded_wallet.shielded_history.first().unwrap().1;
+    assert_eq!(aa_history.len(), 2);
 
     // 7. Try to spend some amount from the remaining note
     let captured = CapturedOutput::of(|| {
@@ -8478,6 +8559,12 @@ fn speculative_context() -> Result<()> {
     // The speculative context invalidates the entire note spent so we expect to
     // see an empty balance
     assert!(captured.contains("nam: 0"));
+    // Load the updated shielded wallet
+    rt.block_on(shielded_wallet.load_confirmed());
+    // Assert that the shielded history has not been updated
+    assert_eq!(shielded_wallet.shielded_history.len(), 1);
+    let aa_history = shielded_wallet.shielded_history.first().unwrap().1;
+    assert_eq!(aa_history.len(), 2);
 
     // 9. Finally, sync the shielded context and check the confirmed balances
     run(
@@ -8526,6 +8613,118 @@ fn speculative_context() -> Result<()> {
     });
     assert!(captured.result.is_ok());
     assert!(captured.contains("nam: 180"));
+
+    // Load the updated shielded wallet
+    rt.block_on(shielded_wallet.load_confirmed());
+    // Assert that the shielded history has been updated with the corresponding
+    // entries
+    assert_eq!(shielded_wallet.shielded_history.len(), 2);
+    let aa_history = shielded_wallet.shielded_history.first().unwrap().1;
+    assert_eq!(aa_history.len(), 4);
+    let third_aa_history_entry = aa_history
+        .get(&IndexedTx {
+            block_height: 15.into(),
+            block_index: 0.into(),
+            batch_index: 0.into(),
+        })
+        .unwrap();
+    let expected_inputs: HashMap<AssetData, Amount> = [(
+        AssetData {
+            token: native_token.clone(),
+            denom: 6.into(),
+            position: MaspDigitPos::Zero,
+            epoch: MaspEpoch::zero().next(),
+        },
+        Amount::from(100_000_000),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(expected_inputs, third_aa_history_entry.inputs);
+    let expected_outputs: HashMap<AssetData, Amount> = [(
+        AssetData {
+            token: native_token.clone(),
+            denom: 6.into(),
+            position: MaspDigitPos::Zero,
+            epoch: MaspEpoch::zero().next(),
+        },
+        Amount::from(10_000_000),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(expected_outputs, third_aa_history_entry.outputs);
+    let fourth_aa_history_entry = aa_history
+        .get(&IndexedTx {
+            block_height: 19.into(),
+            block_index: 0.into(),
+            batch_index: 0.into(),
+        })
+        .unwrap();
+    let expected_inputs: HashMap<AssetData, Amount> = [(
+        AssetData {
+            token: native_token.clone(),
+            denom: 6.into(),
+            position: MaspDigitPos::Zero,
+            epoch: MaspEpoch::zero().next(),
+        },
+        Amount::from(100_000_000),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(expected_inputs, fourth_aa_history_entry.inputs);
+    let expected_outputs: HashMap<AssetData, Amount> = [(
+        AssetData {
+            token: native_token.clone(),
+            denom: 6.into(),
+            position: MaspDigitPos::Zero,
+            epoch: MaspEpoch::zero().next(),
+        },
+        Amount::from(10_000_000),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(expected_outputs, fourth_aa_history_entry.outputs);
+    let ab_history = shielded_wallet.shielded_history.get_index(1).unwrap().1;
+    assert_eq!(ab_history.len(), 2);
+    let first_ab_history_entry = ab_history
+        .get(&IndexedTx {
+            block_height: 15.into(),
+            block_index: 0.into(),
+            batch_index: 0.into(),
+        })
+        .unwrap();
+    assert!(first_ab_history_entry.inputs.is_empty());
+    let expected_outputs: HashMap<AssetData, Amount> = [(
+        AssetData {
+            token: native_token.clone(),
+            denom: 6.into(),
+            position: MaspDigitPos::Zero,
+            epoch: MaspEpoch::zero().next(),
+        },
+        Amount::from(90_000_000),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(expected_outputs, first_ab_history_entry.outputs);
+    let second_ab_history_entry = ab_history
+        .get(&IndexedTx {
+            block_height: 19.into(),
+            block_index: 0.into(),
+            batch_index: 0.into(),
+        })
+        .unwrap();
+    assert!(second_ab_history_entry.inputs.is_empty());
+    let expected_outputs: HashMap<AssetData, Amount> = [(
+        AssetData {
+            token: native_token.clone(),
+            denom: 6.into(),
+            position: MaspDigitPos::Zero,
+            epoch: MaspEpoch::zero().next(),
+        },
+        Amount::from(90_000_000),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(expected_outputs, second_ab_history_entry.outputs);
 
     Ok(())
 }
@@ -9383,6 +9582,379 @@ fn multiple_inputs_from_single_note() -> Result<()> {
     });
     assert!(captured.result.is_ok());
     assert!(captured.contains("btc: 9.9"));
+
+    Ok(())
+}
+
+// Test that the shielded wallet constructs the correct history of MASP
+// transactions for its keys
+#[test]
+// FIXME: make sure we account for conversions in the inputs/outputs
+fn shielded_history() -> Result<()> {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    // This address doesn't matter for tests. But an argument is required.
+    let validator_one_rpc = "http://127.0.0.1:26567";
+    // Download the shielded pool parameters before starting node
+    FsShieldedUtils::new(PathBuf::new());
+    let (mut node, _services) = setup::setup()?;
+    // Generate the shielded wallet in a fixed path to retrieve it later
+    let mut shielded_wallet = FsShieldedUtils::new(node.genesis_dir());
+
+    // Assert that the shielded history is empty
+    assert!(shielded_wallet.shielded_history.is_empty());
+
+    // Wait till epoch boundary
+    node.next_masp_epoch();
+
+    // Send 10 NAM from Albert to PA
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "shield",
+                "--source",
+                ALBERT,
+                "--target",
+                AA_PAYMENT_ADDRESS,
+                "--token",
+                NAM,
+                "--amount",
+                "10",
+                "--signing-keys",
+                ALBERT_KEY,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains(TX_APPLIED_SUCCESS));
+
+    // Send 10 BTC from Albert to PA
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "shield",
+                "--source",
+                ALBERT,
+                "--target",
+                AA_PAYMENT_ADDRESS,
+                "--token",
+                BTC,
+                "--amount",
+                "10",
+                "--signing-keys",
+                ALBERT_KEY,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains(TX_APPLIED_SUCCESS));
+
+    // Load the updated shielded wallet and check that the history is empty
+    // since we haven't run shielded-sync yet
+    rt.block_on(shielded_wallet.load_confirmed());
+    assert!(shielded_wallet.shielded_history.is_empty());
+
+    // sync the shielded context
+    run(
+        &node,
+        Bin::Client,
+        vec![
+            "shielded-sync",
+            "--viewing-keys",
+            AA_VIEWING_KEY,
+            "--node",
+            validator_one_rpc,
+        ],
+    )?;
+
+    // Assert NAM balance at VK(A) is 10
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                AA_VIEWING_KEY,
+                "--token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains("nam: 10"));
+
+    // Assert BTC balance at VK(A) is 10
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                AA_VIEWING_KEY,
+                "--token",
+                BTC,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains("btc: 10"));
+
+    let native_token = node
+        .shell
+        .lock()
+        .unwrap()
+        .state
+        .in_mem()
+        .native_token
+        .clone();
+    let token_map_key = masp_token_map_key();
+    let tokens: TokenMap = node
+        .shell
+        .lock()
+        .unwrap()
+        .state
+        .read(&token_map_key)
+        .unwrap()
+        .unwrap_or_default();
+    let btc_addr = tokens[&BTC.to_lowercase()].clone();
+    // Load the updated shielded wallet
+    rt.block_on(shielded_wallet.load_confirmed());
+    // Assert that the shielded history has been updated with the corresponding
+    // entries
+    assert_eq!(shielded_wallet.shielded_history.len(), 1);
+    let aa_history = shielded_wallet.shielded_history.first().unwrap().1;
+    assert_eq!(aa_history.len(), 2);
+    let nam_aa_history_entry = aa_history
+        .get(&IndexedTx {
+            block_height: 11.into(),
+            block_index: 0.into(),
+            batch_index: 0.into(),
+        })
+        .unwrap();
+    assert!(nam_aa_history_entry.inputs.is_empty());
+    let expected_outputs: HashMap<AssetData, Amount> = [(
+        AssetData {
+            token: native_token.clone(),
+            denom: 6.into(),
+            position: MaspDigitPos::Zero,
+            epoch: MaspEpoch::zero().next(),
+        },
+        Amount::from(10_000_000),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(expected_outputs, nam_aa_history_entry.outputs);
+    let btc_aa_history_entry = aa_history
+        .get(&IndexedTx {
+            block_height: 13.into(),
+            block_index: 0.into(),
+            batch_index: 0.into(),
+        })
+        .unwrap();
+    assert!(btc_aa_history_entry.inputs.is_empty());
+    let expected_outputs: HashMap<AssetData, Amount> = [(
+        AssetData {
+            token: btc_addr,
+            denom: 8.into(),
+            position: MaspDigitPos::Zero,
+            epoch: MaspEpoch::zero().next(),
+        },
+        Amount::from(1_000_000_000),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(expected_outputs, btc_aa_history_entry.outputs);
+
+    // Send 5 NAM from VK(A) to PB
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "transfer",
+                "--source",
+                AA_VIEWING_KEY,
+                "--target",
+                AB_PAYMENT_ADDRESS,
+                "--token",
+                NAM,
+                "--amount",
+                "5",
+                "--signing-keys",
+                ALBERT_KEY,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains(TX_APPLIED_SUCCESS));
+
+    // sync the shielded context
+    run(
+        &node,
+        Bin::Client,
+        vec![
+            "shielded-sync",
+            "--viewing-keys",
+            AA_VIEWING_KEY,
+            AB_VIEWING_KEY,
+            "--node",
+            validator_one_rpc,
+        ],
+    )?;
+
+    // Assert NAM balance at VK(A) is 5
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                AA_VIEWING_KEY,
+                "--token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains("nam: 5"));
+
+    // Assert BTC balance at VK(A) is 10
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                AA_VIEWING_KEY,
+                "--token",
+                BTC,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains("btc: 10"));
+
+    // Assert NAM balance at VK(B) is 5
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                AB_VIEWING_KEY,
+                "--token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains("nam: 5"));
+
+    // Assert BTC balance at VK(B) is 0
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                AB_VIEWING_KEY,
+                "--token",
+                BTC,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains("btc: 0"));
+
+    // Load the updated shielded wallet
+    rt.block_on(shielded_wallet.load_confirmed());
+    // Assert that the shielded history has been updated with the corresponding
+    // entries
+    assert_eq!(shielded_wallet.shielded_history.len(), 2);
+    let aa_history = shielded_wallet.shielded_history.first().unwrap().1;
+    let ab_history = shielded_wallet.shielded_history.get_index(1).unwrap().1;
+    assert_eq!(aa_history.len(), 3);
+    assert_eq!(ab_history.len(), 1);
+    let nam_aa_history_entry = aa_history
+        .get(&IndexedTx {
+            block_height: 15.into(),
+            block_index: 0.into(),
+            batch_index: 0.into(),
+        })
+        .unwrap();
+    let expected_inputs: HashMap<AssetData, Amount> = [(
+        AssetData {
+            token: native_token.clone(),
+            denom: 6.into(),
+            position: MaspDigitPos::Zero,
+            epoch: MaspEpoch::zero().next(),
+        },
+        Amount::from(10_000_000),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(expected_inputs, nam_aa_history_entry.inputs);
+    let expected_outputs: HashMap<AssetData, Amount> = [(
+        AssetData {
+            token: native_token.clone(),
+            denom: 6.into(),
+            position: MaspDigitPos::Zero,
+            epoch: MaspEpoch::zero().next(),
+        },
+        Amount::from(5_000_000),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(expected_outputs, nam_aa_history_entry.outputs);
+    // Check entry for VK(B)
+    let nam_ab_history_entry = ab_history
+        .get(&IndexedTx {
+            block_height: 15.into(),
+            block_index: 0.into(),
+            batch_index: 0.into(),
+        })
+        .unwrap();
+    assert!(nam_ab_history_entry.inputs.is_empty());
+    let expected_outputs: HashMap<AssetData, Amount> = [(
+        AssetData {
+            token: native_token,
+            denom: 6.into(),
+            position: MaspDigitPos::Zero,
+            epoch: MaspEpoch::zero().next(),
+        },
+        Amount::from(5_000_000),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(expected_outputs, nam_ab_history_entry.outputs);
 
     Ok(())
 }

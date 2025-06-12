@@ -152,23 +152,27 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     /// transparent bundle data one should rely on querying a node or an
     /// indexer
     // FIXME: should this be optional or put behind a compiler feature? Or
-    // maybe a generic type on the ShieldedWallet? FIXME: need to sperate
-    // the histories for each viewing key. Is it possible? For output notes
-    // yes, not sure when spending. Yes we can, nf_map to get the note index
-    // and then vk_map to get the associated viewing key
+    // maybe a generic type on the ShieldedWallet?
     pub shielded_history:
         HashMap<ViewingKey, HashMap<IndexedTx, TxHistoryEntry>>,
     /// The sync state of the context
     pub sync_status: ContextSyncStatus,
 }
-// FIXME: need some testing for the history
 
 /// The data for an indexed masp transaction
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 pub struct TxHistoryEntry {
-    // FIXME: make sure we only account for our notes in these two!
-    inputs: HashMap<AssetData, Amount>,
-    outputs: HashMap<AssetData, Amount>,
+    // FIXME: should just add the conversions here?
+    // FIXME: it seems to me like we can't understand the conversions in the
+    // bundle. Maybe we could look for all the conversions for the given assets
+    // and see if they match the known ones? No they are behing a zkp
+    // FIXME: maybe we can just signal if there were conversions? Like with a
+    // boolean? FIXME: can we try to apply the conversions to the input
+    // notes to update their amounts?
+    /// The inputs of the indexed transaction
+    pub inputs: HashMap<AssetData, Amount>,
+    /// The outputs of the indexed transaction
+    pub outputs: HashMap<AssetData, Amount>,
 }
 
 /// Default implementation to ease construction of TxContexts. Derive cannot be
@@ -419,6 +423,9 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
                         .entry(asset_data)
                         .or_insert(Amount::zero());
 
+                    // FIXME: we don't account for conversions in the spent
+                    // notes, and this is wrong? Problem is that I don't think
+                    // we can account for the conversions
                     *input_entry = checked!(input_entry + note.value.into())
                         .wrap_err("Overflow in shielded history inputs")?;
                 }
@@ -721,6 +728,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         else {
             return Ok(());
         };
+        // FIXME: so here we get the conversion in cleartext
         // Get the conversion for the given asset type, otherwise fail
         let Some(ConversionData {
             token,
@@ -766,6 +774,14 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         let mut output = I128Sum::zero();
         // Repeatedly exchange assets until it is no longer possible
         while let Some(asset_type) = input.asset_types().next().cloned() {
+            // FIXME: maybe when we get the spent notes we could try to look for
+            // the conversions of that asset and try to construct the conversion
+            // and then see if it matches the encrypted one? Could be a very
+            // slow process though FIXME: can we even reconstruct
+            // the convertion note from the allowed conversion? We probably need
+            // the builder but I'm not sure the build process is deterministic.
+            // Maybe we can just try to construct a commitment that matches the
+            // conversion commitment?
             self.query_allowed_conversion(client, asset_type, conversions)
                 .await?;
             // Consolidate the current amount with any dust from output.

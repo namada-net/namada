@@ -153,6 +153,7 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     /// indexer
     // FIXME: should this be optional or put behind a compiler feature? Or
     // maybe a generic type on the ShieldedWallet?
+    // FIXME: rename to just history
     pub shielded_history:
         HashMap<ViewingKey, HashMap<IndexedTx, TxHistoryEntry>>,
     /// The sync state of the context
@@ -163,9 +164,9 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
 #[derive(BorshSerialize, BorshDeserialize, Debug, Default)]
 pub struct TxHistoryEntry {
     /// The inputs of the indexed transaction
-    pub inputs: HashMap<AssetData, Amount>,
+    pub inputs: HashMap<Address, Amount>,
     /// The outputs of the indexed transaction
-    pub outputs: HashMap<AssetData, Amount>,
+    pub outputs: HashMap<Address, Amount>,
     /// A flag to mark the presence of conversions in the transaction
     pub conversions: bool,
 }
@@ -349,6 +350,8 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         let asset_data = self
             .asset_types
             .get(&note.asset_type)
+            // FIXME: should lookup the asset if not found but we need the
+            // ShieldedContext
             .ok_or_else(|| eyre!("Can not get the asset data"))?
             .to_owned();
         let output_entry = self
@@ -358,10 +361,14 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
             .entry(indexed_tx)
             .or_default()
             .outputs
-            .entry(asset_data)
+            .entry(asset_data.token)
             .or_insert(Amount::zero());
+        // No need to take care of the denomination as that should already be
+        // the default one for the given token
+        let note_amount =
+            Amount::from_masp_denominated(note.value, asset_data.position);
 
-        *output_entry = checked!(output_entry + note.value.into())
+        *output_entry = checked!(output_entry + note_amount)
             .wrap_err("Overflow in shielded history outputs")?;
 
         Ok(())
@@ -418,9 +425,15 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
 
                     let input_entry = history_entry
                         .inputs
-                        .entry(asset_data)
+                        .entry(asset_data.token)
                         .or_insert(Amount::zero());
-                    *input_entry = checked!(input_entry + note.value.into())
+                    // No need to take care of the denomination as that should
+                    // already be the default one for the given token
+                    let note_amount = Amount::from_masp_denominated(
+                        note.value,
+                        asset_data.position,
+                    );
+                    *input_entry = checked!(input_entry + note_amount)
                         .wrap_err("Overflow in shielded history inputs")?;
                 }
             }

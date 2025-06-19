@@ -110,10 +110,7 @@ pub async fn syncing<
 
     // Load the confirmed context and update the conversions for the shielded
     // history
-    shielded
-        .load_confirmed()
-        .await
-        .map_err(|e| Error::Other(e.to_string()))?;
+    shielded.load_confirmed().await;
     for (asset_type, (token, denom, position, epoch, _conv)) in
         namada_sdk::rpc::query_conversions(&client).await?
     {

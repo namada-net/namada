@@ -94,8 +94,7 @@ pub mod v0 {
         /// won't show up in here). Only the sapling bundle data is
         /// cached here, for the transparent bundle data one should
         /// rely on querying a node or an indexer
-        pub shielded_history:
-            HashMap<ViewingKey, HashMap<IndexedTx, TxHistoryEntry>>,
+        pub history: HashMap<ViewingKey, HashMap<IndexedTx, TxHistoryEntry>>,
         /// The sync state of the context
         pub sync_status: ContextSyncStatus,
     }
@@ -115,7 +114,7 @@ pub mod v0 {
                 spents: HashSet::default(),
                 asset_types: HashMap::default(),
                 vk_map: HashMap::default(),
-                shielded_history: Default::default(),
+                history: Default::default(),
                 sync_status: ContextSyncStatus::Confirmed,
             }
         }
@@ -139,7 +138,7 @@ pub mod v0 {
                 vk_map: wallet.vk_map,
                 note_index: wallet.note_index,
                 sync_status: wallet.sync_status,
-                shielded_history: wallet.shielded_history,
+                history: wallet.history,
             }
         }
     }

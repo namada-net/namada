@@ -407,6 +407,7 @@ where
             self.ctx.save_shielded_spends(
                 &stx_batch,
                 needs_witness_map_update,
+                #[cfg(feature = "historic")]
                 Some(masp_indexed_tx.indexed_tx),
             )?;
             if needs_witness_map_update
@@ -433,6 +434,7 @@ where
                     .unwrap_or_default()
                 {
                     self.ctx.save_decrypted_shielded_outputs(
+                        #[cfg(feature = "historic")]
                         masp_indexed_tx.indexed_tx,
                         vk,
                         first_note_pos + note_pos_offset,

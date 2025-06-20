@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use color_eyre::owo_colors::OwoColorize;
+#[cfg(feature = "testing")]
 use namada_core::masp::AssetData;
 use namada_sdk::args::ShieldedSync;
 use namada_sdk::control_flow::install_shutdown_signal;
@@ -108,24 +109,29 @@ pub async fn syncing<
         }};
     }
 
-    // Load the confirmed context and update the conversions for the shielded
-    // history
-    shielded.load_confirmed().await;
-    for (asset_type, (token, denom, position, epoch, _conv)) in
-        namada_sdk::rpc::query_conversions(&client).await?
+    #[cfg(feature = "testing")]
     {
-        let pre_asset_type = AssetData {
-            token,
-            denom,
-            position,
-            epoch: Some(epoch),
-        };
-        shielded.asset_types.insert(asset_type, pre_asset_type);
+        // Load the confirmed context and update the conversions for the
+        // shielded history. This is needed for integration tests only
+        // as the cli wallet is not supposed to compile the history of shielded
+        // transactions
+        shielded.load_confirmed().await;
+        for (asset_type, (token, denom, position, epoch, _conv)) in
+            namada_sdk::rpc::query_conversions(&client).await?
+        {
+            let pre_asset_type = AssetData {
+                token,
+                denom,
+                position,
+                epoch: Some(epoch),
+            };
+            shielded.asset_types.insert(asset_type, pre_asset_type);
+        }
+        shielded
+            .save()
+            .await
+            .map_err(|e| Error::Other(e.to_string()))?;
     }
-    shielded
-        .save()
-        .await
-        .map_err(|e| Error::Other(e.to_string()))?;
 
     let shielded = if let Some(endpoint) = args.with_indexer {
         display_line!(

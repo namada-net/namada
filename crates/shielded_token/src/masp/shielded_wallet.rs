@@ -44,6 +44,7 @@ use namada_io::{
     Io, MaybeSend, MaybeSync, NamadaIo, ProgressBar, display_line,
     edisplay_line,
 };
+#[cfg(feature = "historic")]
 use namada_tx::IndexedTx;
 use namada_wallet::{DatedKeypair, DatedSpendingKey};
 use rand::prelude::StdRng;
@@ -151,8 +152,7 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     /// show up in here). Only the sapling bundle data is cached here, for the
     /// transparent bundle data one should rely on querying a node or an
     /// indexer
-    // FIXME: should this be optional or put behind a compiler feature? Or
-    // maybe a generic type on the ShieldedWallet?
+    #[cfg(feature = "historic")]
     pub history: HashMap<ViewingKey, HashMap<IndexedTx, TxHistoryEntry>>,
     /// The sync state of the context
     pub sync_status: ContextSyncStatus,
@@ -188,6 +188,7 @@ impl<U: ShieldedUtils + Default> Default for ShieldedWallet<U> {
             conversions: Default::default(),
             asset_types: HashMap::default(),
             vk_map: HashMap::default(),
+            #[cfg(feature = "historic")]
             history: Default::default(),
             sync_status: ContextSyncStatus::Confirmed,
         }
@@ -320,7 +321,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
     #[allow(missing_docs)]
     pub fn save_decrypted_shielded_outputs(
         &mut self,
-        indexed_tx: IndexedTx,
+        #[cfg(feature = "historic")] indexed_tx: IndexedTx,
         vk: &ViewingKey,
         note_pos: usize,
         note: Note,
@@ -344,30 +345,31 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         self.div_map.insert(note_pos, *pa.diversifier());
         self.nf_map.insert(nf, note_pos);
         self.vk_map.insert(note_pos, *vk);
-        // Update the history
-        let asset_data = self
-            .asset_types
-            .get(&note.asset_type)
-            // FIXME: should lookup the asset if not found but we need the
-            // ShieldedContext
-            .ok_or_else(|| eyre!("Can not get the asset data"))?
-            .to_owned();
-        let output_entry = self
-            .history
-            .entry(vk.to_owned())
-            .or_default()
-            .entry(indexed_tx)
-            .or_default()
-            .outputs
-            .entry(asset_data.token)
-            .or_insert(Amount::zero());
-        // No need to take care of the denomination as that should already be
-        // the default one for the given token
-        let note_amount =
-            Amount::from_masp_denominated(note.value, asset_data.position);
+        #[cfg(feature = "historic")]
+        {
+            // Update the history
+            let asset_data = self
+                .asset_types
+                .get(&note.asset_type)
+                .ok_or_else(|| eyre!("Can not get the asset data"))?
+                .to_owned();
+            let output_entry = self
+                .history
+                .entry(vk.to_owned())
+                .or_default()
+                .entry(indexed_tx)
+                .or_default()
+                .outputs
+                .entry(asset_data.token)
+                .or_insert(Amount::zero());
+            // No need to take care of the denomination as that should already
+            // be the default one for the given token
+            let note_amount =
+                Amount::from_masp_denominated(note.value, asset_data.position);
 
-        *output_entry = checked!(output_entry + note_amount)
-            .wrap_err("Overflow in shielded history outputs")?;
+            *output_entry = checked!(output_entry + note_amount)
+                .wrap_err("Overflow in shielded history outputs")?;
+        }
 
         Ok(())
     }
@@ -377,8 +379,9 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         &mut self,
         transaction: &Transaction,
         update_witness_map: bool,
-        update_history: Option<IndexedTx>,
+        #[cfg(feature = "historic")] update_history: Option<IndexedTx>,
     ) -> Result<(), eyre::Error> {
+        #[cfg(feature = "historic")]
         let used_conversions = transaction.sapling_bundle().map_or_else(
             || false,
             |bundle| !bundle.shielded_converts.is_empty(),
@@ -395,44 +398,52 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
                 if update_witness_map {
                     self.witness_map.swap_remove(note_pos);
                 }
-                // Update the history if required
-                if let Some(indexed_tx) = update_history {
-                    let vk = self.vk_map.get(note_pos).ok_or_else(|| {
-                        eyre!(
-                            "Missing viewing key for the provided note \
-                             position"
-                        )
-                    })?;
-                    let note =
-                        self.note_map.get(note_pos).ok_or_else(|| {
-                            eyre!("Missing note for the provided note position")
-                        })?;
-                    let asset_data = self
-                        .asset_types
-                        .get(&note.asset_type)
-                        .ok_or_else(|| eyre!("Can not get the asset data"))?
-                        .to_owned();
+                #[cfg(feature = "historic")]
+                {
+                    // Update the history if required
+                    if let Some(indexed_tx) = update_history {
+                        let vk =
+                            self.vk_map.get(note_pos).ok_or_else(|| {
+                                eyre!(
+                                    "Missing viewing key for the provided \
+                                     note position"
+                                )
+                            })?;
+                        let note =
+                            self.note_map.get(note_pos).ok_or_else(|| {
+                                eyre!(
+                                    "Missing note for the provided note \
+                                     position"
+                                )
+                            })?;
+                        let asset_data = self
+                            .asset_types
+                            .get(&note.asset_type)
+                            .ok_or_else(|| eyre!("Can not get the asset data"))?
+                            .to_owned();
 
-                    let history_entry = self
-                        .history
-                        .entry(vk.to_owned())
-                        .or_default()
-                        .entry(indexed_tx)
-                        .or_default();
-                    history_entry.conversions = used_conversions;
+                        let history_entry = self
+                            .history
+                            .entry(vk.to_owned())
+                            .or_default()
+                            .entry(indexed_tx)
+                            .or_default();
+                        history_entry.conversions = used_conversions;
 
-                    let input_entry = history_entry
-                        .inputs
-                        .entry(asset_data.token)
-                        .or_insert(Amount::zero());
-                    // No need to take care of the denomination as that should
-                    // already be the default one for the given token
-                    let note_amount = Amount::from_masp_denominated(
-                        note.value,
-                        asset_data.position,
-                    );
-                    *input_entry = checked!(input_entry + note_amount)
-                        .wrap_err("Overflow in shielded history inputs")?;
+                        let input_entry = history_entry
+                            .inputs
+                            .entry(asset_data.token)
+                            .or_insert(Amount::zero());
+                        // No need to take care of the denomination as that
+                        // should already be the default
+                        // one for the given token
+                        let note_amount = Amount::from_masp_denominated(
+                            note.value,
+                            asset_data.position,
+                        );
+                        *input_entry = checked!(input_entry + note_amount)
+                            .wrap_err("Overflow in shielded history inputs")?;
+                    }
                 }
             }
         }
@@ -546,7 +557,12 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         &mut self,
         masp_tx: &Transaction,
     ) -> Result<(), eyre::Error> {
-        self.save_shielded_spends(masp_tx, false, None)?;
+        self.save_shielded_spends(
+            masp_tx,
+            false,
+            #[cfg(feature = "historic")]
+            None,
+        )?;
 
         // Save the speculative state for future usage
         self.sync_status = ContextSyncStatus::Speculative;

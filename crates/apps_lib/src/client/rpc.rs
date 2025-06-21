@@ -92,7 +92,7 @@ pub async fn query_and_print_masp_epoch(context: &impl Namada) -> MaspEpoch {
 /// begin.
 pub async fn query_and_print_next_epoch_info(context: &impl Namada) {
     println!();
-    query_block(context).await.unwrap();
+    let current_block = query_block(context).await.unwrap();
 
     let current_epoch = query_epoch(context.client()).await.unwrap();
     let (this_epoch_first_height, epoch_duration) =
@@ -110,6 +110,9 @@ pub async fn query_and_print_next_epoch_info(context: &impl Namada) {
     #[allow(clippy::disallowed_methods)]
     let current_time = DateTimeUtc::now();
     let seconds_left = next_epoch_time.time_diff(current_time).0;
+    let blocks_left =
+        (this_epoch_first_height.0 + epoch_duration.min_num_of_blocks + 2u64)
+            .saturating_sub(current_block.height.0);
     let time_remaining_str = convert_to_hours(seconds_left);
 
     display_line!(context.io(), "\nCurrent epoch: {current_epoch}.");
@@ -128,14 +131,30 @@ pub async fn query_and_print_next_epoch_info(context: &impl Namada) {
         "Minimum amount of time for an epoch: {}.",
         convert_to_hours(epoch_duration.min_duration.0)
     );
-    display_line!(
-        context.io(),
-        "\nNext epoch ({}) begins in {} or at block height {}, whichever \
-         occurs later.\n",
-        current_epoch.next(),
-        time_remaining_str,
-        this_epoch_first_height.0 + epoch_duration.min_num_of_blocks
-    );
+    if seconds_left == 0 {
+        display_line!(
+            context.io(),
+            "\nNext epoch ({}) begins in {} blocks\n",
+            current_epoch.next(),
+            blocks_left
+        );
+    } else if blocks_left == 0 {
+        display_line!(
+            context.io(),
+            "\nNext epoch ({}) begins in {}\n",
+            current_epoch.next(),
+            time_remaining_str
+        );
+    } else {
+        display_line!(
+            context.io(),
+            "\nNext epoch ({}) begins in {} or in {} blocks, whichever occurs \
+             later.\n",
+            current_epoch.next(),
+            time_remaining_str,
+            blocks_left
+        );
+    }
 }
 
 fn convert_to_hours(seconds: u64) -> String {

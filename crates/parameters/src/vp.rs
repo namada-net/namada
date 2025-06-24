@@ -40,16 +40,20 @@ where
             };
             match key_type {
                 KeyType::PARAMETER | KeyType::UNKNOWN_PARAMETER => {
-                    Gov::is_proposal_accepted(&ctx.pre(), &data)?.ok_or_else(
-                        || {
+                    let is_gov = Gov::is_proposal_accepted(&ctx.pre(), &data)?
+                        .ok_or_else(|| {
                             Error::new_alloc(format!(
                                 "Attempted to change a protocol parameter \
                                  from outside of a governance proposal, or \
                                  from a non-accepted governance proposal: \
                                  {key}",
                             ))
-                        },
-                    )
+                        });
+                    is_gov.and_then(|()| {
+                        // ensure that new parameters can be decoded
+                        let _ = crate::read(&ctx.post())?;
+                        Ok(())
+                    })
                 }
                 KeyType::UNKNOWN => Ok(()),
             }

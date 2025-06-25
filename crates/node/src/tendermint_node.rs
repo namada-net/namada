@@ -281,6 +281,17 @@ async fn update_tendermint_config(
         // become valid again in the future.
         config.mempool.keep_invalid_txs_in_cache = false;
 
+        // Drop txs from the mempool that are larger than 1 MiB
+        //
+        // The application (Namada) can assign arbitrary max tx sizes,
+        // which are subject to consensus. Either way, nodes are able to
+        // configure their local mempool however they please.
+        //
+        // 1 MiB is a reasonable value that allows governance proposal txs
+        // containing wasm code to be proposed by a leading validator
+        // during some round's start
+        // https://github.com/cometbft/cometbft/blob/c653eee08d7f2c44bd87fcca0b8a16666cd08fee/config/config.go#L1016
+
         // Hold 50x the max amount of txs in a block.
         #[allow(clippy::arithmetic_side_effects)]
         {

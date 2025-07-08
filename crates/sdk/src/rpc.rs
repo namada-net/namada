@@ -264,6 +264,18 @@ pub async fn get_staking_rewards_rate<C: Client + Sync>(
     )
 }
 
+/// Query the effective total supply of the native token
+pub async fn get_shielding_fee_amount<C: Client + Sync>(
+    client: &C,
+    token: &Address,
+) -> Result<DenominatedAmount, error::Error> {
+    query_storage_value(
+        client,
+        &namada_token::storage_key::masp_shielding_fee_amount(token),
+    )
+    .await
+}
+
 /// Check if the given address is a known validator.
 pub async fn is_validator<C: namada_io::Client + Sync>(
     client: &C,

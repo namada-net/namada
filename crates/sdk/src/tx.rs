@@ -41,7 +41,7 @@ use namada_core::ibc::core::client::types::Height as IbcHeight;
 use namada_core::ibc::core::host::types::identifiers::{ChannelId, PortId};
 use namada_core::ibc::primitives::{IntoTimestamp, Timestamp as IbcTimestamp};
 use namada_core::key::{self, *};
-use namada_core::masp::{AssetData, MaspEpoch, TransferSource, TransferTarget};
+use namada_core::masp::{AssetData, MaspEpoch, MaspTxId, TransferSource, TransferTarget};
 use namada_core::storage;
 use namada_core::time::DateTimeUtc;
 use namada_events::extend::EventAttributeEntry;
@@ -55,7 +55,7 @@ use namada_governance::storage::proposal::{
 use namada_governance::storage::vote::ProposalVote;
 use namada_ibc::storage::channel_key;
 use namada_ibc::trace::is_nft_trace;
-use namada_ibc::{MsgNftTransfer, MsgTransfer};
+use namada_ibc::{IbcShieldingData, MsgNftTransfer, MsgTransfer};
 use namada_io::{Client, Io, display_line, edisplay_line};
 use namada_proof_of_stake::parameters::{
     MAX_VALIDATOR_METADATA_LEN, PosParams,
@@ -84,7 +84,8 @@ use crate::rpc::{
     query_wasm_code_hash, validate_amount,
 };
 use crate::signing::{
-    self, SigningTxData, validate_fee, validate_transparent_fee,
+    self, SigningTxData, TxSourcePostBalance, validate_fee,
+    validate_transparent_fee,
 };
 use crate::tendermint_rpc::endpoint::broadcast::tx_sync::Response;
 use crate::tendermint_rpc::error::Error as RpcError;
@@ -332,6 +333,7 @@ pub async fn build_reveal_pk(
         None,
         Some(public_key.into()),
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -701,6 +703,7 @@ pub async fn build_change_consensus_key(
         None,
         None,
         vec![consensus_key.clone()],
+        None,
         false,
         vec![],
         None,
@@ -741,6 +744,7 @@ pub async fn build_validator_commission_change(
         Some(validator.clone()),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -886,6 +890,7 @@ pub async fn build_validator_metadata_change(
         Some(validator.clone()),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -1114,6 +1119,7 @@ pub async fn build_update_steward_commission(
         Some(steward.clone()),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -1185,6 +1191,7 @@ pub async fn build_resign_steward(
         Some(steward.clone()),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -1236,6 +1243,7 @@ pub async fn build_unjail_validator(
         Some(validator.clone()),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -1343,6 +1351,7 @@ pub async fn build_deactivate_validator(
         Some(validator.clone()),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -1421,6 +1430,7 @@ pub async fn build_reactivate_validator(
         Some(validator.clone()),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -1651,6 +1661,7 @@ pub async fn build_redelegation(
         Some(default_address),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -1698,6 +1709,7 @@ pub async fn build_withdraw(
         Some(default_address),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -1788,6 +1800,7 @@ pub async fn build_claim_rewards(
         Some(default_address),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -1895,6 +1908,7 @@ pub async fn build_unbond(
         Some(default_address),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -2133,6 +2147,7 @@ pub async fn build_bond(
         Some(default_address.clone()),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -2201,6 +2216,7 @@ pub async fn build_default_proposal(
         Some(proposal.proposal.author.clone()),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -2265,6 +2281,7 @@ pub async fn build_vote_proposal(
         default_signer.clone(),
         default_signer.clone(),
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -2577,6 +2594,7 @@ pub async fn build_become_validator(
         None,
         None,
         all_pks,
+        None,
         false,
         vec![],
         None,
@@ -2619,6 +2637,7 @@ pub async fn build_pgf_funding_proposal(
         Some(proposal.proposal.author.clone()),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -2669,6 +2688,7 @@ pub async fn build_pgf_stewards_proposal(
         Some(proposal.proposal.author.clone()),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -2725,23 +2745,50 @@ pub async fn build_ibc_transfer(
         Some(source.clone()),
         Some(source.clone()),
         vec![],
+        if let Some(IbcShieldingData {
+            shielding_fee_payer: payer,
+            ..
+        }) = &args.ibc_shielding_data
+        {
+            Some(payer.clone())
+        } else {
+            None
+        },
         args.source.spending_key().is_some(),
         vec![],
         None,
     )
     .await?;
     let fee_payer = signing_data.fee_payer_or_err()?;
-    let (fee_per_gas_unit, updated_balance) =
+    let (fee_per_gas_unit, updated_balance, shielding_fee_payer) =
         if let TransferSource::ExtendedKey(_) = args.source {
             // MASP fee payment
-            (validate_fee(context, &args.tx).await?, None)
+            (validate_fee(context, &args.tx).await?, None, None)
         } else {
             // Transparent fee payment
-            validate_transparent_fee(context, &args.tx, fee_payer)
-                .await
-                .map(|(fee_amount, updated_balance)| {
-                    (fee_amount, Some(updated_balance))
-                })?
+            let (fee_per_gas_unit, mut updated_balance) =
+                validate_transparent_fee(context, &args.tx, fee_payer).await?;
+            // check that if there is a shielding fee payer, they have enough
+            // balance to cover the fee
+
+            let shielding_fee_payer = if let Some(IbcShieldingData {
+                shielding_fee_payer: payer,
+                shielding_fee_token,
+                ..
+            }) = &args.ibc_shielding_data
+            {
+                validate_shielding_fee(
+                    context,
+                    Some(&mut updated_balance),
+                    payer,
+                    shielding_fee_token,
+                    args.tx.force,
+                )
+                .await?
+            } else {
+                None
+            };
+            (fee_per_gas_unit, Some(updated_balance), shielding_fee_payer)
         };
 
     // Check that the source address exists on chain
@@ -2762,6 +2809,14 @@ pub async fn build_ibc_transfer(
             && updated_balance.token == args.token
         {
             CheckBalance::Balance(updated_balance.post_balance)
+        } else if let Some(updated_fee_payer) = &shielding_fee_payer {
+            if updated_fee_payer.source == source
+                && updated_fee_payer.token == args.token
+            {
+                CheckBalance::Balance(updated_fee_payer.post_balance)
+            } else {
+                CheckBalance::Query(balance_key(&args.token, &source))
+            }
         } else {
             CheckBalance::Query(balance_key(&args.token, &source))
         };
@@ -2868,6 +2923,18 @@ pub async fn build_ibc_transfer(
     let mut tx = Tx::new(chain_id, args.tx.expiration.to_datetime());
     if let Some(memo) = &args.tx.memo {
         tx.add_memo(memo);
+    }
+    if let Some(IbcShieldingData {
+        shielding_fee_payer: payer,
+        shielding_fee_token: token,
+        masp_tx,
+    }) = &args.ibc_shielding_data
+    {
+        tx.add_section(Section::ShieldingFee {
+            payer: payer.clone(),
+            token: token.clone(),
+            cmt: MaspTxId::from(masp_tx.txid()),
+        });
     }
 
     let transfer = shielded_parts
@@ -2977,6 +3044,81 @@ pub async fn build_ibc_transfer(
     prepare_tx(&args.tx, &mut tx, fee_per_gas_unit, fee_payer).await?;
 
     Ok((tx, signing_data, shielded_tx_epoch))
+}
+
+/// Check if a shielding fee payer is necessary. If so,
+/// guarantee one is provided and has sufficient balance.
+/// If it is the same account as the provided `updated_balance`
+/// arg, fold the change into that struct. Otherwise, return
+/// a new updated balance.
+pub async fn validate_shielding_fee<N: Namada>(
+    context: &N,
+    updated_balance: Option<&mut TxSourcePostBalance>,
+    shielding_fee_payer: &common::PublicKey,
+    shielding_fee_token: &Address,
+    force: bool,
+) -> Result<Option<TxSourcePostBalance>> {
+    let payer = Address::from(shielding_fee_payer);
+
+    let shielding_fee =
+        rpc::get_shielding_fee_amount(context.client(), shielding_fee_token)
+            .await
+            .map_err(|_| {
+                Error::Other(format!(
+                    "The MASP shielding fee cannot be paid with token \
+                     {shielding_fee_token}"
+                ))
+            })?;
+    // fee payer is the same as shielded fee payer and paying with the same
+    // token
+    let Some(updated_balance) = updated_balance else {
+        return Some(
+            check_balance_too_low_err(
+                shielding_fee_token,
+                &payer,
+                shielding_fee.amount(),
+                CheckBalance::Query(balance_key(shielding_fee_token, &payer)),
+                force,
+                context,
+            )
+            .await,
+        )
+        .transpose();
+    };
+    if updated_balance.token == *shielding_fee_token
+        && updated_balance.source == payer
+    {
+        updated_balance.post_balance =
+            checked!(updated_balance.post_balance - shielding_fee.amount())
+                .map_err(|_| {
+                    Error::Other(format!(
+                        "{} does not have enough balance to pay for fees and \
+                         shielding fees. Short by {} {}",
+                        updated_balance.source,
+                        checked!(
+                            shielding_fee.amount()
+                                - updated_balance.post_balance
+                        )
+                        .unwrap(),
+                        updated_balance.token
+                    ))
+                })?;
+        Ok(None)
+    } else {
+        // check if the shielding fee payer has enough balance
+        Some(
+            check_balance_too_low_err(
+                shielding_fee_token,
+                &payer,
+                shielding_fee.amount(),
+                CheckBalance::Query(balance_key(shielding_fee_token, &payer)),
+                force,
+                context,
+            )
+            .await,
+        )
+        .transpose()
+    }
 }
 
 /// Abstraction for helping build transactions
@@ -3137,6 +3279,7 @@ pub async fn build_transparent_transfer<N: Namada>(
             source.clone(),
             source,
             vec![],
+            None,
             false,
             vec![],
             None,
@@ -3242,6 +3385,7 @@ pub async fn build_shielded_transfer<N: Namada>(
         Some(MASP),
         Some(MASP),
         vec![],
+        None,
         true,
         vec![],
         None,
@@ -3425,6 +3569,7 @@ pub async fn build_shielding_transfer<N: Namada>(
         source.clone(),
         source,
         vec![],
+        Some(args.shielding_fee_payer.clone()),
         false,
         vec![],
         None,
@@ -3433,12 +3578,20 @@ pub async fn build_shielding_transfer<N: Namada>(
 
     // Transparent fee payment
     let fee_payer = signing_data.fee_payer_or_err()?;
-    let (fee_amount, updated_balance) =
+    let (fee_amount, mut updated_balance) =
         validate_transparent_fee(context, &args.tx, fee_payer)
             .await
             .map(|(fee_amount, updated_balance)| {
                 (fee_amount, Some(updated_balance))
             })?;
+    let shielding_fee_balance = validate_shielding_fee(
+        context,
+        updated_balance.as_mut(),
+        &args.shielding_fee_payer,
+        &args.shielding_fee_token,
+        args.tx.force,
+    )
+    .await?;
 
     let mut transfer_data = MaspTransferData::default();
     let mut data = token::Transfer::default();
@@ -3455,10 +3608,18 @@ pub async fn build_shielding_transfer<N: Namada>(
 
         // Check the balance of the source
         if let Some(updated_balance) = &updated_balance {
-            let check_balance = if &updated_balance.source == source
-                && &updated_balance.token == token
+            let check_balance = if updated_balance.source == *source
+                && updated_balance.token == *token
             {
                 CheckBalance::Balance(updated_balance.post_balance)
+            } else if let Some(updated_fee_payer) = &shielding_fee_balance {
+                if updated_fee_payer.source == *source
+                    && updated_fee_payer.token == *token
+                {
+                    CheckBalance::Balance(updated_fee_payer.post_balance)
+                } else {
+                    CheckBalance::Query(balance_key(token, source))
+                }
             } else {
                 CheckBalance::Query(balance_key(token, source))
             };
@@ -3544,6 +3705,14 @@ pub async fn build_shielding_transfer<N: Namada>(
 
         data.shielded_section_hash = Some(shielded_section_hash);
         signing_data.shielded_hash = Some(shielded_section_hash);
+
+
+        tx.add_section(Section::ShieldingFee {
+            payer: args.shielding_fee_payer.clone(),
+            token: args.shielding_fee_token.clone(),
+            cmt: shielded_section_hash
+        });
+
         tracing::debug!("Transfer data {data:?}");
         Ok(())
     };
@@ -3573,6 +3742,7 @@ pub async fn build_unshielding_transfer<N: Namada>(
         Some(MASP),
         Some(MASP),
         vec![],
+        None,
         true,
         vec![],
         None,
@@ -3766,6 +3936,7 @@ pub async fn build_init_account(
         None,
         None,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -3857,6 +4028,7 @@ pub async fn build_update_account(
         Some(addr.clone()),
         default_signer,
         vec![],
+        None,
         false,
         vec![],
         None,
@@ -4057,6 +4229,7 @@ pub async fn build_custom(
             owner.clone(),
             default_signer,
             vec![],
+            None,
             false,
             signatures.to_owned(),
             None,
@@ -4360,6 +4533,9 @@ enum CheckBalance {
 /// Checks the balance at the given address is enough to transfer the
 /// given amount, along with the balance even existing. Force
 /// overrides this.
+///
+/// Returns the balance after the amount has been debited if
+/// successful.
 async fn check_balance_too_low_err<N: Namada>(
     token: &Address,
     source: &Address,
@@ -4367,7 +4543,7 @@ async fn check_balance_too_low_err<N: Namada>(
     balance: CheckBalance,
     force: bool,
     context: &N,
-) -> Result<()> {
+) -> Result<TxSourcePostBalance> {
     let balance = match balance {
         CheckBalance::Balance(amt) => amt,
         CheckBalance::Query(ref balance_key) => {
@@ -4388,7 +4564,11 @@ async fn check_balance_too_low_err<N: Namada>(
                             source,
                             token
                         );
-                        return Ok(());
+                        return Ok(TxSourcePostBalance {
+                            post_balance: Default::default(),
+                            source: source.clone(),
+                            token: token.clone(),
+                        });
                     } else {
                         return Err(Error::from(
                             TxSubmitError::NoBalanceForToken(
@@ -4406,7 +4586,11 @@ async fn check_balance_too_low_err<N: Namada>(
     };
 
     match balance.checked_sub(amount) {
-        Some(_) => Ok(()),
+        Some(amt) => Ok(TxSourcePostBalance {
+            post_balance: amt,
+            source: source.clone(),
+            token: token.clone(),
+        }),
         None => {
             if force {
                 edisplay_line!(
@@ -4419,7 +4603,11 @@ async fn check_balance_too_low_err<N: Namada>(
                     context.format_amount(token, amount).await,
                     context.format_amount(token, balance).await,
                 );
-                Ok(())
+                Ok(TxSourcePostBalance {
+                    post_balance: Default::default(),
+                    source: source.clone(),
+                    token: token.clone(),
+                })
             } else {
                 Err(Error::from(TxSubmitError::BalanceTooLow(
                     source.clone(),

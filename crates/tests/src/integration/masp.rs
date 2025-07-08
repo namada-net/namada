@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use borsh::BorshDeserialize;
 use color_eyre::eyre::Result;
 use color_eyre::owo_colors::OwoColorize;
 use itertools::Either;
@@ -13,9 +14,12 @@ use namada_apps_lib::wallet::defaults::{
     get_unencrypted_keypair, is_use_device,
 };
 use namada_core::address::Address;
+use namada_core::collections::HashSet;
 use namada_core::dec::Dec;
 use namada_core::masp::{MaspTxId, Precision, TokenMap, encode_asset_type};
-use namada_node::shell::testing::client::run;
+use namada_node::shell::testing::client::{
+    dummy_args, run, sign_tx, submit_custom,
+};
 use namada_node::shell::testing::node::NodeResults;
 use namada_node::shell::testing::utils::{Bin, CapturedOutput};
 use namada_sdk::account::AccountPublicKeysMap;
@@ -42,7 +46,10 @@ use crate::e2e::setup::constants::{
     C_SPENDING_KEY, CHRISTEL, CHRISTEL_KEY, ETH, FRANK_KEY, MASP, NAM,
 };
 use crate::integration::helpers::make_temp_account;
+use crate::integration::ledger_tests::find_files_with_ext;
 use crate::strings::TX_APPLIED_SUCCESS;
+use crate::token::storage_key::masp_shielding_fee_amount;
+use crate::tx::Authorization;
 
 /// Enable masp rewards before some token is shielded,
 /// but the max reward rate is null.
@@ -126,6 +133,10 @@ fn init_null_rewards() -> Result<()> {
                 TEST_TOKEN_ADDR,
                 "--amount",
                 "1000000",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 RPC,
             ]),
@@ -490,6 +501,10 @@ fn values_spanning_multiple_masp_digits() -> Result<()> {
                 TEST_TOKEN_ADDR,
                 "--amount",
                 HALF_TEST_TOKEN_INITIAL_SUPPLY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 RPC,
             ]),
@@ -659,6 +674,10 @@ fn values_spanning_multiple_masp_digits() -> Result<()> {
                 TEST_TOKEN_ADDR,
                 "--amount",
                 HALF_TEST_TOKEN_INITIAL_SUPPLY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 RPC,
             ]),
@@ -805,6 +824,10 @@ fn values_spanning_multiple_masp_digits() -> Result<()> {
                 "1",
                 "--gas-payer",
                 BERTHA_KEY,
+                "--shielding-fee-payer",
+                CHRISTEL_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 RPC,
             ]),
@@ -967,6 +990,10 @@ fn enable_rewards_after_shielding() -> Result<()> {
                 TEST_TOKEN_ADDR,
                 "--amount",
                 "1000000",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 RPC,
             ]),
@@ -1190,6 +1217,10 @@ fn enable_rewards_after_shielding() -> Result<()> {
                 TEST_TOKEN_ADDR,
                 "--amount",
                 "1000000",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 RPC,
             ]),
@@ -1451,6 +1482,538 @@ fn enable_rewards_after_shielding() -> Result<()> {
     Ok(())
 }
 
+/// This tests that shielding fees are enforced. We test the following
+/// cases
+///
+/// 1. Test the happy flow.
+/// 2. Test that if the shielding fee section is missing from the tx, it is
+///    rejected
+/// 3. Test that if the shielding fee holds the wrong Masp Tx id, it is rejected.
+/// 4. Test that if the account listed in the shielding fee does not sign the
+///    tx, it is rejected
+///
+#[test]
+fn test_shielding_fee_protocol_checks() -> Result<()> {
+    // This address doesn't matter for tests. But an argument is required.
+    let validator_one_rpc = "http://127.0.0.1:26567";
+    // Download the shielded pool parameters before starting node
+    let _ = FsShieldedUtils::new(PathBuf::new());
+    let (mut node, _services) = setup::setup()?;
+    let native_token = node.native_token();
+    node.shell
+        .lock()
+        .unwrap()
+        .state
+        .write(
+            &masp_shielding_fee_amount(&native_token),
+            DenominatedAmount::native(Amount::native_whole(2000)),
+        )
+        .expect("Test failed");
+    node.next_masp_epoch();
+    // test that the shielding fee debits from the correct account
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                BERTHA_KEY,
+                "--token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    // 1998000 = 2000000 - 2000
+    assert!(captured.contains("nam: 2000000"));
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "shield",
+                "--source",
+                ALBERT,
+                "--target",
+                AA_PAYMENT_ADDRESS,
+                "--token",
+                BTC,
+                "--amount",
+                "0.1",
+                "--signing-keys",
+                ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains(TX_APPLIED_SUCCESS));
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                BERTHA_KEY,
+                "--token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    // 1998000 = 2000000 - 2000
+    assert!(captured.contains("nam: 1998000"));
+
+    // we now show that signing and submitting manually is successful
+    let output_folder = node.test_dir.path();
+    run(
+        &node,
+        Bin::Client,
+        apply_use_device(vec![
+            "shield",
+            "--source",
+            ALBERT,
+            "--target",
+            AA_PAYMENT_ADDRESS,
+            "--token",
+            BTC,
+            "--amount",
+            "0.1",
+            "--signing-keys",
+            ALBERT_KEY,
+            "--shielding-fee-payer",
+            BERTHA_KEY,
+            "--shielding-fee-token",
+            NAM,
+            "--dump-wrapper-tx",
+            "--output-folder-path",
+            output_folder.to_str().unwrap(),
+            "--node",
+            validator_one_rpc,
+        ]),
+    )?;
+    let tx_path = find_files_with_ext(output_folder, "tx")
+        .unwrap()
+        .first()
+        .expect("Offline tx should be found.")
+        .to_path_buf()
+        .display()
+        .to_string();
+    let tx: Tx = serde_json::from_reader(
+        std::fs::File::open(tx_path.clone()).expect("Test Failed"),
+    )
+    .expect("Test failed");
+    let signing_data = SigningTxData {
+        owner: Some(node.lookup_address(ALBERT)?),
+        public_keys: HashSet::from([node.lookup_pk(ALBERT_KEY)?]),
+        threshold: 1,
+        account_public_keys_map: Some(
+            [node.lookup_pk(ALBERT_KEY)?].into_iter().collect(),
+        ),
+        fee_payer: Either::Left((node.lookup_pk(ALBERT_KEY)?, false)),
+        shielded_hash: None,
+        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
+        signatures: vec![],
+    };
+    let signed = sign_tx(&node, tx, signing_data, &dummy_args(&node))?;
+    let captured =
+        CapturedOutput::of(|| submit_custom(&node, signed, &dummy_args(&node)));
+    assert!(captured.result.is_ok());
+    assert!(captured.contains(TX_APPLIED_SUCCESS));
+    std::fs::remove_file(tx_path).expect("Test failed");
+
+    // we remove the shielding fee section
+    run(
+        &node,
+        Bin::Client,
+        apply_use_device(vec![
+            "shield",
+            "--source",
+            ALBERT,
+            "--target",
+            AA_PAYMENT_ADDRESS,
+            "--token",
+            BTC,
+            "--amount",
+            "0.1",
+            "--signing-keys",
+            ALBERT_KEY,
+            "--shielding-fee-payer",
+            BERTHA_KEY,
+            "--shielding-fee-token",
+            NAM,
+            "--dump-wrapper-tx",
+            "--output-folder-path",
+            output_folder.to_str().unwrap(),
+            "--node",
+            validator_one_rpc,
+        ]),
+    )?;
+    let tx_path = find_files_with_ext(output_folder, "tx")
+        .unwrap()
+        .first()
+        .expect("Offline tx should be found.")
+        .to_path_buf()
+        .display()
+        .to_string();
+    let tx: Tx = serde_json::from_reader(
+        std::fs::File::open(tx_path.clone()).expect("Test Failed"),
+    )
+    .expect("Test failed");
+    let signing_data = SigningTxData {
+        owner: Some(node.lookup_address(ALBERT)?),
+        public_keys: HashSet::from([node.lookup_pk(ALBERT_KEY)?]),
+        threshold: 1,
+        account_public_keys_map: Some(
+            [node.lookup_pk(ALBERT_KEY)?].into_iter().collect(),
+        ),
+        fee_payer: Either::Left((node.lookup_pk(ALBERT_KEY)?, false)),
+        shielded_hash: None,
+        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
+        signatures: vec![],
+    };
+    let mut signed = sign_tx(&node, tx, signing_data, &dummy_args(&node))?;
+    signed
+        .sections
+        .retain(|s| !matches!(s, Section::ShieldingFee { .. }));
+    let captured =
+        CapturedOutput::of(|| submit_custom(&node, signed, &dummy_args(&node)));
+    assert!(captured.result.is_ok());
+    assert!(
+        captured.contains(
+            "A fee payer was not provided for a shielding transaction"
+        )
+    );
+    std::fs::remove_file(tx_path).expect("Test failed");
+
+    // now we make the shielding fee section contain the wrong masp tx id
+    run(
+        &node,
+        Bin::Client,
+        apply_use_device(vec![
+            "shield",
+            "--source",
+            ALBERT,
+            "--target",
+            AA_PAYMENT_ADDRESS,
+            "--token",
+            BTC,
+            "--amount",
+            "0.1",
+            "--signing-keys",
+            ALBERT_KEY,
+            "--shielding-fee-payer",
+            BERTHA_KEY,
+            "--shielding-fee-token",
+            NAM,
+            "--dump-wrapper-tx",
+            "--output-folder-path",
+            output_folder.to_str().unwrap(),
+            "--node",
+            validator_one_rpc,
+        ]),
+    )?;
+    let tx_path = find_files_with_ext(output_folder, "tx")
+        .unwrap()
+        .first()
+        .expect("Offline tx should be found.")
+        .to_path_buf()
+        .display()
+        .to_string();
+    let mut tx: Tx = serde_json::from_reader(
+        std::fs::File::open(tx_path.clone()).expect("Test Failed"),
+    )
+        .expect("Test failed");
+    let signing_data = SigningTxData {
+        owner: Some(node.lookup_address(ALBERT)?),
+        public_keys: HashSet::from([node.lookup_pk(ALBERT_KEY)?]),
+        threshold: 1,
+        account_public_keys_map: Some(
+            [node.lookup_pk(ALBERT_KEY)?].into_iter().collect(),
+        ),
+        fee_payer: Either::Left((node.lookup_pk(ALBERT_KEY)?, false)),
+        shielded_hash: None,
+        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
+        signatures: vec![],
+    };
+    for sec in tx.sections.iter_mut() {
+        if let Section::ShieldingFee {cmt, ..} = sec {
+            *cmt = MaspTxId::from(masp_primitives::transaction::TxId::from_bytes([0u8; 32]));
+        }
+    }
+    let signed = sign_tx(&node, tx, signing_data, &dummy_args(&node))?;
+
+    let captured =
+        CapturedOutput::of(|| submit_custom(&node, signed, &dummy_args(&node)));
+    assert!(captured.result.is_ok());
+    assert!(
+        captured.contains(
+            "A fee payer was not provided for a shielding transaction"
+        )
+    );
+    std::fs::remove_file(tx_path).expect("Test failed");
+
+    // now we sign the shielding fee with the wrong key
+    run(
+        &node,
+        Bin::Client,
+        apply_use_device(vec![
+            "shield",
+            "--source",
+            ALBERT,
+            "--target",
+            AA_PAYMENT_ADDRESS,
+            "--token",
+            BTC,
+            "--amount",
+            "0.1",
+            "--signing-keys",
+            ALBERT_KEY,
+            "--shielding-fee-payer",
+            BERTHA_KEY,
+            "--shielding-fee-token",
+            NAM,
+            "--dump-wrapper-tx",
+            "--output-folder-path",
+            output_folder.to_str().unwrap(),
+            "--node",
+            validator_one_rpc,
+        ]),
+    )?;
+    let tx_path = find_files_with_ext(output_folder, "tx")
+        .unwrap()
+        .first()
+        .expect("Offline tx should be found.")
+        .to_path_buf()
+        .display()
+        .to_string();
+    let tx: Tx = serde_json::from_reader(
+        std::fs::File::open(tx_path).expect("Test Failed"),
+    )
+    .expect("Test failed");
+    let signing_data = SigningTxData {
+        owner: Some(node.lookup_address(ALBERT)?),
+        public_keys: HashSet::from([node.lookup_pk(ALBERT_KEY)?]),
+        threshold: 1,
+        account_public_keys_map: Some(
+            [node.lookup_pk(ALBERT_KEY)?].into_iter().collect(),
+        ),
+        fee_payer: Either::Left((node.lookup_pk(ALBERT_KEY)?, false)),
+        shielded_hash: None,
+        // this should be Bertha's key
+        shielding_fee_payer: Some(node.lookup_pk(ALBERT_KEY)?),
+        signatures: vec![],
+    };
+    let signed = sign_tx(&node, tx, signing_data, &dummy_args(&node))?;
+    let captured =
+        CapturedOutput::of(|| submit_custom(&node, signed, &dummy_args(&node)));
+    assert!(captured.result.is_ok());
+    assert!(captured.contains("The section signature is invalid"));
+
+    Ok(())
+}
+
+/// Test the client balance checks for shielding fees
+///
+/// Check insufficient balance when
+/// 1. Shielding fee payer is unique
+/// 2. Check when fee payer and shielding fee payer are the same
+/// 3. Check when shielding account and shielding fee payer are the same
+/// 4. All three are the same
+///
+/// Check when paying with token not whitelisted for shielding fee payments
+#[test]
+fn test_shielding_fee_client_balance_checks() -> Result<()> {
+    // This address doesn't matter for tests. But an argument is required.
+    let validator_one_rpc = "http://127.0.0.1:26567";
+    // Download the shielded pool parameters before starting node
+    let _ = FsShieldedUtils::new(PathBuf::new());
+    let (mut node, _services) = setup::setup()?;
+    let native_token = node.native_token();
+    node.shell
+        .lock()
+        .unwrap()
+        .state
+        .write(
+            &masp_shielding_fee_amount(&native_token),
+            DenominatedAmount::native(Amount::native_whole(2000001)),
+        )
+        .expect("Test failed");
+    node.next_masp_epoch();
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "shield",
+                "--source",
+                ALBERT,
+                "--target",
+                AA_PAYMENT_ADDRESS,
+                "--token",
+                BTC,
+                "--amount",
+                "0.1",
+                "--signing-keys",
+                ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_err());
+    assert!(captured.contains(r"balance of the source \w+ of token \w+ is lower than the amount to be transferred."));
+    node.shell
+        .lock()
+        .unwrap()
+        .state
+        .write(
+            &masp_shielding_fee_amount(&native_token),
+            DenominatedAmount::native(Amount::native_whole(2000000)),
+        )
+        .expect("Test failed");
+    node.next_masp_epoch();
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "shield",
+                "--source",
+                ALBERT,
+                "--target",
+                AA_PAYMENT_ADDRESS,
+                "--token",
+                BTC,
+                "--amount",
+                "0.1",
+                "--signing-keys",
+                BERTHA_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_err());
+    assert!(captured.contains(
+        "does not have enough balance to pay for fees and shielding fees."
+    ));
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "shield",
+                "--source",
+                BERTHA_KEY,
+                "--target",
+                AA_PAYMENT_ADDRESS,
+                "--token",
+                NAM,
+                "--amount",
+                "1",
+                "--signing-keys",
+                ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_err());
+    assert!(captured.contains(r"balance of the source \w+ of token \w+ is lower than the amount to be transferred."));
+    node.shell
+        .lock()
+        .unwrap()
+        .state
+        .write(
+            &masp_shielding_fee_amount(&native_token),
+            DenominatedAmount::native(Amount::native_whole(1000000)),
+        )
+        .expect("Test failed");
+    node.next_masp_epoch();
+
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "shield",
+                "--source",
+                BERTHA_KEY,
+                "--target",
+                AA_PAYMENT_ADDRESS,
+                "--token",
+                NAM,
+                "--amount",
+                "1000000",
+                "--signing-keys",
+                BERTHA_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_err());
+    assert!(captured.contains(r"balance of the source \w+ of token \w+ is lower than the amount to be transferred."));
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "shield",
+                "--source",
+                ALBERT_KEY,
+                "--target",
+                AA_PAYMENT_ADDRESS,
+                "--token",
+                NAM,
+                "--amount",
+                "1",
+                "--signing-keys",
+                ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                BTC,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_err());
+    assert!(
+        captured.contains("The MASP shielding fee cannot be paid with token")
+    );
+    Ok(())
+}
+
 /// In this test we verify that the results of auto-compounding are
 /// approximately equal to what is obtained by manually unshielding and
 /// reshielding each time.
@@ -1482,6 +2045,10 @@ fn auto_compounding() -> Result<()> {
                 ALBERT_KEY,
                 "--node",
                 validator_one_rpc,
+                "--shielding-fee-payer",
+                ALBERT_KEY,
+                "--shielding-fee-token",
+                NAM,
             ]),
         )
     });
@@ -1507,6 +2074,10 @@ fn auto_compounding() -> Result<()> {
                 ALBERT_KEY,
                 "--node",
                 validator_one_rpc,
+                "--shielding-fee-payer",
+                ALBERT_KEY,
+                "--shielding-fee-token",
+                NAM,
             ]),
         )
     });
@@ -1731,6 +2302,10 @@ fn auto_compounding() -> Result<()> {
                         bal_b,
                         "--signing-keys",
                         ALBERT_KEY,
+                        "--shielding-fee-payer",
+                        ALBERT_KEY,
+                        "--shielding-fee-token",
+                        NAM,
                         "--node",
                         validator_one_rpc,
                     ]),
@@ -1835,6 +2410,10 @@ fn base_precision_effective() -> Result<()> {
                 "0.1",
                 "--signing-keys",
                 ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 validator_one_rpc,
             ]),
@@ -2001,6 +2580,10 @@ fn reset_conversions() -> Result<()> {
                 "1",
                 "--signing-keys",
                 ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 validator_one_rpc,
             ]),
@@ -2478,6 +3061,10 @@ fn dynamic_precision() -> Result<()> {
                 "1",
                 "--signing-keys",
                 ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 validator_one_rpc,
             ]),
@@ -2836,6 +3423,10 @@ fn dynamic_precision() -> Result<()> {
                 "1",
                 "--signing-keys",
                 ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 validator_one_rpc,
             ]),
@@ -3061,6 +3652,10 @@ fn masp_incentives() -> Result<()> {
                 "1",
                 "--signing-keys",
                 ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 validator_one_rpc,
             ]),
@@ -3341,6 +3936,10 @@ fn masp_incentives() -> Result<()> {
                 "0.001",
                 "--signing-keys",
                 ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 validator_one_rpc,
             ]),
@@ -3912,6 +4511,10 @@ fn spend_unconverted_asset_type() -> Result<()> {
                 BTC,
                 "--amount",
                 "20",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 validator_one_rpc,
             ]),
@@ -3936,6 +4539,10 @@ fn spend_unconverted_asset_type() -> Result<()> {
                 NAM,
                 "--amount",
                 "0.000001",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 validator_one_rpc,
             ]),
@@ -4106,6 +4713,10 @@ fn masp_txs_and_queries() -> Result<()> {
                 BTC,
                 "--amount",
                 "20",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 validator_one_rpc,
             ]),
@@ -4386,6 +4997,10 @@ fn multiple_unfetched_txs_same_block() -> Result<()> {
                 NAM,
                 "--amount",
                 "100",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -4408,6 +5023,10 @@ fn multiple_unfetched_txs_same_block() -> Result<()> {
                 NAM,
                 "--amount",
                 "200",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -4430,6 +5049,10 @@ fn multiple_unfetched_txs_same_block() -> Result<()> {
                 NAM,
                 "--amount",
                 "100",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -4627,6 +5250,10 @@ fn expired_masp_tx() -> Result<()> {
             NAM,
             "--amount",
             "100",
+            "--shielding-fee-payer",
+            BERTHA_KEY,
+            "--shielding-fee-token",
+            NAM,
             "--ledger-address",
             validator_one_rpc,
         ]),
@@ -4796,6 +5423,10 @@ fn cross_epoch_unshield() -> Result<()> {
                 "1000",
                 "--signing-keys",
                 ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -4940,6 +5571,10 @@ fn dynamic_assets() -> Result<()> {
                 BTC,
                 "--amount",
                 "1",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 validator_one_rpc,
             ]),
@@ -5076,6 +5711,10 @@ fn dynamic_assets() -> Result<()> {
                 BTC,
                 "--amount",
                 "1",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 validator_one_rpc,
             ]),
@@ -5544,6 +6183,10 @@ fn masp_fee_payment() -> Result<()> {
                 "500000",
                 "--gas-payer",
                 CHRISTEL_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -5818,6 +6461,10 @@ fn masp_fee_payment_gas_limit() -> Result<()> {
                 NAM,
                 "--amount",
                 "1000000",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -5940,6 +6587,10 @@ fn masp_fee_payment_with_non_disposable() -> Result<()> {
                 // Pay gas transparently
                 "--gas-payer",
                 BERTHA_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -6097,6 +6748,10 @@ fn masp_fee_payment_with_custom_spending_key() -> Result<()> {
                 NAM,
                 "--amount",
                 "10000",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -6118,6 +6773,10 @@ fn masp_fee_payment_with_custom_spending_key() -> Result<()> {
                 NAM,
                 "--amount",
                 "300000",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -6298,6 +6957,10 @@ fn masp_fee_payment_with_different_token() -> Result<()> {
                 NAM,
                 "--amount",
                 "1",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -6321,6 +6984,10 @@ fn masp_fee_payment_with_different_token() -> Result<()> {
                 "1000",
                 "--gas-payer",
                 ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -6344,6 +7011,10 @@ fn masp_fee_payment_with_different_token() -> Result<()> {
                 "300000",
                 "--gas-payer",
                 ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -6566,10 +7237,14 @@ fn identical_output_descriptions() -> Result<()> {
                 "--gas-payer",
                 bradley_alias.as_ref(),
                 "--gas-limit",
-                "60000",
+                "70000",
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-wrapper-tx",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -6601,6 +7276,7 @@ fn identical_output_descriptions() -> Result<()> {
         account_public_keys_map: None,
         fee_payer: Either::Left((adam_key.to_public(), false)),
         shielded_hash: None,
+        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
         signatures: vec![],
     };
 
@@ -6617,7 +7293,14 @@ fn identical_output_descriptions() -> Result<()> {
         ),
         None,
     );
+    // signatures for the shielded fee sections
+    batched_tx.add_section(Section::Authorization(Authorization::new(
+        vec![batched_tx.raw_header_hash()],
+        (0..).zip(vec![node.lookup_sk(BERTHA_KEY)?]).collect(),
+        None,
+    )));
     batched_tx.sign_wrapper(bradley_key);
+
 
     let wrapper_hash = batched_tx.wrapper_hash();
     let inner_cmts = batched_tx.commitments();
@@ -6870,12 +7553,16 @@ fn masp_batch() -> Result<()> {
                     "--amount",
                     "1000",
                     "--gas-limit",
-                    "60000",
+                    "80000",
                     "--gas-payer",
                     cooper_alias.as_ref(),
                     "--output-folder-path",
                     tempdir.path().to_str().unwrap(),
                     "--dump-wrapper-tx",
+                    "--shielding-fee-payer",
+                    BERTHA_KEY,
+                    "--shielding-fee-token",
+                    NAM,
                     "--ledger-address",
                     validator_one_rpc,
                 ],
@@ -6906,6 +7593,7 @@ fn masp_batch() -> Result<()> {
         account_public_keys_map: None,
         fee_payer: Either::Left((adam_key.to_public(), false)),
         shielded_hash: None,
+        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
         signatures: vec![],
     };
 
@@ -6945,13 +7633,18 @@ fn masp_batch() -> Result<()> {
             ),
             None,
         );
+        // signatures for the shielded fee sections
+        batched_tx.add_section(Section::Authorization(Authorization::new(
+            vec![batched_tx.raw_header_hash()],
+            (0..).zip(vec![node.lookup_sk(BERTHA_KEY)?]).collect(),
+            None,
+        )));
         batched_tx.sign_wrapper(cooper_key.clone());
 
         wrapper_hashes.push(batched_tx.wrapper_hash());
         for cmt in batched_tx.commitments() {
             inner_cmts.push(cmt.to_owned());
         }
-
         txs.push(batched_tx.to_bytes());
     }
 
@@ -7033,7 +7726,7 @@ fn masp_batch() -> Result<()> {
         ],
     )?;
 
-    // Assert NAM balances at VK(A), Bob and Bertha
+    // Assert NAM balances at VK(A), Adam and Bradley
     for (owner, balance) in [
         (AA_VIEWING_KEY, 2_000),
         (adam_alias.as_ref(), 498_000),
@@ -7127,12 +7820,16 @@ fn masp_atomic_batch() -> Result<()> {
                     "--amount",
                     "1000",
                     "--gas-limit",
-                    "60000",
+                    "80000",
                     "--gas-payer",
                     cooper_alias.as_ref(),
                     "--output-folder-path",
                     tempdir.path().to_str().unwrap(),
                     "--dump-wrapper-tx",
+                    "--shielding-fee-payer",
+                    BERTHA_KEY,
+                    "--shielding-fee-token",
+                    NAM,
                     "--ledger-address",
                     validator_one_rpc,
                 ],
@@ -7162,6 +7859,7 @@ fn masp_atomic_batch() -> Result<()> {
         account_public_keys_map: None,
         fee_payer: Either::Left((adam_key.to_public(), false)),
         shielded_hash: None,
+        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
         signatures: vec![],
     };
 
@@ -7201,6 +7899,12 @@ fn masp_atomic_batch() -> Result<()> {
             ),
             None,
         );
+        // signatures for the shielded fee sections
+        batched_tx.add_section(Section::Authorization(Authorization::new(
+            vec![batched_tx.raw_header_hash()],
+            (0..).zip(vec![node.lookup_sk(BERTHA_KEY)?]).collect(),
+            None,
+        )));
         batched_tx.sign_wrapper(cooper_key.clone());
 
         wrapper_hashes.push(batched_tx.wrapper_hash());
@@ -7369,6 +8073,10 @@ fn masp_failing_atomic_batch() -> Result<()> {
                     NAM,
                     "--amount",
                     "1000",
+                    "--shielding-fee-payer",
+                    BERTHA_KEY,
+                    "--shielding-fee-token",
+                    NAM,
                     "--node",
                     validator_one_rpc,
                 ]),
@@ -7506,6 +8214,7 @@ fn masp_failing_atomic_batch() -> Result<()> {
         account_public_keys_map: None,
         fee_payer: Either::Left((adam_key.to_public(), false)),
         shielded_hash: None,
+        shielding_fee_payer: None,
         signatures: vec![],
     };
 
@@ -7700,6 +8409,10 @@ fn tricky_masp_txs() -> Result<()> {
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-tx",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ],
@@ -7774,6 +8487,11 @@ fn tricky_masp_txs() -> Result<()> {
         None,
     );
     tx0.sign_wrapper(get_unencrypted_keypair("frank-key"));
+    let cmt = tx0.first_commitments().unwrap();
+
+    let data = tx0.data(cmt).unwrap();
+    let transfers = token::Transfer::try_from_slice(&data[..]).unwrap();
+    assert!(transfers.shielded_section_hash.is_none());
 
     // Generate second tx
     let captured = CapturedOutput::of(|| {
@@ -7795,6 +8513,10 @@ fn tricky_masp_txs() -> Result<()> {
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-wrapper-tx",
+                "--shielding-fee-payer",
+                CHRISTEL_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ],
@@ -7824,6 +8546,12 @@ fn tricky_masp_txs() -> Result<()> {
         ),
         None,
     );
+    // signatures for the shielded fee sections
+    tx1.add_section(Section::Authorization(Authorization::new(
+        vec![tx1.raw_header_hash()],
+        (0..).zip(vec![node.lookup_sk(CHRISTEL_KEY)?]).collect(),
+        None,
+    )));
     tx1.sign_wrapper(get_unencrypted_keypair("frank-key"));
 
     let txs = vec![tx0.to_bytes(), tx1.to_bytes()];
@@ -7902,6 +8630,10 @@ fn speculative_context() -> Result<()> {
                     NAM,
                     "--amount",
                     "100",
+                    "--shielding-fee-payer",
+                    BERTHA_KEY,
+                    "--shielding-fee-token",
+                    NAM,
                     "--node",
                     validator_one_rpc,
                 ]),
@@ -8137,7 +8869,7 @@ fn speculative_context() -> Result<()> {
     Ok(())
 }
 
-// Test that mixed masp tranfers and fee payments are correctly labeld by the
+// Test that mixed masp transfers and fee payments are correctly labeled by the
 // protocol (by means of events) and reconstructed in the correct order by the
 // client
 #[test]
@@ -8187,6 +8919,10 @@ fn masp_events() -> Result<()> {
                         NAM,
                         "--amount",
                         "500",
+                        "--shielding-fee-payer",
+                        BERTHA_KEY,
+                        "--shielding-fee-token",
+                        NAM,
                         "--node",
                         validator_one_rpc,
                     ]),
@@ -8269,6 +9005,10 @@ fn masp_events() -> Result<()> {
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-tx",
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -8415,6 +9155,7 @@ fn masp_events() -> Result<()> {
         account_public_keys_map: None,
         fee_payer: Either::Left((cooper_pk.clone(), false)),
         shielded_hash: None,
+        shielding_fee_payer: None,
         signatures: vec![],
     };
 
@@ -8517,6 +9258,14 @@ fn masp_events() -> Result<()> {
             AccountPublicKeysMap::from_iter(vec![(pk)].into_iter()),
             None,
         );
+        if idx == 0 {
+            // signatures for the shielded fee sections
+            tx.add_section(Section::Authorization(Authorization::new(
+                vec![tx.raw_header_hash()],
+                (0..).zip(vec![node.lookup_sk(BERTHA_KEY)?]).collect(),
+                None,
+            )));
+        }
         tx.sign_wrapper(sk);
 
         txs.push(tx.to_bytes());
@@ -8765,6 +9514,10 @@ fn multiple_inputs_from_single_note() -> Result<()> {
                 "10",
                 "--signing-keys",
                 ALBERT_KEY,
+                "--shielding-fee-payer",
+                BERTHA_KEY,
+                "--shielding-fee-token",
+                NAM,
                 "--node",
                 validator_one_rpc,
             ]),

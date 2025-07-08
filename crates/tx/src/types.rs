@@ -299,6 +299,22 @@ impl Tx {
         });
     }
 
+    /// Get the section containing the shielding fee payer
+    /// if it exists. There should be at most one
+    pub fn get_shielding_fee_section(
+        &self,
+        masp_tx: &MaspTxId
+    ) -> Option<(&common::PublicKey, &Address)> {
+        for section in &self.sections {
+            if let Section::ShieldingFee { payer, token, cmt } = section {
+                if cmt == masp_tx {
+                    return Some((payer, token));
+                }
+            }
+        }
+        None
+    }
+
     /// Get the MASP builder section with the given hash
     pub fn get_masp_builder(&self, hash: &MaspTxId) -> Option<&MaspBuilder> {
         for section in &self.sections {

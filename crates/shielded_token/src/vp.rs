@@ -625,8 +625,13 @@ where
             }
         }
         // The transaction shall not push masp authorizer actions that are not
-        // needed cause this might lead vps to run a wrong validation logic
-        if !actions_authorizers.is_empty() {
+        // needed because this might lead vps to run a wrong validation logic
+        if !actions_authorizers.is_empty()
+            && shielded_tx
+                .transparent_bundle()
+                .map(|b| b.vin.is_empty())
+                .unwrap_or(true)
+        {
             let error = Error::new_const(
                 "Found masp authorizer actions that are not required",
             );

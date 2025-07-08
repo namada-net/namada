@@ -19,7 +19,9 @@ use ibc::core::handler::types::msgs::MsgEnvelope;
 use ibc::core::host::types::identifiers::PortId;
 use ibc::primitives::proto::Protobuf;
 use masp_primitives::transaction::Transaction as MaspTransaction;
+use namada_core::address::Address;
 use namada_core::borsh::BorshSerializeExt;
+use namada_core::key::common::PublicKey;
 use namada_core::string_encoding::StringEncoded;
 use serde::{Deserialize, Serialize};
 
@@ -238,7 +240,14 @@ impl<Transfer: BorshSchema> BorshSchema for MsgNftTransfer<Transfer> {
 
 /// Shielding data in IBC packet memo
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
-pub struct IbcShieldingData(pub MaspTransaction);
+pub struct IbcShieldingData {
+    /// The MASP transaction that does the shielding
+    pub masp_tx: MaspTransaction,
+    /// The account that will pay the shielding fee
+    pub shielding_fee_payer: PublicKey,
+    /// The token that the shielding fee will be paid in
+    pub shielding_fee_token: Address,
+}
 
 impl From<&IbcShieldingData> for String {
     fn from(data: &IbcShieldingData) -> Self {
@@ -301,7 +310,7 @@ pub fn decode_ibc_shielding_data(
 /// Extract MASP transaction from IBC packet memo
 pub fn extract_masp_tx_from_packet(packet: &Packet) -> Option<MaspTransaction> {
     let memo = extract_memo_from_packet(packet, &packet.port_id_on_b)?;
-    decode_ibc_shielding_data(memo).map(|data| data.0)
+    decode_ibc_shielding_data(memo).map(|data| data.masp_tx)
 }
 
 fn extract_memo_from_packet(
@@ -366,6 +375,15 @@ pub fn extract_traces_from_recv_msg(
 }
 
 /// Get IBC memo string from MASP transaction for receiving
-pub fn convert_masp_tx_to_ibc_memo(transaction: &MaspTransaction) -> String {
-    IbcShieldingData(transaction.clone()).into()
+pub fn convert_masp_tx_to_ibc_memo(
+    transaction: &MaspTransaction,
+    shielding_fee_payer: PublicKey,
+    shielding_fee_token: Address,
+) -> String {
+    IbcShieldingData {
+        masp_tx: transaction.clone(),
+        shielding_fee_payer,
+        shielding_fee_token,
+    }
+    .into()
 }

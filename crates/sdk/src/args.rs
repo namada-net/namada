@@ -386,6 +386,10 @@ pub struct TxShieldingTransfer<C: NamadaTypes = SdkTypes> {
     pub targets: Vec<TxShieldedTarget<C>>,
     /// Transfer-specific data
     pub sources: Vec<TxTransparentSource<C>>,
+    /// The account which will pay the fees for shielding
+    pub shielding_fee_payer: C::PublicKey,
+    /// The token in which the fees for shielding will be paid
+    pub shielding_fee_token: C::Address,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }
@@ -693,7 +697,13 @@ impl TxOsmosisSwap<SdkTypes> {
                          yet"
                     ),
                 };
-
+                let Some(ibc_shielding_data) =
+                    transfer.ibc_shielding_data.as_ref()
+                else {
+                    return Err(Error::Other(
+                        "Expected IBC shielding data".to_string(),
+                    ));
+                };
                 let shielding_tx = tx::gen_ibc_shielding_transfer(
                     ctx,
                     GenIbcShieldingTransfer {
@@ -715,6 +725,12 @@ impl TxOsmosisSwap<SdkTypes> {
                             ),
                         ),
                         expiration: transfer.tx.expiration.clone(),
+                        shielding_fee_payer: ibc_shielding_data
+                            .shielding_fee_payer
+                            .clone(),
+                        shielding_fee_token: ibc_shielding_data
+                            .shielding_fee_token
+                            .clone(),
                     },
                 )
                 .await?
@@ -728,7 +744,15 @@ impl TxOsmosisSwap<SdkTypes> {
                     serde_json::to_value(&NamadaMemo {
                         namada: NamadaMemoData::OsmosisSwap {
                             shielding_data: StringEncoded::new(
-                                IbcShieldingData(shielding_tx),
+                                IbcShieldingData {
+                                    masp_tx: shielding_tx,
+                                    shielding_fee_payer: ibc_shielding_data
+                                        .shielding_fee_payer
+                                        .clone(),
+                                    shielding_fee_token: ibc_shielding_data
+                                        .shielding_fee_token
+                                        .clone(),
+                                },
                             ),
                             shielded_amount: amount_to_shield,
                             overflow_receiver,
@@ -3236,6 +3260,10 @@ pub struct GenIbcShieldingTransfer<C: NamadaTypes = SdkTypes> {
     pub expiration: TxExpiration,
     /// Asset to shield over IBC to Namada
     pub asset: IbcShieldingTransferAsset<C>,
+    /// Account to pay the shielding fee.
+    pub shielding_fee_payer: C::PublicKey,
+    /// Token which will be used to pay shielding fee
+    pub shielding_fee_token: C::Address,
 }
 
 /// IBC shielding transfer asset, to be used by [`GenIbcShieldingTransfer`]

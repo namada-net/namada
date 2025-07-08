@@ -64,7 +64,7 @@ use crate::wallet::{Wallet, WalletIo};
 use crate::{Namada, args, rpc};
 
 /// A structure holding the signing data to craft a transaction
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SigningTxData {
     /// The address owning the transaction
     pub owner: Option<Address>,
@@ -80,6 +80,8 @@ pub struct SigningTxData {
     pub fee_payer: either::Either<(common::PublicKey, bool), Vec<u8>>,
     /// ID of the Transaction needing signing
     pub shielded_hash: Option<MaspTxId>,
+    /// The key of the account paying for shielding fees
+    pub shielding_fee_payer: Option<common::PublicKey>,
     /// List of serialized signatures to attach to the transaction
     pub signatures: Vec<Vec<u8>>,
 }
@@ -288,6 +290,23 @@ where
         }
     }
 
+    if let Some(shielding_fee_payer) = signing_data.shielding_fee_payer.as_ref()
+    {
+        let mut wallet = wallet.write().await;
+        // If the secret key is not found, continue because the
+        // hardware wallet may still be able to sign this
+        if let Ok(secret_key) =
+            find_key_by_pk(&mut wallet, args, shielding_fee_payer)
+        {
+            used_pubkeys.insert(shielding_fee_payer.clone());
+            tx.add_section(Section::Authorization(Authorization::new(
+                vec![tx.raw_header_hash()],
+                (0..).zip(vec![secret_key]).collect(),
+                None,
+            )));
+        }
+    }
+
     // Then try to sign the raw header using the hardware wallet
     for pubkey in &signing_data.public_keys {
         if !used_pubkeys.contains(pubkey) {
@@ -307,6 +326,22 @@ where
                         used_pubkeys.insert(pubkey.clone());
                     }
                 }
+            }
+        }
+    }
+    // try to sign the shielding fee with the hardware wallet if necessary
+    if let Some(payer) = signing_data.shielding_fee_payer {
+        if !used_pubkeys.contains(&payer) {
+            if let Ok(ntx) = sign(
+                tx.clone(),
+                payer.clone(),
+                Signable::RawHeader,
+                user_data.clone(),
+            )
+            .await
+            {
+                *tx = ntx;
+                used_pubkeys.insert(payer.clone());
             }
         }
     }
@@ -381,6 +416,7 @@ pub async fn aux_signing_data(
     owner: Option<Address>,
     default_signer: Option<Address>,
     extra_public_keys: Vec<common::PublicKey>,
+    shielding_fee_payer: Option<common::PublicKey>,
     is_shielded_source: bool,
     signatures: Vec<Vec<u8>>,
     wrapper_signature: Option<Vec<u8>>,
@@ -444,6 +480,7 @@ pub async fn aux_signing_data(
         threshold,
         account_public_keys_map,
         fee_payer,
+        shielding_fee_payer,
         shielded_hash: None,
         signatures,
     })
@@ -2585,6 +2622,7 @@ mod test_signing {
             account_public_keys_map: Some(Default::default()),
             fee_payer: either::Either::Left((public_key_fee.clone(), false)),
             shielded_hash: None,
+            shielding_fee_payer: None,
             signatures: vec![],
         };
 
@@ -2622,6 +2660,7 @@ mod test_signing {
             account_public_keys_map: Some(Default::default()),
             fee_payer: either::Left((public_key.clone(), false)),
             shielded_hash: None,
+            shielding_fee_payer: None,
             signatures: vec![],
         };
         sign_tx(

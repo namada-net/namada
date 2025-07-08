@@ -500,6 +500,7 @@ pub mod cmds {
     }
 
     #[derive(Clone, Debug)]
+    #[allow(clippy::large_enum_variant)]
     pub enum NamadaClientWithContext {
         // Ledger cmds
         TxCustom(TxCustom),
@@ -3672,6 +3673,10 @@ pub mod args {
         arg("self-bond-amount");
     pub const SENDER: Arg<String> = arg("sender");
     pub const SHIELDED: ArgFlag = flag("shielded");
+    pub const SHIELDING_FEE_PAYER: Arg<WalletPublicKey> =
+        arg("shielding-fee-payer");
+    pub const SHIELDING_FEE_TOKEN: Arg<WalletAddress> =
+        arg("shielding-fee-token");
     pub const SHOW_IBC_TOKENS: ArgFlag = flag("show-ibc-tokens");
     pub const SLIPPAGE: ArgOpt<f64> = arg_opt("slippage-percentage");
     pub const SIGNING_KEYS: ArgMulti<WalletPublicKey, GlobStar> =
@@ -4946,12 +4951,15 @@ pub mod args {
                     amount: transfer_data.amount,
                 });
             }
+            let shielding_fee_payer = chain_ctx.get(&self.shielding_fee_payer);
 
             Ok(TxShieldingTransfer::<SdkTypes> {
                 tx,
                 sources: data,
                 targets,
                 tx_code_path: self.tx_code_path.to_path_buf(),
+                shielding_fee_payer,
+                shielding_fee_token: chain_ctx.get(&self.shielding_fee_token),
             })
         }
     }
@@ -4964,6 +4972,8 @@ pub mod args {
             let token = TOKEN.parse(matches);
             let amount = InputAmount::Unvalidated(AMOUNT.parse(matches));
             let tx_code_path = PathBuf::from(TX_TRANSFER_WASM);
+            let shielding_fee_payer = SHIELDING_FEE_PAYER.parse(matches);
+            let shielding_fee_token = SHIELDING_FEE_TOKEN.parse(matches);
             let data = vec![TxTransparentSource {
                 source,
                 token: token.clone(),
@@ -4980,6 +4990,8 @@ pub mod args {
                 sources: data,
                 targets,
                 tx_code_path,
+                shielding_fee_payer,
+                shielding_fee_token,
             }
         }
 
@@ -5000,6 +5012,13 @@ pub mod args {
                         .def()
                         .help(wrap!("The amount to transfer in decimal.")),
                 )
+                .arg(SHIELDING_FEE_PAYER.def().help(wrap!(
+                    "The implicit account which will pay the fee for \
+                     shielding tokens"
+                )))
+                .arg(SHIELDING_FEE_TOKEN.def().help(wrap!(
+                    "The token which will be used to pay the shielding fee"
+                )))
         }
     }
 
@@ -7243,6 +7262,8 @@ pub mod args {
                         IbcShieldingTransferAsset::Address(chain_ctx.get(&addr))
                     }
                 },
+                shielding_fee_payer: chain_ctx.get(&self.shielding_fee_payer),
+                shielding_fee_token: chain_ctx.get(&self.shielding_fee_token),
             })
         }
     }
@@ -7266,6 +7287,8 @@ pub mod args {
                     None => TxExpiration::Default,
                 }
             };
+            let shielding_fee_payer = SHIELDING_FEE_PAYER.parse(matches);
+            let shielding_fee_token = SHIELDING_FEE_TOKEN.parse(matches);
 
             Self {
                 query,
@@ -7278,6 +7301,8 @@ pub mod args {
                     channel_id,
                     token,
                 },
+                shielding_fee_payer,
+                shielding_fee_token,
             }
         }
 
@@ -7319,6 +7344,14 @@ pub mod args {
                 .arg(CHANNEL_ID.def().help(wrap!(
                     "The channel ID via which the token is received."
                 )))
+                .arg(SHIELDING_FEE_PAYER.def().help(wrap!(
+                    "The implicit account paying the fee for shielding tokens"
+                )))
+                .arg(
+                    SHIELDING_FEE_TOKEN
+                        .def()
+                        .help(wrap!("The token used to pay the shielding fee")),
+                )
         }
     }
 

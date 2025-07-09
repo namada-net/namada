@@ -565,7 +565,7 @@ pub fn wasm_migration(updates: &mut Vec<migrations::DbUpdateType>) {
             Hash::from_str(hash_str).unwrap().to_string().to_lowercase()
         })
         .collect();
-    // Replace the targetted old hashes
+    // Replace the targeted old hashes
     for (old_code_hash, name, code) in WASM_UPDATES {
         let old_code_hash = Hash::from_str(old_code_hash).unwrap();
         let new_code_hash = Hash(*Sha256::digest(code).as_ref());

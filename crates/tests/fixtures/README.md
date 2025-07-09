@@ -1,6 +1,6 @@
 # Test fixtures
 
-Folder contaning tests fixture.
+Folder containing tests fixture.
 
 ## txs.json
 

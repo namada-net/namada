@@ -3474,7 +3474,7 @@ mod test_finalize_block {
         let code = event[1].read_attribute::<CodeAttr>().expect("Test failed");
         assert_eq!(code, ResultCode::Ok);
 
-        // This hash must be present as succesfully added by the second
+        // This hash must be present as successfully added by the second
         // transaction
     }
 

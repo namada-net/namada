@@ -52,6 +52,8 @@ pub struct Parameters {
     pub masp_epoch_multiplier: u64,
     /// The gas limit for a masp transaction paying fees
     pub masp_fee_payment_gas_limit: u64,
+    /// The amount of NAM the MASP shielding fee costs
+    pub masp_nam_shielding_fee: String,
     /// Gas scale
     pub gas_scale: u64,
     /// Map of the cost per gas unit for every token allowed for fee payment
@@ -98,6 +100,7 @@ impl Default for Parameters {
             epochs_per_year: 365,
             masp_epoch_multiplier: 2,
             masp_fee_payment_gas_limit: 0,
+            masp_nam_shielding_fee: 0.to_string(),
             gas_scale: 100_000_000,
             minimum_gas_price: Default::default(),
             is_native_token_transferable: true,

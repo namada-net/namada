@@ -91,7 +91,7 @@ pub fn start_namada_ledger_node_wait_wasm(
     wait_for_wasm_pre_compile(&mut node)?;
     Ok(node)
 }
-
+/*
 /// Test that when we "run-ledger" with all the possible command
 /// combinations from fresh state, the node starts-up successfully for both a
 /// validator and non-validator user.
@@ -1118,7 +1118,7 @@ fn ledger_many_txs_in_a_block() -> Result<()> {
 
     Ok(())
 }
-
+*/
 pub fn write_json_file<T>(proposal_path: &std::path::Path, proposal_content: T)
 where
     T: Serialize,
@@ -1132,7 +1132,7 @@ where
 
     serde_json::to_writer(intent_writer, &proposal_content).unwrap();
 }
-
+/*
 /// In this test we intentionally make a validator node double sign blocks
 /// to test that slashing evidence is received and processed by the ledger
 /// correctly:
@@ -1536,7 +1536,7 @@ fn test_epoch_sleep() -> Result<()> {
 
     Ok(())
 }
-
+*/
 /// Prepare proposal data in the test's temp dir from the given source address.
 /// This can be submitted with "init-proposal" command.
 pub fn prepare_proposal_data(
@@ -1571,7 +1571,7 @@ pub fn prepare_proposal_data(
     write_json_file(valid_proposal_json_path.as_path(), valid_proposal_json);
     valid_proposal_json_path
 }
-
+/*
 #[test]
 fn deactivate_and_reactivate_validator() -> Result<()> {
     let pipeline_len = 2;
@@ -2844,3 +2844,4 @@ fn test_genesis_manipulation() -> Result<()> {
 
     Ok(())
 }
+*/

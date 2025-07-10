@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
-use namada_core::address::PGF;
+use namada_core::address::{InternalAddress, PGF};
 use namada_core::arith::CheckedSub;
 use namada_core::collections::HashSet;
 use namada_core::masp::encode_asset_type;
@@ -11,10 +11,9 @@ use namada_core::masp_primitives::transaction::Transaction;
 use namada_core::token::{DenominatedAmount, MaspDigitPos};
 use namada_core::uint::I320;
 use namada_core::{masp, token};
+use namada_core::storage::{DbKeySeg, Key};
 use namada_events::EmitEvents;
-use namada_shielded_token::storage_key::{
-    masp_shielding_fee_amount, masp_undated_balance_key,
-};
+use namada_shielded_token::storage_key::masp_undated_balance_key;
 use namada_shielded_token::{MaspTxId, read_undated_balance, utils};
 use namada_storage::{Error, OptionExt, ResultExt};
 use namada_trans_token::read_denom;
@@ -211,7 +210,9 @@ where
         env.push_action(Action::Masp(MaspAction::MaspAuthorizer(authorizer)))?;
     }
     if !vin_addresses.is_empty() {
-        if let Some((payer, token)) = tx_data.tx.get_shielding_fee_section(&masp_section_ref) {
+        if let Some((payer, token)) =
+            tx_data.tx.get_shielding_fee_section(&masp_section_ref)
+        {
             env.push_action(Action::Masp(MaspAction::MaspAuthorizer(
                 Address::from(payer),
             )))?;
@@ -255,6 +256,17 @@ where
     }
 
     Ok(())
+}
+
+/// The key for getting the shielding fee amount of the provided
+/// token.
+fn masp_shielding_fee_amount(token: &Address) -> Key {
+    pub const MASP_SHIELDING_FEE_PREFIX: &str = "shielding_fee";
+    namada_core::storage::Key::from(DbKeySeg::AddressSeg(Address::Internal(InternalAddress::Parameters)))
+        .push(&MASP_SHIELDING_FEE_PREFIX.to_owned())
+        .expect("Cannot obtain a storage key")
+        .push(token)
+        .expect("Cannot obtain a storage key")
 }
 
 #[cfg(test)]

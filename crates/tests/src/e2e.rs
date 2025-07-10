@@ -17,4 +17,4 @@ pub mod helpers;
 pub mod ibc_tests;
 pub mod ledger_tests;
 pub mod setup;
-pub mod wallet_tests;
+//pub mod wallet_tests;

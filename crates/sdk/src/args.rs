@@ -515,6 +515,18 @@ pub enum Slippage {
     },
 }
 
+/// Data needed for an Osmosis swap to shield the output of a swap
+/// on Namada
+#[derive(Debug, Clone)]
+pub struct ShieldedSwapRecipient<C: NamadaTypes = SdkTypes> {
+    /// The recipient
+    pub recipient: C::PaymentAddress,
+    /// The account paying the shielding fee
+    pub shielding_fee_payer: C::PublicKey,
+    /// The token the shielding fee is being paid in
+    pub shielding_fee_token: C::Address,
+}
+
 /// An token swap on Osmosis
 #[derive(Debug, Clone)]
 pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
@@ -523,7 +535,7 @@ pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
     /// The token we wish to receive (on Namada)
     pub output_denom: String,
     /// Address of the recipient on Namada
-    pub recipient: Either<C::Address, C::PaymentAddress>,
+    pub recipient: Either<C::Address, ShieldedSwapRecipient<C>>,
     /// Address to receive funds exceeding the minimum amount,
     /// in case of IBC shieldings
     ///
@@ -686,7 +698,7 @@ impl TxOsmosisSwap<SdkTypes> {
                 (transparent_recipient.to_string(), slippage, None)
             }
             Either::Right(fut) => {
-                let (payment_addr, overflow_receiver) = fut.await;
+                let (shielded_recipient, overflow_receiver) = fut.await;
 
                 let amount_to_shield = match slippage {
                     Slippage::MinOutputAmount(amount_to_shield) => {
@@ -697,13 +709,7 @@ impl TxOsmosisSwap<SdkTypes> {
                          yet"
                     ),
                 };
-                let Some(ibc_shielding_data) =
-                    transfer.ibc_shielding_data.as_ref()
-                else {
-                    return Err(Error::Other(
-                        "Expected IBC shielding data".to_string(),
-                    ));
-                };
+
                 let shielding_tx = tx::gen_ibc_shielding_transfer(
                     ctx,
                     GenIbcShieldingTransfer {
@@ -713,7 +719,7 @@ impl TxOsmosisSwap<SdkTypes> {
                         output_folder: None,
                         target:
                             namada_core::masp::TransferTarget::PaymentAddress(
-                                payment_addr,
+                                shielded_recipient.recipient,
                             ),
                         asset: IbcShieldingTransferAsset::Address(
                             namada_output_addr,
@@ -725,10 +731,10 @@ impl TxOsmosisSwap<SdkTypes> {
                             ),
                         ),
                         expiration: transfer.tx.expiration.clone(),
-                        shielding_fee_payer: ibc_shielding_data
+                        shielding_fee_payer: shielded_recipient
                             .shielding_fee_payer
                             .clone(),
-                        shielding_fee_token: ibc_shielding_data
+                        shielding_fee_token: shielded_recipient
                             .shielding_fee_token
                             .clone(),
                     },
@@ -744,14 +750,10 @@ impl TxOsmosisSwap<SdkTypes> {
                     serde_json::to_value(&NamadaMemo {
                         namada: NamadaMemoData::OsmosisSwap {
                             shielding_data: StringEncoded::new(
-                                IbcShieldingData {
+                                IbcShieldingData{
                                     masp_tx: shielding_tx,
-                                    shielding_fee_payer: ibc_shielding_data
-                                        .shielding_fee_payer
-                                        .clone(),
-                                    shielding_fee_token: ibc_shielding_data
-                                        .shielding_fee_token
-                                        .clone(),
+                                    shielding_fee_payer: shielded_recipient.shielding_fee_payer,
+                                    shielding_fee_token: shielded_recipient.shielding_fee_token
                                 },
                             ),
                             shielded_amount: amount_to_shield,

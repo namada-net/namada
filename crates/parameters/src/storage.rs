@@ -5,7 +5,6 @@ use namada_core::storage::DbKeySeg;
 pub use namada_core::storage::Key;
 use namada_macros::StorageKeys;
 use namada_state::{Error, Result, StorageRead};
-
 use super::ADDRESS;
 
 #[derive(StorageKeys)]
@@ -191,4 +190,15 @@ pub fn is_native_token_transferable(
             "Missing is_native_token_transferable parameter from storage",
         ),
     )
+}
+
+/// The key for getting the shielding fee amount of the provided
+/// token.
+pub fn masp_shielding_fee_amount(token: &Address) -> Key {
+    pub const MASP_SHIELDING_FEE_PREFIX: &str = "shielding_fee";
+    namada_core::storage::Key::from(DbKeySeg::AddressSeg(ADDRESS))
+        .push(&MASP_SHIELDING_FEE_PREFIX.to_owned())
+        .expect("Cannot obtain a storage key")
+        .push(token)
+        .expect("Cannot obtain a storage key")
 }

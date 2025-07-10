@@ -3675,8 +3675,12 @@ pub mod args {
     pub const SHIELDED: ArgFlag = flag("shielded");
     pub const SHIELDING_FEE_PAYER: Arg<WalletPublicKey> =
         arg("shielding-fee-payer");
+    pub const SHIELDING_FEE_PAYER_OPT: ArgOpt<WalletPublicKey> =
+        arg_opt("shielding-fee-payer");
     pub const SHIELDING_FEE_TOKEN: Arg<WalletAddress> =
         arg("shielding-fee-token");
+    pub const SHIELDING_FEE_TOKEN_OPT: ArgOpt<WalletAddress> =
+        arg_opt("shielding-fee-token");
     pub const SHOW_IBC_TOKENS: ArgFlag = flag("show-ibc-tokens");
     pub const SLIPPAGE: ArgOpt<f64> = arg_opt("slippage-percentage");
     pub const SIGNING_KEYS: ArgMulti<WalletPublicKey, GlobStar> =
@@ -5249,7 +5253,14 @@ pub mod args {
             let chain_ctx = ctx.borrow_mut_chain_or_exit();
             let recipient = match self.recipient {
                 Either::Left(r) => Either::Left(chain_ctx.get(&r)),
-                Either::Right(r) => Either::Right(chain_ctx.get(&r)),
+                Either::Right(r) => {
+                    let shielded_recipient = ShieldedSwapRecipient {
+                        recipient: chain_ctx.get(&r.recipient),
+                        shielding_fee_payer: chain_ctx.get(&r.shielding_fee_payer),
+                        shielding_fee_token: chain_ctx.get(&r.shielding_fee_token),
+                    };
+                    Either::Right(shielded_recipient)
+                },
             };
             let overflow = self.overflow.map(|r| chain_ctx.get(&r));
             Ok(TxOsmosisSwap {
@@ -5273,6 +5284,8 @@ pub mod args {
             let maybe_trans_recipient = TARGET_OPT.parse(matches);
             let maybe_shielded_recipient =
                 PAYMENT_ADDRESS_TARGET_OPT.parse(matches);
+            let maybe_shielding_fee_payer = SHIELDING_FEE_PAYER_OPT.parse(matches);
+            let maybe_shielding_fee_token = SHIELDING_FEE_TOKEN_OPT.parse(matches);
             let maybe_overflow = OVERFLOW_OPT.parse(matches);
             let slippage_percent = SLIPPAGE.parse(matches);
             if slippage_percent
@@ -5314,7 +5327,11 @@ pub mod args {
                 recipient: if let Some(target) = maybe_trans_recipient {
                     Either::Left(target)
                 } else {
-                    Either::Right(maybe_shielded_recipient.unwrap())
+                    Either::Right(ShieldedSwapRecipient {
+                        recipient: maybe_shielded_recipient.unwrap(),
+                        shielding_fee_payer: maybe_shielding_fee_payer.unwrap(),
+                        shielding_fee_token: maybe_shielding_fee_token.unwrap(),
+                    })
                 },
                 overflow: maybe_overflow,
                 slippage,
@@ -5357,10 +5374,28 @@ pub mod args {
                 .arg(
                     PAYMENT_ADDRESS_TARGET_OPT
                         .def()
+                        .requires(SHIELDING_FEE_PAYER_OPT.name)
+                        .requires(SHIELDING_FEE_TOKEN_OPT.name)
                         .conflicts_with(TARGET_OPT.name)
                         .help(wrap!(
                             "Namada payment address that shall receive the \
                              minimum amount of tokens swapped on Osmosis."
+                        )),
+                )
+                .arg(
+                    SHIELDING_FEE_PAYER_OPT
+                        .def()
+                        .conflicts_with(TARGET_OPT.name)
+                        .help(wrap!(
+                            "Namada address that will pay the shielding fee."
+                        )),
+                )
+                .arg(
+                    SHIELDING_FEE_TOKEN_OPT
+                        .def()
+                        .conflicts_with(TARGET_OPT.name)
+                        .help(wrap!(
+                            "Namada token address that the shielding fee will be paid in."
                         )),
                 )
                 .arg(OVERFLOW_OPT.def().help(wrap!(

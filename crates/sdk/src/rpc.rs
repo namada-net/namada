@@ -271,7 +271,7 @@ pub async fn get_shielding_fee_amount<C: Client + Sync>(
 ) -> Result<DenominatedAmount, error::Error> {
     query_storage_value(
         client,
-        &namada_token::storage_key::masp_shielding_fee_amount(token),
+        &namada_parameters::storage::masp_shielding_fee_amount(token),
     )
     .await
 }

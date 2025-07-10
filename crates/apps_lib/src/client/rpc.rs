@@ -843,6 +843,14 @@ pub async fn query_protocol_parameters(
         query_storage_value(context.client(), &key)
             .await
             .expect("Parameter should be defined.");
+    let native_token = rpc::query_native_token(context.client())
+        .await
+        .expect("Native token should be defined");
+    let key = param_storage::masp_shielding_fee_amount(&native_token);
+    let masp_nam_shielding_fee: DenominatedAmount =
+        query_storage_value(context.client(), &key)
+            .await
+            .expect("Parameter should be defined.");
     let key = param_storage::get_gas_cost_key();
     let minimum_gas_price: BTreeMap<Address, token::Amount> =
         query_storage_value(context.client(), &key)
@@ -874,6 +882,7 @@ pub async fn query_protocol_parameters(
         epochs_per_year,
         masp_epoch_multiplier,
         masp_fee_payment_gas_limit,
+        masp_nam_shielding_fee: masp_nam_shielding_fee.to_string_precise(),
         gas_scale,
         minimum_gas_price,
         is_native_token_transferable,
@@ -890,6 +899,7 @@ pub async fn query_protocol_parameters(
         epochs_per_year,
         masp_epoch_multiplier,
         masp_fee_payment_gas_limit,
+        masp_nam_shielding_fee,
         gas_scale,
         minimum_gas_price,
         is_native_token_transferable,
@@ -945,6 +955,12 @@ pub async fn query_protocol_parameters(
         "{:4}Masp fee payment gas limit: {:?} gas units",
         "",
         masp_fee_payment_gas_limit
+    );
+    display_line!(
+        context.io(),
+        "{:4}Masp shielding fee payment (NAM): {:?} gas units",
+        "",
+        masp_nam_shielding_fee
     );
     display_line!(context.io(), "{:4}Minimum gas costs:", "");
     for (token, gas_cost) in minimum_gas_price {

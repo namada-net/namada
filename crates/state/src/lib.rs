@@ -759,6 +759,7 @@ mod tests {
                 epochs_per_year: 100,
                 masp_epoch_multiplier: 2,
                 masp_fee_payment_gas_limit: 20_000,
+                masp_nam_shielding_fee: 0.to_string(),
                 gas_scale: 10_000_000,
                 minimum_gas_price: BTreeMap::default(),
                 is_native_token_transferable: true,

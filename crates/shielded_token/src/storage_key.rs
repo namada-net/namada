@@ -391,12 +391,3 @@ pub fn masp_total_rewards() -> storage::Key {
         .expect("Cannot obtain a storage key")
 }
 
-/// The key for getting the shielding fee amount of the provided
-/// token.
-pub fn masp_shielding_fee_amount(token: &Address) -> storage::Key {
-    storage::Key::from(address::MASP.to_db_key())
-        .push(&MASP_SHIELDING_FEE_PREFIX.to_owned())
-        .expect("Cannot obtain a storage key")
-        .push(token)
-        .expect("Cannot obtain a storage key")
-}

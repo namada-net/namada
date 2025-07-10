@@ -303,7 +303,7 @@ impl Tx {
     /// if it exists. There should be at most one
     pub fn get_shielding_fee_section(
         &self,
-        masp_tx: &MaspTxId
+        masp_tx: &MaspTxId,
     ) -> Option<(&common::PublicKey, &Address)> {
         for section in &self.sections {
             if let Section::ShieldingFee { payer, token, cmt } = section {

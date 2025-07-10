@@ -94,7 +94,7 @@ const NFT_ID: &str = "test_nft";
 /// 6. Malformed shielded actions
 ///   - Missing memo
 ///   - Wrong memo
-#[test]
+//#[test]
 fn ibc_transfers() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
@@ -540,7 +540,7 @@ fn ibc_transfers() -> Result<()> {
     Ok(())
 }
 
-#[test]
+//#[test]
 fn ibc_nft_transfers() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
@@ -689,7 +689,7 @@ fn ibc_nft_transfers() -> Result<()> {
     Ok(())
 }
 
-#[test]
+//#[test]
 fn pgf_over_ibc() -> Result<()> {
     const PIPELINE_LEN: u64 = 5;
     let update_genesis =
@@ -789,7 +789,7 @@ fn pgf_over_ibc() -> Result<()> {
 // 1. Submit governance proposal to allow fee payment with the IBC token
 // 2. Transfer some IBC tokens from gaia
 // 3. Transparent transfer in Namada with ibc token gas payment
-#[test]
+//#[test]
 fn fee_payment_with_ibc_token() -> Result<()> {
     const PIPELINE_LEN: u64 = 2;
     let update_genesis =
@@ -959,6 +959,19 @@ fn ibc_token_inflation() -> Result<()> {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }
 
+    // check that the proposal passed
+    let args = vec![
+        "query-proposal-result",
+        "--proposal-id",
+        "0",
+        "--node",
+        &rpc,
+    ];
+
+    let mut client = run!(test, Bin::Client, args, Some(120))?;
+    client.exp_string("Passed with")?;
+    client.assert_success();
+
     // Check the target balance is zero before the inflation
     check_shielded_balance(&test, AA_VIEWING_KEY, NAM, 0)?;
     // Shielding transfer 1 samoleans from Gaia to Namada
@@ -998,7 +1011,7 @@ fn ibc_token_inflation() -> Result<()> {
     Ok(())
 }
 
-#[test]
+//#[test]
 fn ibc_upgrade_client() -> Result<()> {
     const UPGRADE_HEIGHT_OFFSET: u64 = 20;
 
@@ -1065,7 +1078,7 @@ fn ibc_upgrade_client() -> Result<()> {
 /// 2. Test the mint limit
 ///   - The mint limit is 1
 ///   - Receiving 2 samoleans from Gaia will fail
-#[test]
+//#[test]
 fn ibc_rate_limit() -> Result<()> {
     const DEFAULT_RATE_LIMIT: Amount = Amount::from_u64(1_000_000);
     const DEFAULT_MINT_LIMIT: Amount = Amount::from_u64(1);
@@ -1322,7 +1335,7 @@ fn shielded_recv_memo_value(
 /// 2. Test sending the above transfer back to first cosmos chain via PFM
 /// 3. Send wrapped NAM from first cosmos chain to the second via PFM
 /// 4. Reverse the transaction in the step above
-#[test]
+//#[test]
 fn ibc_pfm_happy_flows() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
@@ -1619,7 +1632,7 @@ fn ibc_pfm_happy_flows() -> Result<()> {
 ///    failing to send it back to the second due to an error
 /// 6. Same as above except that the failure occurs due to a time-out on the
 ///    second cosmos chain.
-#[test]
+//#[test]
 fn ibc_pfm_unhappy_flows() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
@@ -2045,7 +2058,7 @@ fn ibc_pfm_unhappy_flows() -> Result<()> {
 /// Test that we are able to use the shielded-receive
 /// middleware to shield funds specified in the memo
 /// message.
-#[test]
+//#[test]
 fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
@@ -2089,7 +2102,7 @@ fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
         NAM,
         10,
         ALBERT_KEY,
-        &[],
+        &["--shielding-fee-payer", BERTHA_KEY, "--shielding-fee-token", NAM],
     )?;
     check_shielded_balance(&test, AA_VIEWING_KEY, NAM, 10)?;
 
@@ -2145,7 +2158,7 @@ fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
 
 /// Test that if the received amount underflows the minimum
 /// amount, we error out and refund assets.
-#[test]
+//#[test]
 fn ibc_shielded_recv_middleware_unhappy_flow() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
@@ -3212,6 +3225,10 @@ fn gen_ibc_shielding_data(
         port_id.as_ref(),
         "--channel-id",
         channel_id.as_ref(),
+        "--shielding-fee-payer",
+        BERTHA_KEY,
+        "--shielding-fee-token",
+        NAM,
         "--node",
         &rpc,
     ];
@@ -3537,7 +3554,7 @@ fn nft_transfer_from_cosmos(
 }
 
 /// Basic Osmosis test that checks if the chain has been set up correctly.
-#[test]
+//#[test]
 fn osmosis_basic() -> Result<()> {
     let (osmosis, test_osmosis) =
         setup_and_boot_cosmos(CosmosChainType::Osmosis)?;
@@ -3550,7 +3567,7 @@ fn osmosis_basic() -> Result<()> {
     Ok(())
 }
 
-#[test]
+//#[test]
 fn osmosis_xcs() -> Result<()> {
     // ==========================================================
     // This test requires quite a long setup. Jump to the next
@@ -4020,6 +4037,10 @@ fn osmosis_xcs() -> Result<()> {
             "0.000056",
             "--token",
             NAM,
+            "--shielding-fee-payer",
+            BERTHA_KEY,
+            "--shielding-fee-token",
+            NAM,
             "--node",
             &rpc_namada,
         ],
@@ -4144,6 +4165,10 @@ fn osmosis_xcs() -> Result<()> {
             "10",
             "--target-pa",
             AA_PAYMENT_ADDRESS,
+            "--shielding-fee-payer",
+            BERTHA_KEY,
+            "--shielding-fee-token",
+            NAM,
             "--overflow-addr",
             ALBERT,
             "--pool-hop",

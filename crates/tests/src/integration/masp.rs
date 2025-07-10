@@ -47,8 +47,8 @@ use crate::e2e::setup::constants::{
 };
 use crate::integration::helpers::make_temp_account;
 use crate::integration::ledger_tests::find_files_with_ext;
+use crate::parameters::storage::masp_shielding_fee_amount;
 use crate::strings::TX_APPLIED_SUCCESS;
-use crate::token::storage_key::masp_shielding_fee_amount;
 use crate::tx::Authorization;
 
 /// Enable masp rewards before some token is shielded,
@@ -1488,10 +1488,10 @@ fn enable_rewards_after_shielding() -> Result<()> {
 /// 1. Test the happy flow.
 /// 2. Test that if the shielding fee section is missing from the tx, it is
 ///    rejected
-/// 3. Test that if the shielding fee holds the wrong Masp Tx id, it is rejected.
+/// 3. Test that if the shielding fee holds the wrong Masp Tx id, it is
+///    rejected.
 /// 4. Test that if the account listed in the shielding fee does not sign the
 ///    tx, it is rejected
-///
 #[test]
 fn test_shielding_fee_protocol_checks() -> Result<()> {
     // This address doesn't matter for tests. But an argument is required.
@@ -1734,7 +1734,7 @@ fn test_shielding_fee_protocol_checks() -> Result<()> {
     let mut tx: Tx = serde_json::from_reader(
         std::fs::File::open(tx_path.clone()).expect("Test Failed"),
     )
-        .expect("Test failed");
+    .expect("Test failed");
     let signing_data = SigningTxData {
         owner: Some(node.lookup_address(ALBERT)?),
         public_keys: HashSet::from([node.lookup_pk(ALBERT_KEY)?]),
@@ -1748,8 +1748,10 @@ fn test_shielding_fee_protocol_checks() -> Result<()> {
         signatures: vec![],
     };
     for sec in tx.sections.iter_mut() {
-        if let Section::ShieldingFee {cmt, ..} = sec {
-            *cmt = MaspTxId::from(masp_primitives::transaction::TxId::from_bytes([0u8; 32]));
+        if let Section::ShieldingFee { cmt, .. } = sec {
+            *cmt = MaspTxId::from(
+                masp_primitives::transaction::TxId::from_bytes([0u8; 32]),
+            );
         }
     }
     let signed = sign_tx(&node, tx, signing_data, &dummy_args(&node))?;
@@ -7300,7 +7302,6 @@ fn identical_output_descriptions() -> Result<()> {
         None,
     )));
     batched_tx.sign_wrapper(bradley_key);
-
 
     let wrapper_hash = batched_tx.wrapper_hash();
     let inner_cmts = batched_tx.commitments();

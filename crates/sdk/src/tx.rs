@@ -41,7 +41,9 @@ use namada_core::ibc::core::client::types::Height as IbcHeight;
 use namada_core::ibc::core::host::types::identifiers::{ChannelId, PortId};
 use namada_core::ibc::primitives::{IntoTimestamp, Timestamp as IbcTimestamp};
 use namada_core::key::{self, *};
-use namada_core::masp::{AssetData, MaspEpoch, MaspTxId, TransferSource, TransferTarget};
+use namada_core::masp::{
+    AssetData, MaspEpoch, MaspTxId, TransferSource, TransferTarget,
+};
 use namada_core::storage;
 use namada_core::time::DateTimeUtc;
 use namada_events::extend::EventAttributeEntry;
@@ -3706,11 +3708,10 @@ pub async fn build_shielding_transfer<N: Namada>(
         data.shielded_section_hash = Some(shielded_section_hash);
         signing_data.shielded_hash = Some(shielded_section_hash);
 
-
         tx.add_section(Section::ShieldingFee {
             payer: args.shielding_fee_payer.clone(),
             token: args.shielding_fee_token.clone(),
-            cmt: shielded_section_hash
+            cmt: shielded_section_hash,
         });
 
         tracing::debug!("Transfer data {data:?}");

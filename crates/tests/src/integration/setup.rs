@@ -30,8 +30,8 @@ use namada_sdk::token;
 use namada_sdk::wallet::alias::Alias;
 
 use crate::e2e::setup::copy_wasm_to_chain_dir;
+use crate::parameters::storage::masp_shielding_fee_amount;
 use crate::proof_of_stake::StorageWrite;
-use crate::token::storage_key::masp_shielding_fee_amount;
 
 /// Env. var for keeping temporary files created by the integration tests
 const ENV_VAR_KEEP_TEMP: &str = "NAMADA_INT_KEEP_TEMP";

@@ -22,7 +22,7 @@ pub mod vp;
 mod wasm_allowlist;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
-
+use std::str::FromStr;
 use namada_core::address::{Address, InternalAddress};
 use namada_core::arith::checked;
 use namada_core::chain::BlockHeight;
@@ -33,6 +33,7 @@ use namada_state::{Error, Key, ResultExt, StorageRead, StorageWrite};
 pub use namada_systems::parameters::*;
 pub use storage::{get_gas_scale, get_max_block_gas};
 use thiserror::Error;
+use namada_core::token::{DenominatedAmount, NATIVE_MAX_DECIMAL_PLACES};
 pub use wasm_allowlist::{is_tx_allowed, is_vp_allowed};
 
 /// Parameters storage `Keys/Read/Write` implementation
@@ -115,6 +116,7 @@ pub enum WriteError {
     SerializeError(String),
 }
 
+
 /// Initialize parameters in storage in the genesis block.
 pub fn init_storage<S>(parameters: &Parameters, storage: &mut S) -> Result<()>
 where
@@ -131,6 +133,7 @@ where
         epochs_per_year,
         masp_epoch_multiplier,
         minimum_gas_price,
+        masp_nam_shielding_fee,
         masp_fee_payment_gas_limit,
         gas_scale,
         is_native_token_transferable,
@@ -157,6 +160,13 @@ where
         storage::get_masp_fee_payment_gas_limit_key();
     storage
         .write(&masp_fee_payment_gas_limit_key, masp_fee_payment_gas_limit)?;
+
+    let native_token = &storage.get_native_token()?;
+    let masp_nam_shielding_fee_key = storage::masp_shielding_fee_amount(native_token);
+    let masp_nam_shielding_fee = DenominatedAmount::from_str(masp_nam_shielding_fee)
+        .map_err(|e| Error::AllocMessage(e.to_string()))?
+        .redenominate(NATIVE_MAX_DECIMAL_PLACES);
+    storage.write(&masp_nam_shielding_fee_key, masp_nam_shielding_fee)?;
 
     // write the gas scale
     let gas_scale_key = storage::get_gas_scale_key();
@@ -409,6 +419,13 @@ where
         .ok_or(ReadError::ParametersMissing)
         .into_storage_result()?;
 
+    let masp_nam_shielding_fee_key = storage::masp_shielding_fee_amount(&storage.get_native_token()?);
+    let value = storage.read::<DenominatedAmount>(&masp_nam_shielding_fee_key)?;
+    let masp_nam_shielding_fee = value
+        .ok_or(ReadError::ParametersMissing)
+        .into_storage_result()?
+        .to_string_precise();
+
     // read gas scale
     let gas_scale_key = storage::get_gas_scale_key();
     let value = storage.read(&gas_scale_key)?;
@@ -459,6 +476,7 @@ where
         masp_epoch_multiplier,
         minimum_gas_price,
         masp_fee_payment_gas_limit,
+        masp_nam_shielding_fee,
         gas_scale,
         is_native_token_transferable,
     })
@@ -500,6 +518,7 @@ where
         epochs_per_year: 365,
         masp_epoch_multiplier: 2,
         masp_fee_payment_gas_limit: 0,
+        masp_nam_shielding_fee: 0.to_string(),
         gas_scale: 10_000_000,
         minimum_gas_price: Default::default(),
         is_native_token_transferable: true,

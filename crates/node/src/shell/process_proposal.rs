@@ -576,18 +576,27 @@ where
     H: StorageHasher + Sync + 'static,
     CA: 'static + WasmCacheAccess + Sync,
 {
-    let minimum_gas_price =
+    let protocol_minimum_gas_price =
         parameters::read_gas_cost(shell_params.state, &wrapper.fee.token)
             .expect("Must be able to read gas cost parameter")
             .ok_or(Error::TxApply(protocol::Error::FeeError(format!(
                 "The provided {} token is not allowed for fee payment",
                 wrapper.fee.token
             ))))?;
+    let minimum_gas_price =
+        protocol::ProtocolGasPrice(protocol_minimum_gas_price);
+    let fee_components =
+        fee_data_check(wrapper, &minimum_gas_price, shell_params.state)?;
 
-    fee_data_check(wrapper, minimum_gas_price, shell_params)?;
-
-    protocol::transfer_fee(shell_params, proposer, tx, wrapper, tx_index)
-        .map_or_else(|e| Err(Error::TxApply(e)), |_| Ok(()))
+    protocol::transfer_fee(
+        shell_params,
+        proposer,
+        tx,
+        wrapper,
+        tx_index,
+        &fee_components,
+    )
+    .map_or_else(|e| Err(Error::TxApply(e)), |_| Ok(()))
 }
 
 /// We test the failure cases of [`process_proposal`]. The happy flows

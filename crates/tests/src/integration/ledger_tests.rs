@@ -554,10 +554,10 @@ fn pos_rewards() -> Result<()> {
     });
     assert_matches!(captured.result, Ok(_));
     let _res = captured
-        .matches(r"Current annual staking rewards rate: 65.705255877354")
+        .matches(r"Current annual staking rewards rate: 65.705256154607")
         .expect("Test failed");
     let _res = captured
-        .matches(r"PoS inflation rate: 0.066593164444")
+        .matches(r"PoS inflation rate: 0.066593164725")
         .expect("Test failed");
 
     Ok(())
@@ -1299,7 +1299,7 @@ fn pgf_governance_proposal() -> Result<()> {
         CapturedOutput::of(|| run(&node, Bin::Client, query_total_supply_args));
     assert_matches!(captured.result, Ok(_));
     assert!(captured.contains(
-        "token tnam1q9kn74xfzytqkqyycfrhycr8ajam8ny935cge0z5: 118400024.740301"
+        "token tnam1q9kn74xfzytqkqyycfrhycr8ajam8ny935cge0z5: 118400022.740301"
     ));
 
     let query_native_supply_args =
@@ -1308,7 +1308,7 @@ fn pgf_governance_proposal() -> Result<()> {
         run(&node, Bin::Client, query_native_supply_args)
     });
     assert_matches!(captured.result, Ok(_));
-    assert!(captured.contains("nam: 118400010.473048"));
+    assert!(captured.contains("nam: 118400008.473048"));
 
     // 8. Submit proposal funding
     let albert = defaults::albert_address();

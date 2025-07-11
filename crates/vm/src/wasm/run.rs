@@ -37,6 +37,9 @@ use crate::{
     validate_untrusted_wasm,
 };
 
+/// Allocator function name injected into a expored from wasm
+pub const ALLOC_FN_NAME: &str = "_injected_alloc";
+
 const TX_ENTRYPOINT: &str = "_apply_tx";
 const VP_ENTRYPOINT: &str = "_validate_tx";
 const WASM_STACK_LIMIT: u32 = u16::MAX as u32;
@@ -59,6 +62,8 @@ pub enum Error {
     MemoryError(memory::Error),
     #[error("Unable to inject stack limiter")]
     StackLimiterInjection,
+    #[error("Unable to inject alloc")]
+    AllocInjection,
     #[error("Wasm deserialization error: {0}")]
     DeserializationError(elements::Error),
     #[error("Wasm serialization error: {0}")]
@@ -240,15 +245,18 @@ where
 
     env.memory.init_from(guest_memory);
 
-    // Write the inputs in the memory exported from the wasm
-    // module
     let memory::TxCallInput {
         tx_data_ptr,
         tx_data_len,
     } = {
         let mut store = store.borrow_mut();
-        memory::write_tx_inputs(&mut *store, guest_memory, &batched_tx)
-            .map_err(Error::MemoryError)?
+        memory::write_tx_inputs(
+            &instance,
+            &mut *store,
+            guest_memory,
+            &batched_tx,
+        )
+        .map_err(Error::MemoryError)?
     };
 
     // Get the module's entrypoint to be called
@@ -437,7 +445,7 @@ where
         verifiers_len,
     } = {
         let mut store = store.borrow_mut();
-        memory::write_vp_inputs(&mut *store, guest_memory, input)
+        memory::write_vp_inputs(&instance, &mut *store, guest_memory, input)
             .map_err(Error::MemoryError)?
     };
 
@@ -694,7 +702,103 @@ pub fn prepare_wasm_code<T: AsRef<[u8]>>(code: T) -> Result<Vec<u8>> {
     let module =
         wasm_instrument::inject_stack_limiter(module, WASM_STACK_LIMIT)
             .map_err(|_original_module| Error::StackLimiterInjection)?;
+
+    let module = inject_alloc(module)?;
+
     elements::serialize(module).map_err(Error::SerializationError)
+}
+
+/// Inject and export allocation function that can be used to grow memory from
+/// the host side
+fn inject_alloc(module: elements::Module) -> Result<elements::Module> {
+    use elements::{BlockType, Instruction, Instructions, ValueType};
+    use parity_wasm::builder;
+
+    // Index of the function to be injected (note that the result of
+    // `builder.push_function` is wrong as it ignores improted fns)
+    let fn_ix: u32 = module
+        .functions_space()
+        .try_into()
+        .map_err(|_| Error::AllocInjection)?;
+    let mut builder = builder::from_module(module);
+
+    const WASM_PAGE_SIZE_LOG2: i32 = 16;
+    const WASM_PAGE_SIZE: i32 = 1 << WASM_PAGE_SIZE_LOG2;
+
+    // Alloc fn in WAT:
+    //
+    // (func (;0;) (type 0) (param i32) (result i32)
+    // block  ;; label = @1
+    //   local.get 0
+    //   i32.const -65536
+    //   i32.le_u
+    //   if  ;; label = @2
+    //     local.get 0
+    //     i32.const 65535
+    //     i32.add
+    //     i32.const 16
+    //     i32.shr_u
+    //     memory.grow
+    //     local.tee 0
+    //     i32.const -1
+    //     i32.ne
+    //     br_if 1 (;@1;)
+    //   end
+    //   unreachable
+    // end
+    // local.get 0
+    // i32.const 16
+    // i32.shl)
+
+    let instructions = {
+        use Instruction::*;
+        vec![
+            Block(BlockType::NoResult),
+            GetLocal(0),
+            I32Const(-WASM_PAGE_SIZE),
+            I32LeU,
+            If(BlockType::NoResult),
+            GetLocal(0),
+            I32Const(WASM_PAGE_SIZE - 1),
+            I32Add,
+            I32Const(WASM_PAGE_SIZE_LOG2),
+            I32ShrU,
+            GrowMemory(0),
+            TeeLocal(0),
+            I32Const(-1),
+            I32Ne,
+            BrIf(1),
+            End,
+            Unreachable,
+            End,
+            GetLocal(0),
+            I32Const(WASM_PAGE_SIZE_LOG2),
+            I32Shl,
+            End,
+        ]
+    };
+
+    builder.push_function(
+        builder::function()
+            .signature()
+            .with_param(ValueType::I32)
+            .with_result(ValueType::I32)
+            .build()
+            .body()
+            .with_instructions(Instructions::new(instructions))
+            .build()
+            .build(),
+    );
+
+    builder.push_export(
+        builder::export()
+            .field(ALLOC_FN_NAME)
+            .internal()
+            .func(fn_ix)
+            .build(),
+    );
+
+    Ok(builder.build())
 }
 
 // Fetch or compile a WASM code from the cache or storage. Account for the
@@ -1017,7 +1121,7 @@ mod tests {
     use namada_core::borsh::BorshSerializeExt;
     use namada_state::StorageWrite;
     use namada_state::testing::TestState;
-    use namada_test_utils::TestWasms;
+    use namada_test_utils::{TestWasms, tx_data};
     use namada_token::DenominatedAmount;
     use namada_tx::data::eval_vp::EvalVp;
     use namada_tx::data::{Fee, TxType};
@@ -2176,6 +2280,64 @@ mod tests {
             vp_cache,
             tx_cache,
         )
+    }
+
+    /// Test that a tx which is larger than the initial WASM memory size gets
+    /// executed without issues (the injected alloc fn should be invoked from
+    /// host)
+    #[test]
+    fn test_tx_alloc() {
+        let mut state = TestState::default();
+        let gas_meter = RefCell::new(TxGasMeter::new(TX_GAS_LIMIT, GAS_SCALE));
+        let tx_index = TxIndex::default();
+
+        let tx_write = TestWasms::TxWriteStorageKey.read_bytes();
+        // store the wasm code
+        let code_hash = Hash::sha256(&tx_write);
+        let key = Key::wasm_code(&code_hash);
+        let len_key = Key::wasm_code_len(&code_hash);
+        let code_len = (tx_write.len() as u64).serialize_to_vec();
+        let _ = state
+            .write_log_mut()
+            .write(&key, tx_write.serialize_to_vec())
+            .unwrap();
+        let _ = state.write_log_mut().write(&len_key, code_len).unwrap();
+
+        // Using `2^21` (2 MiB) for the input should be above the initial memory
+        // size and require allocation
+        let len = 2_usize.pow(21);
+        let value: Vec<u8> = vec![6_u8; len];
+        let key_raw = "key";
+        let key = Key::parse(key_raw).unwrap();
+        let tx_data = tx_data::TxWriteData {
+            key: key.clone(),
+            value: value.clone(),
+        }
+        .serialize_to_vec();
+
+        let (mut vp_cache, _) =
+            wasm::compilation_cache::common::testing::vp_cache();
+        let (mut tx_cache, _) =
+            wasm::compilation_cache::common::testing::tx_cache();
+
+        let mut outer_tx = Tx::from_type(TxType::Raw);
+        outer_tx.set_code(Code::new(tx_write, None));
+        outer_tx.set_data(Data::new(tx_data));
+        let batched_tx = outer_tx.batch_ref_first_tx().unwrap();
+        tx(
+            &mut state,
+            &gas_meter,
+            None,
+            &tx_index,
+            batched_tx.tx,
+            batched_tx.cmt,
+            &mut vp_cache,
+            &mut tx_cache,
+        )
+        .unwrap();
+
+        let written_value = state.read_bytes(&key).unwrap().unwrap();
+        assert_eq!(value, written_value);
     }
 
     fn loop_in_tx_wasm(loops: u32) -> Result<BTreeSet<Address>> {

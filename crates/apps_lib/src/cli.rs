@@ -5256,11 +5256,13 @@ pub mod args {
                 Either::Right(r) => {
                     let shielded_recipient = ShieldedSwapRecipient {
                         recipient: chain_ctx.get(&r.recipient),
-                        shielding_fee_payer: chain_ctx.get(&r.shielding_fee_payer),
-                        shielding_fee_token: chain_ctx.get(&r.shielding_fee_token),
+                        shielding_fee_payer: chain_ctx
+                            .get(&r.shielding_fee_payer),
+                        shielding_fee_token: chain_ctx
+                            .get(&r.shielding_fee_token),
                     };
                     Either::Right(shielded_recipient)
-                },
+                }
             };
             let overflow = self.overflow.map(|r| chain_ctx.get(&r));
             Ok(TxOsmosisSwap {
@@ -5284,8 +5286,10 @@ pub mod args {
             let maybe_trans_recipient = TARGET_OPT.parse(matches);
             let maybe_shielded_recipient =
                 PAYMENT_ADDRESS_TARGET_OPT.parse(matches);
-            let maybe_shielding_fee_payer = SHIELDING_FEE_PAYER_OPT.parse(matches);
-            let maybe_shielding_fee_token = SHIELDING_FEE_TOKEN_OPT.parse(matches);
+            let maybe_shielding_fee_payer =
+                SHIELDING_FEE_PAYER_OPT.parse(matches);
+            let maybe_shielding_fee_token =
+                SHIELDING_FEE_TOKEN_OPT.parse(matches);
             let maybe_overflow = OVERFLOW_OPT.parse(matches);
             let slippage_percent = SLIPPAGE.parse(matches);
             if slippage_percent
@@ -5395,7 +5399,8 @@ pub mod args {
                         .def()
                         .conflicts_with(TARGET_OPT.name)
                         .help(wrap!(
-                            "Namada token address that the shielding fee will be paid in."
+                            "Namada token address that the shielding fee will \
+                             be paid in."
                         )),
                 )
                 .arg(OVERFLOW_OPT.def().help(wrap!(

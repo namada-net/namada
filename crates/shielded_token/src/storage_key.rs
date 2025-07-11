@@ -390,4 +390,3 @@ pub fn masp_total_rewards() -> storage::Key {
         .push(&MASP_TOTAL_REWARDS.to_owned())
         .expect("Cannot obtain a storage key")
 }
-

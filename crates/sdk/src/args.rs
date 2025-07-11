@@ -750,10 +750,12 @@ impl TxOsmosisSwap<SdkTypes> {
                     serde_json::to_value(&NamadaMemo {
                         namada: NamadaMemoData::OsmosisSwap {
                             shielding_data: StringEncoded::new(
-                                IbcShieldingData{
+                                IbcShieldingData {
                                     masp_tx: shielding_tx,
-                                    shielding_fee_payer: shielded_recipient.shielding_fee_payer,
-                                    shielding_fee_token: shielded_recipient.shielding_fee_token
+                                    shielding_fee_payer: shielded_recipient
+                                        .shielding_fee_payer,
+                                    shielding_fee_token: shielded_recipient
+                                        .shielding_fee_token,
                                 },
                             ),
                             shielded_amount: amount_to_shield,

@@ -5,6 +5,7 @@ use namada_core::storage::DbKeySeg;
 pub use namada_core::storage::Key;
 use namada_macros::StorageKeys;
 use namada_state::{Error, Result, StorageRead};
+
 use super::ADDRESS;
 
 #[derive(StorageKeys)]

@@ -23,17 +23,18 @@ mod wasm_allowlist;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::str::FromStr;
+
 use namada_core::address::{Address, InternalAddress};
 use namada_core::arith::checked;
 use namada_core::chain::BlockHeight;
 pub use namada_core::parameters::ProposalBytes;
 use namada_core::time::DurationSecs;
+use namada_core::token::{DenominatedAmount, NATIVE_MAX_DECIMAL_PLACES};
 use namada_core::{hints, token};
 use namada_state::{Error, Key, ResultExt, StorageRead, StorageWrite};
 pub use namada_systems::parameters::*;
 pub use storage::{get_gas_scale, get_max_block_gas};
 use thiserror::Error;
-use namada_core::token::{DenominatedAmount, NATIVE_MAX_DECIMAL_PLACES};
 pub use wasm_allowlist::{is_tx_allowed, is_vp_allowed};
 
 /// Parameters storage `Keys/Read/Write` implementation
@@ -116,7 +117,6 @@ pub enum WriteError {
     SerializeError(String),
 }
 
-
 /// Initialize parameters in storage in the genesis block.
 pub fn init_storage<S>(parameters: &Parameters, storage: &mut S) -> Result<()>
 where
@@ -162,10 +162,12 @@ where
         .write(&masp_fee_payment_gas_limit_key, masp_fee_payment_gas_limit)?;
 
     let native_token = &storage.get_native_token()?;
-    let masp_nam_shielding_fee_key = storage::masp_shielding_fee_amount(native_token);
-    let masp_nam_shielding_fee = DenominatedAmount::from_str(masp_nam_shielding_fee)
-        .map_err(|e| Error::AllocMessage(e.to_string()))?
-        .redenominate(NATIVE_MAX_DECIMAL_PLACES);
+    let masp_nam_shielding_fee_key =
+        storage::masp_shielding_fee_amount(native_token);
+    let masp_nam_shielding_fee =
+        DenominatedAmount::from_str(masp_nam_shielding_fee)
+            .map_err(|e| Error::AllocMessage(e.to_string()))?
+            .redenominate(NATIVE_MAX_DECIMAL_PLACES);
     storage.write(&masp_nam_shielding_fee_key, masp_nam_shielding_fee)?;
 
     // write the gas scale
@@ -419,8 +421,10 @@ where
         .ok_or(ReadError::ParametersMissing)
         .into_storage_result()?;
 
-    let masp_nam_shielding_fee_key = storage::masp_shielding_fee_amount(&storage.get_native_token()?);
-    let value = storage.read::<DenominatedAmount>(&masp_nam_shielding_fee_key)?;
+    let masp_nam_shielding_fee_key =
+        storage::masp_shielding_fee_amount(&storage.get_native_token()?);
+    let value =
+        storage.read::<DenominatedAmount>(&masp_nam_shielding_fee_key)?;
     let masp_nam_shielding_fee = value
         .ok_or(ReadError::ParametersMissing)
         .into_storage_result()?

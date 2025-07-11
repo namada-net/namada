@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
 use std::path::Path;
 use std::str::FromStr;
+
 use eyre::eyre;
 use namada_macros::BorshDeserializer;
 #[cfg(feature = "migrations")]
@@ -349,26 +350,29 @@ impl ChainParams<Unvalidated> {
             })?;
             min_gas_prices.insert(token, amount);
         }
-        let masp_nam_shielding_fee = match DenominatedAmount::from_str(&masp_nam_shielding_fee) {
-            Ok(amount) => {
-                amount.increase_precision(NATIVE_MAX_DECIMAL_PLACES.into()).map_err(|e| {
+        let masp_nam_shielding_fee =
+            match DenominatedAmount::from_str(&masp_nam_shielding_fee) {
+                Ok(amount) => amount
+                    .increase_precision(NATIVE_MAX_DECIMAL_PLACES.into())
+                    .map_err(|e| {
+                        eprintln!(
+                            "A MASP shielding fee (in NAM) in the \
+                             parameters.toml file was incorrectly \
+                             denominated:\n{}",
+                            e
+                        );
+                        e
+                    })?,
+                Err(e) => {
                     eprintln!(
-                        "A MASP shielding fee (in NAM) in the parameters.toml file was \
-                        incorrectly denominated:\n{}",
+                        "A MASP shielding fee (in NAM) in the parameters.toml \
+                         file was incorrectly formatted:\n{}",
                         e
                     );
-                    e
-                })?
+                    return Err(eyre!("{}", e.to_string()));
+                }
             }
-            Err(e) => {
-                eprintln!(
-                    "A MASP shielding fee (in NAM) in the parameters.toml file was \
-                        incorrectly formatted:\n{}",
-                    e
-                );
-                return Err(eyre!("{}", e.to_string()));
-            }
-        }.to_string_precise();
+            .to_string_precise();
 
         Ok(ChainParams {
             max_tx_bytes,

@@ -67,11 +67,11 @@ impl From<Error> for namada_state::Error {
 /// Initial pages in tx memory
 pub const TX_MEMORY_INIT_PAGES: u32 = 100; // 6.4 MiB
 /// Mamixmum pages in tx memory
-pub const TX_MEMORY_MAX_PAGES: u32 = 200; // 12.8 MiB
+pub const TX_MEMORY_MAX_PAGES: u32 = 400; // 25.6 MiB
 /// Initial pages in VP memory
-pub const VP_MEMORY_INIT_PAGES: u32 = 100; // 6.4 MiB
+pub const VP_MEMORY_INIT_PAGES: u32 = TX_MEMORY_INIT_PAGES; // 6.4 MiB
 /// Mamixmum pages in VP memory
-pub const VP_MEMORY_MAX_PAGES: u32 = 200; // 12.8 MiB
+pub const VP_MEMORY_MAX_PAGES: u32 = TX_MEMORY_MAX_PAGES; // 25.6 MiB
 
 /// Prepare memory for instantiating a transaction module
 pub fn prepare_tx_memory(

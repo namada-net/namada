@@ -1284,12 +1284,12 @@ mod tests {
         let _ = state.write_log_mut().write(&key, tx_code.clone()).unwrap();
         let _ = state.write_log_mut().write(&len_key, code_len).unwrap();
 
-        // Assuming 200 pages, 12.8 MiB limit
-        assert_eq!(memory::TX_MEMORY_MAX_PAGES, 200);
+        // Assuming 400 pages, 25.6 MiB limit
+        assert_eq!(memory::TX_MEMORY_MAX_PAGES, 400);
 
-        // Allocating `2^23` (8 MiB) should be below the memory limit and
+        // Allocating `2^24` (16 MiB) should be below the memory limit and
         // shouldn't fail
-        let tx_data = 2_usize.pow(23).serialize_to_vec();
+        let tx_data = 2_usize.pow(24).serialize_to_vec();
         let (mut vp_cache, _) =
             wasm::compilation_cache::common::testing::vp_cache();
         let (mut tx_cache, _) =
@@ -1310,9 +1310,9 @@ mod tests {
         );
         assert!(result.is_ok(), "Expected success, got {:?}", result);
 
-        // Allocating `2^24` (16 MiB) should be above the memory limit and
+        // Allocating `2^25` (32 MiB) should be above the memory limit and
         // should fail
-        let tx_data = 2_usize.pow(24).serialize_to_vec();
+        let tx_data = 2_usize.pow(25).serialize_to_vec();
         let mut outer_tx = Tx::from_type(TxType::Raw);
         outer_tx.set_code(Code::new(tx_code, None));
         outer_tx.set_data(Data::new(tx_data));
@@ -1365,12 +1365,12 @@ mod tests {
         state.write(&key, vp_memory_limit).unwrap();
         state.write(&len_key, code_len).unwrap();
 
-        // Assuming 200 pages, 12.8 MiB limit
-        assert_eq!(memory::VP_MEMORY_MAX_PAGES, 200);
+        // Assuming 400 pages, 25.6 MiB limit
+        assert_eq!(memory::VP_MEMORY_MAX_PAGES, 400);
 
-        // Allocating `2^23` (8 MiB) should be below the memory limit and
+        // Allocating `2^24` (16 MiB) should be below the memory limit and
         // shouldn't fail
-        let input = 2_usize.pow(23).serialize_to_vec();
+        let input = 2_usize.pow(24).serialize_to_vec();
 
         let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
         tx.add_code(vec![], None).add_serialized_data(input);
@@ -1402,9 +1402,9 @@ mod tests {
             .is_ok()
         );
 
-        // Allocating `2^24` (16 MiB) should be above the memory limit and
+        // Allocating `2^25` (32 MiB) should be above the memory limit and
         // should fail
-        let input = 2_usize.pow(24).serialize_to_vec();
+        let input = 2_usize.pow(25).serialize_to_vec();
         let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
         tx.add_code(vec![], None).add_data(input);
 
@@ -1458,12 +1458,12 @@ mod tests {
         state.write(&key, vp_code).unwrap();
         state.write(&len_key, code_len).unwrap();
 
-        // Assuming 200 pages, 12.8 MiB limit
-        assert_eq!(memory::VP_MEMORY_MAX_PAGES, 200);
+        // Assuming 400 pages, 25.6 MiB limit
+        assert_eq!(memory::VP_MEMORY_MAX_PAGES, 400);
 
-        // Allocating `2^23` (8 MiB) should be below the memory limit and
+        // Allocating `2^24` (16 MiB) should be below the memory limit and
         // shouldn't fail
-        let tx_data = 2_usize.pow(23).serialize_to_vec();
+        let tx_data = 2_usize.pow(24).serialize_to_vec();
         let mut outer_tx = Tx::from_type(TxType::Raw);
         outer_tx.header.chain_id = state.in_mem().chain_id.clone();
         outer_tx.set_data(Data::new(tx_data));
@@ -1483,9 +1483,9 @@ mod tests {
         );
         assert!(result.is_ok(), "Expected success, got {:?}", result);
 
-        // Allocating `2^24` (16 MiB) should be above the memory limit and
+        // Allocating `2^25` (32 MiB) should be above the memory limit and
         // should fail
-        let tx_data = 2_usize.pow(24).serialize_to_vec();
+        let tx_data = 2_usize.pow(25).serialize_to_vec();
         let mut outer_tx = Tx::from_type(TxType::Raw);
         outer_tx.header.chain_id = state.in_mem().chain_id.clone();
         outer_tx.set_data(Data::new(tx_data));
@@ -1525,12 +1525,12 @@ mod tests {
             .unwrap();
         let _ = state.write_log_mut().write(&len_key, code_len).unwrap();
 
-        // Assuming 200 pages, 12.8 MiB limit
-        assert_eq!(memory::TX_MEMORY_MAX_PAGES, 200);
+        // Assuming 400 pages, 25.6 MiB limit
+        assert_eq!(memory::TX_MEMORY_MAX_PAGES, 400);
 
-        // Allocating `2^24` (16 MiB) for the input should be above the memory
+        // Allocating `2^25` (32 MiB) for the input should be above the memory
         // limit and should fail
-        let len = 2_usize.pow(24);
+        let len = 2_usize.pow(25);
         let tx_data: Vec<u8> = vec![6_u8; len];
         let (mut vp_cache, _) =
             wasm::compilation_cache::common::testing::vp_cache();
@@ -1553,17 +1553,8 @@ mod tests {
         // Depending on platform, we get a different error from the running out
         // of memory
         match result {
-            // Dylib engine error (used anywhere except mac)
-            Err(Error::MemoryError(memory::Error::Grow(
-                wasmer::MemoryError::CouldNotGrow { .. },
-            ))) => {}
-            Err(error) => {
-                let trap_code = get_trap_code(&error);
-                // Universal engine error (currently used on mac)
-                assert_eq!(
-                    trap_code,
-                    Either::Left(wasmer_vm::TrapCode::HeapAccessOutOfBounds)
-                );
+            Err(Error::MemoryError(memory::Error::GuestAlloc(_))) => {
+                // as expected
             }
             _ => panic!("Expected to run out of memory, got {:?}", result),
         }
@@ -1591,12 +1582,12 @@ mod tests {
         state.write(&key, vp_code).unwrap();
         state.write(&len_key, code_len).unwrap();
 
-        // Assuming 200 pages, 12.8 MiB limit
-        assert_eq!(memory::VP_MEMORY_MAX_PAGES, 200);
+        // Assuming 400 pages, 25.6 MiB limit
+        assert_eq!(memory::VP_MEMORY_MAX_PAGES, 400);
 
-        // Allocating `2^24` (16 MiB) for the input should be above the memory
+        // Allocating `2^25` (32 MiB) for the input should be above the memory
         // limit and should fail
-        let len = 2_usize.pow(24);
+        let len = 2_usize.pow(25);
         let tx_data: Vec<u8> = vec![6_u8; len];
         let mut outer_tx = Tx::from_type(TxType::Raw);
         outer_tx.header.chain_id = state.in_mem().chain_id.clone();
@@ -1618,19 +1609,8 @@ mod tests {
         // Depending on platform, we get a different error from the running out
         // of memory
         match result {
-            // Dylib engine error (used anywhere except mac)
-            Err(Error::MemoryError(memory::Error::Grow(
-                wasmer::MemoryError::CouldNotGrow { .. },
-            ))) => {
+            Err(Error::MemoryError(memory::Error::GuestAlloc(_))) => {
                 // as expected
-            }
-            Err(error) => {
-                let trap_code = get_trap_code(&error);
-                // Universal engine error (currently used on mac)
-                assert_eq!(
-                    trap_code,
-                    Either::Left(wasmer_vm::TrapCode::HeapAccessOutOfBounds)
-                );
             }
             _ => panic!("Expected to run out of memory, got {:?}", result),
         }
@@ -1657,10 +1637,10 @@ mod tests {
             .unwrap();
         let _ = state.write_log_mut().write(&len_key, code_len).unwrap();
 
-        // Allocating `2^24` (16 MiB) for a value in storage that the tx
+        // Allocating `2^25` (32 MiB) for a value in storage that the tx
         // attempts to read should be above the memory limit and should
         // fail
-        let len = 2_usize.pow(24);
+        let len = 2_usize.pow(25);
         let value: Vec<u8> = vec![6_u8; len];
         let key_raw = "key";
         let key = Key::parse(key_raw).unwrap();
@@ -1715,10 +1695,10 @@ mod tests {
         state.write(&key, vp_read_key).unwrap();
         state.write(&len_key, code_len).unwrap();
 
-        // Allocating `2^24` (16 MiB) for a value in storage that the tx
+        // Allocating `2^25` (32 MiB) for a value in storage that the tx
         // attempts to read should be above the memory limit and should
         // fail
-        let len = 2_usize.pow(24);
+        let len = 2_usize.pow(25);
         let value: Vec<u8> = vec![6_u8; len];
         let key_raw = "key";
         let key = Key::parse(key_raw).unwrap();

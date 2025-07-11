@@ -708,10 +708,13 @@ pub fn prepare_wasm_code<T: AsRef<[u8]>>(code: T) -> Result<Vec<u8>> {
     elements::serialize(module).map_err(Error::SerializationError)
 }
 
-/// Inject and export allocation function that can be used to grow memory from
-/// the host side
+/// Inject and export allocation function that can be used to grow the initial
+/// memory from the host side.
+///
+/// IMPORTANT: This must not be used for non-initial memory allocations as it
+/// assumes writing at location 0.
 fn inject_alloc(module: elements::Module) -> Result<elements::Module> {
-    use elements::{BlockType, Instruction, Instructions, ValueType};
+    use elements::{BlockType, Instruction, Instructions, Local, ValueType};
     use parity_wasm::builder;
 
     // Index of the function to be injected (note that the result of
@@ -722,17 +725,21 @@ fn inject_alloc(module: elements::Module) -> Result<elements::Module> {
         .map_err(|_| Error::AllocInjection)?;
     let mut builder = builder::from_module(module);
 
-    const WASM_PAGE_SIZE_LOG2: i32 = 16;
-    const WASM_PAGE_SIZE: i32 = 1 << WASM_PAGE_SIZE_LOG2;
-
     // Alloc fn in WAT:
     //
-    // (func (;0;) (type 0) (param i32) (result i32)
+    // (func (;0;) (type 0) (param i32)
+    // (local i32)
     // block  ;; label = @1
     //   local.get 0
-    //   i32.const -65536
-    //   i32.le_u
-    //   if  ;; label = @2
+    //   memory.size
+    //   i32.const 16
+    //   i32.shl
+    //   i32.gt_u
+    //   if (result i32)  ;; label = @2
+    //     local.get 0
+    //     i32.const -65536
+    //     i32.gt_u
+    //     br_if 1 (;@1;)
     //     local.get 0
     //     i32.const 65535
     //     i32.add
@@ -741,39 +748,54 @@ fn inject_alloc(module: elements::Module) -> Result<elements::Module> {
     //     memory.grow
     //     local.tee 0
     //     i32.const -1
-    //     i32.ne
+    //     i32.eq
     //     br_if 1 (;@1;)
+    //     local.get 0
+    //     i32.const 16
+    //     i32.shl
+    //   else
+    //     i32.const 0
     //   end
-    //   unreachable
+    //   return
     // end
-    // local.get 0
-    // i32.const 16
-    // i32.shl)
+    // unreachable)
 
+    const MEMORY_IX: u8 = 0;
+    const WASM_PAGE_SIZE_LOG2: i32 = 16;
+    const WASM_PAGE_SIZE: i32 = 1 << WASM_PAGE_SIZE_LOG2;
     let instructions = {
         use Instruction::*;
         vec![
             Block(BlockType::NoResult),
             GetLocal(0),
+            CurrentMemory(MEMORY_IX),
+            I32Const(WASM_PAGE_SIZE_LOG2),
+            I32Shl,
+            I32GtU,
+            If(BlockType::Value(ValueType::I32)),
+            GetLocal(0),
             I32Const(-WASM_PAGE_SIZE),
-            I32LeU,
-            If(BlockType::NoResult),
+            I32GtU,
+            BrIf(1),
             GetLocal(0),
             I32Const(WASM_PAGE_SIZE - 1),
             I32Add,
             I32Const(WASM_PAGE_SIZE_LOG2),
             I32ShrU,
-            GrowMemory(0),
+            GrowMemory(MEMORY_IX),
             TeeLocal(0),
             I32Const(-1),
-            I32Ne,
+            I32Eq,
             BrIf(1),
-            End,
-            Unreachable,
-            End,
             GetLocal(0),
             I32Const(WASM_PAGE_SIZE_LOG2),
             I32Shl,
+            Else,
+            I32Const(0),
+            End,
+            Return,
+            End,
+            Unreachable,
             End,
         ]
     };
@@ -786,6 +808,7 @@ fn inject_alloc(module: elements::Module) -> Result<elements::Module> {
             .build()
             .body()
             .with_instructions(Instructions::new(instructions))
+            .with_locals([Local::new(1, ValueType::I32)])
             .build()
             .build(),
     );

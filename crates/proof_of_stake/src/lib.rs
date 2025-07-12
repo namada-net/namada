@@ -1126,18 +1126,7 @@ where
                 bonds_to_remove.new_entry
             {
                 modified_redelegation.validator_to_modify = Some(src_validator);
-                modified_redelegation.epochs_to_remove = {
-                    let mut epochs = bonds_to_remove.epochs;
-                    // TODO: remove this insertion then we don't have to remove
-                    // it again in `fn update_redelegated_bonds`
-                    // when `epoch_to_modify` is Some (and avoid
-                    // `modified_redelegation.epochs_to_remove.clone`)
-                    // It affects assumption 3. in `fn
-                    // compute_new_redelegated_unbonds`, but that also looks
-                    // trivial to change.
-                    epochs.insert(bond_epoch);
-                    epochs
-                };
+                modified_redelegation.epochs_to_remove = bonds_to_remove.epochs;
                 modified_redelegation.epoch_to_modify = Some(bond_epoch);
                 modified_redelegation.new_amount = Some(new_bond_amount);
             } else {

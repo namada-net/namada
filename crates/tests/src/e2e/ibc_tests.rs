@@ -1000,7 +1000,7 @@ fn ibc_token_inflation() -> Result<()> {
 
     // wait the next masp epoch to dispense the reward
     let mut epoch = get_epoch(&test, &rpc).unwrap();
-    let new_epoch = Epoch(epoch.0 * MASP_EPOCH_MULTIPLIER);
+    let new_epoch = epoch + MASP_EPOCH_MULTIPLIER;
     while epoch < new_epoch {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }

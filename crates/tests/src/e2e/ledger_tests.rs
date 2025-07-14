@@ -2553,7 +2553,7 @@ fn masp_txs_and_queries() -> Result<()> {
                 "20",
                 "--shielding-fee-payer",
                 ALBERT_KEY,
-                "--shielding-token",
+                "--shielding-fee-token",
                 NAM,
             ]),
             TX_APPLIED_SUCCESS,

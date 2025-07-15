@@ -493,6 +493,20 @@ impl EventAttributeEntry<'static> for Height {
     }
 }
 
+/// Extend an [`Event`] with the name of the wasm code.
+pub struct CodeName(pub String);
+
+impl EventAttributeEntry<'static> for CodeName {
+    type Value = String;
+    type ValueOwned = Self::Value;
+
+    const KEY: &'static str = "code-name";
+
+    fn into_value(self) -> Self::Value {
+        self.0
+    }
+}
+
 /// Extend an [`Event`] with transaction hash information.
 pub struct TxHash(pub Hash);
 

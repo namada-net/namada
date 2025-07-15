@@ -1,0 +1,1 @@
+ -  For each inner tx, an event is emitted giving the human readable wasm name of the code contained in said tx.([\#4691](https://github.com/anoma/namada/pull/4691))

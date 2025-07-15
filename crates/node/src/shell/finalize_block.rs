@@ -21,8 +21,8 @@ use namada_sdk::state::{
 use namada_sdk::storage::{BlockHeader, BlockResults, Epoch};
 use namada_sdk::tx::data::protocol::ProtocolTxType;
 use namada_sdk::tx::data::{VpStatusFlags, compute_inner_tx_hash};
-use namada_sdk::tx::event::{Batch, Code};
-use namada_sdk::tx::new_tx_event;
+use namada_sdk::tx::event::{Batch, Code, TxWasmEvent};
+use namada_sdk::tx::{TxCommitments, new_tx_event};
 use namada_sdk::{ibc, proof_of_stake};
 use namada_vote_ext::ethereum_events::MultiSignedEthEvent;
 use namada_vote_ext::ethereum_tx_data_variants;
@@ -363,12 +363,18 @@ where
                             tx_data.tx.wrapper_hash().as_ref(),
                             Either::Right(cmt),
                         );
+                        self.emit_wasm_name_event(
+                            &tx_data,
+                            cmt,
+                            inner_tx_hash,
+                            response,
+                        );
                         if let Some(Ok(batched_result)) =
                             tx_result.get_mut(&inner_tx_hash)
                         {
                             if batched_result.is_accepted() {
                                 // Take the events from the batch result to
-                                // avoid emitting them again after the exection
+                                // avoid emitting them again after the execution
                                 // of the entire batch
                                 response.events.emit_many(
                                     std::mem::take(&mut batched_result.events)
@@ -468,6 +474,40 @@ where
 
         response.events.emit(tx_logs.tx_event);
         None
+    }
+
+    // a special event is emitted for each inner tx giving the human readable
+    // name of its wasm code.
+    fn emit_wasm_name_event(
+        &self,
+        tx_data: &TxData<'_>,
+        cmt: &TxCommitments,
+        inner_tx_hash: Hash,
+        response: &mut shim::response::FinalizeBlock,
+    ) {
+        // emit an event that gives the human readable name
+        // of the wasm payload.
+        let code_name = match tx_data
+            .tx
+            .get_section(&cmt.code_hash)
+            .unwrap()
+            .code_sec()
+            .map(|c| c.code.hash())
+        {
+            None => "".to_string(),
+            Some(hash) => self
+                .state
+                .read(&Key::wasm_code_name(&hash))
+                .expect("Reading wasm name from storage should not fail")
+                .unwrap_or("".to_string()),
+        };
+
+        let code_name_event = TxWasmEvent {
+            hash: tx_data.tx.wrapper_hash(),
+            inner_tx_hash,
+            name: code_name,
+        };
+        response.events.emit(code_name_event);
     }
 
     // Evaluate the results of all the transactions of the batch. Commit or drop
@@ -1302,7 +1342,7 @@ mod test_finalize_block {
     };
     use namada_sdk::ethereum_events::{EthAddress, Uint as ethUint};
     use namada_sdk::events::Event;
-    use namada_sdk::events::extend::Log;
+    use namada_sdk::events::extend::{CodeName, Log};
     use namada_sdk::gas::VpGasMeter;
     use namada_sdk::governance::storage::keys::get_proposal_execution_key;
     use namada_sdk::governance::storage::proposal::ProposalType;
@@ -1519,6 +1559,7 @@ mod test_finalize_block {
             })
             .expect("Test failed")
             .iter()
+            .filter(|e| e.read_attribute::<CodeName>().is_err())
         {
             assert_eq!(*event.kind(), APPLIED_TX);
             let hash = event.read_attribute::<TxHash>().expect("Test failed");
@@ -3166,7 +3207,10 @@ mod test_finalize_block {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
-            .expect("Test failed")[0];
+            .expect("Test failed")
+            .into_iter()
+            .filter(|e| e.read_attribute::<CodeName>().is_err())
+            .collect::<Vec<_>>()[0];
         assert_eq!(*event.kind(), APPLIED_TX);
         let code = event.read_attribute::<CodeAttr>().expect("Test failed");
         assert_eq!(code, ResultCode::Ok);
@@ -3325,7 +3369,10 @@ mod test_finalize_block {
                 txs: processed_txs,
                 ..Default::default()
             })
-            .expect("Test failed");
+            .expect("Test failed")
+            .into_iter()
+            .filter(|e| e.read_attribute::<CodeName>().is_err())
+            .collect::<Vec<_>>();
 
         // the merkle tree root should not change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
@@ -3453,7 +3500,10 @@ mod test_finalize_block {
                 txs: processed_txs,
                 ..Default::default()
             })
-            .expect("Test failed");
+            .expect("Test failed")
+            .into_iter()
+            .filter(|e| e.read_attribute::<CodeName>().is_err())
+            .collect::<Vec<_>>();
 
         // the merkle tree root should not change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
@@ -3582,7 +3632,10 @@ mod test_finalize_block {
                 txs: processed_txs,
                 ..Default::default()
             })
-            .expect("Test failed");
+            .expect("Test failed")
+            .into_iter()
+            .filter(|e| e.read_attribute::<CodeName>().is_err())
+            .collect::<Vec<_>>();
 
         // the merkle tree root should not change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
@@ -3814,7 +3867,10 @@ mod test_finalize_block {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
-            .expect("Test failed")[0];
+            .expect("Test failed")
+            .into_iter()
+            .filter(|e| e.read_attribute::<CodeName>().is_err())
+            .collect::<Vec<_>>()[0];
 
         // Check balance of fee payer
         assert_eq!(*event.kind(), APPLIED_TX);
@@ -3974,7 +4030,10 @@ mod test_finalize_block {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
-            .expect("Test failed")[0];
+            .expect("Test failed")
+            .into_iter()
+            .filter(|e| e.read_attribute::<CodeName>().is_err())
+            .collect::<Vec<_>>()[0];
 
         // Check fee payment
         assert_eq!(*event.kind(), APPLIED_TX);
@@ -4059,7 +4118,10 @@ mod test_finalize_block {
                 proposer_address,
                 ..Default::default()
             })
-            .expect("Test failed")[0];
+            .expect("Test failed")
+            .into_iter()
+            .filter(|e| e.read_attribute::<CodeName>().is_err())
+            .collect::<Vec<_>>()[0];
 
         // Check fee payment
         assert_eq!(*event.kind(), APPLIED_TX);
@@ -5791,7 +5853,10 @@ mod test_finalize_block {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
-            .expect("Test failed");
+            .expect("Test failed")
+            .into_iter()
+            .filter(|e| e.read_attribute::<CodeName>().is_err())
+            .collect::<Vec<_>>();
 
         let code = event[0].read_attribute::<CodeAttr>().unwrap();
         assert_eq!(code, ResultCode::Ok);
@@ -5839,7 +5904,10 @@ mod test_finalize_block {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
-            .expect("Test failed");
+            .expect("Test failed")
+            .into_iter()
+            .filter(|e| e.read_attribute::<CodeName>().is_err())
+            .collect::<Vec<_>>();
 
         let code = event[0].read_attribute::<CodeAttr>().unwrap();
         assert_eq!(code, ResultCode::WasmRuntimeError);
@@ -5898,7 +5966,10 @@ mod test_finalize_block {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
-            .expect("Test failed");
+            .expect("Test failed")
+            .into_iter()
+            .filter(|e| e.read_attribute::<CodeName>().is_err())
+            .collect::<Vec<_>>();
 
         let code = event[0].read_attribute::<CodeAttr>().unwrap();
         assert_eq!(code, ResultCode::Ok);
@@ -5975,7 +6046,10 @@ mod test_finalize_block {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
-            .expect("Test failed");
+            .expect("Test failed")
+            .into_iter()
+            .filter(|e| e.read_attribute::<CodeName>().is_err())
+            .collect::<Vec<_>>();
 
         let code = event[0].read_attribute::<CodeAttr>().unwrap();
         assert_eq!(code, ResultCode::WasmRuntimeError);
@@ -6028,12 +6102,15 @@ mod test_finalize_block {
         let (batch, processed_tx) =
             mk_tx_batch(&shell, &sk, false, false, true);
 
-        let event = &shell
+        let event = shell
             .finalize_block(FinalizeBlock {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
-            .expect("Test failed");
+            .expect("Test failed")
+            .into_iter()
+            .filter(|e| e.read_attribute::<CodeName>().is_err())
+            .collect::<Vec<_>>();
 
         let code = event[0].read_attribute::<CodeAttr>().unwrap();
         assert_eq!(code, ResultCode::WasmRuntimeError);
@@ -6121,7 +6198,27 @@ mod test_finalize_block {
 
             batch
         };
+        let commitments = batch_tx.commitments().first().expect("Test failed");
 
+        shell
+            .state
+            .write(
+                &Key::wasm_code_name(
+                    &batch_tx
+                        .get_section(&commitments.code_hash)
+                        .unwrap()
+                        .code_sec()
+                        .map(|c| c.code.hash())
+                        .unwrap(),
+                ),
+                TestWasms::TxNoOpEvent
+                    .path()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+            )
+            .expect("Test failed");
         let processed_txs = vec![ProcessedTx {
             tx: batch_tx.to_bytes().into(),
             result: TxResult {
@@ -6136,14 +6233,19 @@ mod test_finalize_block {
                 ..Default::default()
             })
             .expect("Test failed");
-
-        // three top level events
-        assert_eq!(events.len(), 3);
+        // five top level events
+        assert_eq!(events.len(), 5);
 
         // tx events. Check that they are present and in the correct order
         // TODO(namada#3856): right now we lose events ordering in a batch
         // because of the BTreeSet we use in BatchedTxResult so we can only
         // check the presence of the events but not the order
+        let event = events.remove(0);
+        let code_name = event.read_attribute::<CodeName>().unwrap();
+        assert_eq!(code_name, "tx_no_op_event.wasm");
+        let event = events.remove(0);
+        let code_name = event.read_attribute::<CodeName>().unwrap();
+        assert_eq!(code_name, "tx_no_op_event.wasm");
         let mut unordered_events = vec![];
         let event = events.remove(0);
         let msg = event.read_attribute::<Log>().unwrap();
@@ -6220,13 +6322,19 @@ mod test_finalize_block {
             .expect("Test failed");
 
         // three top level events
-        assert_eq!(events.len(), 3);
+        assert_eq!(events.len(), 5);
 
         // tx events. Check that they are both present even if they are
         // identical. This is important because some inner txs of a single batch
         // may correctly emit identical events and we don't want them to
         // overshadow each other which could deceive external tools like
         // indexers
+        let event = events.remove(0);
+        let code_name = event.read_attribute::<CodeName>().unwrap();
+        assert_eq!(code_name, "");
+        let event = events.remove(0);
+        let code_name = event.read_attribute::<CodeName>().unwrap();
+        assert_eq!(code_name, "");
         let event = events.remove(0);
         let msg = event.read_attribute::<Log>().unwrap();
         assert_eq!(&msg, EVENT_MSG);
@@ -6297,10 +6405,16 @@ mod test_finalize_block {
             .expect("Test failed");
 
         // two top level events
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 4);
 
         // tx events. Check the expected ones are present and in the correct
         // order
+        let event = events.remove(0);
+        let code_name = event.read_attribute::<CodeName>().unwrap();
+        assert_eq!(code_name, "");
+        let event = events.remove(0);
+        let code_name = event.read_attribute::<CodeName>().unwrap();
+        assert_eq!(code_name, "");
         let event = events.remove(0);
         let msg = event.read_attribute::<Log>().unwrap();
         assert_eq!(&msg, "bing");
@@ -6368,9 +6482,15 @@ mod test_finalize_block {
             .expect("Test failed");
 
         // one top level event (no tx events, only tx result)
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 3);
 
         // multiple tx results (2)
+        let event = events.remove(0);
+        let code_name = event.read_attribute::<CodeName>().unwrap();
+        assert_eq!(code_name, "");
+        let event = events.remove(0);
+        let code_name = event.read_attribute::<CodeName>().unwrap();
+        assert_eq!(code_name, "");
         let tx_event = events.remove(0);
         let tx_results = tx_event.read_attribute::<Batch<'_>>().unwrap();
         assert_eq!(tx_results.len(), 2);

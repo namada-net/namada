@@ -627,13 +627,11 @@ where
         let masp_tx_id = shielded_tx.txid().into();
         let has_trans_inputs = shielded_tx
             .transparent_bundle()
-            .map(|b| !b.vin.empty())
+            .map(|b| !b.vin.is_empty())
             .unwrap_or(false);
         // The transaction shall not push masp authorizer actions that are not
         // needed because this might lead vps to run a wrong validation logic
-        if !actions_authorizers.is_empty()
-            && !has_trans_inputs
-        {
+        if !actions_authorizers.is_empty() && !has_trans_inputs {
             let error = Error::new_const(
                 "Found masp authorizer actions that are not required",
             );
@@ -641,7 +639,11 @@ where
             return Err(error);
         }
         // check that the tx has a shielding fee section
-        if has_trans_inputs && batched_tx.tx.get_shielding_fee_section(&masp_tx_id).is_none()
+        if has_trans_inputs
+            && batched_tx
+                .tx
+                .get_shielding_fee_section(&masp_tx_id)
+                .is_none()
         {
             let error = Error::new_const(
                 "Found a shielding transaction with a shielding fee section",

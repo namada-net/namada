@@ -958,8 +958,7 @@ pub async fn query_protocol_parameters(
     );
     display_line!(
         context.io(),
-        "{:4}Masp shielding fee payment (NAM): {:?} gas units",
-        "",
+        "{:4}Masp shielding fee payment (NAM)",
         masp_nam_shielding_fee
     );
     display_line!(context.io(), "{:4}Minimum gas costs:", "");

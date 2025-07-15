@@ -624,16 +624,27 @@ where
                 return Err(error);
             }
         }
+        let masp_tx_id = shielded_tx.txid().into();
+        let has_trans_inputs = shielded_tx
+            .transparent_bundle()
+            .map(|b| !b.vin.empty())
+            .unwrap_or(false);
         // The transaction shall not push masp authorizer actions that are not
         // needed because this might lead vps to run a wrong validation logic
         if !actions_authorizers.is_empty()
-            && shielded_tx
-                .transparent_bundle()
-                .map(|b| b.vin.is_empty())
-                .unwrap_or(true)
+            && !has_trans_inputs
         {
             let error = Error::new_const(
                 "Found masp authorizer actions that are not required",
+            );
+            tracing::debug!("{error}");
+            return Err(error);
+        }
+        // check that the tx has a shielding fee section
+        if has_trans_inputs && batched_tx.tx.get_shielding_fee_section(&masp_tx_id).is_none()
+        {
+            let error = Error::new_const(
+                "Found a shielding transaction with a shielding fee section",
             );
             tracing::debug!("{error}");
             return Err(error);

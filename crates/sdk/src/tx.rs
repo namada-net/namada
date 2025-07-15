@@ -2747,15 +2747,9 @@ pub async fn build_ibc_transfer(
         Some(source.clone()),
         Some(source.clone()),
         vec![],
-        if let Some(IbcShieldingData {
-            shielding_fee_payer: payer,
-            ..
-        }) = &args.ibc_shielding_data
-        {
-            Some(payer.clone())
-        } else {
-            None
-        },
+        args.ibc_shielding_data
+            .as_ref()
+            .map(|shielding_data| shielding_data.shielding_fee_payer.clone()),
         args.source.spending_key().is_some(),
         vec![],
         None,

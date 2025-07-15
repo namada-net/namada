@@ -11,7 +11,7 @@ use namada_sdk::io::Io;
 use namada_sdk::signing::{SigningTxData, default_sign};
 use namada_sdk::tx::data::GasLimit;
 use namada_sdk::tx::{ProcessTxResponse, Tx};
-use namada_sdk::{signing, tendermint_rpc, tx};
+use namada_sdk::{signing, tendermint_rpc};
 
 use super::node::MockNode;
 use crate::shell::testing::utils::{Bin, TestingIo};
@@ -118,7 +118,7 @@ impl CliClient for MockNode {
 /// Manually sign a tx. This can be used to sign a tx that was dumped
 pub fn sign_tx(
     node: &MockNode,
-    tx: Tx,
+    mut tx: Tx,
     signing: SigningTxData,
     // this is only used to give the password for decrypting keys to the wallet
     args: &args::Tx,
@@ -138,25 +138,19 @@ pub fn sign_tx(
         .to_sdk(node.clone(), TestingIo);
     let rt = tokio::runtime::Runtime::new().unwrap();
 
-    let (mut batched_tx, batched_signing_data) =
-        tx::build_batch(vec![(tx, signing)])
-            .wrap_err("Failed to build tx batch")?;
     rt.block_on(async {
-        for sig_data in batched_signing_data {
-            signing::sign_tx(
-                ctx.wallet_lock(),
-                args,
-                &mut batched_tx,
-                sig_data,
-                default_sign,
-                (),
-            )
-            .await
-            .wrap_err("Signing tx failed")?;
-        }
-        Ok::<(), Report>(())
+        signing::sign_tx(
+            ctx.wallet_lock(),
+            args,
+            &mut tx,
+            signing,
+            default_sign,
+            (),
+        )
+        .await
+        .wrap_err("Signing tx failed")
     })?;
-    Ok(batched_tx)
+    Ok(tx)
 }
 
 /// Manually submit a tx. Used for txs that have been manually constructed

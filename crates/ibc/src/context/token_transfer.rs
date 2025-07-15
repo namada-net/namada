@@ -55,6 +55,22 @@ where
         self.is_shielded = true;
     }
 
+    fn validate_sent_coin(&self, coin: &PrefixedCoin) -> Result<(), HostError> {
+        // The base denom should not be an IBC token address because an IBC
+        // token address has been already encoded and other chains can't extract
+        // the trace paths
+        match Address::decode(coin.denom.base_denom.as_str()) {
+            Ok(Address::Internal(InternalAddress::IbcToken(_))) => {
+                Err(HostError::Other {
+                    description: "The base denom should not be an IBC token \
+                                  address"
+                        .to_string(),
+                })
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Get the token address and the amount from PrefixedCoin. If the base
     /// denom is not an address, it returns `IbcToken`
     fn get_token_amount(
@@ -210,9 +226,11 @@ where
         _from_account: &Self::AccountId,
         _port_id: &PortId,
         _channel_id: &ChannelId,
-        _coin: &PrefixedCoin,
+        coin: &PrefixedCoin,
         _memo: &Memo,
     ) -> Result<(), HostError> {
+        self.validate_sent_coin(coin)?;
+
         // validated by Multitoken VP
         Ok(())
     }
@@ -240,9 +258,11 @@ where
     fn burn_coins_validate(
         &self,
         _account: &Self::AccountId,
-        _coin: &PrefixedCoin,
+        coin: &PrefixedCoin,
         _memo: &Memo,
     ) -> Result<(), HostError> {
+        self.validate_sent_coin(coin)?;
+
         // validated by Multitoken VP
         Ok(())
     }

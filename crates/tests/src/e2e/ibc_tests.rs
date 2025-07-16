@@ -2080,65 +2080,86 @@ fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
     let hermes = run_hermes(&hermes_dir)?;
     let _bg_hermes = hermes.background();
 
-    // 1. Shield 10 NAM to AA_PAYMENT_ADDRESS
+    // 1. Shield 20 NAM to AA_PAYMENT_ADDRESS
     transfer_on_chain(
         &test,
         "shield",
         ALBERT,
         AA_PAYMENT_ADDRESS,
         NAM,
-        10,
+        20,
         ALBERT_KEY,
         &[],
     )?;
-    check_shielded_balance(&test, AA_VIEWING_KEY, NAM, 10)?;
+    check_shielded_balance(&test, AA_VIEWING_KEY, NAM, 20)?;
 
     // 2. Unshield from A_SPENDING_KEY to B_SPENDING_KEY,
     // using the packet forward and shielded receive
     // middlewares
-    let nam_addr = find_address(&test, NAM)?;
-    let overflow_addr = "tnam1qrqzqa0l0rzzrlr20n487l6n865t8ndv6uhseulq";
-    let ibc_denom_on_gaia = format!("transfer/{channel_id_gaia}/{nam_addr}");
-    let memo_path = gen_ibc_shielding_data(
-        &test,
-        AB_PAYMENT_ADDRESS,
-        &ibc_denom_on_gaia,
-        8,
-        &port_id_namada,
-        &channel_id_namada,
-    )?;
-    let memo = packet_forward_memo(
-        MASP.to_string().into(),
-        &PortId::transfer(),
-        &channel_id_namada,
-        None,
-        Some(shielded_recv_memo_value(
-            &memo_path,
-            Amount::native_whole(8),
-            overflow_addr.parse().unwrap(),
-        )),
-    );
-    transfer(
-        &test,
-        A_SPENDING_KEY,
-        "PacketForwardMiddleware",
-        NAM,
-        10,
-        Some(ALBERT_KEY),
-        &PortId::transfer(),
-        &channel_id_namada,
-        None,
-        None,
-        None,
-        Some(&memo),
-        true,
-    )?;
-    wait_for_packet_relay(&hermes_dir, &port_id_gaia, &channel_id_gaia, &test)?;
+    for iter in 1..=2u64 {
+        let nam_addr = find_address(&test, NAM)?;
+        let overflow_addr = "tnam1qrqzqa0l0rzzrlr20n487l6n865t8ndv6uhseulq";
+        let ibc_denom_on_gaia =
+            format!("transfer/{channel_id_gaia}/{nam_addr}");
+        let memo_path = gen_ibc_shielding_data(
+            &test,
+            AB_PAYMENT_ADDRESS,
+            &ibc_denom_on_gaia,
+            8,
+            &port_id_namada,
+            &channel_id_namada,
+        )?;
+        let masp_receiver = match iter {
+            // Test addresses encoded using `bech32m`...
+            1 => MASP.encode(),
+            // ...as well as addresses encoded using `bech32`
+            2 => {
+                let bech32 = "tnam1pcqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqh8f9c4";
+                let addr: namada_core::address::Address =
+                    bech32.parse().unwrap();
+                assert_eq!(addr, MASP);
+                bech32.to_owned()
+            }
+            _ => unreachable!("there are only 2 iters"),
+        };
+        let memo = packet_forward_memo(
+            masp_receiver.into(),
+            &PortId::transfer(),
+            &channel_id_namada,
+            None,
+            Some(shielded_recv_memo_value(
+                &memo_path,
+                Amount::native_whole(8),
+                overflow_addr.parse().unwrap(),
+            )),
+        );
+        transfer(
+            &test,
+            A_SPENDING_KEY,
+            "PacketForwardMiddleware",
+            NAM,
+            10,
+            Some(ALBERT_KEY),
+            &PortId::transfer(),
+            &channel_id_namada,
+            None,
+            None,
+            None,
+            Some(&memo),
+            true,
+        )?;
+        wait_for_packet_relay(
+            &hermes_dir,
+            &port_id_gaia,
+            &channel_id_gaia,
+            &test,
+        )?;
 
-    // Check the token on Namada
-    check_shielded_balance(&test, AA_VIEWING_KEY, NAM, 0)?;
-    check_shielded_balance(&test, AB_VIEWING_KEY, NAM, 8)?;
-    check_balance(&test, overflow_addr, NAM, 2)?;
+        // Check the token on Namada
+        check_shielded_balance(&test, AA_VIEWING_KEY, NAM, 20 - iter * 10)?;
+        check_shielded_balance(&test, AB_VIEWING_KEY, NAM, 8 * iter)?;
+        check_balance(&test, overflow_addr, NAM, 2 * iter)?;
+    }
 
     Ok(())
 }

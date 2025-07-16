@@ -424,17 +424,25 @@ impl TryFrom<&Signer> for Address {
     type Error = DecodeError;
 
     fn try_from(signer: &Signer) -> Result<Self> {
-        // The given address should be an address or payment address. When
-        // sending a token from a spending key, it has been already
-        // replaced with the MASP address.
-        Address::decode(signer.as_ref()).or(
-            match crate::masp::PaymentAddress::from_str(signer.as_ref()) {
-                Ok(_) => Ok(MASP),
-                Err(_) => Err(DecodeError::InvalidInnerEncoding(format!(
-                    "Invalid address for IBC transfer: {signer}"
-                ))),
-            },
-        )
+        let signer: &str = signer.as_ref();
+
+        #[cold]
+        fn is_znam(signer: &str) -> bool {
+            crate::masp::PaymentAddress::from_str(signer).is_ok()
+        }
+
+        Address::decode(signer).map_err(|err| {
+            let err_msg = if is_znam(signer) {
+                format!(
+                    "MASP IBC shielding transfers should target the \
+                     transparent address {MASP}"
+                )
+            } else {
+                format!("Invalid address {signer:?} for IBC transfer: {err}")
+            };
+
+            DecodeError::InvalidInnerEncoding(err_msg)
+        })
     }
 }
 

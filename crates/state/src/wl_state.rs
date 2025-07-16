@@ -27,7 +27,7 @@ use crate::{
     DB, DBIter, EPOCH_SWITCH_BLOCKS_DELAY, Epoch, Error, Hash, Key, KeySeg,
     LastBlock, MembershipProof, MerkleTree, MerkleTreeError, ProofOps, Result,
     STORAGE_ACCESS_GAS_PER_BYTE, State, StateError, StateRead, StorageHasher,
-    StoreType, TxWrites, is_pending_transfer_key,
+    StoreType, is_pending_transfer_key,
 };
 
 /// Owned state with full R/W access.
@@ -64,22 +64,6 @@ where
     fn conversion_state(&self) -> &ConversionState {
         self.in_mem.get_conversion_state()
     }
-}
-
-/// State with a temporary write log. This is used for dry-running txs and ABCI
-/// prepare and processs proposal, which must not modify the actual state.
-#[derive(Debug)]
-pub struct TxWlState<'a, D, H>
-where
-    D: DB + for<'iter> DBIter<'iter>,
-    H: StorageHasher,
-{
-    /// Write log
-    pub(crate) write_log: &'a mut WriteLog,
-    // DB
-    pub(crate) db: &'a D,
-    /// State
-    pub(crate) in_mem: &'a InMemory<H>,
 }
 
 /// State with a temporary write log. This is used for dry-running txs and ABCI
@@ -1384,61 +1368,6 @@ where
     }
 }
 
-impl<D, H> TxWrites for WlState<D, H>
-where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
-    H: 'static + StorageHasher,
-{
-    fn with_tx_writes(&mut self) -> TxWlState<'_, Self::D, Self::H> {
-        TxWlState {
-            write_log: &mut self.write_log,
-            db: &self.db,
-            in_mem: &self.in_mem,
-        }
-    }
-}
-
-impl<D, H> StateRead for TxWlState<'_, D, H>
-where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
-    H: 'static + StorageHasher,
-{
-    type D = D;
-    type H = H;
-
-    fn write_log(&self) -> &WriteLog {
-        self.write_log
-    }
-
-    fn db(&self) -> &D {
-        self.db
-    }
-
-    fn in_mem(&self) -> &InMemory<Self::H> {
-        self.in_mem
-    }
-
-    fn charge_gas(&self, _gas: Gas) -> Result<()> {
-        Ok(())
-    }
-}
-
-impl<D, H> State for TxWlState<'_, D, H>
-where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
-    H: 'static + StorageHasher,
-{
-    fn write_log_mut(&mut self) -> &mut WriteLog {
-        self.write_log
-    }
-
-    fn split_borrow(
-        &mut self,
-    ) -> (&mut WriteLog, &InMemory<Self::H>, &Self::D) {
-        (self.write_log, (self.in_mem), (self.db))
-    }
-}
-
 impl<D, H> EmitEvents for WlState<D, H>
 where
     D: 'static + DB + for<'iter> DBIter<'iter>,
@@ -1501,20 +1430,6 @@ where
         &mut self,
     ) -> (&mut WriteLog, &InMemory<Self::H>, &Self::D) {
         (&mut self.write_log, (self.in_mem), (self.db))
-    }
-}
-
-impl<D, H> TxWrites for TempWlState<'_, D, H>
-where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
-    H: 'static + StorageHasher,
-{
-    fn with_tx_writes(&mut self) -> TxWlState<'_, Self::D, Self::H> {
-        TxWlState {
-            write_log: &mut self.write_log,
-            db: self.db,
-            in_mem: self.in_mem,
-        }
     }
 }
 

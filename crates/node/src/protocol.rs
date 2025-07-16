@@ -18,7 +18,7 @@ use namada_sdk::gas::{self, Gas, GasMetering, TxGasMeter, VpGasMeter};
 use namada_sdk::hash::Hash;
 use namada_sdk::parameters::get_gas_scale;
 use namada_sdk::state::{
-    DB, DBIter, State, StorageHasher, StorageRead, TxWrites, WlState,
+    DB, DBIter, State, StorageHasher, StorageRead, WlState,
 };
 use namada_sdk::storage::TxIndex;
 use namada_sdk::token::Amount;
@@ -488,7 +488,6 @@ where
     S: 'static
         + State<D = D, H = H>
         + Read<Err = state::Error>
-        + TxWrites
         + ReadConversionState
         + Sync,
     D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
@@ -576,7 +575,6 @@ where
     S: 'static
         + State<D = D, H = H>
         + StorageRead
-        + TxWrites
         + Read<Err = state::Error>
         + ReadConversionState
         + Sync,
@@ -928,22 +926,18 @@ fn get_optional_masp_ref<S: Read<Err = state::Error>>(
 // Manage the token transfer for the fee payment. If an error is detected the
 // write log is dropped to prevent committing an inconsistent state. Propagates
 // the result to the caller
-fn fee_token_transfer<WLS>(
-    state: &mut WLS,
+fn fee_token_transfer(
+    state: &mut impl State,
     token: &Address,
     src: &Address,
     dest: &Address,
     amount: Amount,
-) -> Result<()>
-where
-    WLS: State + StorageRead + TxWrites,
-{
-    token::transfer(&mut state.with_tx_writes(), token, src, dest, amount)
-        .map_err(|err| {
-            state.write_log_mut().drop_tx();
+) -> Result<()> {
+    token::transfer(state, token, src, dest, amount).map_err(|err| {
+        state.write_log_mut().drop_tx();
 
-            Error::Error(err)
-        })
+        Error::Error(err)
+    })
 }
 
 /// Check if the fee payer has enough transparent balance to pay fees

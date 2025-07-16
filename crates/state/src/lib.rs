@@ -65,7 +65,6 @@ pub use namada_storage::{
 };
 use namada_systems::parameters;
 use thiserror::Error;
-use wl_state::TxWlState;
 pub use wl_state::{FullAccessState, TempWlState, WlState};
 use write_log::WriteLog;
 
@@ -208,12 +207,6 @@ pub trait State: StateRead + StorageWrite {
     fn write_tx_hash(&mut self, hash: Hash) -> write_log::Result<()> {
         self.write_log_mut().write_tx_hash(hash)
     }
-}
-
-/// Perform storage writes and deletions to write-log at tx level.
-pub trait TxWrites: StateRead {
-    /// Performs storage writes at the tx level of the write-log.
-    fn with_tx_writes(&mut self) -> TxWlState<'_, Self::D, Self::H>;
 }
 
 /// Implement [`trait StorageRead`] using its [`trait StateRead`]
@@ -422,11 +415,9 @@ macro_rules! impl_storage_write_by_protocol {
 impl_storage_read!(FullAccessState<D, H>);
 impl_storage_read!(WlState<D, H>);
 impl_storage_read!(TempWlState<'_, D, H>);
-impl_storage_read!(TxWlState<'_, D, H>);
 impl_storage_write_by_protocol!(FullAccessState<D, H>);
 impl_storage_write_by_protocol!(WlState<D, H>);
 impl_storage_write_by_protocol!(TempWlState<'_, D, H>);
-impl_storage_write!(TxWlState<'_, D, H>);
 
 impl_storage_read!(TxHostEnvState<'_, D, H>);
 impl_storage_read!(VpHostEnvState<'_, D, H>);

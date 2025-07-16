@@ -1,4 +1,4 @@
-- Currently, the shielded wallet attempts to find a file and deserialize it, but of which are fallible. Upon failure, 
+- Currently, the shielded wallet attempts to find a file and deserialize it, both of which are fallible. Upon failure, 
   a default (empty) wallet is created. This is fine if the file is missing, but causes unexpeceted behavior when we've changed
   the wallet format and deserialize fails. This PR changes the logic to the following:
 

@@ -3,9 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
 use std::path::Path;
-use std::str::FromStr;
 
-use eyre::eyre;
 use namada_macros::BorshDeserializer;
 #[cfg(feature = "migrations")]
 use namada_migrations::*;
@@ -293,7 +291,7 @@ pub struct ChainParams<T: TemplateValidation> {
     /// Gas limit of a masp transaction paying fees
     pub masp_fee_payment_gas_limit: u64,
     /// The amount of NAM the MASP shielding fee costs
-    pub masp_nam_shielding_fee: String,
+    pub masp_nam_shielding_fee: DenominatedAmount,
     /// Gas scale
     pub gas_scale: u64,
     /// Map of the cost per gas unit for every token allowed for fee payment
@@ -350,29 +348,16 @@ impl ChainParams<Unvalidated> {
             })?;
             min_gas_prices.insert(token, amount);
         }
-        let masp_nam_shielding_fee =
-            match DenominatedAmount::from_str(&masp_nam_shielding_fee) {
-                Ok(amount) => amount
-                    .increase_precision(NATIVE_MAX_DECIMAL_PLACES.into())
-                    .map_err(|e| {
-                        eprintln!(
-                            "A MASP shielding fee (in NAM) in the \
-                             parameters.toml file was incorrectly \
-                             denominated:\n{}",
-                            e
-                        );
-                        e
-                    })?,
-                Err(e) => {
-                    eprintln!(
-                        "A MASP shielding fee (in NAM) in the parameters.toml \
-                         file was incorrectly formatted:\n{}",
-                        e
-                    );
-                    return Err(eyre!("{}", e.to_string()));
-                }
-            }
-            .to_string_precise();
+        let masp_nam_shielding_fee = masp_nam_shielding_fee
+            .increase_precision(NATIVE_MAX_DECIMAL_PLACES.into())
+            .map_err(|e| {
+                eprintln!(
+                    "A MASP shielding fee (in NAM) in the parameters.toml \
+                     file was incorrectly denominated:\n{}",
+                    e
+                );
+                e
+            })?;
 
         Ok(ChainParams {
             max_tx_bytes,

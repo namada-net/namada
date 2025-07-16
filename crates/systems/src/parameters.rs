@@ -1,9 +1,11 @@
 //! Parameters abstract interfaces
 
+use namada_core::address::Address;
 use namada_core::chain::BlockHeight;
 pub use namada_core::parameters::*;
 use namada_core::storage;
 use namada_core::time::DurationSecs;
+use namada_core::token::DenominatedAmount;
 pub use namada_storage::Result;
 
 /// Abstract parameters storage keys interface
@@ -37,6 +39,13 @@ pub trait Read<S> {
         last_block_height: BlockHeight,
         num_blocks_to_read: u64,
     ) -> Result<DurationSecs>;
+
+    /// Return the amount of the given token is necessary to pay
+    /// a shielding fee
+    fn masp_shielding_fee_amount(
+        storage: &S,
+        token: &Address,
+    ) -> Result<Option<DenominatedAmount>>;
 }
 
 /// Abstract parameters storage write interface

@@ -1492,6 +1492,8 @@ fn enable_rewards_after_shielding() -> Result<()> {
 ///    rejected.
 /// 4. Test that if the account listed in the shielding fee does not sign the
 ///    tx, it is rejected
+/// 5. Test that duplicating a shielding fee section does not result in paying
+///    the fee twice
 #[test]
 fn test_shielding_fee_protocol_checks() -> Result<()> {
     // This address doesn't matter for tests. But an argument is required.
@@ -1632,6 +1634,24 @@ fn test_shielding_fee_protocol_checks() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
     std::fs::remove_file(tx_path).expect("Test failed");
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                BERTHA_KEY,
+                "--token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    // 1998000 = 2000000 - 4000
+    assert!(captured.contains("nam: 1996000"));
 
     // we remove the shielding fee section
     run(
@@ -1801,7 +1821,7 @@ fn test_shielding_fee_protocol_checks() -> Result<()> {
         .display()
         .to_string();
     let tx: Tx = serde_json::from_reader(
-        std::fs::File::open(tx_path).expect("Test Failed"),
+        std::fs::File::open(&tx_path).expect("Test Failed"),
     )
     .expect("Test failed");
     let signing_data = SigningTxData {
@@ -1822,6 +1842,89 @@ fn test_shielding_fee_protocol_checks() -> Result<()> {
         CapturedOutput::of(|| submit_custom(&node, signed, &dummy_args(&node)));
     assert!(captured.result.is_ok());
     assert!(captured.contains("The section signature is invalid"));
+    std::fs::remove_file(tx_path).expect("Test failed");
+
+    // now we duplicate the shielding fee section
+    run(
+        &node,
+        Bin::Client,
+        apply_use_device(vec![
+            "shield",
+            "--source",
+            ALBERT,
+            "--target",
+            AA_PAYMENT_ADDRESS,
+            "--token",
+            BTC,
+            "--amount",
+            "0.1",
+            "--signing-keys",
+            ALBERT_KEY,
+            "--shielding-fee-payer",
+            BERTHA_KEY,
+            "--shielding-fee-token",
+            NAM,
+            "--dump-wrapper-tx",
+            "--output-folder-path",
+            output_folder.to_str().unwrap(),
+            "--node",
+            validator_one_rpc,
+        ]),
+    )?;
+    let tx_path = find_files_with_ext(output_folder, "tx")
+        .unwrap()
+        .first()
+        .expect("Offline tx should be found.")
+        .to_path_buf()
+        .display()
+        .to_string();
+    let mut tx: Tx = serde_json::from_reader(
+        std::fs::File::open(tx_path).expect("Test Failed"),
+    )
+    .expect("Test failed");
+    let shielding_fee_section = tx
+        .sections
+        .iter()
+        .find(|s| matches!(s, Section::ShieldingFee { .. }))
+        .expect("Test failed")
+        .clone();
+    tx.add_section(shielding_fee_section);
+    let signing_data = SigningTxData {
+        owner: Some(node.lookup_address(ALBERT)?),
+        public_keys: HashSet::from([node.lookup_pk(ALBERT_KEY)?]),
+        threshold: 1,
+        account_public_keys_map: Some(
+            [node.lookup_pk(ALBERT_KEY)?].into_iter().collect(),
+        ),
+        fee_payer: Either::Left((node.lookup_pk(ALBERT_KEY)?, false)),
+        shielded_hash: None,
+        // this should be Bertha's key
+        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
+        signatures: vec![],
+    };
+    let signed = sign_tx(&node, tx, signing_data, &dummy_args(&node))?;
+    let captured =
+        CapturedOutput::of(|| submit_custom(&node, signed, &dummy_args(&node)));
+    assert!(captured.result.is_ok());
+    assert!(captured.contains(TX_APPLIED_SUCCESS));
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                BERTHA_KEY,
+                "--token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    // 1998000 = 2000000 - 6000
+    assert!(captured.contains("nam: 1994000"));
 
     Ok(())
 }

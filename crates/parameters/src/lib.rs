@@ -22,7 +22,6 @@ pub mod vp;
 mod wasm_allowlist;
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
-use std::str::FromStr;
 
 use namada_core::address::{Address, InternalAddress};
 use namada_core::arith::checked;
@@ -36,6 +35,8 @@ pub use namada_systems::parameters::*;
 pub use storage::{get_gas_scale, get_max_block_gas};
 use thiserror::Error;
 pub use wasm_allowlist::{is_tx_allowed, is_vp_allowed};
+
+use crate::storage::masp_shielding_fee_amount;
 
 /// Parameters storage `Keys/Read/Write` implementation
 #[derive(Debug)]
@@ -81,6 +82,14 @@ where
             last_block_height,
             num_blocks_to_read,
         )
+    }
+
+    fn masp_shielding_fee_amount(
+        storage: &S,
+        token: &Address,
+    ) -> Result<Option<DenominatedAmount>> {
+        let key = masp_shielding_fee_amount(token);
+        storage.read(&key)
     }
 }
 
@@ -165,8 +174,7 @@ where
     let masp_nam_shielding_fee_key =
         storage::masp_shielding_fee_amount(native_token);
     let masp_nam_shielding_fee =
-        DenominatedAmount::from_str(masp_nam_shielding_fee)
-            .map_err(|e| Error::AllocMessage(e.to_string()))?
+        DenominatedAmount::native(*masp_nam_shielding_fee)
             .redenominate(NATIVE_MAX_DECIMAL_PLACES);
     storage.write(&masp_nam_shielding_fee_key, masp_nam_shielding_fee)?;
 
@@ -428,7 +436,7 @@ where
     let masp_nam_shielding_fee = value
         .ok_or(ReadError::ParametersMissing)
         .into_storage_result()?
-        .to_string_precise();
+        .amount();
 
     // read gas scale
     let gas_scale_key = storage::get_gas_scale_key();
@@ -522,7 +530,7 @@ where
         epochs_per_year: 365,
         masp_epoch_multiplier: 2,
         masp_fee_payment_gas_limit: 0,
-        masp_nam_shielding_fee: 0.to_string(),
+        masp_nam_shielding_fee: namada_core::token::Amount::zero(),
         gas_scale: 10_000_000,
         minimum_gas_price: Default::default(),
         is_native_token_transferable: true,

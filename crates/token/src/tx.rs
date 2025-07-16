@@ -3,12 +3,11 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
-use namada_core::address::{InternalAddress, PGF};
+use namada_core::address::PGF;
 use namada_core::arith::CheckedSub;
 use namada_core::collections::HashSet;
 use namada_core::masp::encode_asset_type;
 use namada_core::masp_primitives::transaction::Transaction;
-use namada_core::storage::{DbKeySeg, Key};
 use namada_core::token::{DenominatedAmount, MaspDigitPos};
 use namada_core::uint::I320;
 use namada_core::{masp, token};
@@ -218,7 +217,7 @@ where
             )))?;
             // transfer the shielding fee
             let amount: DenominatedAmount = env
-                .read(&masp_shielding_fee_amount(token))
+                .get_masp_shielding_fee_amount(token)
                 .expect("Failed to read storage")
                 .ok_or_else(|| {
                     Error::AllocMessage(format!(
@@ -256,19 +255,6 @@ where
     }
 
     Ok(())
-}
-
-/// The key for getting the shielding fee amount of the provided
-/// token.
-fn masp_shielding_fee_amount(token: &Address) -> Key {
-    pub const MASP_SHIELDING_FEE_PREFIX: &str = "shielding_fee";
-    namada_core::storage::Key::from(DbKeySeg::AddressSeg(Address::Internal(
-        InternalAddress::Parameters,
-    )))
-    .push(&MASP_SHIELDING_FEE_PREFIX.to_owned())
-    .expect("Cannot obtain a storage key")
-    .push(token)
-    .expect("Cannot obtain a storage key")
 }
 
 #[cfg(test)]

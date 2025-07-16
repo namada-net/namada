@@ -39,6 +39,9 @@ use crate::{
     validate_untrusted_wasm,
 };
 
+/// Allocator function name injected into a expored from wasm
+pub const ALLOC_FN_NAME: &str = "_injected_alloc";
+
 const GUEST_MEMORY: &str = "memory";
 const TX_ENTRYPOINT: &str = "_apply_tx";
 const VP_ENTRYPOINT: &str = "_validate_tx";
@@ -63,6 +66,8 @@ pub enum Error {
     MemoryError(memory::Error),
     #[error("Unable to inject stack limiter")]
     StackLimiterInjection,
+    #[error("Unable to inject alloc")]
+    AllocInjection,
     #[error("Wasm deserialization error: {0}")]
     DeserializationError(elements::Error),
     #[error("Wasm serialization error: {0}")]
@@ -292,15 +297,18 @@ where
 
     env.memory.init_from(guest_memory);
 
-    // Write the inputs in the memory exported from the wasm
-    // module
     let memory::TxCallInput {
         tx_data_ptr,
         tx_data_len,
     } = {
         let mut store = store.borrow_mut();
-        memory::write_tx_inputs(&mut *store, guest_memory, &batched_tx)
-            .map_err(Error::MemoryError)?
+        memory::write_tx_inputs(
+            &instance,
+            &mut *store,
+            guest_memory,
+            &batched_tx,
+        )
+        .map_err(Error::MemoryError)?
     };
 
     // Get the module's entrypoint to be called
@@ -548,7 +556,7 @@ where
         verifiers_len,
     } = {
         let mut store = store.borrow_mut();
-        memory::write_vp_inputs(&mut *store, guest_memory, input)
+        memory::write_vp_inputs(&instance, &mut *store, guest_memory, input)
             .map_err(Error::MemoryError)?
     };
 
@@ -944,7 +952,126 @@ pub fn prepare_wasm_code<T: AsRef<[u8]>>(
         &stack_limiter_exempt_fn_ids,
     )
     .map_err(|_original_module| Error::StackLimiterInjection)?;
+
+    let module = inject_alloc(module)?;
+
     elements::serialize(module).map_err(Error::SerializationError)
+}
+
+/// Inject and export allocation function that can be used to grow the initial
+/// memory from the host side.
+///
+/// IMPORTANT: This must not be used for non-initial memory allocations as it
+/// assumes writing at location 0.
+fn inject_alloc(module: elements::Module) -> Result<elements::Module> {
+    use elements::{BlockType, Instruction, Instructions, Local, ValueType};
+    use parity_wasm::builder;
+
+    // Index of the function to be injected (note that the result of
+    // `builder.push_function` is wrong as it ignores improted fns)
+    let fn_ix: u32 = module
+        .functions_space()
+        .try_into()
+        .map_err(|_| Error::AllocInjection)?;
+    let mut builder = builder::from_module(module);
+
+    // Alloc fn in WAT:
+    //
+    // (func (;0;) (type 0) (param i32)
+    // (local i32)
+    // block  ;; label = @1
+    //   local.get 0
+    //   memory.size
+    //   i32.const 16
+    //   i32.shl
+    //   i32.gt_u
+    //   if (result i32)  ;; label = @2
+    //     local.get 0
+    //     i32.const -65536
+    //     i32.gt_u
+    //     br_if 1 (;@1;)
+    //     local.get 0
+    //     i32.const 65535
+    //     i32.add
+    //     i32.const 16
+    //     i32.shr_u
+    //     memory.grow
+    //     local.tee 0
+    //     i32.const -1
+    //     i32.eq
+    //     br_if 1 (;@1;)
+    //     local.get 0
+    //     i32.const 16
+    //     i32.shl
+    //   else
+    //     i32.const 0
+    //   end
+    //   return
+    // end
+    // unreachable)
+
+    const MEMORY_IX: u8 = 0;
+    const WASM_PAGE_SIZE_LOG2: i32 = 16;
+    const WASM_PAGE_SIZE: i32 = 1 << WASM_PAGE_SIZE_LOG2;
+    let instructions = {
+        use Instruction::*;
+        vec![
+            Block(BlockType::NoResult),
+            GetLocal(0),
+            CurrentMemory(MEMORY_IX),
+            I32Const(WASM_PAGE_SIZE_LOG2),
+            I32Shl,
+            I32GtU,
+            If(BlockType::Value(ValueType::I32)),
+            GetLocal(0),
+            I32Const(-WASM_PAGE_SIZE),
+            I32GtU,
+            BrIf(1),
+            GetLocal(0),
+            I32Const(WASM_PAGE_SIZE - 1),
+            I32Add,
+            I32Const(WASM_PAGE_SIZE_LOG2),
+            I32ShrU,
+            GrowMemory(MEMORY_IX),
+            TeeLocal(0),
+            I32Const(-1),
+            I32Eq,
+            BrIf(1),
+            GetLocal(0),
+            I32Const(WASM_PAGE_SIZE_LOG2),
+            I32Shl,
+            Else,
+            I32Const(0),
+            End,
+            Return,
+            End,
+            Unreachable,
+            End,
+        ]
+    };
+
+    builder.push_function(
+        builder::function()
+            .signature()
+            .with_param(ValueType::I32)
+            .with_result(ValueType::I32)
+            .build()
+            .body()
+            .with_instructions(Instructions::new(instructions))
+            .with_locals([Local::new(1, ValueType::I32)])
+            .build()
+            .build(),
+    );
+
+    builder.push_export(
+        builder::export()
+            .field(ALLOC_FN_NAME)
+            .internal()
+            .func(fn_ix)
+            .build(),
+    );
+
+    Ok(builder.build())
 }
 
 // Fetch or compile a WASM code from the cache or storage. Account for the
@@ -1309,7 +1436,7 @@ mod tests {
     use namada_core::borsh::BorshSerializeExt;
     use namada_state::StorageWrite;
     use namada_state::testing::TestState;
-    use namada_test_utils::TestWasms;
+    use namada_test_utils::{TestWasms, tx_data};
     use namada_token::DenominatedAmount;
     use namada_tx::data::eval_vp::EvalVp;
     use namada_tx::data::{Fee, TxType};
@@ -1472,12 +1599,12 @@ mod tests {
         let _ = state.write_log_mut().write(&key, tx_code.clone()).unwrap();
         let _ = state.write_log_mut().write(&len_key, code_len).unwrap();
 
-        // Assuming 200 pages, 12.8 MiB limit
-        assert_eq!(memory::TX_MEMORY_MAX_PAGES, 200);
+        // Assuming 400 pages, 25.6 MiB limit
+        assert_eq!(memory::TX_MEMORY_MAX_PAGES, 400);
 
-        // Allocating `2^23` (8 MiB) should be below the memory limit and
+        // Allocating `2^24` (16 MiB) should be below the memory limit and
         // shouldn't fail
-        let tx_data = 2_usize.pow(23).serialize_to_vec();
+        let tx_data = 2_usize.pow(24).serialize_to_vec();
         let (mut vp_cache, _) =
             wasm::compilation_cache::common::testing::vp_cache();
         let (mut tx_cache, _) =
@@ -1499,9 +1626,9 @@ mod tests {
         );
         assert!(result.is_ok(), "Expected success, got {:?}", result);
 
-        // Allocating `2^24` (16 MiB) should be above the memory limit and
+        // Allocating `2^25` (32 MiB) should be above the memory limit and
         // should fail
-        let tx_data = 2_usize.pow(24).serialize_to_vec();
+        let tx_data = 2_usize.pow(25).serialize_to_vec();
         let mut outer_tx = Tx::from_type(TxType::Raw);
         outer_tx.set_code(Code::new(tx_code, None));
         outer_tx.set_data(Data::new(tx_data));
@@ -1555,12 +1682,12 @@ mod tests {
         state.write(&key, vp_memory_limit).unwrap();
         state.write(&len_key, code_len).unwrap();
 
-        // Assuming 200 pages, 12.8 MiB limit
-        assert_eq!(memory::VP_MEMORY_MAX_PAGES, 200);
+        // Assuming 400 pages, 25.6 MiB limit
+        assert_eq!(memory::VP_MEMORY_MAX_PAGES, 400);
 
-        // Allocating `2^23` (8 MiB) should be below the memory limit and
+        // Allocating `2^24` (16 MiB) should be below the memory limit and
         // shouldn't fail
-        let input = 2_usize.pow(23).serialize_to_vec();
+        let input = 2_usize.pow(24).serialize_to_vec();
 
         let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
         tx.add_code(vec![], None).add_serialized_data(input);
@@ -1593,9 +1720,9 @@ mod tests {
             .is_ok()
         );
 
-        // Allocating `2^24` (16 MiB) should be above the memory limit and
+        // Allocating `2^25` (32 MiB) should be above the memory limit and
         // should fail
-        let input = 2_usize.pow(24).serialize_to_vec();
+        let input = 2_usize.pow(25).serialize_to_vec();
         let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
         tx.add_code(vec![], None).add_data(input);
 
@@ -1650,12 +1777,12 @@ mod tests {
         state.write(&key, vp_code).unwrap();
         state.write(&len_key, code_len).unwrap();
 
-        // Assuming 200 pages, 12.8 MiB limit
-        assert_eq!(memory::VP_MEMORY_MAX_PAGES, 200);
+        // Assuming 400 pages, 25.6 MiB limit
+        assert_eq!(memory::VP_MEMORY_MAX_PAGES, 400);
 
-        // Allocating `2^23` (8 MiB) should be below the memory limit and
+        // Allocating `2^24` (16 MiB) should be below the memory limit and
         // shouldn't fail
-        let tx_data = 2_usize.pow(23).serialize_to_vec();
+        let tx_data = 2_usize.pow(24).serialize_to_vec();
         let mut outer_tx = Tx::from_type(TxType::Raw);
         outer_tx.header.chain_id = state.in_mem().chain_id.clone();
         outer_tx.set_data(Data::new(tx_data));
@@ -1676,9 +1803,9 @@ mod tests {
         );
         assert!(result.is_ok(), "Expected success, got {:?}", result);
 
-        // Allocating `2^24` (16 MiB) should be above the memory limit and
+        // Allocating `2^25` (32 MiB) should be above the memory limit and
         // should fail
-        let tx_data = 2_usize.pow(24).serialize_to_vec();
+        let tx_data = 2_usize.pow(25).serialize_to_vec();
         let mut outer_tx = Tx::from_type(TxType::Raw);
         outer_tx.header.chain_id = state.in_mem().chain_id.clone();
         outer_tx.set_data(Data::new(tx_data));
@@ -1719,12 +1846,12 @@ mod tests {
             .unwrap();
         let _ = state.write_log_mut().write(&len_key, code_len).unwrap();
 
-        // Assuming 200 pages, 12.8 MiB limit
-        assert_eq!(memory::TX_MEMORY_MAX_PAGES, 200);
+        // Assuming 400 pages, 25.6 MiB limit
+        assert_eq!(memory::TX_MEMORY_MAX_PAGES, 400);
 
-        // Allocating `2^24` (16 MiB) for the input should be above the memory
+        // Allocating `2^25` (32 MiB) for the input should be above the memory
         // limit and should fail
-        let len = 2_usize.pow(24);
+        let len = 2_usize.pow(25);
         let tx_data: Vec<u8> = vec![6_u8; len];
         let (mut vp_cache, _) =
             wasm::compilation_cache::common::testing::vp_cache();
@@ -1748,17 +1875,8 @@ mod tests {
         // Depending on platform, we get a different error from the running out
         // of memory
         match result {
-            // Dylib engine error (used anywhere except mac)
-            Err(Error::MemoryError(memory::Error::Grow(
-                wasmer::MemoryError::CouldNotGrow { .. },
-            ))) => {}
-            Err(error) => {
-                let trap_code = get_trap_code(&error);
-                // Universal engine error (currently used on mac)
-                assert_eq!(
-                    trap_code,
-                    Either::Left(wasmer_vm::TrapCode::HeapAccessOutOfBounds)
-                );
+            Err(Error::MemoryError(memory::Error::GuestAlloc(_))) => {
+                // as expected
             }
             _ => panic!("Expected to run out of memory, got {:?}", result),
         }
@@ -1786,12 +1904,12 @@ mod tests {
         state.write(&key, vp_code).unwrap();
         state.write(&len_key, code_len).unwrap();
 
-        // Assuming 200 pages, 12.8 MiB limit
-        assert_eq!(memory::VP_MEMORY_MAX_PAGES, 200);
+        // Assuming 400 pages, 25.6 MiB limit
+        assert_eq!(memory::VP_MEMORY_MAX_PAGES, 400);
 
-        // Allocating `2^24` (16 MiB) for the input should be above the memory
+        // Allocating `2^25` (32 MiB) for the input should be above the memory
         // limit and should fail
-        let len = 2_usize.pow(24);
+        let len = 2_usize.pow(25);
         let tx_data: Vec<u8> = vec![6_u8; len];
         let mut outer_tx = Tx::from_type(TxType::Raw);
         outer_tx.header.chain_id = state.in_mem().chain_id.clone();
@@ -1814,19 +1932,8 @@ mod tests {
         // Depending on platform, we get a different error from the running out
         // of memory
         match result {
-            // Dylib engine error (used anywhere except mac)
-            Err(Error::MemoryError(memory::Error::Grow(
-                wasmer::MemoryError::CouldNotGrow { .. },
-            ))) => {
+            Err(Error::MemoryError(memory::Error::GuestAlloc(_))) => {
                 // as expected
-            }
-            Err(error) => {
-                let trap_code = get_trap_code(&error);
-                // Universal engine error (currently used on mac)
-                assert_eq!(
-                    trap_code,
-                    Either::Left(wasmer_vm::TrapCode::HeapAccessOutOfBounds)
-                );
             }
             _ => panic!("Expected to run out of memory, got {:?}", result),
         }
@@ -1853,10 +1960,10 @@ mod tests {
             .unwrap();
         let _ = state.write_log_mut().write(&len_key, code_len).unwrap();
 
-        // Allocating `2^24` (16 MiB) for a value in storage that the tx
+        // Allocating `2^25` (32 MiB) for a value in storage that the tx
         // attempts to read should be above the memory limit and should
         // fail
-        let len = 2_usize.pow(24);
+        let len = 2_usize.pow(25);
         let value: Vec<u8> = vec![6_u8; len];
         let key_raw = "key";
         let key = Key::parse(key_raw).unwrap();
@@ -1912,10 +2019,10 @@ mod tests {
         state.write(&key, vp_read_key).unwrap();
         state.write(&len_key, code_len).unwrap();
 
-        // Allocating `2^24` (16 MiB) for a value in storage that the tx
+        // Allocating `2^25` (32 MiB) for a value in storage that the tx
         // attempts to read should be above the memory limit and should
         // fail
-        let len = 2_usize.pow(24);
+        let len = 2_usize.pow(25);
         let value: Vec<u8> = vec![6_u8; len];
         let key_raw = "key";
         let key = Key::parse(key_raw).unwrap();
@@ -2485,6 +2592,65 @@ mod tests {
             tx_cache,
             GasMeterKind::MutGlobal,
         )
+    }
+
+    /// Test that a tx which is larger than the initial WASM memory size gets
+    /// executed without issues (the injected alloc fn should be invoked from
+    /// host)
+    #[test]
+    fn test_tx_alloc() {
+        let mut state = TestState::default();
+        let gas_meter = RefCell::new(TxGasMeter::new(TX_GAS_LIMIT, GAS_SCALE));
+        let tx_index = TxIndex::default();
+
+        let tx_write = TestWasms::TxWriteStorageKey.read_bytes();
+        // store the wasm code
+        let code_hash = Hash::sha256(&tx_write);
+        let key = Key::wasm_code(&code_hash);
+        let len_key = Key::wasm_code_len(&code_hash);
+        let code_len = (tx_write.len() as u64).serialize_to_vec();
+        let _ = state
+            .write_log_mut()
+            .write(&key, tx_write.serialize_to_vec())
+            .unwrap();
+        let _ = state.write_log_mut().write(&len_key, code_len).unwrap();
+
+        // Using `2^21` (2 MiB) for the input should be above the initial memory
+        // size and require allocation
+        let len = 2_usize.pow(21);
+        let value: Vec<u8> = vec![6_u8; len];
+        let key_raw = "key";
+        let key = Key::parse(key_raw).unwrap();
+        let tx_data = tx_data::TxWriteData {
+            key: key.clone(),
+            value: value.clone(),
+        }
+        .serialize_to_vec();
+
+        let (mut vp_cache, _) =
+            wasm::compilation_cache::common::testing::vp_cache();
+        let (mut tx_cache, _) =
+            wasm::compilation_cache::common::testing::tx_cache();
+
+        let mut outer_tx = Tx::from_type(TxType::Raw);
+        outer_tx.set_code(Code::new(tx_write, None));
+        outer_tx.set_data(Data::new(tx_data));
+        let batched_tx = outer_tx.batch_ref_first_tx().unwrap();
+        tx(
+            &mut state,
+            &gas_meter,
+            None,
+            &tx_index,
+            batched_tx.tx,
+            batched_tx.cmt,
+            &mut vp_cache,
+            &mut tx_cache,
+            GasMeterKind::MutGlobal,
+        )
+        .unwrap();
+
+        let written_value = state.read_bytes(&key).unwrap().unwrap();
+        assert_eq!(value, written_value);
     }
 
     fn loop_in_tx_wasm(loops: u32) -> Result<BTreeSet<Address>> {

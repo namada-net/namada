@@ -46,6 +46,8 @@ pub enum Error {
     Arith(#[from] arith::Error),
     #[error("{0}")]
     TryFromInt(#[from] std::num::TryFromIntError),
+    #[error("Failed to allocate memory: {0}")]
+    GuestAlloc(wasmer::RuntimeError),
 }
 
 /// Result of a function that may fail
@@ -65,11 +67,11 @@ impl From<Error> for namada_state::Error {
 /// Initial pages in tx memory
 pub const TX_MEMORY_INIT_PAGES: u32 = 100; // 6.4 MiB
 /// Mamixmum pages in tx memory
-pub const TX_MEMORY_MAX_PAGES: u32 = 200; // 12.8 MiB
+pub const TX_MEMORY_MAX_PAGES: u32 = 400; // 25.6 MiB
 /// Initial pages in VP memory
-pub const VP_MEMORY_INIT_PAGES: u32 = 100; // 6.4 MiB
+pub const VP_MEMORY_INIT_PAGES: u32 = TX_MEMORY_INIT_PAGES; // 6.4 MiB
 /// Mamixmum pages in VP memory
-pub const VP_MEMORY_MAX_PAGES: u32 = 200; // 12.8 MiB
+pub const VP_MEMORY_MAX_PAGES: u32 = TX_MEMORY_MAX_PAGES; // 25.6 MiB
 
 /// Prepare memory for instantiating a transaction module
 pub fn prepare_tx_memory(
@@ -107,15 +109,16 @@ pub struct TxCallInput {
 
 /// Write transaction inputs into wasm memory
 pub fn write_tx_inputs(
+    instance: &wasmer::Instance,
     store: &mut impl wasmer::AsStoreMut,
     memory: &wasmer::Memory,
     tx_data: &BatchedTxRef<'_>,
 ) -> Result<TxCallInput> {
-    let tx_data_ptr = 0;
     let tx_data_bytes = tx_data.serialize_to_vec();
-    let tx_data_len = tx_data_bytes.len() as _;
+    let tx_data_len = tx_data_bytes.len() as u64;
+    let tx_data_ptr = wasm_alloc(instance, store, tx_data_len)?;
 
-    write_memory_bytes(store, memory, tx_data_ptr, tx_data_bytes)?;
+    write_memory_bytes(store, memory, tx_data_ptr, &tx_data_bytes)?;
 
     Ok(TxCallInput {
         tx_data_ptr,
@@ -146,6 +149,7 @@ pub struct VpCallInput {
 
 /// Write validity predicate inputs into wasm memory
 pub fn write_vp_inputs(
+    instance: &wasmer::Instance,
     store: &mut impl wasmer::AsStoreMut,
     memory: &wasmer::Memory,
     VpInput {
@@ -155,20 +159,16 @@ pub fn write_vp_inputs(
         verifiers,
     }: VpInput<'_>,
 ) -> Result<VpCallInput> {
-    let addr_ptr = 0_u64;
     let addr_bytes = addr.serialize_to_vec();
     let addr_len = addr_bytes.len() as _;
 
     let data_bytes = data.serialize_to_vec();
-    let data_ptr = checked!(addr_ptr + addr_len)?;
     let data_len = data_bytes.len() as _;
 
     let keys_changed_bytes = keys_changed.serialize_to_vec();
-    let keys_changed_ptr = checked!(data_ptr + data_len)?;
     let keys_changed_len = keys_changed_bytes.len() as _;
 
     let verifiers_bytes = verifiers.serialize_to_vec();
-    let verifiers_ptr = checked!(keys_changed_ptr + keys_changed_len)?;
     let verifiers_len = verifiers_bytes.len() as _;
 
     let bytes = [
@@ -178,6 +178,13 @@ pub fn write_vp_inputs(
         &verifiers_bytes[..],
     ]
     .concat();
+    let bytes_len = bytes.len() as u64;
+
+    let addr_ptr = wasm_alloc(instance, store, bytes_len)?;
+    let data_ptr = checked!(addr_ptr + addr_len)?;
+    let keys_changed_ptr = checked!(data_ptr + data_len)?;
+    let verifiers_ptr = checked!(keys_changed_ptr + keys_changed_len)?;
+
     write_memory_bytes(store, memory, addr_ptr, bytes)?;
 
     Ok(VpCallInput {
@@ -190,6 +197,26 @@ pub fn write_vp_inputs(
         verifiers_ptr,
         verifiers_len,
     })
+}
+
+/// Allocated inside the wasm instance using the injected function and return a
+/// ptr to it
+fn wasm_alloc(
+    instance: &wasmer::Instance,
+    store: &mut impl wasmer::AsStoreMut,
+    len: u64,
+) -> Result<u64> {
+    let alloc_fn = instance
+        .exports
+        .get_function(super::run::ALLOC_FN_NAME)
+        .unwrap()
+        .typed::<i32, i32>(&*store)
+        .unwrap();
+
+    let len: i32 = len.try_into().map_err(Error::TryFromInt)?;
+    let ptr = alloc_fn.call(&mut *store, len).map_err(Error::GuestAlloc)?;
+    let ptr: u64 = ptr.try_into().map_err(Error::TryFromInt)?;
+    Ok(ptr)
 }
 
 /// Check that the given offset and length fits into the memory bounds. If not,

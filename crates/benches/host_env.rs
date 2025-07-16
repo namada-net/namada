@@ -1,7 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use namada_apps_lib::account::AccountPublicKeysMap;
 use namada_apps_lib::collections::{HashMap, HashSet};
-use namada_apps_lib::storage::DB;
+use namada_apps_lib::storage::{DB, DBRead};
 use namada_apps_lib::token::{Amount, Transfer};
 use namada_apps_lib::tx::Authorization;
 use namada_apps_lib::wallet::defaults;

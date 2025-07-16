@@ -69,7 +69,7 @@ mod tests {
     use namada_sdk::parameters::Parameters;
     use namada_sdk::state::merkle_tree::NO_DIFF_KEY_PREFIX;
     use namada_sdk::state::{
-        self, DB, StateRead, StorageRead, StorageWrite, StoreType,
+        self, DBRead, StateRead, StorageRead, StorageWrite, StoreType,
     };
     use namada_sdk::storage::{Key, KeySeg};
     use namada_sdk::token::conversion::update_allowed_conversions;

@@ -53,8 +53,8 @@ use namada_sdk::proof_of_stake::types::{
 };
 use namada_sdk::state::tx_queue::ExpiredTx;
 use namada_sdk::state::{
-    DB, DBIter, EPOCH_SWITCH_BLOCKS_DELAY, FullAccessState, Sha256Hasher,
-    StorageHasher, StorageRead, TempWlState, WlState,
+    DB, DBIter, DBRead, EPOCH_SWITCH_BLOCKS_DELAY, FullAccessState,
+    Sha256Hasher, StorageHasher, StorageRead, TempWlState, WlState,
 };
 use namada_sdk::storage::{Key, TxIndex};
 use namada_sdk::tendermint::AppHash;

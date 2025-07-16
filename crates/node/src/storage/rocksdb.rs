@@ -65,7 +65,7 @@ use namada_sdk::state::merkle_tree::{
     tree_key_prefix_with_epoch, tree_key_prefix_with_height,
 };
 use namada_sdk::state::{
-    BlockStateRead, BlockStateWrite, DB, DBIter, DBWriteBatch,
+    BlockStateRead, BlockStateWrite, DB, DBIter, DBRead, DBWriteBatch,
     DbError as Error, DbResult as Result, MerkleTreeStoresRead,
     PatternIterator, PrefixIterator, StoreType,
 };
@@ -1073,11 +1073,8 @@ impl DbSnapshot {
     }
 }
 
-impl DB for RocksDB {
+impl DBRead for RocksDB {
     type Cache = rocksdb::Cache;
-    type Migrator = RocksDBUpdateVisitor;
-    type RestoreSource<'a> = (&'a rocksdb::Cache, &'a mut std::fs::File);
-    type WriteBatch = RocksDBWriteBatch;
 
     fn open(
         db_path: impl AsRef<std::path::Path>,
@@ -1093,58 +1090,8 @@ impl DB for RocksDB {
         open(db_path, true, cache).expect("cannot open the DB")
     }
 
-    fn restore_from(
-        &mut self,
-        (cache, snapshot): Self::RestoreSource<'_>,
-    ) -> Result<()> {
-        snapshot.rewind().map_err(|e| {
-            Error::DBError(format!("Failed to rewind snapshot file: {e}",))
-        })?;
-
-        let db_dir = self.inner.path().to_owned();
-
-        let unpack_dir = db_dir.parent().ok_or_else(|| {
-            Error::DBError(format!(
-                "Failed to query parent directory of db: {}",
-                db_dir.to_string_lossy()
-            ))
-        })?;
-
-        // NB: close the current database handle.
-        // DON'T TRY THIS AT HOME KIDS. we are
-        // trained monkeys.
-        unsafe {
-            self.invalid_handle = true;
-            ManuallyDrop::drop(&mut self.inner);
-        }
-
-        std::fs::remove_dir_all(&db_dir)
-            .expect("Failed to nuke database directory");
-        DbSnapshot::unpack(snapshot, unpack_dir)
-            .expect("Failed to unpack new db");
-
-        *self = Self::open(db_dir, Some(cache));
-
-        Ok(())
-    }
-
     fn path(&self) -> Option<&Path> {
         Some(self.inner.path())
-    }
-
-    fn flush(&self, wait: bool) -> Result<()> {
-        let mut flush_opts = FlushOptions::default();
-        flush_opts.set_wait(wait);
-        let cfs = self
-            .column_families()
-            .into_iter()
-            .map(|(_, cf)| cf)
-            .collect::<Vec<_>>();
-        // "For manual flush, application has to specify the list of column
-        // families to flush atomically" from <https://github.com/facebook/rocksdb/wiki/Atomic-flush>
-        self.inner
-            .flush_cfs_opt(&cfs, &flush_opts)
-            .map_err(|e| Error::DBError(e.into_string()))
     }
 
     fn read_last_block(&self) -> Result<Option<BlockStateRead>> {
@@ -1254,140 +1201,6 @@ impl DB for RocksDB {
             eth_events_queue,
             commit_only_data,
         }))
-    }
-
-    fn add_block_to_batch(
-        &self,
-        state: BlockStateWrite<'_>,
-        batch: &mut Self::WriteBatch,
-        is_full_commit: bool,
-    ) -> Result<()> {
-        let BlockStateWrite {
-            merkle_tree_stores,
-            header,
-            height,
-            time,
-            epoch,
-            pred_epochs,
-            next_epoch_min_start_height,
-            next_epoch_min_start_time,
-            update_epoch_blocks_delay,
-            address_gen,
-            results,
-            conversion_state,
-            ethereum_height,
-            eth_events_queue,
-            commit_only_data,
-        }: BlockStateWrite<'_> = state;
-
-        let state_cf = self.get_column_family(STATE_CF)?;
-
-        // Epoch start height and time
-        self.add_state_value_to_batch(
-            state_cf,
-            NEXT_EPOCH_MIN_START_HEIGHT_KEY,
-            &next_epoch_min_start_height,
-            batch,
-        )?;
-        self.add_state_value_to_batch(
-            state_cf,
-            NEXT_EPOCH_MIN_START_TIME_KEY,
-            &next_epoch_min_start_time,
-            batch,
-        )?;
-
-        self.add_state_value_to_batch(
-            state_cf,
-            UPDATE_EPOCH_BLOCKS_DELAY_KEY,
-            &update_epoch_blocks_delay,
-            batch,
-        )?;
-
-        self.add_state_value_to_batch(
-            state_cf,
-            COMMIT_ONLY_DATA_KEY,
-            &commit_only_data,
-            batch,
-        )?;
-
-        // Save the conversion state when the epoch is updated
-        if is_full_commit {
-            self.add_state_value_to_batch(
-                state_cf,
-                CONVERSION_STATE_KEY,
-                &conversion_state,
-                batch,
-            )?;
-        }
-
-        self.add_value_to_batch(
-            state_cf,
-            ETHEREUM_HEIGHT_KEY,
-            &ethereum_height,
-            batch,
-        );
-        self.add_value_to_batch(
-            state_cf,
-            ETH_EVENTS_QUEUE_KEY,
-            &eth_events_queue,
-            batch,
-        );
-
-        let block_cf = self.get_column_family(BLOCK_CF)?;
-        let prefix = height.raw();
-
-        // Merkle tree
-        for st in StoreType::iter() {
-            if st.is_stored_every_block() || is_full_commit {
-                let key_prefix = if st.is_stored_every_block() {
-                    tree_key_prefix_with_height(st, height)
-                } else {
-                    tree_key_prefix_with_epoch(st, epoch)
-                };
-                let root_key =
-                    format!("{key_prefix}/{MERKLE_TREE_ROOT_KEY_SEGMENT}");
-                self.add_value_to_batch(
-                    block_cf,
-                    root_key,
-                    merkle_tree_stores.root(st),
-                    batch,
-                );
-                let store_key =
-                    format!("{key_prefix}/{MERKLE_TREE_STORE_KEY_SEGMENT}");
-                self.add_value_bytes_to_batch(
-                    block_cf,
-                    store_key,
-                    merkle_tree_stores.store(st).encode(),
-                    batch,
-                );
-            }
-        }
-
-        // Block header
-        if let Some(h) = header {
-            let header_key = format!("{prefix}/{BLOCK_HEADER_KEY_SEGMENT}");
-            self.add_value_to_batch(block_cf, header_key, &h, batch);
-        }
-        // Block time
-        let time_key = format!("{prefix}/{BLOCK_TIME_KEY_SEGMENT}");
-        self.add_value_to_batch(block_cf, time_key, &time, batch);
-        // Block epoch
-        let epoch_key = format!("{prefix}/{EPOCH_KEY_SEGMENT}");
-        self.add_value_to_batch(block_cf, epoch_key, &epoch, batch);
-        // Block results
-        let results_key = format!("{RESULTS_KEY_PREFIX}/{}", height.raw());
-        self.add_value_to_batch(block_cf, results_key, &results, batch);
-        // Predecessor block epochs
-        let pred_epochs_key = format!("{prefix}/{PRED_EPOCHS_KEY_SEGMENT}");
-        self.add_value_to_batch(block_cf, pred_epochs_key, &pred_epochs, batch);
-        // Address gen
-        let address_gen_key = format!("{prefix}/{ADDRESS_GEN_KEY_SEGMENT}");
-        self.add_value_to_batch(block_cf, address_gen_key, &address_gen, batch);
-
-        // Block height
-        self.add_value_to_batch(state_cf, BLOCK_HEIGHT_KEY, &height, batch);
-
-        Ok(())
     }
 
     fn read_block_header(
@@ -1543,6 +1356,217 @@ impl DB for RocksDB {
         }
     }
 
+    fn read_bridge_pool_signed_nonce(
+        &self,
+        height: BlockHeight,
+        last_height: BlockHeight,
+    ) -> Result<Option<ethereum_events::Uint>> {
+        let nonce_key = bridge_pool::get_signed_root_key();
+        let bytes = if height == BlockHeight(0) || height >= last_height {
+            self.read_subspace_val(&nonce_key)?
+        } else {
+            self.read_subspace_val_with_height(&nonce_key, height, last_height)?
+        };
+        match bytes {
+            Some(bytes) => {
+                let bp_root_proof = BridgePoolRootProof::try_from_slice(&bytes)
+                    .map_err(Error::BorshCodingError)?;
+                Ok(Some(bp_root_proof.data.1))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+impl DB for RocksDB {
+    type Migrator = RocksDBUpdateVisitor;
+    type RestoreSource<'a> = (&'a rocksdb::Cache, &'a mut std::fs::File);
+    type WriteBatch = RocksDBWriteBatch;
+
+    fn restore_from(
+        &mut self,
+        (cache, snapshot): Self::RestoreSource<'_>,
+    ) -> Result<()> {
+        snapshot.rewind().map_err(|e| {
+            Error::DBError(format!("Failed to rewind snapshot file: {e}",))
+        })?;
+
+        let db_dir = self.inner.path().to_owned();
+
+        let unpack_dir = db_dir.parent().ok_or_else(|| {
+            Error::DBError(format!(
+                "Failed to query parent directory of db: {}",
+                db_dir.to_string_lossy()
+            ))
+        })?;
+
+        // NB: close the current database handle.
+        // DON'T TRY THIS AT HOME KIDS. we are
+        // trained monkeys.
+        unsafe {
+            self.invalid_handle = true;
+            ManuallyDrop::drop(&mut self.inner);
+        }
+
+        std::fs::remove_dir_all(&db_dir)
+            .expect("Failed to nuke database directory");
+        DbSnapshot::unpack(snapshot, unpack_dir)
+            .expect("Failed to unpack new db");
+
+        *self = Self::open(db_dir, Some(cache));
+
+        Ok(())
+    }
+
+    fn flush(&self, wait: bool) -> Result<()> {
+        let mut flush_opts = FlushOptions::default();
+        flush_opts.set_wait(wait);
+        let cfs = self
+            .column_families()
+            .into_iter()
+            .map(|(_, cf)| cf)
+            .collect::<Vec<_>>();
+        // "For manual flush, application has to specify the list of column
+        // families to flush atomically" from <https://github.com/facebook/rocksdb/wiki/Atomic-flush>
+        self.inner
+            .flush_cfs_opt(&cfs, &flush_opts)
+            .map_err(|e| Error::DBError(e.into_string()))
+    }
+
+    fn add_block_to_batch(
+        &self,
+        state: BlockStateWrite<'_>,
+        batch: &mut Self::WriteBatch,
+        is_full_commit: bool,
+    ) -> Result<()> {
+        let BlockStateWrite {
+            merkle_tree_stores,
+            header,
+            height,
+            time,
+            epoch,
+            pred_epochs,
+            next_epoch_min_start_height,
+            next_epoch_min_start_time,
+            update_epoch_blocks_delay,
+            address_gen,
+            results,
+            conversion_state,
+            ethereum_height,
+            eth_events_queue,
+            commit_only_data,
+        }: BlockStateWrite<'_> = state;
+
+        let state_cf = self.get_column_family(STATE_CF)?;
+
+        // Epoch start height and time
+        self.add_state_value_to_batch(
+            state_cf,
+            NEXT_EPOCH_MIN_START_HEIGHT_KEY,
+            &next_epoch_min_start_height,
+            batch,
+        )?;
+        self.add_state_value_to_batch(
+            state_cf,
+            NEXT_EPOCH_MIN_START_TIME_KEY,
+            &next_epoch_min_start_time,
+            batch,
+        )?;
+
+        self.add_state_value_to_batch(
+            state_cf,
+            UPDATE_EPOCH_BLOCKS_DELAY_KEY,
+            &update_epoch_blocks_delay,
+            batch,
+        )?;
+
+        self.add_state_value_to_batch(
+            state_cf,
+            COMMIT_ONLY_DATA_KEY,
+            &commit_only_data,
+            batch,
+        )?;
+
+        // Save the conversion state when the epoch is updated
+        if is_full_commit {
+            self.add_state_value_to_batch(
+                state_cf,
+                CONVERSION_STATE_KEY,
+                &conversion_state,
+                batch,
+            )?;
+        }
+
+        self.add_value_to_batch(
+            state_cf,
+            ETHEREUM_HEIGHT_KEY,
+            &ethereum_height,
+            batch,
+        );
+        self.add_value_to_batch(
+            state_cf,
+            ETH_EVENTS_QUEUE_KEY,
+            &eth_events_queue,
+            batch,
+        );
+
+        let block_cf = self.get_column_family(BLOCK_CF)?;
+        let prefix = height.raw();
+
+        // Merkle tree
+        for st in StoreType::iter() {
+            if st.is_stored_every_block() || is_full_commit {
+                let key_prefix = if st.is_stored_every_block() {
+                    tree_key_prefix_with_height(st, height)
+                } else {
+                    tree_key_prefix_with_epoch(st, epoch)
+                };
+                let root_key =
+                    format!("{key_prefix}/{MERKLE_TREE_ROOT_KEY_SEGMENT}");
+                self.add_value_to_batch(
+                    block_cf,
+                    root_key,
+                    merkle_tree_stores.root(st),
+                    batch,
+                );
+                let store_key =
+                    format!("{key_prefix}/{MERKLE_TREE_STORE_KEY_SEGMENT}");
+                self.add_value_bytes_to_batch(
+                    block_cf,
+                    store_key,
+                    merkle_tree_stores.store(st).encode(),
+                    batch,
+                );
+            }
+        }
+
+        // Block header
+        if let Some(h) = header {
+            let header_key = format!("{prefix}/{BLOCK_HEADER_KEY_SEGMENT}");
+            self.add_value_to_batch(block_cf, header_key, &h, batch);
+        }
+        // Block time
+        let time_key = format!("{prefix}/{BLOCK_TIME_KEY_SEGMENT}");
+        self.add_value_to_batch(block_cf, time_key, &time, batch);
+        // Block epoch
+        let epoch_key = format!("{prefix}/{EPOCH_KEY_SEGMENT}");
+        self.add_value_to_batch(block_cf, epoch_key, &epoch, batch);
+        // Block results
+        let results_key = format!("{RESULTS_KEY_PREFIX}/{}", height.raw());
+        self.add_value_to_batch(block_cf, results_key, &results, batch);
+        // Predecessor block epochs
+        let pred_epochs_key = format!("{prefix}/{PRED_EPOCHS_KEY_SEGMENT}");
+        self.add_value_to_batch(block_cf, pred_epochs_key, &pred_epochs, batch);
+        // Address gen
+        let address_gen_key = format!("{prefix}/{ADDRESS_GEN_KEY_SEGMENT}");
+        self.add_value_to_batch(block_cf, address_gen_key, &address_gen, batch);
+
+        // Block height
+        self.add_value_to_batch(state_cf, BLOCK_HEIGHT_KEY, &height, batch);
+
+        Ok(())
+    }
+
     fn write_subspace_val(
         &mut self,
         height: BlockHeight,
@@ -1689,27 +1713,6 @@ impl DB for RocksDB {
         let store_key = format!("{key_prefix}/{MERKLE_TREE_STORE_KEY_SEGMENT}");
         batch.0.delete_cf(block_cf, store_key);
         Ok(())
-    }
-
-    fn read_bridge_pool_signed_nonce(
-        &self,
-        height: BlockHeight,
-        last_height: BlockHeight,
-    ) -> Result<Option<ethereum_events::Uint>> {
-        let nonce_key = bridge_pool::get_signed_root_key();
-        let bytes = if height == BlockHeight(0) || height >= last_height {
-            self.read_subspace_val(&nonce_key)?
-        } else {
-            self.read_subspace_val_with_height(&nonce_key, height, last_height)?
-        };
-        match bytes {
-            Some(bytes) => {
-                let bp_root_proof = BridgePoolRootProof::try_from_slice(&bytes)
-                    .map_err(Error::BorshCodingError)?;
-                Ok(Some(bp_root_proof.data.1))
-            }
-            None => Ok(None),
-        }
     }
 
     fn write_replay_protection_entry(

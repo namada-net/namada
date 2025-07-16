@@ -45,7 +45,7 @@ pub use namada_apps_lib::{
 use namada_sdk::chain::BlockHeight;
 use namada_sdk::eth_bridge::ethers::providers::{Http, Provider};
 use namada_sdk::migrations::ScheduledMigration;
-use namada_sdk::state::{DB, ProcessProposalCachedResult, StateRead};
+use namada_sdk::state::{DBRead, ProcessProposalCachedResult, StateRead};
 use namada_sdk::storage::DbColFam;
 use namada_sdk::tendermint::abci::request::CheckTxKind;
 use namada_sdk::tendermint::abci::response::ProcessProposal;

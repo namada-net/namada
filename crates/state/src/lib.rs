@@ -58,7 +58,7 @@ pub use namada_storage::conversion_state::{
 };
 pub use namada_storage::types::{KVBytes, PatternIterator, PrefixIterator};
 pub use namada_storage::{
-    BlockStateRead, BlockStateWrite, DB, DBIter, DBWriteBatch, DbError,
+    BlockStateRead, BlockStateWrite, DB, DBIter, DBRead, DBWriteBatch, DbError,
     DbResult, Error, OptionExt, Result, ResultExt, StorageHasher, StorageRead,
     StorageWrite, collections, iter_prefix, iter_prefix_bytes,
     iter_prefix_with_filter, iter_prefix_with_filter_map, mockdb, tx_queue,

@@ -115,18 +115,10 @@ pub struct BlockStateWrite<'a> {
     pub commit_only_data: &'a CommitOnlyData,
 }
 
-/// A database backend.
-pub trait DB: Debug {
+/// A database backend to read.
+pub trait DBRead: Debug {
     /// A DB's cache
     type Cache;
-    /// A handle for batch writes
-    type WriteBatch: DBWriteBatch;
-
-    /// A type placeholder for DB migration implementation.
-    type Migrator: DBUpdateVisitor<DB = Self>;
-
-    /// Source data to restore a database.
-    type RestoreSource<'a>;
 
     /// Open the database from provided path
     fn open(
@@ -140,30 +132,14 @@ pub trait DB: Debug {
         cache: Option<&Self::Cache>,
     ) -> Self;
 
-    /// Overwrite the contents of the current database
-    /// with the data read from `source`.
-    fn restore_from(&mut self, source: Self::RestoreSource<'_>) -> Result<()>;
-
     /// Get the path to the db in the filesystem,
     /// if it exists (the DB may be in-memory only)
     fn path(&self) -> Option<&std::path::Path> {
         None
     }
 
-    /// Flush data on the memory to persistent them
-    fn flush(&self, wait: bool) -> Result<()>;
-
     /// Read the last committed block's metadata
     fn read_last_block(&self) -> Result<Option<BlockStateRead>>;
-
-    /// Write block's metadata. Merkle tree sub-stores are committed only when
-    /// `is_full_commit` is `true` (typically on a beginning of a new epoch).
-    fn add_block_to_batch(
-        &self,
-        state: BlockStateWrite<'_>,
-        batch: &mut Self::WriteBatch,
-        is_full_commit: bool,
-    ) -> Result<()>;
 
     /// Read the block header with the given height from the DB
     fn read_block_header(
@@ -206,6 +182,41 @@ pub trait DB: Debug {
         height: BlockHeight,
         is_old: bool,
     ) -> Result<Option<Vec<u8>>>;
+
+    /// Read the signed nonce of Bridge Pool
+    fn read_bridge_pool_signed_nonce(
+        &self,
+        height: BlockHeight,
+        last_height: BlockHeight,
+    ) -> Result<Option<ethereum_events::Uint>>;
+}
+
+/// A database backend.
+pub trait DB: DBRead {
+    /// A handle for batch writes
+    type WriteBatch: DBWriteBatch;
+
+    /// A type placeholder for DB migration implementation.
+    type Migrator: DBUpdateVisitor<DB = Self>;
+
+    /// Source data to restore a database.
+    type RestoreSource<'a>;
+
+    /// Overwrite the contents of the current database
+    /// with the data read from `source`.
+    fn restore_from(&mut self, source: Self::RestoreSource<'_>) -> Result<()>;
+
+    /// Flush data on the memory to persistent them
+    fn flush(&self, wait: bool) -> Result<()>;
+
+    /// Write block's metadata. Merkle tree sub-stores are committed only when
+    /// `is_full_commit` is `true` (typically on a beginning of a new epoch).
+    fn add_block_to_batch(
+        &self,
+        state: BlockStateWrite<'_>,
+        batch: &mut Self::WriteBatch,
+        is_full_commit: bool,
+    ) -> Result<()>;
 
     /// Write the value with the given height and account subspace key to the
     /// DB. Returns the size difference from previous value, if any, or the
@@ -264,13 +275,6 @@ pub trait DB: Debug {
         store_type: &StoreType,
         pruned_target: Either<BlockHeight, Epoch>,
     ) -> Result<()>;
-
-    /// Read the signed nonce of Bridge Pool
-    fn read_bridge_pool_signed_nonce(
-        &self,
-        height: BlockHeight,
-        last_height: BlockHeight,
-    ) -> Result<Option<ethereum_events::Uint>>;
 
     /// Write a replay protection entry
     fn write_replay_protection_entry(

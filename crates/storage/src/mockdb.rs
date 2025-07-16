@@ -22,7 +22,8 @@ use regex::Regex;
 
 use crate::DBUpdateVisitor;
 use crate::db::{
-    BlockStateRead, BlockStateWrite, DB, DBIter, DBWriteBatch, Error, Result,
+    BlockStateRead, BlockStateWrite, DB, DBIter, DBRead, DBWriteBatch, Error,
+    Result,
 };
 use crate::types::{KVBytes, PatternIterator, PrefixIterator};
 
@@ -95,12 +96,9 @@ impl MockDB {
 /// actually restore a [`MockDB`] instance.
 pub enum MockDBRestoreSource {}
 
-impl DB for MockDB {
+impl DBRead for MockDB {
     /// There is no cache for MockDB
     type Cache = ();
-    type Migrator = ();
-    type RestoreSource<'a> = MockDBRestoreSource;
-    type WriteBatch = MockDBWriteBatch;
 
     fn open(_db_path: impl AsRef<Path>, _cache: Option<&Self::Cache>) -> Self {
         Self::default()
@@ -111,14 +109,6 @@ impl DB for MockDB {
         _cache: Option<&Self::Cache>,
     ) -> Self {
         Self::default()
-    }
-
-    fn restore_from(&mut self, source: MockDBRestoreSource) -> Result<()> {
-        match source {}
-    }
-
-    fn flush(&self, _wait: bool) -> Result<()> {
-        Ok(())
     }
 
     fn read_last_block(&self) -> Result<Option<BlockStateRead>> {
@@ -211,94 +201,6 @@ impl DB for MockDB {
             eth_events_queue,
             commit_only_data,
         }))
-    }
-
-    fn add_block_to_batch(
-        &self,
-        state: BlockStateWrite<'_>,
-        _batch: &mut Self::WriteBatch,
-        is_full_commit: bool,
-    ) -> Result<()> {
-        let BlockStateWrite {
-            merkle_tree_stores,
-            header,
-            time,
-            height,
-            epoch,
-            pred_epochs,
-            next_epoch_min_start_height,
-            next_epoch_min_start_time,
-            update_epoch_blocks_delay,
-            address_gen,
-            results,
-            conversion_state,
-            ethereum_height,
-            eth_events_queue,
-            commit_only_data,
-        }: BlockStateWrite<'_> = state;
-
-        self.write_value(
-            NEXT_EPOCH_MIN_START_HEIGHT_KEY,
-            &next_epoch_min_start_height,
-        );
-        self.write_value(
-            NEXT_EPOCH_MIN_START_TIME_KEY,
-            &next_epoch_min_start_time,
-        );
-        self.write_value(
-            UPDATE_EPOCH_BLOCKS_DELAY_KEY,
-            &update_epoch_blocks_delay,
-        );
-        self.write_value(ETHEREUM_HEIGHT_KEY, &ethereum_height);
-        self.write_value(ETH_EVENTS_QUEUE_KEY, &eth_events_queue);
-        self.write_value(CONVERSION_STATE_KEY, &conversion_state);
-        self.write_value(COMMIT_ONLY_DATA_KEY, &commit_only_data);
-
-        let prefix = height.raw();
-
-        // Merkle tree
-        for st in StoreType::iter() {
-            if st.is_stored_every_block() || is_full_commit {
-                let key_prefix = if st.is_stored_every_block() {
-                    tree_key_prefix_with_height(st, height)
-                } else {
-                    tree_key_prefix_with_epoch(st, epoch)
-                };
-                let root_key =
-                    format!("{key_prefix}/{MERKLE_TREE_ROOT_KEY_SEGMENT}");
-                self.write_value(root_key, merkle_tree_stores.root(st));
-                let store_key =
-                    format!("{key_prefix}/{MERKLE_TREE_STORE_KEY_SEGMENT}");
-                self.0
-                    .borrow_mut()
-                    .insert(store_key, merkle_tree_stores.store(st).encode());
-            }
-        }
-        // Block header
-        if let Some(h) = header {
-            let header_key = format!("{prefix}/{BLOCK_HEADER_KEY_SEGMENT}");
-            self.write_value(header_key, &h);
-        }
-        // Block time
-        let time_key = format!("{prefix}/{BLOCK_TIME_KEY_SEGMENT}");
-        self.write_value(time_key, &time);
-        // Block epoch
-        let epoch_key = format!("{prefix}/{EPOCH_KEY_SEGMENT}");
-        self.write_value(epoch_key, &epoch);
-        // Block results
-        let results_key = format!("{RESULTS_KEY_PREFIX}/{}", height.raw());
-        self.write_value(results_key, &results);
-        // Predecessor block epochs
-        let pred_epochs_key = format!("{prefix}/{PRED_EPOCHS_KEY_SEGMENT}");
-        self.write_value(pred_epochs_key, &pred_epochs);
-        // Address gen
-        let address_gen_key = format!("{prefix}/{ADDRESS_GEN_KEY_SEGMENT}");
-        self.write_value(address_gen_key, &address_gen);
-
-        // Block height
-        self.write_value(BLOCK_HEIGHT_KEY, &height);
-
-        Ok(())
     }
 
     fn read_block_header(
@@ -424,6 +326,116 @@ impl DB for MockDB {
 
             self.read_subspace_val(key)
         }
+    }
+
+    fn read_bridge_pool_signed_nonce(
+        &self,
+        _height: BlockHeight,
+        _last_height: BlockHeight,
+    ) -> Result<Option<ethereum_events::Uint>> {
+        Ok(None)
+    }
+}
+
+impl DB for MockDB {
+    type Migrator = ();
+    type RestoreSource<'a> = MockDBRestoreSource;
+    type WriteBatch = MockDBWriteBatch;
+
+    fn restore_from(&mut self, source: MockDBRestoreSource) -> Result<()> {
+        match source {}
+    }
+
+    fn flush(&self, _wait: bool) -> Result<()> {
+        Ok(())
+    }
+
+    fn add_block_to_batch(
+        &self,
+        state: BlockStateWrite<'_>,
+        _batch: &mut Self::WriteBatch,
+        is_full_commit: bool,
+    ) -> Result<()> {
+        let BlockStateWrite {
+            merkle_tree_stores,
+            header,
+            time,
+            height,
+            epoch,
+            pred_epochs,
+            next_epoch_min_start_height,
+            next_epoch_min_start_time,
+            update_epoch_blocks_delay,
+            address_gen,
+            results,
+            conversion_state,
+            ethereum_height,
+            eth_events_queue,
+            commit_only_data,
+        }: BlockStateWrite<'_> = state;
+
+        self.write_value(
+            NEXT_EPOCH_MIN_START_HEIGHT_KEY,
+            &next_epoch_min_start_height,
+        );
+        self.write_value(
+            NEXT_EPOCH_MIN_START_TIME_KEY,
+            &next_epoch_min_start_time,
+        );
+        self.write_value(
+            UPDATE_EPOCH_BLOCKS_DELAY_KEY,
+            &update_epoch_blocks_delay,
+        );
+        self.write_value(ETHEREUM_HEIGHT_KEY, &ethereum_height);
+        self.write_value(ETH_EVENTS_QUEUE_KEY, &eth_events_queue);
+        self.write_value(CONVERSION_STATE_KEY, &conversion_state);
+        self.write_value(COMMIT_ONLY_DATA_KEY, &commit_only_data);
+
+        let prefix = height.raw();
+
+        // Merkle tree
+        for st in StoreType::iter() {
+            if st.is_stored_every_block() || is_full_commit {
+                let key_prefix = if st.is_stored_every_block() {
+                    tree_key_prefix_with_height(st, height)
+                } else {
+                    tree_key_prefix_with_epoch(st, epoch)
+                };
+                let root_key =
+                    format!("{key_prefix}/{MERKLE_TREE_ROOT_KEY_SEGMENT}");
+                self.write_value(root_key, merkle_tree_stores.root(st));
+                let store_key =
+                    format!("{key_prefix}/{MERKLE_TREE_STORE_KEY_SEGMENT}");
+                self.0
+                    .borrow_mut()
+                    .insert(store_key, merkle_tree_stores.store(st).encode());
+            }
+        }
+        // Block header
+        if let Some(h) = header {
+            let header_key = format!("{prefix}/{BLOCK_HEADER_KEY_SEGMENT}");
+            self.write_value(header_key, &h);
+        }
+        // Block time
+        let time_key = format!("{prefix}/{BLOCK_TIME_KEY_SEGMENT}");
+        self.write_value(time_key, &time);
+        // Block epoch
+        let epoch_key = format!("{prefix}/{EPOCH_KEY_SEGMENT}");
+        self.write_value(epoch_key, &epoch);
+        // Block results
+        let results_key = format!("{RESULTS_KEY_PREFIX}/{}", height.raw());
+        self.write_value(results_key, &results);
+        // Predecessor block epochs
+        let pred_epochs_key = format!("{prefix}/{PRED_EPOCHS_KEY_SEGMENT}");
+        self.write_value(pred_epochs_key, &pred_epochs);
+        // Address gen
+        let address_gen_key = format!("{prefix}/{ADDRESS_GEN_KEY_SEGMENT}");
+        self.write_value(address_gen_key, &address_gen);
+
+        // Block height
+        self.write_value(BLOCK_HEIGHT_KEY, &height);
+
+        Ok(())
     }
 
     fn write_subspace_val(
@@ -598,14 +610,6 @@ impl DB for MockDB {
         let store_key = format!("{key_prefix}/{MERKLE_TREE_STORE_KEY_SEGMENT}");
         self.0.borrow_mut().remove(&store_key);
         Ok(())
-    }
-
-    fn read_bridge_pool_signed_nonce(
-        &self,
-        _height: BlockHeight,
-        _last_height: BlockHeight,
-    ) -> Result<Option<ethereum_events::Uint>> {
-        Ok(None)
     }
 
     fn write_replay_protection_entry(

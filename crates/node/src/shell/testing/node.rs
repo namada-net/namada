@@ -31,7 +31,7 @@ use namada_sdk::queries::{
     EncodedResponseQuery, RPC, RequestCtx, RequestQuery, Router,
 };
 use namada_sdk::state::{
-    DB, EPOCH_SWITCH_BLOCKS_DELAY, LastBlock, Sha256Hasher, StorageRead,
+    DBRead, EPOCH_SWITCH_BLOCKS_DELAY, LastBlock, Sha256Hasher, StorageRead,
 };
 use namada_sdk::tendermint::abci::response::Info;
 use namada_sdk::tendermint::abci::types::VoteInfo;

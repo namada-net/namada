@@ -26,8 +26,11 @@ fn apply_tx(ctx: &mut Ctx, _tx_data: BatchedTx) -> TxResult {
     let wasm_code_len_key = Key::wasm_code_len(&wasm_code_hash);
     ctx.write(&wasm_code_len_key, 30.serialize_to_vec())?;
 
-    let wasm_code_name_key = Key::wasm_code_name("test".to_string());
-    ctx.write_bytes(&wasm_code_name_key, wasm_code_name.clone())?;
+    let wasm_code_hash_key = Key::wasm_code_hash("test".to_string());
+    ctx.write_bytes(&wasm_code_hash_key, wasm_code_hash)?;
+
+    let wasm_code_name_key = Key::wasm_code_name(&wasm_code_hash);
+    ctx.write_bytes(&wasm_code_name_key, &wasm_code_name)?;
 
     let wasm_hash_key = Key::wasm_hash("test");
     ctx.write_bytes(&wasm_hash_key, wasm_code_name)?;

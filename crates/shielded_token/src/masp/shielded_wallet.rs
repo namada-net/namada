@@ -47,7 +47,7 @@ use namada_wallet::{DatedKeypair, DatedSpendingKey};
 use rand::prelude::StdRng;
 use rand_core::{OsRng, SeedableRng};
 
-use super::utils::MaspIndexedTx;
+use super::utils::{MaspIndexedTx, TrialDecrypted};
 use crate::masp::utils::MaspClient;
 use crate::masp::{
     ContextSyncStatus, Conversions, MaspAmount, MaspDataLogEntry, MaspFeeData,
@@ -146,6 +146,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         &mut self,
         masp_indexed_tx: MaspIndexedTx,
         shielded: &Transaction,
+        trial_decrypted: &TrialDecrypted,
     ) -> Result<(), eyre::Error> {
         let mut note_pos = self.tree.size();
         self.note_index.insert(masp_indexed_tx, note_pos);
@@ -166,10 +167,13 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
             self.tree.append(node).map_err(|()| {
                 eyre!("note commitment tree is full".to_string())
             })?;
-            // Finally, make it easier to construct merkle paths to this new
-            // note
-            let witness = IncrementalWitness::<Node>::from_tree(&self.tree);
-            self.witness_map.insert(note_pos, witness);
+
+            if trial_decrypted.has_indexed_tx(&masp_indexed_tx) {
+                // Finally, make it easier to construct merkle paths to this new
+                // notes that we own
+                let witness = IncrementalWitness::<Node>::from_tree(&self.tree);
+                self.witness_map.insert(note_pos, witness);
+            }
             note_pos = checked!(note_pos + 1).unwrap();
         }
         Ok(())

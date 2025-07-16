@@ -409,7 +409,11 @@ where
             if needs_witness_map_update
                 && Some(&masp_indexed_tx) > last_witnessed_tx.as_ref()
             {
-                self.ctx.update_witness_map(masp_indexed_tx, &stx_batch)?;
+                self.ctx.update_witness_map(
+                    masp_indexed_tx,
+                    &stx_batch,
+                    &self.cache.trial_decrypted,
+                )?;
             }
             let first_note_pos = self.ctx.note_index[&masp_indexed_tx];
             let mut vk_heights = BTreeMap::new();

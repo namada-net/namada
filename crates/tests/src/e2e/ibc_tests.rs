@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use base64::prelude::{BASE64_STANDARD, Engine};
 use color_eyre::eyre::Result;
-use eyre::eyre;
+use eyre::{WrapErr, eyre};
 use ibc_middleware_packet_forward::ForwardMetadata;
 use itertools::Either;
 use namada_apps_lib::client::rpc::query_storage_value_bytes;
@@ -3596,11 +3596,11 @@ fn osmosis_xcs() -> Result<()> {
 
     // Set up initial hermes configs
     let hermes_gaia_namada = setup_hermes(&test_gaia, &test_namada)
-        .map_err(|_| eyre!("failed to join thread hermes_gaia_namada"))?;
+        .wrap_err("failed to join thread hermes_gaia_namada")?;
     let hermes_gaia_osmosis = setup_hermes(&test_gaia, &test_osmosis)
-        .map_err(|_| eyre!("failed to join thread hermes_gaia_osmosis"))?;
+        .wrap_err("failed to join thread hermes_gaia_osmosis")?;
     let hermes_namada_osmosis = setup_hermes(&test_namada, &test_osmosis)
-        .map_err(|_| eyre!("failed to join thread hermes_namada_osmosis"))?;
+        .wrap_err("failed to join thread hermes_namada_osmosis")?;
     std::thread::sleep(Duration::from_secs(5));
     // Set up channels
     let (channel_from_gaia_to_namada, channel_from_namada_to_gaia) =
@@ -4061,12 +4061,12 @@ fn osmosis_xcs() -> Result<()> {
     ));
 
     // Transparently swap samoleans with nam
-    run!(
+    let mut cmd = run!(
         &test_namada,
         Bin::Client,
         [
             "osmosis-swap",
-            "--osmosis-rest-rpc",
+            "--osmosis-lcd",
             "http://localhost:1317",
             "--source",
             BERTHA,
@@ -4091,9 +4091,12 @@ fn osmosis_xcs() -> Result<()> {
             "--node",
             &rpc_namada,
         ],
-        Some(40),
-    )?
-    .assert_success();
+        Some(80),
+    )?;
+
+    // confirm trade
+    cmd.send_line("y")?;
+    cmd.assert_success();
 
     wait_for_packet_relay(
         &hermes_namada_osmosis,
@@ -4119,12 +4122,12 @@ fn osmosis_xcs() -> Result<()> {
     )?;
 
     // Perform a shielded swap of samoleans and nam
-    run!(
+    let mut cmd = run!(
         &test_namada,
         Bin::Client,
         [
             "osmosis-swap",
-            "--osmosis-rest-rpc",
+            "--osmosis-lcd",
             "http://localhost:1317",
             "--source",
             AA_VIEWING_KEY,
@@ -4156,8 +4159,11 @@ fn osmosis_xcs() -> Result<()> {
             "500000",
         ],
         Some(40),
-    )?
-    .assert_success();
+    )?;
+
+    // confirm trade
+    cmd.send_line("y")?;
+    cmd.assert_success();
 
     wait_for_packet_relay(
         &hermes_namada_osmosis,

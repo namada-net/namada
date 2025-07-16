@@ -3611,7 +3611,8 @@ pub mod args {
     pub const NO_CONVERSIONS: ArgFlag = flag("no-conversions");
     pub const NO_EXPIRATION: ArgFlag = flag("no-expiration");
     pub const NUT: ArgFlag = flag("nut");
-    pub const OSMOSIS_REST_RPC: Arg<String> = arg("osmosis-rest-rpc");
+    pub const OSMOSIS_LCD_RPC: ArgOpt<String> = arg_opt("osmosis-lcd");
+    pub const OSMOSIS_SQS_RPC: ArgOpt<String> = arg_opt("osmosis-sqs");
     pub const OUT_FILE_PATH_OPT: ArgOpt<PathBuf> = arg_opt("out-file-path");
     pub const OUTPUT: ArgOpt<PathBuf> = arg_opt("output");
     pub const OUTPUT_DENOM: Arg<String> = arg("output-denom");
@@ -3673,7 +3674,7 @@ pub mod args {
     pub const SENDER: Arg<String> = arg("sender");
     pub const SHIELDED: ArgFlag = flag("shielded");
     pub const SHOW_IBC_TOKENS: ArgFlag = flag("show-ibc-tokens");
-    pub const SLIPPAGE: ArgOpt<f64> = arg_opt("slippage-percentage");
+    pub const SLIPPAGE: ArgOpt<Dec> = arg_opt("slippage-percentage");
     pub const SIGNING_KEYS: ArgMulti<WalletPublicKey, GlobStar> =
         arg_multi("signing-keys");
     pub const SIGNATURES: ArgMulti<PathBuf, GlobStar> = arg_multi("signatures");
@@ -3734,7 +3735,6 @@ pub mod args {
     pub const WASM_DIR: ArgOpt<PathBuf> = arg_opt("wasm-dir");
     pub const WASM_PATH: ArgOpt<PathBuf> = arg_opt("wasm-path");
     pub const WEBSITE_OPT: ArgOpt<String> = arg_opt("website");
-    pub const WINDOW_SECONDS: ArgOpt<u64> = arg_opt("window-seconds");
     pub const WITH_INDEXER: ArgOpt<String> = arg_opt("with-indexer");
     pub const WRAPPER_SIGNATURE_OPT: ArgOpt<PathBuf> = arg_opt("gas-signature");
     pub const TX_PATH: Arg<PathBuf> = arg("tx-path");
@@ -5241,7 +5241,8 @@ pub mod args {
                 slippage: self.slippage,
                 local_recovery_addr: self.local_recovery_addr,
                 route: self.route,
-                osmosis_rest_rpc: self.osmosis_rest_rpc,
+                osmosis_lcd_rpc: self.osmosis_lcd_rpc,
+                osmosis_sqs_rpc: self.osmosis_sqs_rpc,
             })
         }
     }
@@ -5249,41 +5250,32 @@ pub mod args {
     impl Args for TxOsmosisSwap<CliTypes> {
         fn parse(matches: &ArgMatches) -> Self {
             let transfer = TxIbcTransfer::parse(matches);
-            let osmosis_rest_rpc = OSMOSIS_REST_RPC.parse(matches);
+            let osmosis_lcd_rpc = OSMOSIS_LCD_RPC.parse(matches);
+            let osmosis_sqs_rpc = OSMOSIS_SQS_RPC.parse(matches);
             let output_denom = OUTPUT_DENOM.parse(matches);
             let maybe_trans_recipient = TARGET_OPT.parse(matches);
             let maybe_shielded_recipient =
                 PAYMENT_ADDRESS_TARGET_OPT.parse(matches);
             let maybe_overflow = OVERFLOW_OPT.parse(matches);
             let slippage_percent = SLIPPAGE.parse(matches);
-            if slippage_percent
-                .is_some_and(|percent| !(0.0..=100.0).contains(&percent))
-            {
+            if slippage_percent.is_some_and(|percent| {
+                let zero = Dec::zero();
+                let hundred = Dec::new(100, 0).unwrap();
+
+                percent < zero || percent > hundred
+            }) {
                 panic!(
                     "The slippage percent must be a number between 0 and 100."
                 )
             }
-            let window_seconds = WINDOW_SECONDS.parse(matches);
             let minimum_amount = MINIMUM_AMOUNT.parse(matches);
             let slippage = minimum_amount
                 .map(|d| Slippage::MinOutputAmount(d.redenominate(0).amount()))
                 .or_else(|| {
                     Some(Slippage::Twap {
-                        slippage_percentage: slippage_percent
-                            .expect(
-                                "If a minimum amount was not provided, \
-                                 slippage-percentage and window-seconds must \
-                                 be specified.",
-                            )
-                            .to_string(),
-                        window_seconds: window_seconds.expect(
-                            "If a minimum amount was not provided, \
-                             slippage-percentage and window-seconds must be \
-                             specified.",
-                        ),
+                        slippage_percentage: slippage_percent?,
                     })
-                })
-                .unwrap();
+                });
             let local_recovery_addr = LOCAL_RECOVERY_ADDR.parse(matches);
             let route = match OSMOSIS_POOL_HOP.parse(matches) {
                 r if r.is_empty() => None,
@@ -5301,23 +5293,31 @@ pub mod args {
                 slippage,
                 local_recovery_addr,
                 route,
-                osmosis_rest_rpc,
+                osmosis_lcd_rpc,
+                osmosis_sqs_rpc,
             }
         }
 
         fn def(app: App) -> App {
             app.add_args::<TxIbcTransfer<CliTypes>>()
                 .arg(
-                    OSMOSIS_REST_RPC
+                    OSMOSIS_LCD_RPC
                         .def()
-                        .help(wrap!("A url pointing to an Osmosis REST rpc.")),
+                        .help(wrap!("URL pointing to an Osmosis lcd rpc.")),
                 )
-                .arg(OSMOSIS_POOL_HOP.def().help(wrap!(
-                    "Individual hop of the route to take through Osmosis \
-                     pools. This value takes the form \
-                     <osmosis-pool-id>:<pool-output-denom>. When unspecified, \
-                     the optimal route is queried on the fly."
-                )))
+                .arg(
+                    OSMOSIS_SQS_RPC
+                        .def()
+                        .help(wrap!("URL pointing to an Osmosis sqs rpc.")),
+                )
+                .arg(OSMOSIS_POOL_HOP.def().conflicts_with(SLIPPAGE.name).help(
+                    wrap!(
+                        "Individual hop of the route to take through Osmosis \
+                         pools. This value takes the form \
+                         <osmosis-pool-id>:<pool-output-denom>. When \
+                         unspecified, the optimal route is queried on the fly."
+                    ),
+                ))
                 .arg(OUTPUT_DENOM.def().help(wrap!(
                     "IBC trace path (on Namada) of the desired asset. This is \
                      a string of the form \
@@ -5353,34 +5353,21 @@ pub mod args {
                      of the trade. If unspecified, a disposable address is \
                      generated."
                 )))
-                .arg(SLIPPAGE.def().requires(WINDOW_SECONDS.name).help(wrap!(
+                .arg(SLIPPAGE.def().help(wrap!(
                     "Slippage percentage, as a number between 0 and 100. \
                      Represents the maximum acceptable deviation from the \
                      expected price during a trade."
                 )))
-                .arg(WINDOW_SECONDS.def().requires(SLIPPAGE.name).help(wrap!(
-                    "Time period (in seconds) over which the average price is \
-                     calculated."
-                )))
-                .arg(
-                    MINIMUM_AMOUNT
-                        .def()
-                        .conflicts_with(SLIPPAGE.name)
-                        .conflicts_with(WINDOW_SECONDS.name)
-                        .help(wrap!(
-                            "Minimum amount of target asset that the trade \
-                             should produce."
-                        )),
-                )
+                .arg(MINIMUM_AMOUNT.def().conflicts_with(SLIPPAGE.name).help(
+                    wrap!(
+                        "Minimum amount of target asset that the trade should \
+                         produce."
+                    ),
+                ))
                 .arg(LOCAL_RECOVERY_ADDR.def().help(wrap!(
                     "Address on Osmosis from which to recover funds in case \
                      of failure."
                 )))
-                .group(
-                    ArgGroup::new("slippage")
-                        .args([SLIPPAGE.name, MINIMUM_AMOUNT.name])
-                        .required(true),
-                )
                 .group(
                     ArgGroup::new("transfer-target")
                         .args([

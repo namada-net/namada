@@ -1,5 +1,6 @@
 //! Structures encapsulating SDK arguments
 
+use std::borrow::Cow;
 use std::fmt::Display;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -37,7 +38,7 @@ use crate::ibc::core::host::types::identifiers::{ChannelId, PortId};
 use crate::ibc::{NamadaMemo, NamadaMemoData};
 use crate::rpc::{
     get_registry_from_xcs_osmosis_contract, osmosis_denom_from_namada_denom,
-    query_ibc_denom, query_osmosis_pool_routes,
+    query_ibc_denom, query_osmosis_route_and_min_out,
 };
 use crate::signing::{SigningTxData, gen_disposable_signing_key};
 use crate::wallet::{DatedSpendingKey, DatedViewingKey};
@@ -495,7 +496,7 @@ impl FromStr for OsmosisPoolHop {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-/// Constraints on the  osmosis swap
+/// Constraints on the osmosis swap
 pub enum Slippage {
     /// Specifies the minimum amount to be received
     MinOutputAmount(Amount),
@@ -504,10 +505,7 @@ pub enum Slippage {
         /// The maximum percentage difference allowed between the estimated and
         /// actual trade price. This must be a decimal number in the range
         /// `[0, 100]`.
-        slippage_percentage: String,
-        /// The time period (in seconds) over which the average price is
-        /// calculated
-        window_seconds: u64,
+        slippage_percentage: Dec,
     },
 }
 
@@ -527,21 +525,27 @@ pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
     /// receive funds with
     pub overflow: Option<C::Address>,
     ///  Constraints on the  osmosis swap
-    pub slippage: Slippage,
+    pub slippage: Option<Slippage>,
     /// Recovery address (on Osmosis) in case of failure
     pub local_recovery_addr: String,
     /// The route to take through Osmosis pools
     pub route: Option<Vec<OsmosisPoolHop>>,
-    /// A REST rpc endpoint to Osmosis
-    pub osmosis_rest_rpc: String,
+    /// REST rpc endpoint to the Osmosis GRPC gateway
+    pub osmosis_lcd_rpc: Option<String>,
+    /// REST rpc endpoint to Osmosis SQS
+    pub osmosis_sqs_rpc: Option<String>,
 }
 
 impl TxOsmosisSwap<SdkTypes> {
     /// Create an IBC transfer from the input arguments
-    pub async fn into_ibc_transfer(
+    pub async fn into_ibc_transfer<F>(
         self,
         ctx: &impl Namada,
-    ) -> crate::error::Result<TxIbcTransfer<SdkTypes>> {
+        confirm_swap: F,
+    ) -> crate::error::Result<TxIbcTransfer<SdkTypes>>
+    where
+        F: FnOnce(&[OsmosisPoolHop], &Amount, Option<&Amount>) -> bool,
+    {
         #[derive(Serialize)]
         struct Memo {
             wasm: Wasm,
@@ -585,17 +589,24 @@ impl TxOsmosisSwap<SdkTypes> {
         }
 
         const OSMOSIS_SQS_SERVER: &str = "https://sqsprod.osmosis.zone";
+        const OSMOSIS_LCD_SERVER: &str = "https://lcd.osmosis.zone";
 
         let Self {
             mut transfer,
             recipient,
             slippage,
             local_recovery_addr,
-            route,
+            route: fixed_route,
             overflow,
-            osmosis_rest_rpc,
+            osmosis_lcd_rpc,
+            osmosis_sqs_rpc,
             output_denom: namada_output_denom,
         } = self;
+
+        let osmosis_lcd_rpc = osmosis_lcd_rpc
+            .map_or(Cow::Borrowed(OSMOSIS_LCD_SERVER), Cow::Owned);
+        let osmosis_sqs_rpc = osmosis_sqs_rpc
+            .map_or(Cow::Borrowed(OSMOSIS_SQS_SERVER), Cow::Owned);
 
         let recipient = recipient.map_either(
             |addr| addr,
@@ -616,24 +627,22 @@ impl TxOsmosisSwap<SdkTypes> {
 
         // validate `local_recovery_addr` and the contract addr
         if !bech32::decode(&local_recovery_addr)
-            .is_ok_and(|(hrp, _)| hrp.as_str() == "osmo")
+            .is_ok_and(|(hrp, data)| hrp.as_str() == "osmo" && data.len() == 20)
         {
-            // TODO: validate that addr has 20 bytes?
             return Err(Error::Other(format!(
                 "Invalid Osmosis recovery address {local_recovery_addr:?}"
             )));
         }
         if !bech32::decode(&transfer.receiver)
-            .is_ok_and(|(hrp, _)| hrp.as_str() == "osmo")
+            .is_ok_and(|(hrp, data)| hrp.as_str() == "osmo" && data.len() == 32)
         {
-            // TODO: validate that addr has 32 bytes?
             return Err(Error::Other(format!(
                 "Invalid Osmosis contract address {local_recovery_addr:?}"
             )));
         }
 
         let registry_xcs_addr = get_registry_from_xcs_osmosis_contract(
-            &osmosis_rest_rpc,
+            &osmosis_lcd_rpc,
             &transfer.receiver,
         )
         .await?;
@@ -642,7 +651,7 @@ impl TxOsmosisSwap<SdkTypes> {
             query_ibc_denom(ctx, transfer.token.to_string(), None).await;
 
         let (osmosis_input_denom, _) = osmosis_denom_from_namada_denom(
-            &osmosis_rest_rpc,
+            &osmosis_lcd_rpc,
             &registry_xcs_addr,
             &namada_input_denom,
         )
@@ -650,50 +659,37 @@ impl TxOsmosisSwap<SdkTypes> {
 
         let (osmosis_output_denom, namada_output_addr) =
             osmosis_denom_from_namada_denom(
-                &osmosis_rest_rpc,
+                &osmosis_lcd_rpc,
                 &registry_xcs_addr,
                 &namada_output_denom,
             )
             .await?;
 
-        let route = if let Some(route) = route {
-            route
-        } else {
-            query_osmosis_pool_routes(
+        let (route, trade_min_output_amount, quote) =
+            query_osmosis_route_and_min_out(
                 ctx,
                 &transfer.token,
                 &osmosis_input_denom,
                 transfer.amount,
                 &osmosis_output_denom,
-                OSMOSIS_SQS_SERVER,
+                &osmosis_sqs_rpc,
+                fixed_route,
+                slippage,
             )
-            .await?
-            .pop()
-            .ok_or_else(|| {
-                Error::Other(format!(
-                    "No route found to swap {:?} of {} with {}",
-                    transfer.amount, transfer.token, namada_output_addr,
-                ))
-            })?
-        };
+            .await?;
 
-        let (receiver, slippage, final_memo) = match recipient {
+        if !confirm_swap(&route, &trade_min_output_amount, quote.as_ref()) {
+            return Err(Error::Other("Swap has been cancelled".to_owned()));
+        }
+
+        let (receiver, final_memo) = match recipient {
             Either::Left(transparent_recipient) => {
-                (transparent_recipient.to_string(), slippage, None)
+                (transparent_recipient.encode_compat(), None)
             }
             Either::Right(fut) => {
                 let (payment_addr, overflow_receiver) = fut.await;
 
-                let amount_to_shield = match slippage {
-                    Slippage::MinOutputAmount(amount_to_shield) => {
-                        amount_to_shield
-                    }
-                    Slippage::Twap { .. } => todo!(
-                        "Cannot compute min output amount from slippage TWAP \
-                         yet"
-                    ),
-                };
-
+                let amount_to_shield = trade_min_output_amount;
                 let shielding_tx = tx::gen_ibc_shielding_transfer(
                     ctx,
                     GenIbcShieldingTransfer {
@@ -737,11 +733,7 @@ impl TxOsmosisSwap<SdkTypes> {
                     .unwrap(),
                 );
 
-                (
-                    MASP.to_string(),
-                    Slippage::MinOutputAmount(amount_to_shield),
-                    Some(memo),
-                )
+                (MASP.encode_compat(), Some(memo))
             }
         };
 
@@ -751,7 +743,9 @@ impl TxOsmosisSwap<SdkTypes> {
                 msg: Message {
                     osmosis_swap: OsmosisSwap {
                         output_denom: osmosis_output_denom,
-                        slippage,
+                        slippage: Slippage::MinOutputAmount(
+                            trade_min_output_amount,
+                        ),
                         final_memo,
                         receiver,
                         on_failed_delivery: LocalRecoveryAddr {

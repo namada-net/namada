@@ -89,7 +89,11 @@ pub trait StorageRead {
     fn get_chain_id(&self) -> Result<ChainId>;
 
     /// Getting the block height. The height is that of the block to which the
-    /// current transaction is being applied.
+    /// current transaction is being applied if we are in between the
+    /// `FinalizeBlock` and the `Commit` phases. For all the other phases we
+    /// return the block height of next block that the consensus process
+    /// will decide upon (i.e. the block height of the last committed block
+    /// + 1)
     fn get_block_height(&self) -> Result<BlockHeight>;
 
     /// Getting the block header.

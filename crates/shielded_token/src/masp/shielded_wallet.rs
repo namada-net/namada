@@ -1277,10 +1277,17 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             Some(expiration) => {
                 // Try to match a DateTime expiration with a plausible
                 // corresponding block height
-                let last_block_height = Self::query_block(context.client())
-                    .await
-                    .map_err(|e| TransferErr::General(e.to_string()))?
-                    .unwrap_or(1);
+                let last_block_height = u32::try_from(
+                    Self::query_block(context.client())
+                        .await
+                        .map_err(|e| TransferErr::General(e.to_string()))?
+                        .ok_or_else(|| {
+                            TransferErr::General(
+                                "No blocks have been produced yet".to_string(),
+                            )
+                        })?,
+                )
+                .map_err(|e| TransferErr::General(e.to_string()))?;
                 let max_block_time =
                     Self::query_max_block_time_estimate(context.client())
                         .await
@@ -1296,14 +1303,20 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                         / i64::try_from(max_block_time.0).unwrap(),
                 )
                 .map_err(|e| TransferErr::General(e.to_string()))?;
-                u32::try_from(last_block_height)
-                    .map_err(|e| TransferErr::General(e.to_string()))?
-                    + delta_blocks
+                match checked!(last_block_height + delta_blocks) {
+                    Ok(height) if height <= u32::MAX - 20 => height,
+                    _ => {
+                        return Err(TransferErr::General(
+                            "The provided expiration exceeds the maximum \
+                             allowed"
+                                .to_string(),
+                        ));
+                    }
+                }
             }
             None => {
-                // NOTE: The masp library doesn't support optional
-                // expiration so we set the max to mimic
-                // a never-expiring tx. We also need to
+                // NOTE: The masp library doesn't support optional expiration so
+                // we set the max to mimic a never-expiring tx. We also need to
                 // remove 20 which is going to be added back by the builder
                 u32::MAX - 20
             }

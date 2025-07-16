@@ -2325,7 +2325,7 @@ fn scheduled_migration() -> Result<()> {
         locked.scheduled_migration = Some(scheduled_migration);
     }
 
-    while node.block_height().0 != 4 {
+    while node.last_block_height().0 != 4 {
         node.finalize_and_commit(None)
     }
     // check that the key doesn't exist before the scheduled block

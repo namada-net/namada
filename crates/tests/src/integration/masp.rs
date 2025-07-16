@@ -15,6 +15,7 @@ use namada_apps_lib::wallet::defaults::{
 use namada_core::address::Address;
 use namada_core::dec::Dec;
 use namada_core::masp::{MaspTxId, Precision, TokenMap, encode_asset_type};
+use namada_node::shell::ResultCode;
 use namada_node::shell::testing::client::run;
 use namada_node::shell::testing::node::NodeResults;
 use namada_node::shell::testing::utils::{Bin, CapturedOutput};
@@ -4598,9 +4599,11 @@ fn multiple_unfetched_txs_same_block() -> Result<()> {
     Ok(())
 }
 
-/// Tests that an expired masp tx is rejected by the vp
+/// Tests that an expired masp tx is rejected by the vp. The transaction is
+/// applied at the first invalid height, i.e. block_height = expiration_height +
+/// 1
 #[test]
-fn expired_masp_tx() -> Result<()> {
+fn masp_tx_expiration_first_invalid_block_height() -> Result<()> {
     // This address doesn't matter for tests. But an argument is required.
     let validator_one_rpc = "http://127.0.0.1:26567";
     // Download the shielded pool parameters before starting node
@@ -4704,6 +4707,18 @@ fn expired_masp_tx() -> Result<()> {
         .native_token
         .clone();
     let mut tx = Tx::try_from_json_bytes(&tx_bytes).unwrap();
+    let masp_expiry_height = tx
+        .sections
+        .iter()
+        .find_map(|section| {
+            if let Section::MaspTx(transaction) = section {
+                Some(transaction)
+            } else {
+                None
+            }
+        })
+        .unwrap()
+        .expiry_height();
     // Remove the expiration field to avoid a failure because of it, we only
     // want to check the expiration in the masp vp
     tx.header.expiration = None;
@@ -4719,9 +4734,8 @@ fn expired_masp_tx() -> Result<()> {
     let wrapper_hash = tx.wrapper_hash();
     let inner_cmt = tx.first_commitments().unwrap();
 
-    // Skip at least 20 blocks to ensure expiration (this is because of the
-    // default masp expiration)
-    for _ in 0..=20 {
+    // Skip blocks to ensure expiration
+    while u64::from(node.block_height()) < u64::from(masp_expiry_height) {
         node.finalize_and_commit(None);
     }
     node.clear_results();
@@ -4762,6 +4776,349 @@ fn expired_masp_tx() -> Result<()> {
                 namada_sdk::address::MASP,
                 "Native VP error: MASP transaction is expired".to_string()
             )));
+        }
+    }
+
+    Ok(())
+}
+
+// Tests that an expired masp tx doing masp fee payment is rejected by the vp in
+// process proposal. The transaction is set to be applied at the first invalid
+// height, i.e. block_height = expiration_height + 1
+#[test]
+fn masp_tx_expiration_first_invalid_block_height_with_fee_payment() -> Result<()>
+{
+    // This address doesn't matter for tests. But an argument is required.
+    let validator_one_rpc = "http://127.0.0.1:26567";
+    // Download the shielded pool parameters before starting node
+    let _ = FsShieldedUtils::new(PathBuf::new());
+    let (mut node, _services) = setup::setup()?;
+    _ = node.next_epoch();
+
+    // Initialize account we can access the secret keys of. The account must
+    // have no balance to be used as a disposable gas payer
+    let (cooper_alias, cooper_key) =
+        make_temp_account(&node, validator_one_rpc, "Cooper", NAM, 0)?;
+
+    // 1. Shield tokens
+    _ = node.next_epoch();
+    run(
+        &node,
+        Bin::Client,
+        apply_use_device(vec![
+            "shield",
+            "--source",
+            ALBERT_KEY,
+            "--target",
+            AA_PAYMENT_ADDRESS,
+            "--token",
+            NAM,
+            "--amount",
+            "100",
+            "--ledger-address",
+            validator_one_rpc,
+        ]),
+    )?;
+    // sync shielded context
+    run(
+        &node,
+        Bin::Client,
+        vec!["shielded-sync", "--node", validator_one_rpc],
+    )?;
+
+    // 2. Shielded operation to avoid the need of a signature on the inner tx.
+    //    Dump the tx to then reload and submit
+    let tempdir = tempfile::tempdir().unwrap();
+
+    _ = node.next_epoch();
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "transfer",
+                "--source",
+                A_SPENDING_KEY,
+                "--target",
+                AC_PAYMENT_ADDRESS,
+                "--token",
+                NAM,
+                "--amount",
+                "50",
+                // This gas payer has no funds so we are going to use it as a
+                // disposable gas payer via the MASP
+                "--gas-payer",
+                cooper_alias.as_ref(),
+                // We want to create an expired masp tx. Doing so will also set
+                // the expiration field of the header which can
+                // be a problem because this would lead to the
+                // transaction being rejected by the
+                // protocol check while we want to test expiration in the masp
+                // vp. However, this is not a real issue: to
+                // avoid the failure in protocol we are going
+                // to overwrite the header with one having no
+                // expiration
+                "--expiration",
+                #[allow(clippy::disallowed_methods)]
+                &DateTimeUtc::now().to_string(),
+                "--output-folder-path",
+                tempdir.path().to_str().unwrap(),
+                "--dump-tx",
+                "--ledger-address",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_ok());
+
+    let file_path = tempdir
+        .path()
+        .read_dir()
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let tx_bytes = std::fs::read(&file_path).unwrap();
+    std::fs::remove_file(&file_path).unwrap();
+
+    let sk = cooper_key;
+    let pk = sk.to_public();
+
+    let native_token = node
+        .shell
+        .lock()
+        .unwrap()
+        .state
+        .in_mem()
+        .native_token
+        .clone();
+    let mut tx = Tx::try_from_json_bytes(&tx_bytes).unwrap();
+    let masp_expiry_height = tx
+        .sections
+        .iter()
+        .find_map(|section| {
+            if let Section::MaspTx(transaction) = section {
+                Some(transaction)
+            } else {
+                None
+            }
+        })
+        .unwrap()
+        .expiry_height();
+    // Remove the expiration field to avoid a failure because of it, we only
+    // want to check the expiration in the masp vp
+    tx.header.expiration = None;
+    tx.add_wrapper(
+        namada_sdk::tx::data::wrapper::Fee {
+            amount_per_gas_unit: DenominatedAmount::native(100.into()),
+            token: native_token.clone(),
+        },
+        pk.clone(),
+        DEFAULT_GAS_LIMIT.into(),
+    );
+    tx.sign_wrapper(sk.clone());
+
+    // Skip blocks to ensure expiration
+    while u64::from(node.block_height()) < u64::from(masp_expiry_height) {
+        node.finalize_and_commit(None);
+    }
+    node.clear_results();
+    node.submit_txs(vec![tx.to_bytes()]);
+    {
+        // Assert that the block was rejected in process proposal
+        let codes = node.tx_result_codes.lock().unwrap();
+        assert!(!codes.is_empty());
+
+        for code in codes.iter() {
+            match code {
+                NodeResults::Rejected(tx_result) => {
+                    assert_eq!(tx_result.code, ResultCode::FeeError.to_u32());
+                    assert!(
+                        tx_result.info.contains("MASP transaction is expired")
+                    );
+                }
+                _ => panic!("Test failed"),
+            }
+        }
+
+        let results = node.tx_results.lock().unwrap();
+        // We never made it to finalize block
+        assert!(results.is_empty());
+    }
+
+    Ok(())
+}
+
+// Tests that a masp tx applied at the last valid block before expiration
+// (block_height = expiration_height) is accepted by the vp
+#[test]
+fn masp_tx_expiration_last_valid_block_height() -> Result<()> {
+    // This address doesn't matter for tests. But an argument is required.
+    let validator_one_rpc = "http://127.0.0.1:26567";
+    // Download the shielded pool parameters before starting node
+    let _ = FsShieldedUtils::new(PathBuf::new());
+    let (mut node, _services) = setup::setup()?;
+    _ = node.next_epoch();
+
+    // Initialize accounts we can access the secret keys of
+    let (cooper_alias, cooper_key) =
+        make_temp_account(&node, validator_one_rpc, "Cooper", NAM, 500_000)?;
+
+    // 1. Shield tokens
+    _ = node.next_epoch();
+    run(
+        &node,
+        Bin::Client,
+        apply_use_device(vec![
+            "shield",
+            "--source",
+            ALBERT_KEY,
+            "--target",
+            AA_PAYMENT_ADDRESS,
+            "--token",
+            NAM,
+            "--amount",
+            "100",
+            "--ledger-address",
+            validator_one_rpc,
+        ]),
+    )?;
+    // sync shielded context
+    run(
+        &node,
+        Bin::Client,
+        vec!["shielded-sync", "--node", validator_one_rpc],
+    )?;
+
+    // 2. Shielded operation to avoid the need of a signature on the inner tx.
+    //    Dump the tx to then reload and submit
+    let tempdir = tempfile::tempdir().unwrap();
+
+    _ = node.next_epoch();
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "transfer",
+                "--source",
+                A_SPENDING_KEY,
+                "--target",
+                AC_PAYMENT_ADDRESS,
+                "--token",
+                NAM,
+                "--amount",
+                "50",
+                "--gas-payer",
+                cooper_alias.as_ref(),
+                // We want to create an expired masp tx. Doing so will also set
+                // the expiration field of the header which can
+                // be a problem because this would lead to the
+                // transaction being rejected by the
+                // protocol check while we want to test expiration in the masp
+                // vp. However, this is not a real issue: to
+                // avoid the failure in protocol we are going
+                // to overwrite the header with one having no
+                // expiration
+                "--expiration",
+                #[allow(clippy::disallowed_methods)]
+                &DateTimeUtc::now().to_string(),
+                "--output-folder-path",
+                tempdir.path().to_str().unwrap(),
+                "--dump-tx",
+                "--ledger-address",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_ok());
+
+    let file_path = tempdir
+        .path()
+        .read_dir()
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let tx_bytes = std::fs::read(&file_path).unwrap();
+    std::fs::remove_file(&file_path).unwrap();
+
+    let sk = cooper_key;
+    let pk = sk.to_public();
+
+    let native_token = node
+        .shell
+        .lock()
+        .unwrap()
+        .state
+        .in_mem()
+        .native_token
+        .clone();
+    let mut tx = Tx::try_from_json_bytes(&tx_bytes).unwrap();
+    let masp_expiry_height = tx
+        .sections
+        .iter()
+        .find_map(|section| {
+            if let Section::MaspTx(transaction) = section {
+                Some(transaction)
+            } else {
+                None
+            }
+        })
+        .unwrap()
+        .expiry_height();
+    // Remove the expiration field to avoid a failure because of it, we only
+    // want to check the expiration in the masp vp
+    tx.header.expiration = None;
+    tx.add_wrapper(
+        namada_sdk::tx::data::wrapper::Fee {
+            amount_per_gas_unit: DenominatedAmount::native(100.into()),
+            token: native_token.clone(),
+        },
+        pk.clone(),
+        DEFAULT_GAS_LIMIT.into(),
+    );
+    tx.sign_wrapper(sk.clone());
+    let wrapper_hash = tx.wrapper_hash();
+    let inner_cmt = tx.first_commitments().unwrap();
+
+    // Skip enough blocks to get to the expiry height. Remove one from the
+    // expiry height cause that will be added back in the process of producing
+    // the block with the masp tx
+    while u64::from(node.block_height()) < (u64::from(masp_expiry_height) - 1) {
+        node.finalize_and_commit(None);
+    }
+
+    node.clear_results();
+    node.submit_txs(vec![tx.to_bytes()]);
+    {
+        let codes = node.tx_result_codes.lock().unwrap();
+        // If empty then failed in process proposal
+        assert!(!codes.is_empty());
+
+        for code in codes.iter() {
+            assert!(matches!(code, NodeResults::Ok));
+        }
+
+        let results = node.tx_results.lock().unwrap();
+        // We submitted a single batch
+        assert_eq!(results.len(), 1);
+
+        for result in results.iter() {
+            // The batch should contain a single inner tx
+            assert_eq!(result.len(), 1);
+
+            let inner_tx_result = result
+                .get_inner_tx_result(
+                    wrapper_hash.as_ref(),
+                    itertools::Either::Right(inner_cmt),
+                )
+                .expect("Missing expected tx result")
+                .as_ref()
+                .expect("Result is supposed to be Ok");
+            assert!(inner_tx_result.is_accepted());
         }
     }
 

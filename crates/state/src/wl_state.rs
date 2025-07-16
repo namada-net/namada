@@ -1198,10 +1198,10 @@ where
         Ok(tree)
     }
 
-    /// Get the timestamp of the last committed block, or the current timestamp
-    /// if no blocks have been produced yet
+    /// Get the timestamp of the last committed block, or the current local
+    /// timestamp if no blocks have been produced yet
     pub fn get_last_block_timestamp(&self) -> Result<DateTimeUtc> {
-        let last_block_height = self.in_mem.get_block_height().0;
+        let last_block_height = self.in_mem.get_last_block_height();
 
         Ok(self.db.read_block_header(last_block_height)?.map_or_else(
             #[allow(clippy::disallowed_methods)]

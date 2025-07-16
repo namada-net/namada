@@ -1582,7 +1582,10 @@ where
 
 /// Getting the block height function exposed to the wasm VM Tx
 /// environment. The height is that of the block to which the current
-/// transaction is being applied.
+/// transaction is being applied if we are in between the `FinalizeBlock`
+/// and the `Commit` phases. For all the other phases we return the block height
+/// of next block that the consensus process will decide upon (i.e. the block
+/// height of the last committed block + 1)
 pub fn tx_get_block_height<MEM, D, H, CA>(
     env: &mut TxVmEnv<MEM, D, H, CA>,
 ) -> TxResult<u64>
@@ -1769,7 +1772,10 @@ where
 
 /// Getting the block height function exposed to the wasm VM VP
 /// environment. The height is that of the block to which the current
-/// transaction is being applied.
+/// transaction is being applied if we are in between the `FinalizeBlock`
+/// and the `Commit` phases. For all the other phases we return the block height
+/// of next block that the consensus process will decide upon (i.e. the block
+/// height of the last committed block + 1)
 pub fn vp_get_block_height<MEM, D, H, EVAL, CA>(
     env: &mut VpVmEnv<MEM, D, H, EVAL, CA>,
 ) -> Result<u64>

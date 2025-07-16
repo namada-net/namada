@@ -371,6 +371,15 @@ impl MockNode {
             .unwrap_or_default()
     }
 
+    pub fn last_block_height(&self) -> BlockHeight {
+        self.shell
+            .lock()
+            .unwrap()
+            .state
+            .in_mem()
+            .get_last_block_height()
+    }
+
     pub fn current_epoch(&self) -> Epoch {
         self.shell.lock().unwrap().state.in_mem().last_epoch
     }
@@ -484,9 +493,8 @@ impl MockNode {
     pub fn finalize_and_commit(&self, header_time: Option<DateTimeUtc>) {
         let (proposer_address, votes) = self.prepare_request();
 
+        let height = self.last_block_height().next_height();
         let mut locked = self.shell.lock().unwrap();
-        let height =
-            locked.state.in_mem().get_last_block_height().next_height();
 
         // check if we have protocol txs to be included
         // in the finalize block request
@@ -614,9 +622,8 @@ impl MockNode {
             }),
             ..Default::default()
         };
+        let height = self.last_block_height().next_height();
         let mut locked = self.shell.lock().unwrap();
-        let height =
-            locked.state.in_mem().get_last_block_height().next_height();
         let (result, tx_results) = locked.process_proposal(req);
 
         let mut errors: Vec<_> = tx_results

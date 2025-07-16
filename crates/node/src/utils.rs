@@ -189,7 +189,7 @@ pub fn dry_run_proposal(
 
     let gas_scale = parameters::get_gas_scale(&state)
         .expect("Failed to get gas scale from parameters");
-    let height = state.in_mem().get_last_block_height();
+    let height = state.in_mem().get_block_height().0;
 
     let mut tx = Tx::from_type(TxType::Raw);
     tx.header.chain_id = chain_id.clone();

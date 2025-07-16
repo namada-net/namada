@@ -80,7 +80,8 @@ use namada_sdk::masp::shielded_wallet::ShieldedApi;
 use namada_sdk::masp::utils::RetryStrategy;
 use namada_sdk::masp::{
     self, ContextSyncStatus, DispatcherCache, MaspTransferData,
-    ShieldedContext, ShieldedUtils, ShieldedWallet,
+    ShieldedContext, ShieldedUtils, ShieldedWallet, VersionedWallet,
+    VersionedWalletRef,
 };
 use namada_sdk::queries::{
     EncodedResponseQuery, RPC, RequestCtx, RequestQuery, Router,
@@ -804,25 +805,37 @@ impl ShieldedUtils for BenchShieldedUtils {
                 ContextSyncStatus::Speculative => SPECULATIVE_FILE_NAME,
             }
         };
-        let mut ctx_file = File::open(
+        let mut ctx_file = match File::open(
             self.context_dir.0.path().to_path_buf().join(file_name),
-        )?;
+        ) {
+            Ok(file) => file,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                // a missing file means there is nothing to load.
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
         let mut bytes = Vec::new();
         ctx_file.read_to_end(&mut bytes)?;
         // Fill the supplied context with the deserialized object
+        let wallet = match VersionedWallet::<U>::deserialize(&mut &bytes[..]) {
+            Ok(w) => w.migrate().map_err(std::io::Error::other)?,
+            Err(_) => ShieldedWallet::<U>::deserialize(&mut &bytes[..])?,
+        };
         *ctx = ShieldedWallet {
             utils: ctx.utils.clone(),
-            ..ShieldedWallet::deserialize(&mut &bytes[..])?
+            ..wallet
         };
         Ok(())
     }
 
     /// Save this shielded context into its associated context directory
-    async fn save<U: ShieldedUtils>(
-        &self,
-        ctx: &ShieldedWallet<U>,
+    async fn save<'a, U: ShieldedUtils>(
+        &'a self,
+        ctx: VersionedWalletRef<'a, U>,
+        sync_status: ContextSyncStatus,
     ) -> std::io::Result<()> {
-        let (tmp_file_name, file_name) = match ctx.sync_status {
+        let (tmp_file_name, file_name) = match sync_status {
             ContextSyncStatus::Confirmed => (TMP_FILE_NAME, FILE_NAME),
             ContextSyncStatus::Speculative => {
                 (SPECULATIVE_TMP_FILE_NAME, SPECULATIVE_FILE_NAME)
@@ -855,7 +868,7 @@ impl ShieldedUtils for BenchShieldedUtils {
 
         // Remove the speculative file if present since it's state is
         // overwritten by the confirmed one we just saved
-        if let ContextSyncStatus::Confirmed = ctx.sync_status {
+        if let ContextSyncStatus::Confirmed = sync_status {
             let _ = std::fs::remove_file(
                 self.context_dir
                     .0

@@ -109,12 +109,6 @@ where
             owner.to_string(),
             &trace_hash,
             &ibc_trace,
-        )?;
-
-        self.inner.borrow_mut().store_ibc_trace(
-            token_id,
-            &trace_hash,
-            &ibc_trace,
         )
     }
 }

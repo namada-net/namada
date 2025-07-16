@@ -2543,13 +2543,6 @@ mod tests {
             .write(&trace_key, bytes)
             .expect("write failed");
         keys_changed.insert(trace_key);
-        let trace_key = ibc_trace_key(nam().to_string(), &trace_hash);
-        let bytes = coin.denom.to_string().serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&trace_key, bytes)
-            .expect("write failed");
-        keys_changed.insert(trace_key);
         // event
         let recv_event = RecvEvent {
             sender: sender.to_string().into(),
@@ -3387,13 +3380,6 @@ mod tests {
         let ibc_trace = format!("{class_id}/{token_id}");
         let trace_hash = calc_hash(&ibc_trace);
         let trace_key = ibc_trace_key(receiver.to_string(), &trace_hash);
-        let bytes = ibc_trace.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&trace_key, bytes)
-            .expect("write failed");
-        keys_changed.insert(trace_key);
-        let trace_key = ibc_trace_key(token_id, &trace_hash);
         let bytes = ibc_trace.serialize_to_vec();
         let _ = state
             .write_log_mut()

@@ -152,15 +152,6 @@ where
             owner.to_string(),
             &trace_hash,
             &ibc_denom,
-        )?;
-
-        let base_token = Address::decode(coin.denom.base_denom.as_str())
-            .map(|a| a.to_string())
-            .unwrap_or(coin.denom.base_denom.to_string());
-        self.inner.borrow_mut().store_ibc_trace(
-            base_token,
-            &trace_hash,
-            &ibc_denom,
         )
     }
 }

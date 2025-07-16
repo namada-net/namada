@@ -1246,7 +1246,7 @@ pub async fn submit_shielded_transfer(
     )
     .await?;
     let (mut tx, signing_data) =
-        args.clone().build(namada, &mut bparams).await?;
+        args.clone().build(namada, &mut bparams, false).await?;
     let disposable_fee_payer = match signing_data.fee_payer {
         either::Either::Left((_, disposable_fee_payer)) => disposable_fee_payer,
         either::Either::Right(_) => unreachable!(),
@@ -1409,7 +1409,7 @@ pub async fn submit_unshielding_transfer(
     )
     .await?;
     let (mut tx, signing_data) =
-        args.clone().build(namada, &mut bparams).await?;
+        args.clone().build(namada, &mut bparams, false).await?;
     let disposable_fee_payer = match signing_data.fee_payer {
         either::Either::Left((_, disposable_fee_payer)) => disposable_fee_payer,
         either::Either::Right(_) => unreachable!(),
@@ -1493,7 +1493,7 @@ where
     // If transaction building fails for any reason, then abort the process
     // blaming MASP build parameter generation if that had also failed.
     let (mut tx, signing_data, _) = args
-        .build(namada, &mut bparams)
+        .build(namada, &mut bparams, false)
         .await
         .map_err(|e| bparams_err.unwrap_or(e))?;
     let disposable_fee_payer = match signing_data.fee_payer {

@@ -362,8 +362,10 @@ impl TxShieldedTransfer {
         &mut self,
         context: &impl Namada,
         bparams: &mut impl BuildParams,
+        skip_fee_handling: bool,
     ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
-        tx::build_shielded_transfer(context, self, bparams).await
+        tx::build_shielded_transfer(context, self, bparams, skip_fee_handling)
+            .await
     }
 }
 
@@ -458,8 +460,15 @@ impl TxUnshieldingTransfer {
         &mut self,
         context: &impl Namada,
         bparams: &mut impl BuildParams,
+        skip_fee_handling: bool,
     ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
-        tx::build_unshielding_transfer(context, self, bparams).await
+        tx::build_unshielding_transfer(
+            context,
+            self,
+            bparams,
+            skip_fee_handling,
+        )
+        .await
     }
 }
 
@@ -920,9 +929,10 @@ impl TxIbcTransfer {
         &self,
         context: &impl Namada,
         bparams: &mut impl BuildParams,
+        skip_fee_handling: bool,
     ) -> crate::error::Result<(namada_tx::Tx, SigningTxData, Option<MaspEpoch>)>
     {
-        tx::build_ibc_transfer(context, self, bparams).await
+        tx::build_ibc_transfer(context, self, bparams, skip_fee_handling).await
     }
 }
 

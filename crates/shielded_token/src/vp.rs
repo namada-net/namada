@@ -445,14 +445,6 @@ where
                 }
                 Some(pk) => {
                     let signer = Address::from(pk);
-                    if !verifiers.contains(&signer) {
-                        let error = Error::new_alloc(format!(
-                            "The required vp of address {signer} was not \
-                             triggered"
-                        ));
-                        tracing::debug!("{error}");
-                        return Err(error);
-                    }
                     if !actions_authorizers.swap_remove(&signer) {
                         let error = Error::new_const(
                             "Shielding fee payer is not in the authorizer set",

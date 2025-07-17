@@ -36,7 +36,7 @@ use namada_core::masp::{
 use namada_core::task_env::TaskEnvironment;
 use namada_core::time::{DateTimeUtc, DurationSecs};
 use namada_core::token::{
-    Amount, Change, DenominatedAmount, Denomination, MaspDigitPos,
+    Amount, Change, DenominatedAmount, Denomination, Fraction, MaspDigitPos,
 };
 use namada_io::client::Client;
 use namada_io::{
@@ -396,7 +396,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         conv: AllowedConversion,
         asset_type: AssetType,
         value: i128,
-        usage: &mut i128,
+        usage: &mut I128Sum,
         input: &mut I128Sum,
         output: &mut I128Sum,
     ) -> Result<(), eyre::Error> {
@@ -423,12 +423,12 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         // Forget about the trace amount left over because we cannot
         // realize its value
         let trace = I128Sum::from_pair(asset_type, value % threshold);
-        match checked!(input + &(conv * required) - &trace) {
+        match checked!(input + &(conv * &required) - &trace) {
             // If applying the conversion does not overflow or result in
             // negative input
             Ok(new_input) if new_input >= I128Sum::zero() => {
                 // Record how much more of the given conversion has been used
-                *usage += required;
+                *usage += ValueSum::from_pair(asset_type, required);
                 // Apply conversions to input and move trace amount to output
                 *input = new_input;
                 *output += trace;
@@ -662,7 +662,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         self.asset_types.insert(asset_type, asset_data.clone());
         // If the conversion is 0, then we just have a pure decoding
         if !conv.is_zero() {
-            conv_entry.insert((conv.into(), path, 0));
+            conv_entry.insert((conv.into(), path));
         }
         Ok(())
     }
@@ -677,13 +677,15 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         client: &(impl Client + Sync),
         io: &impl Io,
         mut input: I128Sum,
-        mut conversions: Conversions,
-    ) -> Result<(I128Sum, Conversions), eyre::Error> {
+        conversions: &mut Conversions,
+    ) -> Result<(I128Sum, I128Sum), eyre::Error> {
+        // Where we will track the conversion usages
+        let mut usage = I128Sum::zero();
         // Where we will store our exchanged value
         let mut output = I128Sum::zero();
         // Repeatedly exchange assets until it is no longer possible
         while let Some(asset_type) = input.asset_types().next().cloned() {
-            self.query_allowed_conversion(client, asset_type, &mut conversions)
+            self.query_allowed_conversion(client, asset_type, conversions)
                 .await?;
             // Consolidate the current amount with any dust from output.
             // Whatever is not used is moved back to output anyway.
@@ -691,8 +693,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             input += dust.clone();
             output -= dust;
             // Now attempt to apply conversions
-            if let Some((conv, _wit, usage)) = conversions.get_mut(&asset_type)
-            {
+            if let Some((conv, _wit)) = conversions.get_mut(&asset_type) {
                 display_line!(
                     io,
                     "converting current asset type to latest asset type..."
@@ -705,7 +706,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                     conv.clone(),
                     asset_type,
                     input[&asset_type],
-                    usage,
+                    &mut usage,
                     &mut input,
                     &mut output,
                 )
@@ -717,7 +718,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 input -= comp;
             }
         }
-        Ok((output, conversions))
+        Ok((output, usage))
     }
 
     /// Compute the total unspent notes associated with the viewing key in the
@@ -734,66 +735,18 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         // First get the unexchanged balance
         if let Some(balance) = self.compute_shielded_balance(vk).await? {
             let exchanged_amount = self
-                .compute_exchanged_amount(client, io, balance, BTreeMap::new())
+                .compute_exchanged_amount(
+                    client,
+                    io,
+                    balance,
+                    &mut Conversions::new(),
+                )
                 .await?
                 .0;
             // And then exchange balance into current asset types
             Ok(Some(exchanged_amount))
         } else {
             Ok(None)
-        }
-    }
-
-    /// Determine if using the current note would actually bring us closer to
-    /// our target. Returns the contribution of the current note to the
-    /// target if so.
-    #[allow(async_fn_in_trait)]
-    async fn is_amount_required(
-        &mut self,
-        client: &(impl Client + Sync),
-        // NB: value accumulated thus far
-        src: ValueSum<(MaspDigitPos, Address), i128>,
-        // NB: the target amount remaining
-        dest: ValueSum<(MaspDigitPos, Address), i128>,
-        // NB: current contribution (from a note + rewards if any)
-        delta: I128Sum,
-    ) -> Option<ValueSum<(MaspDigitPos, Address), i128>> {
-        // If the delta causes any regression, then do not use it
-        if delta < I128Sum::zero() {
-            return None;
-        }
-
-        let gap = dest.clone() - src;
-
-        // Decode the assets in delta; any undecodable assets
-        // will end up in `_rem_delta`
-        let (decoded_delta, _rem_delta) = self.decode_sum(client, delta).await;
-
-        // Find any component in the delta that may help
-        // close the gap with dest
-        let any_component_closes_gap =
-            decoded_delta.components().any(|((_, asset_data), value)| {
-                *value > 0
-                    && gap
-                        .get(&(asset_data.position, asset_data.token.clone()))
-                        .is_positive()
-            });
-
-        if any_component_closes_gap {
-            // Convert the delta into Namada amounts
-            let converted_delta = decoded_delta.components().fold(
-                ValueSum::zero(),
-                |accum, ((_, asset_data), value)| {
-                    accum
-                        + ValueSum::from_pair(
-                            (asset_data.position, asset_data.token.clone()),
-                            *value,
-                        )
-                },
-            );
-            Some(converted_delta)
-        } else {
-            None
         }
     }
 
@@ -836,7 +789,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 context.client(),
                 context.io(),
                 raw_balance.to_owned(),
-                Conversions::new(),
+                &mut Conversions::new(),
             )
             .await?
             .0;
@@ -870,7 +823,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
 
         let mut estimated_next_epoch_conversions = Conversions::new();
         // re-date the all the latest conversions up one epoch
-        for (asset_type, (conv, wit, _)) in latest_conversions {
+        for (asset_type, (conv, wit)) in latest_conversions {
             let asset = self
                 .decode_asset_type(context.client(), asset_type)
                 .await
@@ -903,7 +856,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             }
             estimated_next_epoch_conversions.insert(
                 asset.redate_to_next_epoch().encode().unwrap(),
-                (AllowedConversion::from(est_conv), wit.clone(), 0),
+                (AllowedConversion::from(est_conv), wit.clone()),
             );
         }
 
@@ -913,7 +866,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 context.client(),
                 context.io(),
                 current_exchanged_balance.clone(),
-                estimated_next_epoch_conversions,
+                &mut estimated_next_epoch_conversions,
             )
             .await?
             .0;
@@ -1020,10 +973,187 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             .map(DenominatedAmount::native)
     }
 
-    /// Collect enough unspent notes in this context to exceed the given amount
-    /// of the specified asset type. Return the total value accumulated plus
-    /// notes and the corresponding diversifiers/merkle paths that were used to
-    /// achieve the total value. Updates the changes map.
+    /// Select an exchanged note to bring the transaction inputs closer to the
+    /// target. Essentially choose the first note that takes the accumulator
+    /// closesr to the target.
+    #[allow(clippy::type_complexity)]
+    fn select_note_naive(
+        exchanged_notes: &BTreeMap<
+            usize,
+            (
+                Note,
+                I128Sum,
+                I128Sum,
+                ValueSum<(MaspDigitPos, Address), i128>,
+            ),
+        >,
+        _weights: &ValueSum<(MaspDigitPos, Address), Fraction<i128>>,
+        namada_acc: &ValueSum<(MaspDigitPos, Address), i128>,
+        target: ValueSum<(MaspDigitPos, Address), i128>,
+    ) -> Option<usize> {
+        // How much do we still need in order to arrive at target?
+        let gap = ValueSum::zero().sup(&(target - namada_acc));
+
+        // Iterate through the notes tracking the current best
+        for (idx, (_note, _usages, _contr, namada_contr)) in exchanged_notes {
+            // Find the intersection between this note's contribution and what
+            // what remains for hitting the target
+            let intersect = namada_contr.inf(&gap);
+            // Only consider this exchanged note if it's better than whats
+            if intersect > ValueSum::zero() {
+                return Some(*idx);
+            }
+        }
+        None
+    }
+
+    /// Select an exchanged note to bring the transaction inputs closer to the
+    /// target. Essentially choose the note that takes the accumulator closest
+    /// to the target.
+    #[allow(clippy::type_complexity)]
+    fn select_note_greedy(
+        exchanged_notes: &BTreeMap<
+            usize,
+            (
+                Note,
+                I128Sum,
+                I128Sum,
+                ValueSum<(MaspDigitPos, Address), i128>,
+            ),
+        >,
+        weights: &ValueSum<(MaspDigitPos, Address), Fraction<i128>>,
+        namada_acc: &ValueSum<(MaspDigitPos, Address), i128>,
+        target: ValueSum<(MaspDigitPos, Address), i128>,
+    ) -> Option<usize> {
+        let mut max_coverage = 0;
+        let mut note_idx = None;
+        // How much do we still need in order to arrive at target?
+        let gap = ValueSum::zero().sup(&(target - namada_acc));
+
+        // Iterate through the notes tracking the current best
+        for (idx, (_note, _usages, _contr, namada_contr)) in exchanged_notes {
+            // Find the intersection between this note's contribution and what
+            // what remains for hitting the target
+            let intersect = namada_contr.inf(&gap);
+            // Compute the amount this note covers using double negation to
+            // round up the results
+            let coverage = -(weights.clone() * -intersect);
+            // Only consider this exchanged note if it's better than what's
+            // there
+            if coverage > max_coverage {
+                max_coverage = coverage;
+                note_idx = Some(*idx);
+            }
+        }
+        note_idx
+    }
+
+    /// Minimizing the number of notes used in a a multi-currency setting
+    /// involves deciding whether to take one asset or another. To facilitate
+    /// comparing quantities of different assets with different denominations,
+    /// normalize them into fractions of the target amount. Hence the
+    /// construction of weights with which to normalize.
+    fn compute_asset_weights(
+        target: &ValueSum<(MaspDigitPos, Address), i128>,
+    ) -> ValueSum<(MaspDigitPos, Address), Fraction<i128>> {
+        const PRECISION: i128 = 100000000000000000000;
+        let mut weights = ValueSum::zero();
+
+        for (asset_type, val) in target.components() {
+            // Quantities not in the target do not contribute to note scores
+            if *val != 0 {
+                // Use precision as the numerator to avoid the resulting
+                // normalizations being rounded down to zero.
+                let weight = Fraction::new(PRECISION, *val);
+                weights += ValueSum::from_pair(asset_type.clone(), weight);
+            }
+        }
+        weights
+    }
+
+    /// Collect all unspent notes for the given key and apply all possible
+    /// conversions to them.
+    #[allow(async_fn_in_trait)]
+    async fn exchange_notes(
+        &mut self,
+        context: &impl NamadaIo,
+        spent_notes: &mut SpentNotesTracker,
+        vk: &ViewingKey,
+        conversions: &mut Conversions,
+    ) -> Result<
+        BTreeMap<
+            usize,
+            (
+                Note,
+                I128Sum,
+                I128Sum,
+                ValueSum<(MaspDigitPos, Address), i128>,
+            ),
+        >,
+        eyre::Error,
+    > {
+        let mut exchanged_notes = BTreeMap::new();
+        // Retrieve the notes that can be spent by this key
+        let Some(avail_notes) = self.pos_map.get(vk).cloned() else {
+            return Ok(exchanged_notes);
+        };
+        // Collect the notes that could potentially be used in the transaction
+        for note_idx in &avail_notes {
+            // Spent notes from the shielded context (i.e. from previous
+            // transactions) cannot contribute a new transaction's pool.
+            // Also skip spend notes already used in this transaction
+            if spent_notes
+                .get(vk)
+                .is_some_and(|set| set.contains(note_idx))
+                || self.spents.contains(note_idx)
+            {
+                continue;
+            }
+            // Get note, merkle path, diversifier associated with this ID
+            let note = *self
+                .note_map
+                .get(note_idx)
+                .ok_or_else(|| eyre!("Unable to get note {note_idx}"))?;
+
+            // The amount contributed by this note before conversion
+            let pre_contr =
+                I128Sum::from_pair(note.asset_type, i128::from(note.value));
+            let (contr, usages) = self
+                .compute_exchanged_amount(
+                    context.client(),
+                    context.io(),
+                    pre_contr,
+                    conversions,
+                )
+                .await?;
+
+            // Decode the assets in delta; any undecodable assets
+            // will end up in `_rem_delta`
+            let (decoded_delta, _rem_delta) =
+                self.decode_sum(context.client(), contr.clone()).await;
+
+            // Convert the delta into Namada amounts
+            let converted_delta = decoded_delta.components().fold(
+                ValueSum::zero(),
+                |accum, ((_, asset_data), value)| {
+                    accum
+                        + ValueSum::from_pair(
+                            (asset_data.position, asset_data.token.clone()),
+                            *value,
+                        )
+                },
+            );
+            // Store additional information about the current note
+            exchanged_notes
+                .insert(*note_idx, (note, usages, contr, converted_delta));
+        }
+        Ok(exchanged_notes)
+    }
+
+    /// Collect enough relevant unspent notes in this context to exceed the
+    /// given amount of the specified asset type. Return the total value
+    /// accumulated plus notes and the corresponding diversifiers/merkle paths
+    /// that were used to achieve the total value. Updates the changes map.
     #[allow(clippy::too_many_arguments)]
     #[allow(async_fn_in_trait)]
     async fn collect_unspent_notes(
@@ -1037,98 +1167,67 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             I128Sum,
             Vec<(Diversifier, Note, MerklePath<Node>)>,
             Conversions,
+            I128Sum,
         ),
         eyre::Error,
     > {
         let vk = &sk.to_viewing_key().fvk.vk;
-        // TODO: we should try to use the smallest notes possible to fund the
-        // transaction to allow people to fetch less often
-        // Establish connection with which to do exchange rate queries
-        let mut conversions = BTreeMap::new();
+        let mut conversions = Conversions::new();
         let mut namada_acc = ValueSum::zero();
         let mut masp_acc = I128Sum::zero();
         let mut notes = Vec::new();
+        let mut usages = I128Sum::zero();
 
-        // Retrieve the notes that can be spent by this key
-        if let Some(avail_notes) = self.pos_map.get(vk).cloned() {
-            for note_idx in &avail_notes {
-                // Skip spend notes already used in this transaction
-                if spent_notes
-                    .get(vk)
-                    .is_some_and(|set| set.contains(note_idx))
-                {
-                    continue;
-                }
-                // No more transaction inputs are required once we have met
-                // the target amount
-                if namada_acc >= target {
-                    break;
-                }
-                // Spent notes from the shielded context (i.e. from previous
-                // transactions) cannot contribute a new transaction's pool
-                if self.spents.contains(note_idx) {
-                    continue;
-                }
-                // Get note, merkle path, diversifier associated with this ID
-                let note = *self
-                    .note_map
-                    .get(note_idx)
-                    .ok_or_else(|| eyre!("Unable to get note {note_idx}"))?;
-
-                // The amount contributed by this note before conversion
-                let pre_contr =
-                    I128Sum::from_pair(note.asset_type, i128::from(note.value));
-                let (contr, proposed_convs) = self
-                    .compute_exchanged_amount(
-                        context.client(),
-                        context.io(),
-                        pre_contr,
-                        conversions.clone(),
-                    )
-                    .await?;
-
-                // Use this note only if it brings us closer to our target
-                if let Some(namada_contr) = self
-                    .is_amount_required(
-                        context.client(),
-                        namada_acc.clone(),
-                        target.clone(),
-                        contr.clone(),
-                    )
-                    .await
-                {
-                    // Be sure to record the conversions used in computing
-                    // accumulated value
-                    masp_acc += contr;
-                    namada_acc += namada_contr;
-
-                    // Commit the conversions that were used to exchange
-                    conversions = proposed_convs;
-                    let merkle_path = self
-                        .witness_map
-                        .get(note_idx)
-                        .ok_or_else(|| eyre!("Unable to get note {note_idx}"))?
-                        .path()
-                        .ok_or_else(|| {
-                            eyre!("Unable to get path: {}", line!())
-                        })?;
-                    let diversifier =
-                        self.div_map.get(note_idx).ok_or_else(|| {
-                            eyre!("Unable to get note {note_idx}")
-                        })?;
-                    // Commit this note to our transaction
-                    notes.push((*diversifier, note, merkle_path));
-                    // Append the note the list of used ones
-                    spent_notes
-                        .entry(vk.to_owned())
-                        .and_modify(|set| {
-                            set.insert(*note_idx);
-                        })
-                        .or_insert([*note_idx].into_iter().collect());
-                }
+        // Collect all unspent notes and exchange them
+        let mut exchanged_notes = self
+            .exchange_notes(context, spent_notes, vk, &mut conversions)
+            .await?;
+        // Compute the weights used to normalize the remaining amount
+        // computations
+        let weights = Self::compute_asset_weights(&target);
+        // Finally choose and apply notes in order to meet the target amount
+        while let Some(note_idx) = Self::select_note_greedy(
+            &exchanged_notes,
+            &weights,
+            &namada_acc,
+            target.clone(),
+        ) {
+            // No more transaction inputs are required once we have met
+            // the target amount
+            if namada_acc >= target {
+                break;
             }
+
+            // Be sure to record the conversions used in computing
+            // accumulated value
+            let (note, proposed_usages, contr, namada_contr) =
+                exchanged_notes.remove(&note_idx).unwrap();
+            masp_acc += contr;
+            namada_acc += namada_contr;
+
+            // Commit the conversions that were used to exchange
+            usages += proposed_usages;
+            let merkle_path = self
+                .witness_map
+                .get(&note_idx)
+                .ok_or_else(|| eyre!("Unable to get note {note_idx}"))?
+                .path()
+                .ok_or_else(|| eyre!("Unable to get path: {}", line!()))?;
+            let diversifier = self
+                .div_map
+                .get(&note_idx)
+                .ok_or_else(|| eyre!("Unable to get note {note_idx}"))?;
+            // Commit this note to our transaction
+            notes.push((*diversifier, note, merkle_path));
+            // Append the note the list of used ones
+            spent_notes
+                .entry(vk.to_owned())
+                .and_modify(|set| {
+                    set.insert(note_idx);
+                })
+                .or_insert([note_idx].into_iter().collect());
         }
-        Ok((masp_acc, notes, conversions))
+        Ok((masp_acc, notes, conversions, usages))
     }
 
     /// Convert an amount whose units are AssetTypes to one whose units are
@@ -1676,7 +1775,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             );
             // Locate unspent notes that can help us meet the transaction
             // amount
-            let (added_amt, unspent_notes, used_convs) = self
+            let (added_amt, unspent_notes, used_convs, usages) = self
                 .collect_unspent_notes(
                     context,
                     notes_tracker,
@@ -1719,12 +1818,13 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                     })?;
             }
             // Commit the conversion notes used during summation
-            for (conv, wit, value) in used_convs.values() {
+            for (asset_type, (conv, wit)) in used_convs {
+                let value = usages.get(&asset_type);
                 if value.is_positive() {
                     builder
                         .add_sapling_convert(
                             conv.clone(),
-                            *value as u64,
+                            value as u64,
                             wit.clone(),
                         )
                         .map_err(|e| TransferErr::Build {
@@ -2155,7 +2255,7 @@ mod test_shielded_wallet {
                 context.client(),
                 context.io(),
                 balance,
-                Conversions::new(),
+                &mut Conversions::new(),
             )
             .await
             .unwrap()

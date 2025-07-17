@@ -11,9 +11,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  MINOR_VERSION_RELEASE: "0.150.999" # bump on a major release
-  BACKPORT_LIBS_LABEL: "backport-libs-0.150" # also bump on major release
-  MAINT_LIBS_BRANCH: "maint-libs-0.150" # also bump on major release
+  MINOR_VERSION_RELEASE: "0.251.999" # bump on a major release
+  BACKPORT_LIBS_LABEL: "backport-libs-0.251" # also bump on major release
+  MAINT_LIBS_BRANCH: "maint-libs-0.251" # also bump on major release
 
 jobs:
   # Check if a PR has no major breaking changes to be backported to library

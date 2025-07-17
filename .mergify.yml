@@ -10,19 +10,19 @@ queue_rules:
     merge_method: merge
     autosquash: true   
 
-  - name: backport-apps-101.1-queue
+  - name: backport-apps-201.0-queue
     batch_size: 3
     queue_conditions:
       - "#approved-reviews-by >= 1"
-      - base = maint-101.1
+      - base = maint-201.0
     merge_method: merge
     autosquash: true   
 
-  - name: backport-libs-0.150-queue
+  - name: backport-libs-0.251-queue
     batch_size: 3
     queue_conditions:
       - "#approved-reviews-by >= 1"
-      - base = maint-libs-0.150
+      - base = maint-libs-0.251
     merge_method: merge
     autosquash: true   
 
@@ -34,8 +34,8 @@ pull_request_rules:
       - "#approved-reviews-by >= 1"
       - or:
         - base = main
-        - base = maint-101.1
-        - base = maint-libs-0.150
+        - base = maint-201.0
+        - base = maint-libs-0.251
     actions:
       queue:
 
@@ -52,18 +52,18 @@ pull_request_rules:
           Sorry about that, but you can requeue the PR by using `@mergifyio requeue`
           if you think this was a mistake.
 
-  - name: backport PR to apps 101.1 lane
+  - name: backport PR to apps 201.0 lane
     conditions:
-      - label = backport-101.1
+      - label = backport-201.0
     actions:
       backport:
         branches:
-          - "maint-101.1"
+          - "maint-201.0"
 
-  - name: backport PR to libs 0.150 lane
+  - name: backport PR to libs 0.251 lane
     conditions:
-      - label = backport-libs-0.150
+      - label = backport-libs-0.251
     actions:
       backport:
         branches:
-          - "maint-libs-0.150"
+          - "maint-libs-0.251"

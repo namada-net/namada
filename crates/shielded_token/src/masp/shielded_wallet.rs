@@ -1041,25 +1041,20 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         spent_notes: &mut SpentNotesTracker,
         sk: PseudoExtendedKey,
         target: ValueSum<(MaspDigitPos, Address), i128>,
+        conversions: &mut Conversions,
+        usages: &mut I128Sum,
     ) -> Result<
-        (
-            I128Sum,
-            Vec<(Diversifier, Note, MerklePath<Node>)>,
-            Conversions,
-            I128Sum,
-        ),
+        (I128Sum, Vec<(Diversifier, Note, MerklePath<Node>)>),
         eyre::Error,
     > {
         let vk = &sk.to_viewing_key().fvk.vk;
-        let mut conversions = Conversions::new();
         let mut namada_acc = ValueSum::zero();
         let mut masp_acc = I128Sum::zero();
         let mut notes = Vec::new();
-        let mut usages = I128Sum::zero();
 
         // Collect all unspent notes and exchange them
         let mut exchanged_notes = self
-            .exchange_notes(context, spent_notes, vk, &mut conversions)
+            .exchange_notes(context, spent_notes, vk, conversions)
             .await?;
         // Compute the weights used to normalize the remaining amount
         // computations
@@ -1085,7 +1080,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             namada_acc += namada_contr;
 
             // Commit the conversions that were used to exchange
-            usages += proposed_usages;
+            *usages += proposed_usages;
             let merkle_path = self
                 .witness_map
                 .get(&note_idx)
@@ -1106,7 +1101,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 })
                 .or_insert([note_idx].into_iter().collect());
         }
-        Ok((masp_acc, notes, conversions, usages))
+        Ok((masp_acc, notes))
     }
 
     /// Convert an amount whose units are AssetTypes to one whose units are
@@ -1315,6 +1310,10 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             return Ok(None);
         };
 
+        // Track the conversions used across spending keys
+        let mut conversions = Conversions::new();
+        let mut usages = I128Sum::zero();
+        // Commit all the transaction inputs sans conversions
         for (source, amount) in &source_data {
             self.add_inputs(
                 context,
@@ -1324,10 +1323,27 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 epoch,
                 &mut denoms,
                 &mut notes_tracker,
+                &mut conversions,
+                &mut usages,
             )
             .await?;
         }
-
+        // Commit the consolidated conversion notes from the summations
+        for (asset_type, (conv, wit)) in conversions {
+            let value = usages.get(&asset_type);
+            if value.is_positive() {
+                builder
+                    .add_sapling_convert(
+                        conv.clone(),
+                        value as u64,
+                        wit.clone(),
+                    )
+                    .map_err(|e| TransferErr::Build {
+                        error: builder::Error::SaplingBuild(e),
+                    })?;
+            }
+        }
+        // Commit the transaction outputs
         for (target, amount) in target_data {
             self.add_outputs(
                 context,
@@ -1584,6 +1600,8 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         epoch: MaspEpoch,
         denoms: &mut HashMap<Address, Denomination>,
         notes_tracker: &mut SpentNotesTracker,
+        conversions: &mut Conversions,
+        usages: &mut I128Sum,
     ) -> Result<Option<I128Sum>, TransferErr> {
         // We want to fund our transaction solely from supplied spending key
         let spending_key = source.spending_key();
@@ -1639,12 +1657,14 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             );
             // Locate unspent notes that can help us meet the transaction
             // amount
-            let (added_amt, unspent_notes, used_convs, usages) = self
+            let (added_amt, unspent_notes) = self
                 .collect_unspent_notes(
                     context,
                     notes_tracker,
                     sk,
                     required_amt.clone(),
+                    conversions,
+                    usages,
                 )
                 .await
                 .map_err(|e| TransferErr::General(e.to_string()))?;
@@ -1680,21 +1700,6 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                     .map_err(|e| TransferErr::Build {
                         error: builder::Error::SaplingBuild(e),
                     })?;
-            }
-            // Commit the conversion notes used during summation
-            for (asset_type, (conv, wit)) in used_convs {
-                let value = usages.get(&asset_type);
-                if value.is_positive() {
-                    builder
-                        .add_sapling_convert(
-                            conv.clone(),
-                            value as u64,
-                            wit.clone(),
-                        )
-                        .map_err(|e| TransferErr::Build {
-                            error: builder::Error::SaplingBuild(e),
-                        })?;
-                }
             }
 
             Some(added_amt)

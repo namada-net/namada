@@ -331,6 +331,7 @@ impl Finalized {
             epochs_per_year,
             masp_epoch_multiplier,
             masp_fee_payment_gas_limit,
+            masp_nam_shielding_fee,
             gas_scale,
             max_block_gas,
             minimum_gas_price,
@@ -373,6 +374,7 @@ impl Finalized {
             masp_epoch_multiplier,
             max_proposal_bytes,
             masp_fee_payment_gas_limit,
+            masp_nam_shielding_fee: masp_nam_shielding_fee.amount(),
             gas_scale,
             max_block_gas,
             minimum_gas_price: minimum_gas_price

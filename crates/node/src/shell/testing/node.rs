@@ -8,10 +8,13 @@ use std::task::Poll;
 
 use color_eyre::eyre::{Report, Result};
 use data_encoding::HEXUPPER;
+use eyre::{WrapErr, eyre};
 use itertools::Either;
 use lazy_static::lazy_static;
+use namada_apps_lib::cli::Context;
+use namada_apps_lib::cli::args::Global;
 use namada_sdk::address::Address;
-use namada_sdk::chain::{BlockHeader, BlockHeight, Epoch};
+use namada_sdk::chain::{BlockHeader, BlockHeight, ChainId, Epoch};
 use namada_sdk::collections::HashMap;
 use namada_sdk::control_flow::time::Duration;
 use namada_sdk::eth_bridge::oracle::config::Config as OracleConfig;
@@ -21,7 +24,7 @@ use namada_sdk::events::extend::Height as HeightAttr;
 use namada_sdk::events::log::dumb_queries;
 use namada_sdk::hash::Hash;
 use namada_sdk::io::Client;
-use namada_sdk::key::tm_consensus_key_raw_hash;
+use namada_sdk::key::{common, tm_consensus_key_raw_hash};
 use namada_sdk::proof_of_stake::storage::{
     read_consensus_validator_set_addresses_with_stake, read_pos_params,
     validator_consensus_key_handle,
@@ -49,7 +52,7 @@ use crate::ethereum_oracle::test_tools::mock_web3_client::{
 use crate::ethereum_oracle::{
     control, last_processed_block, try_process_eth_events,
 };
-use crate::shell::testing::utils::TestDir;
+use crate::shell::testing::utils::{TestDir, TestingIo};
 use crate::shell::token::MaspEpoch;
 use crate::shell::{EthereumOracleChannels, Shell};
 use crate::shims::abcipp_shim_types::shim::request::{
@@ -307,6 +310,10 @@ impl Drop for SalvageableTestDir {
 }
 
 impl MockNode {
+    pub fn chain_id(&self) -> ChainId {
+        self.shell.lock().unwrap().chain_id.clone()
+    }
+
     pub async fn handle_service_action(&self, action: MockServiceAction) {
         match action {
             MockServiceAction::BroadcastTxs(txs) => {
@@ -788,6 +795,76 @@ impl MockNode {
             );
         }
         self.clear_results();
+    }
+
+    pub fn lookup_pk(&self, alias: &str) -> Result<common::PublicKey, Report> {
+        use namada_sdk::Namada;
+        let global = {
+            let locked = self.shell.lock().unwrap();
+            Global {
+                is_pre_genesis: false,
+                chain_id: Some(locked.chain_id.clone()),
+                base_dir: locked.base_dir.clone(),
+                wasm_dir: Some(locked.wasm_dir.clone()),
+            }
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let ctx = Context::new::<TestingIo>(global.clone())
+            .wrap_err("Failed to build context")?
+            .to_sdk(self.clone(), TestingIo);
+        rt.block_on(async {
+            let wallet = ctx.wallet_lock().read().await;
+            wallet
+                .find_public_key(alias)
+                .wrap_err("Could not find the given public key")
+        })
+    }
+
+    pub fn lookup_sk(&self, alias: &str) -> Result<common::SecretKey, Report> {
+        use namada_sdk::Namada;
+        let global = {
+            let locked = self.shell.lock().unwrap();
+            Global {
+                is_pre_genesis: false,
+                chain_id: Some(locked.chain_id.clone()),
+                base_dir: locked.base_dir.clone(),
+                wasm_dir: Some(locked.wasm_dir.clone()),
+            }
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let ctx = Context::new::<TestingIo>(global.clone())
+            .wrap_err("Failed to build context")?
+            .to_sdk(self.clone(), TestingIo);
+        rt.block_on(async {
+            let mut wallet = ctx.wallet_lock().write().await;
+            wallet
+                .find_secret_key(alias, None)
+                .wrap_err("Could not find the given public key")
+        })
+    }
+
+    pub fn lookup_address(&self, alias: &str) -> Result<Address, Report> {
+        use namada_sdk::Namada;
+        let global = {
+            let locked = self.shell.lock().unwrap();
+            Global {
+                is_pre_genesis: false,
+                chain_id: Some(locked.chain_id.clone()),
+                base_dir: locked.base_dir.clone(),
+                wasm_dir: Some(locked.wasm_dir.clone()),
+            }
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let ctx = Context::new::<TestingIo>(global.clone())
+            .wrap_err("Failed to build context")?
+            .to_sdk(self.clone(), TestingIo);
+        rt.block_on(async {
+            let wallet = ctx.wallet_lock().read().await;
+            wallet
+                .find_address(alias)
+                .ok_or_else(|| eyre!("Could not find the given public key"))
+                .map(|a| a.into_owned())
+        })
     }
 }
 

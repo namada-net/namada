@@ -79,6 +79,7 @@ pub async fn aux_signing_data(
         owner,
         default_signer,
         vec![],
+        None,
         disposable_signing_key,
         signatures,
         wrapper_signature,
@@ -2011,6 +2012,8 @@ pub async fn gen_ibc_shielding_transfer(
 ) -> Result<(), error::Error> {
     let output_folder = args.output_folder.clone();
 
+    let shielding_fee_payer = args.shielding_fee_payer.clone();
+    let shielding_fee_token = args.shielding_fee_token.clone();
     if let Some(masp_tx) = tx::gen_ibc_shielding_transfer(context, args).await?
     {
         let tx_id = masp_tx.txid().to_string();
@@ -2021,7 +2024,11 @@ pub async fn gen_ibc_shielding_transfer(
         };
         let mut out = File::create(&output_path)
             .expect("Creating a new file for IBC MASP transaction failed.");
-        let bytes = convert_masp_tx_to_ibc_memo(&masp_tx);
+        let bytes = convert_masp_tx_to_ibc_memo(
+            &masp_tx,
+            shielding_fee_payer,
+            shielding_fee_token,
+        );
         out.write_all(bytes.as_bytes())
             .expect("Writing IBC MASP transaction file failed.");
         println!(

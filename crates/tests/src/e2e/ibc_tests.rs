@@ -959,6 +959,19 @@ fn ibc_token_inflation() -> Result<()> {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }
 
+    // check that the proposal passed
+    let args = vec![
+        "query-proposal-result",
+        "--proposal-id",
+        "0",
+        "--node",
+        &rpc,
+    ];
+
+    let mut client = run!(test, Bin::Client, args, Some(120))?;
+    client.exp_string("Passed with")?;
+    client.assert_success();
+
     // Check the target balance is zero before the inflation
     check_shielded_balance(&test, AA_VIEWING_KEY, NAM, 0)?;
     // Shielding transfer 1 samoleans from Gaia to Namada
@@ -2089,7 +2102,12 @@ fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
         NAM,
         10,
         ALBERT_KEY,
-        &[],
+        &[
+            "--shielding-fee-payer",
+            BERTHA_KEY,
+            "--shielding-fee-token",
+            NAM,
+        ],
     )?;
     check_shielded_balance(&test, AA_VIEWING_KEY, NAM, 10)?;
 
@@ -3212,6 +3230,10 @@ fn gen_ibc_shielding_data(
         port_id.as_ref(),
         "--channel-id",
         channel_id.as_ref(),
+        "--shielding-fee-payer",
+        BERTHA_KEY,
+        "--shielding-fee-token",
+        NAM,
         "--node",
         &rpc,
     ];
@@ -4020,6 +4042,10 @@ fn osmosis_xcs() -> Result<()> {
             "0.000056",
             "--token",
             NAM,
+            "--shielding-fee-payer",
+            BERTHA_KEY,
+            "--shielding-fee-token",
+            NAM,
             "--node",
             &rpc_namada,
         ],
@@ -4144,6 +4170,10 @@ fn osmosis_xcs() -> Result<()> {
             "10",
             "--target-pa",
             AA_PAYMENT_ADDRESS,
+            "--shielding-fee-payer",
+            BERTHA_KEY,
+            "--shielding-fee-token",
+            NAM,
             "--overflow-addr",
             ALBERT,
             "--pool-hop",

@@ -285,7 +285,7 @@ pub type SpentNotesTracker = HashMap<ViewingKey, HashSet<usize>>;
 
 /// Represents the amount used of different conversions
 pub type Conversions =
-    BTreeMap<AssetType, (AllowedConversion, MerklePath<Node>, i128)>;
+    BTreeMap<AssetType, (AllowedConversion, MerklePath<Node>)>;
 
 /// Represents the changes that were made to a list of transparent accounts
 pub type TransferDelta = HashMap<Address, MaspChange>;

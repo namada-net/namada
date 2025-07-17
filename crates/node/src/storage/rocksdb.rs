@@ -127,6 +127,20 @@ pub struct RocksDB {
     invalid_handle: bool,
 }
 
+/// RocksDB read-only snapshot
+pub struct RocksDBSnapshot<'a> {
+    db: &'a rocksdb::DB,
+    snapshot: rocksdb::Snapshot<'a>,
+}
+
+impl<'a> std::fmt::Debug for RocksDBSnapshot<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RocksDBSnapshot")
+            .field("db", &format_args!("{:p}", self.db))
+            .finish()
+    }
+}
+
 /// DB Handle for batch writes.
 #[derive(Default)]
 pub struct RocksDBWriteBatch(WriteBatch);
@@ -231,22 +245,20 @@ pub fn open(
         replay_protection_cf_opts,
     ));
     Ok(if read_only {
+        let db = rocksdb::DB::open_cf_descriptors_read_only(
+            &db_opts, path, cfs, false,
+        )
+        .map_err(|e| Error::DBError(e.into_string()))?;
         RocksDB {
-            inner: ManuallyDrop::new(
-                rocksdb::DB::open_cf_descriptors_read_only(
-                    &db_opts, path, cfs, false,
-                )
-                .map_err(|e| Error::DBError(e.into_string()))?,
-            ),
+            inner: ManuallyDrop::new(db),
             invalid_handle: false,
             read_only: true,
         }
     } else {
+        let db = rocksdb::DB::open_cf_descriptors(&db_opts, path, cfs)
+            .map_err(|e| Error::DBError(e.into_string()))?;
         RocksDB {
-            inner: ManuallyDrop::new(
-                rocksdb::DB::open_cf_descriptors(&db_opts, path, cfs)
-                    .map_err(|e| Error::DBError(e.into_string()))?,
-            ),
+            inner: ManuallyDrop::new(db),
             invalid_handle: false,
             read_only: false,
         }
@@ -265,12 +277,14 @@ impl Drop for RocksDB {
     }
 }
 
-impl RocksDB {
-    fn get_column_family(&self, cf_name: &str) -> Result<&ColumnFamily> {
-        self.inner
-            .cf_handle(cf_name)
-            .ok_or(Error::DBError("No {cf_name} column family".to_string()))
-    }
+trait RocksDBCommon {
+    fn get_column_family(&self, cf_name: &str) -> Result<&ColumnFamily>;
+
+    fn read_value_bytes(
+        &self,
+        cf: &ColumnFamily,
+        key: impl AsRef<str>,
+    ) -> Result<Option<Vec<u8>>>;
 
     fn read_value<T>(
         &self,
@@ -284,6 +298,14 @@ impl RocksDB {
             .map(|bytes| decode(bytes).map_err(Error::CodingError))
             .transpose()
     }
+}
+
+impl RocksDBCommon for RocksDB {
+    fn get_column_family(&self, cf_name: &str) -> Result<&ColumnFamily> {
+        self.inner
+            .cf_handle(cf_name)
+            .ok_or(Error::DBError("No {cf_name} column family".to_string()))
+    }
 
     fn read_value_bytes(
         &self,
@@ -294,82 +316,27 @@ impl RocksDB {
             .get_cf(cf, key.as_ref())
             .map_err(|e| Error::DBError(e.into_string()))
     }
+}
 
-    fn add_state_value_to_batch<T>(
+impl RocksDBCommon for RocksDBSnapshot<'_> {
+    fn get_column_family(&self, cf_name: &str) -> Result<&ColumnFamily> {
+        self.db
+            .cf_handle(cf_name)
+            .ok_or(Error::DBError("No {cf_name} column family".to_string()))
+    }
+
+    fn read_value_bytes(
         &self,
         cf: &ColumnFamily,
         key: impl AsRef<str>,
-        value: &T,
-        batch: &mut RocksDBWriteBatch,
-    ) -> Result<()>
-    where
-        T: BorshSerialize,
-    {
-        if let Some(current_value) = self
-            .inner
+    ) -> Result<Option<Vec<u8>>> {
+        self.snapshot
             .get_cf(cf, key.as_ref())
-            .map_err(|e| Error::DBError(e.into_string()))?
-        {
-            batch.0.put_cf(
-                cf,
-                format!("{PRED_KEY_PREFIX}/{}", key.as_ref()),
-                current_value,
-            );
-        }
-        self.add_value_to_batch(cf, key, value, batch);
-        Ok(())
+            .map_err(|e| Error::DBError(e.into_string()))
     }
+}
 
-    fn add_value_to_batch<T>(
-        &self,
-        cf: &ColumnFamily,
-        key: impl AsRef<str>,
-        value: &T,
-        batch: &mut RocksDBWriteBatch,
-    ) where
-        T: BorshSerialize,
-    {
-        self.add_value_bytes_to_batch(cf, key, encode(&value), batch)
-    }
-
-    fn add_value_bytes_to_batch(
-        &self,
-        cf: &ColumnFamily,
-        key: impl AsRef<str>,
-        value: Vec<u8>,
-        batch: &mut RocksDBWriteBatch,
-    ) {
-        batch.0.put_cf(cf, key.as_ref(), value);
-    }
-
-    /// Persist the diff of an account subspace key-val under the height where
-    /// it was changed in a batch write.
-    fn batch_write_subspace_diff(
-        &self,
-        batch: &mut RocksDBWriteBatch,
-        height: BlockHeight,
-        key: &Key,
-        old_value: Option<&[u8]>,
-        new_value: Option<&[u8]>,
-        persist_diffs: bool,
-    ) -> Result<()> {
-        let cf = if persist_diffs {
-            self.get_column_family(DIFFS_CF)?
-        } else {
-            self.get_column_family(ROLLBACK_CF)?
-        };
-        let (old_val_key, new_val_key) = old_and_new_diff_key(key, height)?;
-
-        if let Some(old_value) = old_value {
-            batch.0.put_cf(cf, old_val_key, old_value);
-        }
-
-        if let Some(new_value) = new_value {
-            batch.0.put_cf(cf, new_val_key, new_value);
-        }
-        Ok(())
-    }
-
+impl RocksDBSnapshot<'_> {
     /// Dump last known block
     pub fn dump_block(
         &self,
@@ -488,13 +455,13 @@ impl RocksDB {
     ) {
         let read_opts = make_iter_read_opts(prefix.clone());
         let iter = if let Some(prefix) = prefix {
-            self.inner.iterator_cf_opt(
+            self.snapshot.iterator_cf_opt(
                 cf,
                 read_opts,
                 IteratorMode::From(prefix.as_bytes(), Direction::Forward),
             )
         } else {
-            self.inner
+            self.snapshot
                 .iterator_cf_opt(cf, read_opts, IteratorMode::Start)
         };
 
@@ -510,6 +477,83 @@ impl RocksDB {
                 .expect("Unable to write to buffer");
         }
         buf.flush().expect("Unable to write to output file");
+    }
+}
+
+impl RocksDB {
+    fn add_state_value_to_batch<T>(
+        &self,
+        cf: &ColumnFamily,
+        key: impl AsRef<str>,
+        value: &T,
+        batch: &mut RocksDBWriteBatch,
+    ) -> Result<()>
+    where
+        T: BorshSerialize,
+    {
+        if let Some(current_value) = self
+            .inner
+            .get_cf(cf, key.as_ref())
+            .map_err(|e| Error::DBError(e.into_string()))?
+        {
+            batch.0.put_cf(
+                cf,
+                format!("{PRED_KEY_PREFIX}/{}", key.as_ref()),
+                current_value,
+            );
+        }
+        self.add_value_to_batch(cf, key, value, batch);
+        Ok(())
+    }
+
+    fn add_value_to_batch<T>(
+        &self,
+        cf: &ColumnFamily,
+        key: impl AsRef<str>,
+        value: &T,
+        batch: &mut RocksDBWriteBatch,
+    ) where
+        T: BorshSerialize,
+    {
+        self.add_value_bytes_to_batch(cf, key, encode(&value), batch)
+    }
+
+    fn add_value_bytes_to_batch(
+        &self,
+        cf: &ColumnFamily,
+        key: impl AsRef<str>,
+        value: Vec<u8>,
+        batch: &mut RocksDBWriteBatch,
+    ) {
+        batch.0.put_cf(cf, key.as_ref(), value);
+    }
+
+    /// Persist the diff of an account subspace key-val under the height where
+    /// it was changed in a batch write.
+    fn batch_write_subspace_diff(
+        &self,
+        batch: &mut RocksDBWriteBatch,
+        height: BlockHeight,
+        key: &Key,
+        old_value: Option<&[u8]>,
+        new_value: Option<&[u8]>,
+        persist_diffs: bool,
+    ) -> Result<()> {
+        let cf = if persist_diffs {
+            self.get_column_family(DIFFS_CF)?
+        } else {
+            self.get_column_family(ROLLBACK_CF)?
+        };
+        let (old_val_key, new_val_key) = old_and_new_diff_key(key, height)?;
+
+        if let Some(old_value) = old_value {
+            batch.0.put_cf(cf, old_val_key, old_value);
+        }
+
+        if let Some(new_value) = new_value {
+            batch.0.put_cf(cf, new_val_key, new_value);
+        }
+        Ok(())
     }
 
     /// Create a checkpoint of the state in RocksDB at block height
@@ -792,6 +836,73 @@ impl RocksDB {
         );
         Ok(())
     }
+
+    fn iter_diffs_prefix<'a>(
+        &self,
+        cf: &'a ColumnFamily,
+        height: BlockHeight,
+        prefix: Option<&Key>,
+        is_old: bool,
+    ) -> PersistentPrefixIterator<'a> {
+        let kind = if is_old {
+            OLD_DIFF_PREFIX
+        } else {
+            NEW_DIFF_PREFIX
+        };
+        let stripped_prefix = Some(
+            Key::from(height.to_db_key())
+                .push(&kind.to_string())
+                .unwrap(),
+        );
+        // get keys without the `stripped_prefix`
+        self.iter_prefix(cf, stripped_prefix.as_ref(), prefix)
+    }
+
+    /// Create an iterator over key-vals in the given CF matching the given
+    /// prefix(es). If any, the `stripped_prefix` is matched first and will be
+    /// removed from the matched keys. If any, the second `prefix` is matched
+    /// against the stripped keys and remains in the matched keys.
+    fn iter_prefix<'a>(
+        &self,
+        cf: &'a ColumnFamily,
+        stripped_prefix: Option<&Key>,
+        prefix: Option<&Key>,
+    ) -> PersistentPrefixIterator<'a> {
+        let stripped_prefix = match stripped_prefix {
+            Some(p) if !p.is_empty() => format!("{p}/"),
+            _ => "".to_owned(),
+        };
+        let prefix = match prefix {
+            Some(p) if !p.is_empty() => {
+                format!("{stripped_prefix}{p}/")
+            }
+            _ => stripped_prefix.clone(),
+        };
+        let read_opts = make_iter_read_opts(Some(prefix.clone()));
+        let iter = self.inner.iterator_cf_opt(
+            cf,
+            read_opts,
+            IteratorMode::From(prefix.as_bytes(), Direction::Forward),
+        );
+        PersistentPrefixIterator(PrefixIterator::new(iter, stripped_prefix))
+    }
+
+    /// Create an iterator over key-vals in the given CF matching the given
+    /// pattern(s).
+    fn iter_pattern<'a>(
+        &self,
+        cf: &'a ColumnFamily,
+        stripped_prefix: Option<&Key>,
+        prefix: Option<&Key>,
+        pattern: Regex,
+    ) -> PersistentPatternIterator<'a> {
+        PersistentPatternIterator {
+            inner: PatternIterator {
+                iter: self.iter_prefix(cf, stripped_prefix, prefix),
+                pattern,
+            },
+        }
+    }
 }
 
 /// The path to a snapshot.
@@ -1073,25 +1184,11 @@ impl DbSnapshot {
     }
 }
 
-impl DBRead for RocksDB {
+impl DBRead for RocksDBSnapshot<'_> {
     type Cache = rocksdb::Cache;
 
-    fn open(
-        db_path: impl AsRef<std::path::Path>,
-        cache: Option<&Self::Cache>,
-    ) -> Self {
-        open(db_path, false, cache).expect("cannot open the DB")
-    }
-
-    fn open_read_only(
-        db_path: impl AsRef<std::path::Path>,
-        cache: Option<&Self::Cache>,
-    ) -> Self {
-        open(db_path, true, cache).expect("cannot open the DB")
-    }
-
     fn path(&self) -> Option<&Path> {
-        Some(self.inner.path())
+        Some(self.db.path())
     }
 
     fn read_last_block(&self) -> Result<Option<BlockStateRead>> {
@@ -1264,7 +1361,7 @@ impl DBRead for RocksDB {
             replay_protection::key(hash),
         ] {
             if self
-                .inner
+                .snapshot
                 .get_pinned_cf(replay_protection_cf, key.to_string())
                 .map_err(|e| Error::DBError(e.into_string()))?
                 .is_some()
@@ -1312,7 +1409,7 @@ impl DBRead for RocksDB {
             }
             None => {
                 // If it has an "old" val, it was deleted at this height
-                if self.inner.key_may_exist_cf(diffs_cf, &old_val_key) {
+                if self.db.key_may_exist_cf(diffs_cf, &old_val_key) {
                     // check if it actually exists
                     if self.read_value_bytes(diffs_cf, old_val_key)?.is_some() {
                         return Ok(None);
@@ -1335,7 +1432,7 @@ impl DBRead for RocksDB {
                 None => {
                     // Check if the value was created at this height instead,
                     // which would mean that it wasn't present before
-                    if self.inner.key_may_exist_cf(diffs_cf, &new_val_key) {
+                    if self.db.key_may_exist_cf(diffs_cf, &new_val_key) {
                         // check if it actually exists
                         if self
                             .read_value_bytes(diffs_cf, new_val_key)?
@@ -1379,9 +1476,25 @@ impl DBRead for RocksDB {
 }
 
 impl DB for RocksDB {
+    type Cache = rocksdb::Cache;
     type Migrator = RocksDBUpdateVisitor;
+    type ReadOnly = RocksDBSnapshot;
     type RestoreSource<'a> = (&'a rocksdb::Cache, &'a mut std::fs::File);
     type WriteBatch = RocksDBWriteBatch;
+
+    fn open(
+        db_path: impl AsRef<std::path::Path>,
+        cache: Option<&Self::Cache>,
+    ) -> Self {
+        open(db_path, false, cache).expect("cannot open the DB")
+    }
+
+    fn read_only(&self) -> ReadOnly {
+        RocksDBSnapshot {
+            db: &self.inner,
+            snapshot: self.inner.snapshot(),
+        }
+    }
 
     fn restore_from(
         &mut self,
@@ -1957,7 +2070,10 @@ impl DBUpdateVisitor for RocksDBUpdateVisitor {
         db: &Self::DB,
         pattern: Regex,
     ) -> Vec<(String, Vec<u8>)> {
-        db.iter_pattern(None, pattern)
+        let subspace_cf = self
+            .get_column_family(SUBSPACE_CF)
+            .expect("{SUBSPACE_CF} column family should exist");
+        db.iter_pattern(subspace_cf, None, None, pattern)
             .map(|(k, v, _)| (k, v))
             .collect()
     }
@@ -1967,7 +2083,7 @@ impl DBUpdateVisitor for RocksDBUpdateVisitor {
     }
 }
 
-impl<'iter> DBIter<'iter> for RocksDB {
+impl<'iter> DBIter<'iter> for RocksDBSnapshot {
     type PatternIter = PersistentPatternIterator<'iter>;
     type PrefixIter = PersistentPrefixIterator<'iter>;
 
@@ -1975,7 +2091,11 @@ impl<'iter> DBIter<'iter> for RocksDB {
         &'iter self,
         prefix: Option<&Key>,
     ) -> PersistentPrefixIterator<'iter> {
-        iter_subspace_prefix(self, prefix)
+        let subspace_cf = self
+            .get_column_family(SUBSPACE_CF)
+            .expect("{SUBSPACE_CF} column family should exist");
+        let stripped_prefix = None;
+        iter_prefix(self, subspace_cf, stripped_prefix, prefix)
     }
 
     fn iter_pattern(
@@ -1983,7 +2103,11 @@ impl<'iter> DBIter<'iter> for RocksDB {
         prefix: Option<&Key>,
         pattern: Regex,
     ) -> PersistentPatternIterator<'iter> {
-        iter_subspace_pattern(self, prefix, pattern)
+        let subspace_cf = self
+            .get_column_family(SUBSPACE_CF)
+            .expect("{SUBSPACE_CF} column family should exist");
+        let stripped_prefix = None;
+        iter_pattern(self, subspace_cf, stripped_prefix, prefix, pattern)
     }
 
     fn iter_results(&'iter self) -> PersistentPrefixIterator<'iter> {
@@ -1994,7 +2118,7 @@ impl<'iter> DBIter<'iter> for RocksDB {
             .get_column_family(BLOCK_CF)
             .expect("{BLOCK_CF} column family should exist");
         let read_opts = make_iter_read_opts(Some(prefix.clone()));
-        let iter = self.inner.iterator_cf_opt(
+        let iter = self.snapshot.iterator_cf_opt(
             block_cf,
             read_opts,
             IteratorMode::From(prefix.as_bytes(), Direction::Forward),
@@ -2010,7 +2134,7 @@ impl<'iter> DBIter<'iter> for RocksDB {
         let diffs_cf = self
             .get_column_family(DIFFS_CF)
             .expect("{DIFFS_CF} column family should exist");
-        iter_diffs_prefix(self, diffs_cf, height, prefix, true)
+        iter_diffs_prefix(self.db, diffs_cf, height, prefix, true)
     }
 
     fn iter_new_diffs(
@@ -2021,7 +2145,7 @@ impl<'iter> DBIter<'iter> for RocksDB {
         let diffs_cf = self
             .get_column_family(DIFFS_CF)
             .expect("{DIFFS_CF} column family should exist");
-        iter_diffs_prefix(self, diffs_cf, height, prefix, false)
+        iter_diffs_prefix(self.db, diffs_cf, height, prefix, false)
     }
 
     fn iter_current_replay_protection(&'iter self) -> Self::PrefixIter {
@@ -2030,35 +2154,12 @@ impl<'iter> DBIter<'iter> for RocksDB {
             .expect("{REPLAY_PROTECTION_CF} column family should exist");
 
         let prefix = Some(replay_protection::current_prefix());
-        iter_prefix(self, replay_protection_cf, None, prefix.as_ref())
+        iter_prefix(self.db, replay_protection_cf, None, prefix.as_ref())
     }
 }
 
-fn iter_subspace_prefix<'iter>(
-    db: &'iter RocksDB,
-    prefix: Option<&Key>,
-) -> PersistentPrefixIterator<'iter> {
-    let subspace_cf = db
-        .get_column_family(SUBSPACE_CF)
-        .expect("{SUBSPACE_CF} column family should exist");
-    let stripped_prefix = None;
-    iter_prefix(db, subspace_cf, stripped_prefix, prefix)
-}
-
-fn iter_subspace_pattern<'iter>(
-    db: &'iter RocksDB,
-    prefix: Option<&Key>,
-    pattern: Regex,
-) -> PersistentPatternIterator<'iter> {
-    let subspace_cf = db
-        .get_column_family(SUBSPACE_CF)
-        .expect("{SUBSPACE_CF} column family should exist");
-    let stripped_prefix = None;
-    iter_pattern(db, subspace_cf, stripped_prefix, prefix, pattern)
-}
-
 fn iter_diffs_prefix<'a>(
-    db: &'a RocksDB,
+    snapshot: &'a RocksDBSnapshot,
     cf: &'a ColumnFamily,
     height: BlockHeight,
     prefix: Option<&Key>,
@@ -2075,7 +2176,7 @@ fn iter_diffs_prefix<'a>(
             .unwrap(),
     );
     // get keys without the `stripped_prefix`
-    iter_prefix(db, cf, stripped_prefix.as_ref(), prefix)
+    iter_prefix(snapshot, cf, stripped_prefix.as_ref(), prefix)
 }
 
 /// Create an iterator over key-vals in the given CF matching the given
@@ -2083,7 +2184,7 @@ fn iter_diffs_prefix<'a>(
 /// removed from the matched keys. If any, the second `prefix` is matched
 /// against the stripped keys and remains in the matched keys.
 fn iter_prefix<'a>(
-    db: &'a RocksDB,
+    snapshot: &'a RocksDBSnapshot,
     cf: &'a ColumnFamily,
     stripped_prefix: Option<&Key>,
     prefix: Option<&Key>,
@@ -2099,7 +2200,7 @@ fn iter_prefix<'a>(
         _ => stripped_prefix.clone(),
     };
     let read_opts = make_iter_read_opts(Some(prefix.clone()));
-    let iter = db.inner.iterator_cf_opt(
+    let iter = snapshot.snapshot.iterator_cf_opt(
         cf,
         read_opts,
         IteratorMode::From(prefix.as_bytes(), Direction::Forward),
@@ -2110,7 +2211,7 @@ fn iter_prefix<'a>(
 /// Create an iterator over key-vals in the given CF matching the given
 /// pattern(s).
 fn iter_pattern<'a>(
-    db: &'a RocksDB,
+    snapshot: &'a RocksDBSnapshot,
     cf: &'a ColumnFamily,
     stripped_prefix: Option<&Key>,
     prefix: Option<&Key>,
@@ -2118,7 +2219,7 @@ fn iter_pattern<'a>(
 ) -> PersistentPatternIterator<'a> {
     PersistentPatternIterator {
         inner: PatternIterator {
-            iter: iter_prefix(db, cf, stripped_prefix, prefix),
+            iter: iter_prefix(snapshot, cf, stripped_prefix, prefix),
             pattern,
         },
     }

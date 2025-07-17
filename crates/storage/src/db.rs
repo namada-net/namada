@@ -120,18 +120,6 @@ pub trait DBRead: Debug {
     /// A DB's cache
     type Cache;
 
-    /// Open the database from provided path
-    fn open(
-        db_path: impl AsRef<std::path::Path>,
-        cache: Option<&Self::Cache>,
-    ) -> Self;
-
-    /// Open read-only database from provided path
-    fn open_read_only(
-        db_path: impl AsRef<std::path::Path>,
-        cache: Option<&Self::Cache>,
-    ) -> Self;
-
     /// Get the path to the db in the filesystem,
     /// if it exists (the DB may be in-memory only)
     fn path(&self) -> Option<&std::path::Path> {
@@ -191,8 +179,14 @@ pub trait DBRead: Debug {
     ) -> Result<Option<ethereum_events::Uint>>;
 }
 
-/// A database backend.
-pub trait DB: DBRead {
+/// A database backend for write.
+pub trait DB: Debug {
+    /// A DB's cache
+    type Cache;
+
+    /// A databse for read
+    type ReadOnly: DBRead;
+
     /// A handle for batch writes
     type WriteBatch: DBWriteBatch;
 
@@ -201,6 +195,15 @@ pub trait DB: DBRead {
 
     /// Source data to restore a database.
     type RestoreSource<'a>;
+
+    /// Open the database from provided path
+    fn open(
+        db_path: impl AsRef<std::path::Path>,
+        cache: Option<&Self::Cache>,
+    ) -> Self;
+
+    /// Open read-only database
+    fn read_only(&self) -> Self::ReadOnly;
 
     /// Overwrite the contents of the current database
     /// with the data read from `source`.

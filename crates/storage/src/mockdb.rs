@@ -100,17 +100,6 @@ impl DBRead for MockDB {
     /// There is no cache for MockDB
     type Cache = ();
 
-    fn open(_db_path: impl AsRef<Path>, _cache: Option<&Self::Cache>) -> Self {
-        Self::default()
-    }
-
-    fn open_read_only(
-        _db_path: impl AsRef<Path>,
-        _cache: Option<&Self::Cache>,
-    ) -> Self {
-        Self::default()
-    }
-
     fn read_last_block(&self) -> Result<Option<BlockStateRead>> {
         // Block height
         let height: BlockHeight = match self.read_value(BLOCK_HEIGHT_KEY)? {
@@ -338,9 +327,19 @@ impl DBRead for MockDB {
 }
 
 impl DB for MockDB {
+    type Cache = ();
     type Migrator = ();
+    type ReadOnly = Self;
     type RestoreSource<'a> = MockDBRestoreSource;
     type WriteBatch = MockDBWriteBatch;
+
+    fn open(_db_path: impl AsRef<Path>, _cache: Option<&Self::Cache>) -> Self {
+        Self::default()
+    }
+
+    fn read_only(&self) -> Self {
+        Self::default()
+    }
 
     fn restore_from(&mut self, source: MockDBRestoreSource) -> Result<()> {
         match source {}

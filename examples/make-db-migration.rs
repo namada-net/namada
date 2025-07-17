@@ -592,7 +592,8 @@ pub fn wasm_migration(updates: &mut Vec<migrations::DbUpdateType>) {
         let code_key = Key::wasm_code(&new_code_hash);
         let code_len_key = Key::wasm_code_len(&new_code_hash);
         let hash_key = Key::wasm_hash(name);
-        let code_name_key = Key::wasm_code_name(name.to_owned());
+        let code_hash_key = Key::wasm_code_hash(name.to_owned());
+        let code_name_key = Key::wasm_code_name(&new_code_hash);
 
         updates.push(migrations::DbUpdateType::Add {
             key: code_key,
@@ -613,9 +614,15 @@ pub fn wasm_migration(updates: &mut Vec<migrations::DbUpdateType>) {
             force: false,
         });
         updates.push(migrations::DbUpdateType::Add {
-            key: code_name_key,
+            key: code_hash_key,
             cf: DbColFam::SUBSPACE,
             value: new_code_hash.into(),
+            force: false,
+        });
+        updates.push(migrations::DbUpdateType::Add {
+            key: code_name_key,
+            cf: DbColFam::SUBSPACE,
+            value: name.to_string().into(),
             force: false,
         });
     }

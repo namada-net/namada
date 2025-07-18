@@ -189,8 +189,8 @@ libfuzzer-sys = "0.4"
 libloading = "0.8"
 linkme = "0.3"
 madato = "0.7"
-masp_primitives = { git = "https://github.com/namada-net/masp.git", rev = "0a543d03d8366a00c46045adc9ef9931702c2eb6" }
-masp_proofs = { git = "https://github.com/namada-net/masp.git", rev = "0a543d03d8366a00c46045adc9ef9931702c2eb6", default-features = false, features = ["local-prover"] }
+masp_primitives = { git = "https://github.com/namada-net/masp.git", rev = "fac6e3239d17acb1eb6e609223efe377c7b47312" }
+masp_proofs = { git = "https://github.com/namada-net/masp.git", rev = "fac6e3239d17acb1eb6e609223efe377c7b47312", default-features = false, features = ["local-prover"] }
 num256 = "0.6"
 num_cpus = "1.13"
 num_enum = "0.7"

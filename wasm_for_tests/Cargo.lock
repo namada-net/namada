@@ -2274,7 +2274,7 @@ checksum = "04cbf5b083de1c7e0222a7a51dbfdba1cbe1c6ab0b15e29fff3f6c077fd9cd9f"
 [[package]]
 name = "masp_note_encryption"
 version = "1.4.0"
-source = "git+https://github.com/namada-net/masp.git?rev=0a543d03d8366a00c46045adc9ef9931702c2eb6#0a543d03d8366a00c46045adc9ef9931702c2eb6"
+source = "git+https://github.com/namada-net/masp.git?rev=fac6e3239d17acb1eb6e609223efe377c7b47312#fac6e3239d17acb1eb6e609223efe377c7b47312"
 dependencies = [
  "borsh",
  "chacha20",
@@ -2287,7 +2287,7 @@ dependencies = [
 [[package]]
 name = "masp_primitives"
 version = "1.4.0"
-source = "git+https://github.com/namada-net/masp.git?rev=0a543d03d8366a00c46045adc9ef9931702c2eb6#0a543d03d8366a00c46045adc9ef9931702c2eb6"
+source = "git+https://github.com/namada-net/masp.git?rev=fac6e3239d17acb1eb6e609223efe377c7b47312#fac6e3239d17acb1eb6e609223efe377c7b47312"
 dependencies = [
  "aes",
  "bip0039",
@@ -2318,7 +2318,7 @@ dependencies = [
 [[package]]
 name = "masp_proofs"
 version = "1.4.0"
-source = "git+https://github.com/namada-net/masp.git?rev=0a543d03d8366a00c46045adc9ef9931702c2eb6#0a543d03d8366a00c46045adc9ef9931702c2eb6"
+source = "git+https://github.com/namada-net/masp.git?rev=fac6e3239d17acb1eb6e609223efe377c7b47312#fac6e3239d17acb1eb6e609223efe377c7b47312"
 dependencies = [
  "bellman",
  "blake2b_simd",

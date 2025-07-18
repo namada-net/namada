@@ -23,8 +23,8 @@ use uint::construct_uint;
 
 use super::dec::{Dec, POS_DECIMAL_PRECISION};
 use crate::arith::{
-    self, CheckedAdd, CheckedNeg, CheckedSub, One, OverflowingAdd,
-    OverflowingSub, Zero, checked,
+    self, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, One,
+    OverflowingAdd, OverflowingSub, Zero, checked,
 };
 use crate::token;
 use crate::token::{AmountParseError, MaspDigitPos};
@@ -817,12 +817,19 @@ impl CheckedSub for I256 {
     }
 }
 
-// NOTE: This is here only because num_traits::CheckedAdd requires it
-impl std::ops::Add for I256 {
-    type Output = Self;
+impl CheckedMul for I256 {
+    type Output = I256;
 
-    fn add(self, rhs: Self) -> Self::Output {
-        self.checked_add(rhs).unwrap()
+    fn checked_mul(self, rhs: Self) -> Option<Self::Output> {
+        I256::checked_mul(&self, rhs)
+    }
+}
+
+impl CheckedDiv for I256 {
+    type Output = I256;
+
+    fn checked_div(self, rhs: Self) -> Option<Self::Output> {
+        I256::checked_div(&self, rhs)
     }
 }
 
@@ -1210,6 +1217,14 @@ pub mod testing {
         /// Panics if `denom` is zero.
         pub fn mul_div(&self, num: Self, denom: Self) -> (Self, Self) {
             self.checked_mul_div(num, denom).unwrap()
+        }
+    }
+
+    impl std::ops::Add for I256 {
+        type Output = Self;
+
+        fn add(self, rhs: Self) -> Self::Output {
+            self.checked_add(rhs).unwrap()
         }
     }
 

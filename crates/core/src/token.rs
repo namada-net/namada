@@ -14,7 +14,7 @@ use namada_migrations::*;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::arith::{self, CheckedAdd, CheckedSub, checked};
+use crate::arith::{self, CheckedAdd, CheckedSub, One, Zero, checked};
 use crate::dec::{Dec, POS_DECIMAL_PRECISION};
 use crate::storage;
 use crate::storage::{DbKeySeg, KeySeg};
@@ -345,6 +345,26 @@ impl Amount {
         let amt = Amount { raw };
         self.raw = self.raw.checked_rem(b)?;
         Some((amt, self))
+    }
+}
+
+impl Zero for Amount {
+    fn zero() -> Self {
+        Self { raw: uint::ZERO }
+    }
+
+    fn is_zero(&self) -> bool {
+        self.raw == uint::ZERO
+    }
+}
+
+impl One for Amount {
+    fn one() -> Self {
+        Self { raw: uint::ONE }
+    }
+
+    fn is_one(&self) -> bool {
+        self.raw == uint::ONE
     }
 }
 

@@ -52,7 +52,9 @@ pub use crate::masp::shielded_sync::dispatcher::{Dispatcher, DispatcherCache};
 pub use crate::masp::shielded_sync::{
     ShieldedSyncConfig, ShieldedSyncConfigBuilder, utils,
 };
-pub use crate::masp::wallet_migrations::{VersionedWallet, VersionedWalletRef};
+pub use crate::masp::wallet_migrations::{
+    VersionedWallet, VersionedWalletRef, v0,
+};
 pub use crate::validation::{
     CONVERT_NAME, ENV_VAR_MASP_PARAMS_DIR, OUTPUT_NAME, PVKs, SPEND_NAME,
     partial_deauthorize, preload_verifying_keys,

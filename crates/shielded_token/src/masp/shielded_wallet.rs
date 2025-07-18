@@ -25,7 +25,7 @@ use masp_primitives::transaction::fees::fixed::FeeRule;
 use masp_primitives::transaction::{Transaction, builder};
 use masp_primitives::zip32::{ExtendedKey, PseudoExtendedKey};
 use namada_core::address::Address;
-use namada_core::arith::{CheckedAdd, CheckedSub, checked};
+use namada_core::arith::{CheckedAdd, CheckedMul, CheckedSub, checked};
 use namada_core::borsh::{BorshDeserialize, BorshSerialize};
 use namada_core::chain::BlockHeight;
 use namada_core::collections::{HashMap, HashSet};
@@ -38,6 +38,7 @@ use namada_core::time::{DateTimeUtc, DurationSecs};
 use namada_core::token::{
     Amount, Change, DenominatedAmount, Denomination, Fraction, MaspDigitPos,
 };
+use namada_core::uint::I256;
 use namada_io::client::Client;
 use namada_io::{
     Io, MaybeSend, MaybeSync, NamadaIo, ProgressBar, display_line,
@@ -987,7 +988,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 ValueSum<(MaspDigitPos, Address), i128>,
             ),
         >,
-        _weights: &ValueSum<(MaspDigitPos, Address), Fraction<i128>>,
+        _weights: &ValueSum<(MaspDigitPos, Address), Fraction<i128, I256>>,
         namada_acc: &ValueSum<(MaspDigitPos, Address), i128>,
         target: ValueSum<(MaspDigitPos, Address), i128>,
     ) -> Option<usize> {
@@ -1021,11 +1022,11 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 ValueSum<(MaspDigitPos, Address), i128>,
             ),
         >,
-        weights: &ValueSum<(MaspDigitPos, Address), Fraction<i128>>,
+        weights: &ValueSum<(MaspDigitPos, Address), Fraction<i128, I256>>,
         namada_acc: &ValueSum<(MaspDigitPos, Address), i128>,
         target: ValueSum<(MaspDigitPos, Address), i128>,
     ) -> Option<usize> {
-        let mut max_coverage = 0;
+        let mut max_coverage = I256::zero();
         let mut note_idx = None;
         // How much do we still need in order to arrive at target?
         let gap = ValueSum::zero().sup(&(target - namada_acc));
@@ -1037,7 +1038,8 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             let intersect = namada_contr.inf(&gap);
             // Compute the amount this note covers using double negation to
             // round up the results
-            let coverage = -(weights.clone() * -intersect);
+            let coverage = checked!(-(weights.clone() * &-intersect))
+                .unwrap_or(I256::maximum());
             // Only consider this exchanged note if it's better than what's
             // there
             if coverage > max_coverage {
@@ -1055,8 +1057,8 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
     /// construction of weights with which to normalize.
     fn compute_asset_weights(
         target: &ValueSum<(MaspDigitPos, Address), i128>,
-    ) -> ValueSum<(MaspDigitPos, Address), Fraction<i128>> {
-        const PRECISION: i128 = 100000000000000000000;
+    ) -> ValueSum<(MaspDigitPos, Address), Fraction<i128, I256>> {
+        const PRECISION: i128 = u64::MAX as i128;
         let mut weights = ValueSum::zero();
 
         for (asset_type, val) in target.components() {

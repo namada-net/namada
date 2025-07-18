@@ -36,7 +36,7 @@ use namada_core::masp::{
 use namada_core::task_env::TaskEnvironment;
 use namada_core::time::{DateTimeUtc, DurationSecs};
 use namada_core::token::{
-    Amount, Change, DenominatedAmount, Denomination, Fraction, MaspDigitPos,
+    Amount, Change, DenominatedAmount, Denomination, MaspDigitPos,
 };
 use namada_core::uint::I256;
 use namada_io::client::Client;
@@ -867,7 +867,6 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 ValueSum<(MaspDigitPos, Address), i128>,
             ),
         >,
-        _weights: &ValueSum<(MaspDigitPos, Address), Fraction<i128, I256>>,
         namada_acc: &ValueSum<(MaspDigitPos, Address), i128>,
         target: ValueSum<(MaspDigitPos, Address), i128>,
     ) -> Option<usize> {
@@ -879,7 +878,8 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             // Find the intersection between this note's contribution and what
             // what remains for hitting the target
             let intersect = namada_contr.inf(&gap);
-            // Only consider this exchanged note if it's better than whats
+            // Select this exchanged note if it moves us closer to the target by
+            // any amount
             if intersect > ValueSum::zero() {
                 return Some(*idx);
             }
@@ -901,24 +901,41 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 ValueSum<(MaspDigitPos, Address), i128>,
             ),
         >,
-        weights: &ValueSum<(MaspDigitPos, Address), Fraction<i128, I256>>,
         namada_acc: &ValueSum<(MaspDigitPos, Address), i128>,
         target: ValueSum<(MaspDigitPos, Address), i128>,
     ) -> Option<usize> {
         let mut max_coverage = I256::zero();
         let mut note_idx = None;
+        let precision = I256::from(u64::MAX);
         // How much do we still need in order to arrive at target?
-        let gap = ValueSum::zero().sup(&(target - namada_acc));
+        let gap = ValueSum::zero().sup(&(target.clone() - namada_acc));
 
         // Iterate through the notes tracking the current best
         for (idx, (_note, _usages, _contr, namada_contr)) in exchanged_notes {
             // Find the intersection between this note's contribution and what
             // what remains for hitting the target
             let intersect = namada_contr.inf(&gap);
-            // Compute the amount this note covers using double negation to
-            // round up the results
-            let coverage = checked!(-(weights.clone() * &-intersect))
-                .unwrap_or(I256::maximum());
+            // Minimizing the number of notes used in a a multi-currency setting
+            // involves deciding whether to take one asset or another. To
+            // facilitate comparing quantities of different assets
+            // with different denominations, normalize them into
+            // fractions of the target amount.
+            let mut coverage = I256::zero();
+            for (asset_type, intersect_value) in intersect.components() {
+                let target_value = target.get(asset_type);
+                if target_value != 0 {
+                    // Compute the amount this note covers using double negation
+                    // to round up the results
+                    let normalized = checked!(
+                        -((I256::from(*intersect_value) * -precision)
+                            / I256::from(target_value))
+                    )
+                    .unwrap_or(I256::maximum());
+                    // Finally accumulate the normalized contribution
+                    coverage = checked!(coverage + normalized)
+                        .unwrap_or(I256::maximum());
+                }
+            }
             // Only consider this exchanged note if it's better than what's
             // there
             if coverage > max_coverage {
@@ -927,29 +944,6 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             }
         }
         note_idx
-    }
-
-    /// Minimizing the number of notes used in a a multi-currency setting
-    /// involves deciding whether to take one asset or another. To facilitate
-    /// comparing quantities of different assets with different denominations,
-    /// normalize them into fractions of the target amount. Hence the
-    /// construction of weights with which to normalize.
-    fn compute_asset_weights(
-        target: &ValueSum<(MaspDigitPos, Address), i128>,
-    ) -> ValueSum<(MaspDigitPos, Address), Fraction<i128, I256>> {
-        const PRECISION: i128 = u64::MAX as i128;
-        let mut weights = ValueSum::zero();
-
-        for (asset_type, val) in target.components() {
-            // Quantities not in the target do not contribute to note scores
-            if *val != 0 {
-                // Use precision as the numerator to avoid the resulting
-                // normalizations being rounded down to zero.
-                let weight = Fraction::new(PRECISION, *val);
-                weights += ValueSum::from_pair(asset_type.clone(), weight);
-            }
-        }
-        weights
     }
 
     /// Collect all unspent notes for the given key and apply all possible
@@ -1058,13 +1052,9 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         let mut exchanged_notes = self
             .exchange_notes(context, spent_notes, vk, conversions)
             .await?;
-        // Compute the weights used to normalize the remaining amount
-        // computations
-        let weights = Self::compute_asset_weights(&target);
         // Finally choose and apply notes in order to meet the target amount
         while let Some(note_idx) = Self::select_note_greedy(
             &exchanged_notes,
-            &weights,
             &namada_acc,
             target.clone(),
         ) {

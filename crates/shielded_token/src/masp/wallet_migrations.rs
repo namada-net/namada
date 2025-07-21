@@ -38,6 +38,7 @@ pub enum VersionedWalletRef<'w, U: ShieldedUtils> {
     V1(&'w ShieldedWallet<U>),
 }
 
+/// Version 0 of the shielded wallet, which is used for migration purposes.
 pub mod v0 {
     use std::collections::{BTreeMap, BTreeSet};
 

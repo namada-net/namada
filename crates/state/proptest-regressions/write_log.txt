@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 4f1eba51b739ec1a124ea71b653887a78dddda912c7a2d30ecaa335e52c0e64f # shrinks to modifications = [{Key { segments: [AddressSeg(Established: tnam1qxn7zvrfg9nvmw2mrcdmecljrexm6cl5d535w89d), StringSeg("?")] }: Write { value: [] }, Key { segments: [StringSeg("3"), AddressSeg(Internal IbcToken: bf28d9c17e0306b194d50f51c3b2590bead15e04: tnam1pklj3kwp0cpsdvv56584rsajty974527qsp8n0nm), StringSeg("a")] }: Write { value: [] }}, {Key { segments: [AddressSeg(Established: tnam1qxn7zvrfg9nvmw2mrcdmecljrexm6cl5d535w89d), StringSeg("?")] }: Write { value: [] }, Key { segments: [StringSeg("3"), AddressSeg(Internal IbcToken: bf28d9c17e0306b194d50f51c3b2590bead15e04: tnam1pklj3kwp0cpsdvv56584rsajty974527qsp8n0nm)] }: Write { value: [] }}]

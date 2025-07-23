@@ -32,17 +32,19 @@ use namada_vp::native_vp::{Ctx, CtxPreStorageRead, NativeVp, VpEvaluator};
 use thiserror::Error;
 
 use crate::context::middlewares::create_transfer_middlewares;
+use crate::core::channel::types::msgs::PacketMsg;
+use crate::core::handler::types::msgs::MsgEnvelope;
 use crate::core::host::types::identifiers::ChainId as IbcChainId;
 use crate::core::host::types::path::UPGRADED_IBC_STATE;
 use crate::event::IbcEvent;
 use crate::storage::{
     deposit_key, get_limits, is_ibc_key, is_ibc_trace_key, mint_amount_key,
-    withdraw_key,
+    unlimited_channel_key, withdraw_key,
 };
 use crate::trace::calc_hash;
 use crate::{
-    COMMITMENT_PREFIX, Error as ActionError, IbcActions, NftTransferModule,
-    ValidationParams,
+    COMMITMENT_PREFIX, Error as ActionError, IbcActions, IbcMessage,
+    NftTransferModule, ValidationParams,
 };
 
 #[allow(missing_docs)]
@@ -177,7 +179,7 @@ where
         self.validate_trace(keys_changed)?;
 
         // Check the limits
-        self.check_limits(keys_changed)?;
+        self.check_limits(&tx_data, keys_changed)?;
 
         Ok(())
     }
@@ -384,7 +386,22 @@ where
         Ok(())
     }
 
-    fn check_limits(&self, keys_changed: &BTreeSet<Key>) -> Result<bool> {
+    fn check_limits(
+        &self,
+        tx_data: &[u8],
+        keys_changed: &BTreeSet<Key>,
+    ) -> Result<bool> {
+        let message = crate::decode_message::<Transfer>(tx_data)?;
+        if let IbcMessage::Envelope(boxed) = &message {
+            if let MsgEnvelope::Packet(PacketMsg::Recv(msg)) = &**boxed {
+                let dst_channel = &msg.packet.chan_id_on_b;
+                let unlimited_channel_key = unlimited_channel_key(dst_channel);
+                if self.ctx.has_key_post(&unlimited_channel_key)? {
+                    return Ok(true);
+                }
+            }
+        }
+
         let tokens: BTreeSet<&Address> = keys_changed
             .iter()
             .filter_map(|k| {

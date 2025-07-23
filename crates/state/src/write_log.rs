@@ -1264,12 +1264,22 @@ mod tests {
 
                 // Prefix iter prior state for this key and assert that the
                 // values match
+                let mut found_match = false;
                 for (key_str, modification_from_iter) in
                     write_log.iter_prefix_pre(&key)
                 {
-                    assert_eq!(key.to_string(), key_str);
-                    assert_eq!(modification, &modification_from_iter);
+                    // This key might be a prefix of a matched key
+                    if key_str == key.to_string() {
+                        found_match = true;
+                        assert_eq!(modification, &modification_from_iter);
+                    } else {
+                        assert!(key_str.contains(&key.to_string()));
+                    }
                 }
+                assert!(
+                    found_match,
+                    "Expected key {key} not found in iter_prefix_pre"
+                );
             }
 
             // And then commit them to batch
@@ -1286,7 +1296,7 @@ mod tests {
 
             // Iterate through all the modified keys again to check posterior
             // state
-            for key in keys {
+            for key in keys.clone() {
                 // Read the modification associated with this key from posterior
                 // state
                 let (modification, _gas) = write_log.read(&key).unwrap();
@@ -1294,12 +1304,22 @@ mod tests {
 
                 // Prefix iter posterior state for this key and assert that the
                 // values match
+                let mut found_match = false;
                 for (key_str, modification_from_iter) in
                     write_log.iter_prefix_post(&key)
                 {
-                    assert_eq!(key.to_string(), key_str);
-                    assert_eq!(modification, &modification_from_iter);
+                    // This key might be a prefix of a matched key
+                    if key_str == key.to_string() {
+                        found_match = true;
+                        assert_eq!(modification, &modification_from_iter);
+                    } else {
+                        assert!(key_str.contains(&key.to_string()));
+                    }
                 }
+                assert!(
+                    found_match,
+                    "Expected key {key} not found in iter_prefix_post"
+                );
             }
         }
     }

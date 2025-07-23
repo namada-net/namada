@@ -1230,7 +1230,7 @@ fn ibc_rate_limit() -> Result<()> {
 #[test]
 fn ibc_unlimited_channel() -> Result<()> {
     const PIPELINE_LEN: u64 = 5;
-    // No IBC transfer is not allowed first
+    // No IBC transfer is allowed first
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
             genesis.parameters.parameters.epochs_per_year =
@@ -1281,7 +1281,7 @@ fn ibc_unlimited_channel() -> Result<()> {
     )?;
     wait_for_packet_relay(&hermes_dir, &port_id_gaia, &channel_id_gaia, &test)?;
 
-    // Check if Namada hasn't receive it
+    // Check if Namada hasn't received it
     check_balance(&test, ALBERT, &ibc_denom_on_namada, 0)?;
 
     // Try to transfer from Namada, but it should be timed out
@@ -1375,7 +1375,7 @@ fn ibc_unlimited_channel() -> Result<()> {
         &test,
     )?;
 
-    // Check if Namada hasn't receive it
+    // Check if Gaia has received it
     check_cosmos_balance(
         &test_gaia,
         COSMOS_USER,

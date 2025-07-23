@@ -1321,7 +1321,7 @@ fn ibc_unlimited_channel() -> Result<()> {
     wait_for_packet_relay(&hermes_dir, &port_id_gaia, &channel_id_gaia, &test)?;
 
     // Check if Namada has received it
-    check_balance(&test, ALBERT, &cosmos_token_addr, 1)?;
+    check_balance(&test, ALBERT, &ibc_denom, 1)?;
 
     Ok(())
 }

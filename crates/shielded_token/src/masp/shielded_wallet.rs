@@ -905,6 +905,8 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         target: ValueSum<(MaspDigitPos, Address), i128>,
     ) -> Option<usize> {
         let mut max_coverage = I256::zero();
+        let mut min_projection =
+            ValueSum::<(MaspDigitPos, Address), i128>::zero();
         let mut note_idx = None;
         let precision = I256::from(u64::MAX);
         // How much do we still need in order to arrive at target?
@@ -915,31 +917,41 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             // Find the intersection between this note's contribution and what
             // what remains for hitting the target
             let intersect = namada_contr.inf(&gap);
+            // The fraction of the target does this note covers
+            let mut coverage = I256::zero();
+            // The note measured along the components in the target
+            let mut projection = ValueSum::zero();
             // Minimizing the number of notes used in a a multi-currency setting
             // involves deciding whether to take one asset or another. To
             // facilitate comparing quantities of different assets
             // with different denominations, normalize them into
-            // fractions of the target amount.
-            let mut coverage = I256::zero();
-            for (asset_type, intersect_value) in intersect.components() {
-                let target_value = target.get(asset_type);
-                if target_value != 0 {
-                    // Compute the amount this note covers using double negation
-                    // to round up the results
-                    let normalized = checked!(
-                        -((I256::from(*intersect_value) * -precision)
-                            / I256::from(target_value))
-                    )
+            // fractions of the target amount and sum them up.
+            for (asset_type, target_value) in target.components() {
+                // Compute the amount this note covers using double negation
+                // to round up the results
+                let normalized_intersect = checked!(
+                    -((I256::from(intersect.get(asset_type)) * -precision)
+                        / I256::from(*target_value))
+                )
+                .unwrap_or(I256::maximum());
+                // Accumulate the normalized contribution
+                coverage = checked!(coverage + normalized_intersect)
                     .unwrap_or(I256::maximum());
-                    // Finally accumulate the normalized contribution
-                    coverage = checked!(coverage + normalized)
-                        .unwrap_or(I256::maximum());
-                }
+                // Finally accumulate this component of the exchanged note
+                projection += namada_contr.project(asset_type.clone());
             }
-            // Only consider this exchanged note if it's better than what's
-            // there
-            if coverage > max_coverage {
+            // Use this exchanged note if it takes us closer to the target than
+            // the others. Also use this exchanged note if there are multiple
+            // notes that take us equally close to the target, and this is the
+            // smallest one of the lot (when comparison is possible). The idea
+            // in this case is to minimize the fragmentation of bigger notes.
+            if coverage > max_coverage
+                || (coverage.is_positive()
+                    && coverage == max_coverage
+                    && projection < min_projection)
+            {
                 max_coverage = coverage;
+                min_projection = projection;
                 note_idx = Some(*idx);
             }
         }

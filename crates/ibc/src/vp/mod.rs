@@ -391,14 +391,27 @@ where
         tx_data: &[u8],
         keys_changed: &BTreeSet<Key>,
     ) -> Result<bool> {
+        // Check the unlimited channels
         let message = crate::decode_message::<Transfer>(tx_data)?;
-        if let IbcMessage::Envelope(boxed) = &message {
-            if let MsgEnvelope::Packet(PacketMsg::Recv(msg)) = &**boxed {
-                let dst_channel = &msg.packet.chan_id_on_b;
-                let unlimited_channel_key = unlimited_channel_key(dst_channel);
-                if self.ctx.has_key_post(&unlimited_channel_key)? {
-                    return Ok(true);
+        let transfer_channel = match &message {
+            IbcMessage::Transfer(msg_transfer) => {
+                Some(&msg_transfer.message.chan_id_on_a)
+            }
+            IbcMessage::NftTransfer(msg_nft_transfer) => {
+                Some(&msg_nft_transfer.message.chan_id_on_a)
+            }
+            IbcMessage::Envelope(boxed) => {
+                if let MsgEnvelope::Packet(PacketMsg::Recv(msg)) = &**boxed {
+                    Some(&msg.packet.chan_id_on_b)
+                } else {
+                    None
                 }
+            }
+        };
+        if let Some(channel) = transfer_channel {
+            let unlimited_channel_key = unlimited_channel_key(channel);
+            if self.ctx.has_key_post(&unlimited_channel_key)? {
+                return Ok(true);
             }
         }
 

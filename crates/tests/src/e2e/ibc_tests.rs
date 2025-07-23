@@ -1260,9 +1260,11 @@ fn ibc_unlimited_channel() -> Result<()> {
     let hermes = run_hermes(&hermes_dir)?;
     let _bg_hermes = hermes.background();
 
-    let ibc_denom =
+    let ibc_denom_on_namada =
         format!("{port_id_namada}/{channel_id_namada}/{COSMOS_COIN}");
-    let cosmos_token_addr = ibc_token(&ibc_denom).to_string();
+    let token_addr = find_address(&test, APFEL)?;
+    let ibc_denom_on_gaia =
+        format!("{port_id_gaia}/{channel_id_gaia}/{token_addr}");
 
     // Try to transfer from Gaia, but it should be timed out
     let namada_receiver = find_address(&test, ALBERT)?.to_string();
@@ -1280,7 +1282,34 @@ fn ibc_unlimited_channel() -> Result<()> {
     wait_for_packet_relay(&hermes_dir, &port_id_gaia, &channel_id_gaia, &test)?;
 
     // Check if Namada hasn't receive it
-    check_balance(&test, ALBERT, &cosmos_token_addr, 0)?;
+    check_balance(&test, ALBERT, &ibc_denom_on_namada, 0)?;
+
+    // Try to transfer from Namada, but it should be timed out
+    let gaia_receiver = find_cosmos_address(&test_gaia, COSMOS_USER)?;
+    transfer(
+        &test,
+        ALBERT,
+        &gaia_receiver,
+        APFEL,
+        1,
+        Some(ALBERT_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        Some(Duration::new(10, 0)),
+        None,
+        None,
+        None,
+        false,
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+
+    // Check if the token was refunded
+    check_balance(&test, ALBERT, NAM, 1_000_000)?;
 
     // Proposal on Namada
     // Delegate some token
@@ -1306,7 +1335,7 @@ fn ibc_unlimited_channel() -> Result<()> {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }
 
-    // Retry transfer
+    // Retry transfer from Gaia
     transfer_from_cosmos(
         &test_gaia,
         COSMOS_USER,
@@ -1321,7 +1350,38 @@ fn ibc_unlimited_channel() -> Result<()> {
     wait_for_packet_relay(&hermes_dir, &port_id_gaia, &channel_id_gaia, &test)?;
 
     // Check if Namada has received it
-    check_balance(&test, ALBERT, &ibc_denom, 1)?;
+    check_balance(&test, ALBERT, &ibc_denom_on_namada, 1)?;
+
+    // Retry transfer from Namada
+    transfer(
+        &test,
+        ALBERT,
+        &gaia_receiver,
+        APFEL,
+        1,
+        Some(ALBERT_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        Some(Duration::new(10, 0)),
+        None,
+        None,
+        None,
+        false,
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+
+    // Check if Namada hasn't receive it
+    check_cosmos_balance(
+        &test_gaia,
+        COSMOS_USER,
+        &ibc_denom_on_gaia,
+        1_000_000,
+    )?;
 
     Ok(())
 }

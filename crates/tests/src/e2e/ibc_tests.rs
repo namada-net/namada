@@ -1262,6 +1262,7 @@ fn ibc_unlimited_channel() -> Result<()> {
 
     let ibc_denom_on_namada =
         format!("{port_id_namada}/{channel_id_namada}/{COSMOS_COIN}");
+    let ibc_token_addr = ibc_token(&ibc_denom_on_namada).to_string();
     let token_addr = find_address(&test, APFEL)?;
     let ibc_denom_on_gaia =
         format!("{port_id_gaia}/{channel_id_gaia}/{token_addr}");
@@ -1282,7 +1283,7 @@ fn ibc_unlimited_channel() -> Result<()> {
     wait_for_packet_relay(&hermes_dir, &port_id_gaia, &channel_id_gaia, &test)?;
 
     // Check if Namada hasn't received it
-    check_balance(&test, ALBERT, &ibc_denom_on_namada, 0)?;
+    check_balance(&test, ALBERT, &ibc_token_addr, 0)?;
 
     // Try to transfer from Namada, but it should be rejected
     let gaia_receiver = find_cosmos_address(&test_gaia, COSMOS_USER)?;

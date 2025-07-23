@@ -3,7 +3,7 @@
 //! Here, we expose the host functions into wasm's
 //! imports, so they can be called from inside the wasm.
 
-use namada_state::{DB, DBIter, StorageHasher};
+use namada_state::{DBIter, DBRead, StorageHasher};
 use wasmer::{Function, FunctionEnv, Imports};
 
 use crate::host_env::{TxVmEnv, VpEvaluator, VpVmEnv};
@@ -18,7 +18,7 @@ pub fn tx_imports<D, H, CA>(
     env: TxVmEnv<WasmMemory, D, H, CA>,
 ) -> Imports
 where
-    D: DB + for<'iter> DBIter<'iter> + 'static,
+    D: DBRead + for<'iter> DBIter<'iter> + 'static,
     H: StorageHasher + 'static,
     CA: WasmCacheAccess + 'static,
 {
@@ -67,7 +67,7 @@ pub fn vp_imports<D, H, EVAL, CA>(
     env: VpVmEnv<WasmMemory, D, H, EVAL, CA>,
 ) -> Imports
 where
-    D: DB + for<'iter> DBIter<'iter> + 'static,
+    D: DBRead + for<'iter> DBIter<'iter> + 'static,
     H: StorageHasher + 'static,
     EVAL: VpEvaluator<Db = D, H = H, Eval = EVAL, CA = CA> + 'static,
     CA: WasmCacheAccess + 'static,
@@ -114,7 +114,7 @@ mod wrap_tx {
     #![allow(missing_docs)]
     #![allow(clippy::type_complexity)]
 
-    use namada_state::{DB, DBIter, StorageHasher};
+    use namada_state::{DBIter, DBRead, StorageHasher};
     use wasmer::FunctionEnvMut;
 
     use crate::WasmCacheAccess;
@@ -125,7 +125,7 @@ mod wrap_tx {
         f: F,
     ) -> impl Fn(FunctionEnvMut<'_, TxVmEnv<WasmMemory, D, H, CA>>) -> RET
     where
-        D: DB + for<'iter> DBIter<'iter> + 'static,
+        D: DBRead + for<'iter> DBIter<'iter> + 'static,
         H: StorageHasher + 'static,
         CA: WasmCacheAccess + 'static,
         F: Fn(&mut TxVmEnv<WasmMemory, D, H, CA>) -> RET,
@@ -137,7 +137,7 @@ mod wrap_tx {
         f: F,
     ) -> impl Fn(FunctionEnvMut<'_, TxVmEnv<WasmMemory, D, H, CA>>, ARG0) -> RET
     where
-        D: DB + for<'iter> DBIter<'iter> + 'static,
+        D: DBRead + for<'iter> DBIter<'iter> + 'static,
         H: StorageHasher + 'static,
         CA: WasmCacheAccess + 'static,
         F: Fn(&mut TxVmEnv<WasmMemory, D, H, CA>, ARG0) -> RET,
@@ -149,7 +149,7 @@ mod wrap_tx {
         f: F,
     ) -> impl Fn(FunctionEnvMut<'_, TxVmEnv<WasmMemory, D, H, CA>>, ARG0, ARG1) -> RET
     where
-        D: DB + for<'iter> DBIter<'iter> + 'static,
+        D: DBRead + for<'iter> DBIter<'iter> + 'static,
         H: StorageHasher + 'static,
         CA: WasmCacheAccess + 'static,
         F: Fn(&mut TxVmEnv<WasmMemory, D, H, CA>, ARG0, ARG1) -> RET,
@@ -167,7 +167,7 @@ mod wrap_tx {
         ARG3,
     ) -> RET
     where
-        D: DB + for<'iter> DBIter<'iter> + 'static,
+        D: DBRead + for<'iter> DBIter<'iter> + 'static,
         H: StorageHasher + 'static,
         CA: WasmCacheAccess + 'static,
         F: Fn(
@@ -194,7 +194,7 @@ mod wrap_tx {
         ARG4,
     ) -> RET
     where
-        D: DB + for<'iter> DBIter<'iter> + 'static,
+        D: DBRead + for<'iter> DBIter<'iter> + 'static,
         H: StorageHasher + 'static,
         CA: WasmCacheAccess + 'static,
         F: Fn(
@@ -223,7 +223,7 @@ mod wrap_tx {
         ARG5,
     ) -> RET
     where
-        D: DB + for<'iter> DBIter<'iter> + 'static,
+        D: DBRead + for<'iter> DBIter<'iter> + 'static,
         H: StorageHasher + 'static,
         CA: WasmCacheAccess + 'static,
         F: Fn(
@@ -267,7 +267,7 @@ mod wrap_tx {
         ARG6,
     ) -> RET
     where
-        D: DB + for<'iter> DBIter<'iter> + 'static,
+        D: DBRead + for<'iter> DBIter<'iter> + 'static,
         H: StorageHasher + 'static,
         CA: WasmCacheAccess + 'static,
         F: Fn(
@@ -296,7 +296,7 @@ mod wrap_vp {
     #![allow(missing_docs)]
     #![allow(clippy::type_complexity)]
 
-    use namada_state::{DB, DBIter, StorageHasher};
+    use namada_state::{DBIter, DBRead, StorageHasher};
     use wasmer::FunctionEnvMut;
 
     use crate::WasmCacheAccess;
@@ -307,7 +307,7 @@ mod wrap_vp {
         f: F,
     ) -> impl Fn(FunctionEnvMut<'_, VpVmEnv<WasmMemory, D, H, EVAL, CA>>) -> RET
     where
-        D: DB + for<'iter> DBIter<'iter> + 'static,
+        D: DBRead + for<'iter> DBIter<'iter> + 'static,
         H: StorageHasher + 'static,
         CA: WasmCacheAccess + 'static,
         EVAL: VpEvaluator<Db = D, H = H, Eval = EVAL, CA = CA> + 'static,
@@ -320,7 +320,7 @@ mod wrap_vp {
         f: F,
     ) -> impl Fn(FunctionEnvMut<'_, VpVmEnv<WasmMemory, D, H, EVAL, CA>>, ARG0) -> RET
     where
-        D: DB + for<'iter> DBIter<'iter> + 'static,
+        D: DBRead + for<'iter> DBIter<'iter> + 'static,
         H: StorageHasher + 'static,
         CA: WasmCacheAccess + 'static,
         EVAL: VpEvaluator<Db = D, H = H, Eval = EVAL, CA = CA> + 'static,
@@ -337,7 +337,7 @@ mod wrap_vp {
         ARG1,
     ) -> RET
     where
-        D: DB + for<'iter> DBIter<'iter> + 'static,
+        D: DBRead + for<'iter> DBIter<'iter> + 'static,
         H: StorageHasher + 'static,
         CA: WasmCacheAccess + 'static,
         EVAL: VpEvaluator<Db = D, H = H, Eval = EVAL, CA = CA> + 'static,
@@ -356,7 +356,7 @@ mod wrap_vp {
         ARG3,
     ) -> RET
     where
-        D: DB + for<'iter> DBIter<'iter> + 'static,
+        D: DBRead + for<'iter> DBIter<'iter> + 'static,
         H: StorageHasher + 'static,
         CA: WasmCacheAccess + 'static,
         EVAL: VpEvaluator<Db = D, H = H, Eval = EVAL, CA = CA> + 'static,
@@ -400,7 +400,7 @@ mod wrap_vp {
         ARG6,
     ) -> RET
     where
-        D: DB + for<'iter> DBIter<'iter> + 'static,
+        D: DBRead + for<'iter> DBIter<'iter> + 'static,
         H: StorageHasher + 'static,
         CA: WasmCacheAccess + 'static,
         EVAL: VpEvaluator<Db = D, H = H, Eval = EVAL, CA = CA> + 'static,
@@ -451,7 +451,7 @@ mod wrap_vp {
         ARG8,
     ) -> RET
     where
-        D: DB + for<'iter> DBIter<'iter> + 'static,
+        D: DBRead + for<'iter> DBIter<'iter> + 'static,
         H: StorageHasher + 'static,
         CA: WasmCacheAccess + 'static,
         EVAL: VpEvaluator<Db = D, H = H, Eval = EVAL, CA = CA> + 'static,

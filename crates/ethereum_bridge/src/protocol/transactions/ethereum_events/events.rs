@@ -21,7 +21,7 @@ use namada_core::hints;
 use namada_core::storage::{Key, KeySeg};
 use namada_core::uint::Uint;
 use namada_parameters::read_epoch_duration_parameter;
-use namada_state::{DB, DBIter, StorageHasher, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, WlState};
 use namada_storage::{StorageRead, StorageWrite};
 use namada_trans_token::denominated;
 use namada_trans_token::storage_key::{balance_key, minted_balance_key};
@@ -40,11 +40,11 @@ use crate::{ADDRESS as BRIDGE_ADDRESS, token};
 /// confirmed [`EthereumEvent::TransfersToNamada`], mint the corresponding
 /// transferred assets to the appropriate receiver addresses.
 pub(super) fn act_on<D, H>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
     event: EthereumEvent,
 ) -> Result<(BTreeSet<Key>, BTreeSet<EthBridgeEvent>)>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     match event {
@@ -67,11 +67,11 @@ where
 }
 
 fn act_on_transfers_to_namada<'tx, D, H>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
     transfer_event: TransfersToNamada,
 ) -> Result<(BTreeSet<Key>, BTreeSet<EthBridgeEvent>)>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     tracing::debug!(?transfer_event, "Acting on transfers to Namada");
@@ -99,12 +99,12 @@ where
 }
 
 fn update_transfers_to_namada_state<'tx, D, H>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
     changed_keys: &mut BTreeSet<Key>,
     transfers: impl IntoIterator<Item = &'tx TransferToNamada>,
 ) -> Result<()>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let wrapped_native_erc20 = read_native_erc20_address(state)?;
@@ -155,13 +155,13 @@ where
 
 /// Redeems `amount` of the native token for `receiver` from escrow.
 fn redeem_native_token<D, H>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
     native_erc20: &EthAddress,
     receiver: &Address,
     amount: &token::Amount,
 ) -> Result<BTreeSet<Key>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let eth_bridge_native_token_balance_key =
@@ -194,13 +194,13 @@ where
 /// If the given asset is not whitelisted or has exceeded the
 /// token caps, mint NUTs, too.
 fn mint_eth_assets<D, H>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
     asset: &EthAddress,
     receiver: &Address,
     &amount: &token::Amount,
 ) -> Result<(EthAssetMint, BTreeSet<Key>)>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let mut changed_keys = BTreeSet::default();
@@ -237,12 +237,12 @@ where
 }
 
 fn act_on_transfers_to_eth<D, H>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
     transfers: &[TransferToEthereum],
     relayer: &Address,
 ) -> Result<(BTreeSet<Key>, BTreeSet<EthBridgeEvent>)>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     tracing::debug!(?transfers, "Acting on transfers to Ethereum");
@@ -351,10 +351,10 @@ where
 
 fn increment_bp_nonce<D, H>(
     nonce_key: &Key,
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
 ) -> Result<()>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let next_nonce = state
@@ -367,11 +367,11 @@ where
 }
 
 fn refund_transfer<D, H>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
     key: Key,
 ) -> Result<(BTreeSet<Key>, BTreeSet<EthBridgeEvent>)>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let mut changed_keys = BTreeSet::default();
@@ -394,11 +394,11 @@ where
 }
 
 fn refund_transfer_fees<D, H>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
     transfer: &PendingTransfer,
 ) -> Result<BTreeSet<Key>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let mut changed_keys = BTreeSet::default();
@@ -423,11 +423,11 @@ where
 }
 
 fn refund_transferred_assets<D, H>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
     transfer: &PendingTransfer,
 ) -> Result<BTreeSet<Key>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let mut changed_keys = BTreeSet::default();
@@ -472,11 +472,11 @@ where
 /// Burns any transferred ERC20s other than wNAM. If NAM is transferred,
 /// update the wNAM supply key.
 fn update_transferred_asset_balances<D, H>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
     transfer: &PendingTransfer,
 ) -> Result<BTreeSet<Key>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let mut changed_keys = BTreeSet::default();

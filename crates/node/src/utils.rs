@@ -12,7 +12,7 @@ use namada_sdk::address::{Address, ImplicitAddress};
 use namada_sdk::gas::TxGasMeter;
 use namada_sdk::key::common;
 use namada_sdk::state::{
-    FullAccessState, Sha256Hasher, StorageWrite, TxIndex, WlState,
+    FullAccessState, Sha256Hasher, StorageWrite, TempWlState, TxIndex,
 };
 use namada_sdk::tx::data::TxType;
 use namada_sdk::tx::{self, Tx};
@@ -170,15 +170,16 @@ pub fn dry_run_proposal(
     let config = &chain_ctx.config.ledger;
     let chain_id = &config.chain_id;
     let db_path = config.shell.db_dir(chain_id);
-    let mut state: WlState<storage::PersistentDB, Sha256Hasher> =
-        FullAccessState::open_read_only(
+    let mut state: TempWlState<storage::PersistentDB, Sha256Hasher> =
+        FullAccessState::open(
             db_path,
             None,
             chain_id.clone(),
             native_token,
             config.shell.storage_read_past_height_limit,
             |_key| true,
-        );
+        )
+        .with_temp_write_log();
 
     // A fake proposal ID
     let id = u64::MAX;

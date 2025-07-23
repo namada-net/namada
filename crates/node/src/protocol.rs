@@ -18,7 +18,7 @@ use namada_sdk::gas::{self, Gas, GasMetering, TxGasMeter, VpGasMeter};
 use namada_sdk::hash::Hash;
 use namada_sdk::parameters::get_gas_scale;
 use namada_sdk::state::{
-    DB, DBIter, State, StorageHasher, StorageRead, WlState,
+    DBIter, DBRead, State, StorageHasher, StorageRead, WlState,
 };
 use namada_sdk::storage::TxIndex;
 use namada_sdk::token::Amount;
@@ -103,7 +103,7 @@ impl Error {
 pub struct ShellParams<'a, S, D, H, CA>
 where
     S: State<D = D, H = H> + Sync,
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     CA: 'static + WasmCacheAccess + Sync,
 {
@@ -116,7 +116,7 @@ where
 impl<'a, S, D, H, CA> ShellParams<'a, S, D, H, CA>
 where
     S: State<D = D, H = H> + Sync,
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     CA: 'static + WasmCacheAccess + Sync,
 {
@@ -214,7 +214,7 @@ pub fn dispatch_tx<'a, D, H, CA>(
     state: &'a mut WlState<D, H>,
 ) -> std::result::Result<TxResult<Error>, Box<DispatchError>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     CA: 'static + WasmCacheAccess + Sync,
 {
@@ -350,7 +350,7 @@ where
         + Read<Err = state::Error>
         + ReadConversionState
         + Sync,
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     CA: 'static + WasmCacheAccess + Sync,
 {
@@ -490,7 +490,7 @@ where
         + Read<Err = state::Error>
         + ReadConversionState
         + Sync,
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     CA: 'static + WasmCacheAccess + Sync,
 {
@@ -578,7 +578,7 @@ where
         + Read<Err = state::Error>
         + ReadConversionState
         + Sync,
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     CA: 'static + WasmCacheAccess + Sync,
 {
@@ -784,7 +784,7 @@ where
         + Read<Err = state::Error>
         + ReadConversionState
         + Sync,
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     CA: 'static + WasmCacheAccess + Sync,
 {
@@ -1019,7 +1019,7 @@ fn apply_wasm_tx<S, D, H, CA>(
 ) -> Result<BatchedTxResult>
 where
     S: 'static + State<D = D, H = H> + ReadConversionState + Sync,
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     CA: 'static + WasmCacheAccess + Sync,
 {
@@ -1070,10 +1070,10 @@ where
 pub(crate) fn apply_protocol_tx<D, H>(
     tx: ProtocolTxType,
     data: Option<Vec<u8>>,
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
 ) -> Result<BatchedTxResult>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     use namada_sdk::eth_bridge::protocol::transactions;
@@ -1158,7 +1158,7 @@ fn execute_tx<S, D, H, CA>(
 ) -> Result<BTreeSet<Address>>
 where
     S: State<D = D, H = H>,
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     CA: 'static + WasmCacheAccess + Sync,
 {
@@ -1526,7 +1526,7 @@ mod tests {
 
     fn apply_eth_tx<D, H>(
         tx: EthereumTxData,
-        state: &mut WlState<D, H>,
+        state: &mut WlState<'_, D, H>,
     ) -> Result<BatchedTxResult>
     where
         D: 'static + DB + for<'iter> DBIter<'iter> + Sync,

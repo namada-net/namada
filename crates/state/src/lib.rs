@@ -75,7 +75,7 @@ pub const EPOCH_SWITCH_BLOCKS_DELAY: u32 = 2;
 /// Common trait for read-only access to write log, DB and in-memory state.
 pub trait StateRead: StorageRead + Debug {
     /// DB type
-    type D: 'static + DB + for<'iter> DBIter<'iter>;
+    type D: 'static + DBRead + for<'iter> DBIter<'iter>;
     /// DB hasher type
     type H: 'static + StorageHasher;
 
@@ -216,7 +216,7 @@ macro_rules! impl_storage_read {
     ($($type:ty)*) => {
         impl<D, H> StorageRead for $($type)*
         where
-            D: 'static + DB + for<'iter> DBIter<'iter>,
+            D: 'static + DBRead + for<'iter> DBIter<'iter>,
             H: 'static + StorageHasher,
         {
             type PrefixIter<'iter> = PrefixIter<'iter, D> where Self: 'iter;
@@ -352,7 +352,7 @@ macro_rules! impl_storage_write {
     ($($type:ty)*) => {
         impl<D, H> StorageWrite for $($type)*
         where
-            D: 'static + DB + for<'iter> DBIter<'iter>,
+            D: 'static + DBRead + for<'iter> DBIter<'iter>,
             H: 'static + StorageHasher,
         {
             fn write_bytes(
@@ -386,7 +386,7 @@ macro_rules! impl_storage_write_by_protocol {
     ($($type:ty)*) => {
         impl<D, H> StorageWrite for $($type)*
         where
-            D: 'static + DB + for<'iter> DBIter<'iter>,
+            D: 'static + DBRead + for<'iter> DBIter<'iter>,
             H: 'static + StorageHasher,
         {
             fn write_bytes(
@@ -412,11 +412,11 @@ macro_rules! impl_storage_write_by_protocol {
     };
 }
 
-impl_storage_read!(FullAccessState<D, H>);
-impl_storage_read!(WlState<D, H>);
+// impl_storage_read!(FullAccessState<D, H>);
+impl_storage_read!(WlState<'_, D, H>);
 impl_storage_read!(TempWlState<'_, D, H>);
-impl_storage_write_by_protocol!(FullAccessState<D, H>);
-impl_storage_write_by_protocol!(WlState<D, H>);
+// impl_storage_write_by_protocol!(FullAccessState<D, H>);
+impl_storage_write_by_protocol!(WlState<'_, D, H>);
 impl_storage_write_by_protocol!(TempWlState<'_, D, H>);
 
 impl_storage_read!(TxHostEnvState<'_, D, H>);
@@ -442,7 +442,7 @@ impl From<StateError> for Error {
 #[derive(Debug)]
 pub struct PrefixIter<'iter, D>
 where
-    D: DB + DBIter<'iter>,
+    D: DBRead + DBIter<'iter>,
 {
     /// Peekable storage iterator
     pub storage_iter: Peekable<<D as DBIter<'iter>>::PrefixIter>,
@@ -461,7 +461,7 @@ pub fn iter_prefix_pre<'a, D>(
     prefix: &storage::Key,
 ) -> namada_storage::Result<(PrefixIter<'a, D>, Gas)>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
 {
     let storage_iter = db.iter_prefix(Some(prefix)).peekable();
     let write_log_iter = write_log.iter_prefix_pre(prefix).peekable();
@@ -486,7 +486,7 @@ pub fn iter_prefix_post<'a, D>(
     prefix: &storage::Key,
 ) -> namada_storage::Result<(PrefixIter<'a, D>, Gas)>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
 {
     let storage_iter = db.iter_prefix(Some(prefix)).peekable();
     let write_log_iter = write_log.iter_prefix_post(prefix).peekable();
@@ -502,7 +502,7 @@ where
 
 impl<'iter, D> Iterator for PrefixIter<'iter, D>
 where
-    D: DB + DBIter<'iter>,
+    D: DBRead + DBIter<'iter>,
 {
     type Item = (String, Vec<u8>, Gas);
 
@@ -595,16 +595,18 @@ pub mod testing {
     use super::*;
 
     /// A full-access state with a `MockDB` nd sha256 hasher.
-    pub type TestState = FullAccessState<MockDB, Sha256Hasher>;
+    pub type TestFullAccessState = FullAccessState<MockDB, Sha256Hasher>;
+    /// Write-log state with the MockDB
+    pub type TestState = WlState<'static, MockDB, Sha256Hasher>;
 
-    impl Default for TestState {
+    impl Default for TestFullAccessState {
         fn default() -> Self {
-            Self(WlState {
+            Self {
                 write_log: Default::default(),
                 db: MockDB::default(),
                 in_mem: Default::default(),
                 diff_key_filter: diff_all_keys,
-            })
+            }
         }
     }
 
@@ -734,7 +736,7 @@ mod tests {
             min_blocks_delta, min_duration_delta)
             in arb_and_epoch_duration_start_and_block())
         {
-            let mut state =TestState::default();
+            let mut state = TestFullAccessState::default();
             state.in_mem_mut().next_epoch_min_start_height=
                         start_height + epoch_duration.min_num_of_blocks;
             state.in_mem_mut().next_epoch_min_start_time=
@@ -888,10 +890,10 @@ mod tests {
 
     #[test]
     fn test_writing_without_diffs() {
-        let mut state = TestState::default();
+        let mut state = TestFullAccessState::default();
         assert_eq!(state.in_mem().block.height.0, 0);
 
-        (state.0.diff_key_filter) = diff_key_filter;
+        (state.diff_key_filter) = diff_key_filter;
 
         let key1 = test_key_1();
         let val1 = 1u64;

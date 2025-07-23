@@ -3,7 +3,7 @@ use namada_core::borsh::{BorshDeserialize, BorshSerialize};
 use namada_core::hints;
 use namada_core::storage::Key;
 use namada_core::voting_power::FractionalVotingPower;
-use namada_state::{DB, DBIter, PrefixIter, StorageHasher, WlState};
+use namada_state::{DBIter, DBRead, PrefixIter, StorageHasher, WlState};
 use namada_storage::{StorageRead, StorageWrite};
 use namada_systems::governance;
 
@@ -11,14 +11,14 @@ use super::{EpochedVotingPower, EpochedVotingPowerExt, Tally, Votes};
 use crate::storage::vote_tallies;
 
 pub fn write<D, H, T>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
     keys: &vote_tallies::Keys<T>,
     body: &T,
     tally: &Tally,
     already_present: bool,
 ) -> Result<()>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     T: BorshSerialize,
 {
@@ -40,14 +40,14 @@ where
 /// type `T` being voted on, in case it has accumulated more than 1/3
 /// of fractional voting power behind it.
 #[must_use = "The storage value returned by this function must be used"]
-pub fn delete<D, H, Gov, T>(
-    state: &mut WlState<D, H>,
+pub fn delete<'db, D, H, Gov, T>(
+    state: &mut WlState<'db, D, H>,
     keys: &vote_tallies::Keys<T>,
 ) -> Result<Option<T>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
     T: BorshDeserialize,
 {
     let opt_body = {
@@ -73,11 +73,11 @@ where
 }
 
 pub fn read<D, H, T>(
-    state: &WlState<D, H>,
+    state: &WlState<'_, D, H>,
     keys: &vote_tallies::Keys<T>,
 ) -> Result<Tally>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let seen: bool = super::read::value(state, &keys.seen())?;
@@ -93,11 +93,11 @@ where
 }
 
 pub fn iter_prefix<'a, D, H>(
-    state: &'a WlState<D, H>,
+    state: &'a WlState<'_, D, H>,
     prefix: &Key,
 ) -> Result<PrefixIter<'a, D>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     state
@@ -107,11 +107,11 @@ where
 
 #[inline]
 pub fn read_body<D, H, T>(
-    state: &WlState<D, H>,
+    state: &WlState<'_, D, H>,
     keys: &vote_tallies::Keys<T>,
 ) -> Result<T>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     T: BorshDeserialize,
 {
@@ -120,11 +120,11 @@ where
 
 #[inline]
 pub fn maybe_read_seen<D, H, T>(
-    state: &WlState<D, H>,
+    state: &WlState<'_, D, H>,
     keys: &vote_tallies::Keys<T>,
 ) -> Result<Option<bool>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     T: BorshDeserialize,
 {

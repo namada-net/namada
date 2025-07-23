@@ -16,7 +16,9 @@ use namada_core::storage::{Key, TxIndex};
 use namada_core::validity_predicate::VpError;
 use namada_gas::{GasMetering, TxGasMeter, VpGasMeter, WASM_MEMORY_PAGE_GAS};
 use namada_state::prefix_iter::PrefixIterators;
-use namada_state::{DB, DBIter, State, StateRead, StorageHasher, StorageRead};
+use namada_state::{
+    DBIter, DBRead, State, StateRead, StorageHasher, StorageRead,
+};
 use namada_tx::data::{TxSentinel, TxType};
 use namada_tx::{BatchedTxRef, Commitment, Section, Tx, TxCommitments};
 use namada_vp::vp_host_fns;
@@ -519,7 +521,7 @@ where
 #[derive(Default, Debug)]
 pub struct VpEvalWasm<D, H, CA>
 where
-    D: DB + for<'iter> DBIter<'iter> + 'static,
+    D: DBRead + for<'iter> DBIter<'iter> + 'static,
     H: StorageHasher + 'static,
     CA: WasmCacheAccess + 'static,
 {
@@ -584,7 +586,7 @@ where
 
 impl<D, H, CA> VpEvaluator for VpEvalWasm<D, H, CA>
 where
-    D: DB + for<'iter> DBIter<'iter> + 'static,
+    D: DBRead + for<'iter> DBIter<'iter> + 'static,
     H: StorageHasher + 'static,
     CA: WasmCacheAccess + 'static,
 {
@@ -612,7 +614,7 @@ where
 
 impl<D, H, CA> VpEvalWasm<D, H, CA>
 where
-    D: DB + for<'iter> DBIter<'iter> + 'static,
+    D: DBRead + for<'iter> DBIter<'iter> + 'static,
     H: StorageHasher + 'static,
     CA: WasmCacheAccess + 'static,
 {

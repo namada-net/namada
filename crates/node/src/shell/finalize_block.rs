@@ -1140,7 +1140,7 @@ fn gov_finalize_block<D, H>(
     gas_scale: u64,
 ) -> Result<()>
 where
-    D: DB + for<'iter> DBIter<'iter> + Sync,
+    D: DBRead + for<'iter> DBIter<'iter> + Sync,
     H: StorageHasher + Sync,
 {
     let vp_wasm_cache = &mut shell.vp_wasm_cache;
@@ -5709,7 +5709,7 @@ mod test_finalize_block {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = namada_vp::native_vp::Ctx::<_, _, VpEvalWasm<_, _, _>>::new(
             shell.mode.get_validator_address().expect("Test failed"),
-            shell.state.read_only(),
+            &shell.state.with_temp_write_log(),
             batched_tx.tx,
             batched_tx.cmt,
             &TxIndex(0),

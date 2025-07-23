@@ -16,7 +16,9 @@ use namada_tx::{BatchedTxRef, Section};
 use thiserror::Error;
 
 use crate::state::write_log::WriteLog;
-use crate::state::{DB, DBIter, PrefixIter, ResultExt, StateRead, write_log};
+use crate::state::{
+    DBIter, DBRead, PrefixIter, ResultExt, StateRead, write_log,
+};
 pub use crate::state::{Error, Result};
 
 /// These runtime errors will abort VP execution immediately
@@ -353,7 +355,7 @@ pub fn iter_prefix_pre<'a, D>(
     prefix: &Key,
 ) -> Result<PrefixIter<'a, D>>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
 {
     let (iter, gas) = namada_state::iter_prefix_pre(write_log, db, prefix)?;
     add_gas(gas_meter, gas)?;
@@ -372,7 +374,7 @@ pub fn iter_prefix_post<'a, D>(
     prefix: &Key,
 ) -> Result<PrefixIter<'a, D>>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
 {
     let (iter, gas) = namada_state::iter_prefix_post(write_log, db, prefix)?;
     add_gas(gas_meter, gas)?;
@@ -385,7 +387,7 @@ pub fn iter_next<DB>(
     iter: &mut PrefixIter<'_, DB>,
 ) -> Result<Option<(String, Vec<u8>)>>
 where
-    DB: namada_state::DB + for<'iter> namada_state::DBIter<'iter>,
+    DB: DBRead + for<'iter> DBIter<'iter>,
 {
     if let Some((key, val, gas)) = iter.next() {
         add_gas(gas_meter, gas)?;

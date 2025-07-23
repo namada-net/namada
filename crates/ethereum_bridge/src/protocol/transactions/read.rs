@@ -4,7 +4,7 @@ use eyre::{Result, eyre};
 use namada_core::storage;
 #[cfg(test)]
 use namada_core::token::Amount;
-use namada_state::{DB, DBIter, StorageHasher, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, WlState};
 use namada_storage::StorageRead;
 
 /// Returns the stored Amount, or 0 if not stored
@@ -14,7 +14,7 @@ pub(super) fn amount_or_default<D, H>(
     key: &storage::Key,
 ) -> Result<Amount>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     Ok(maybe_value(state, key)?.unwrap_or_default())
@@ -22,11 +22,11 @@ where
 
 /// Read some arbitrary value from storage, erroring if it's not found
 pub(super) fn value<D, H, T: BorshDeserialize>(
-    state: &WlState<D, H>,
+    state: &WlState<'_, D, H>,
     key: &storage::Key,
 ) -> Result<T>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     maybe_value(state, key)?.ok_or_else(|| eyre!("no value found at {}", key))
@@ -36,11 +36,11 @@ where
 /// is read. This will still error if there is data stored at `key` but it is
 /// not deserializable to `T`.
 pub(super) fn maybe_value<D, H, T: BorshDeserialize>(
-    state: &WlState<D, H>,
+    state: &WlState<'_, D, H>,
     key: &storage::Key,
 ) -> Result<Option<T>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     Ok(state.read(key)?)

@@ -3,7 +3,7 @@
 use namada_governance::parameters::GovernanceParameters;
 use namada_governance::storage::proposal::StorageProposal;
 use namada_governance::utils::{ProposalResult, Vote};
-use namada_state::{DB, DBIter, StorageHasher};
+use namada_state::{DBIter, DBRead, StorageHasher};
 
 use crate::queries::types::RequestCtx;
 
@@ -21,7 +21,7 @@ fn proposal_id<D, H, V, T>(
     id: u64,
 ) -> namada_storage::Result<Option<StorageProposal>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     namada_governance::storage::get_proposal_by_id(ctx.state, id)
@@ -33,7 +33,7 @@ fn proposal_id_votes<D, H, V, T>(
     id: u64,
 ) -> namada_storage::Result<Vec<Vote>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     namada_governance::storage::get_proposal_votes(ctx.state, id)
@@ -44,7 +44,7 @@ fn parameters<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<GovernanceParameters>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     namada_governance::storage::get_parameters(ctx.state)
@@ -56,7 +56,7 @@ fn proposal_result<D, H, V, T>(
     id: u64,
 ) -> namada_storage::Result<Option<ProposalResult>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     namada_governance::storage::get_proposal_result(ctx.state, id)

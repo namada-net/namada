@@ -23,7 +23,7 @@ where
                 // the `TempWlState` struct. The `TempWlState` will be dropped
                 // right after dry-run and before any other ABCI request is
                 // processed.
-                unsafe { self.state.read_only().with_static_temp_write_log() },
+                unsafe { self.state.with_static_temp_write_log() },
                 self.vp_wasm_cache.read_only(),
                 self.tx_wasm_cache.read_only(),
                 &query,

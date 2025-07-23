@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 pub use namada_io::client::{EncodedResponseQuery, Error, ResponseQuery};
-use namada_state::{DB, DBIter, StorageHasher, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, WlState};
 
 use crate::events::log::EventLog;
 pub use crate::tendermint::abci::request::Query as RequestQuery;
@@ -10,7 +10,7 @@ pub use crate::tendermint::abci::request::Query as RequestQuery;
 #[derive(Debug, Clone)]
 pub struct RequestCtx<'shell, D, H, VpCache, TxCache>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     /// Reference to the ledger's [`WlState`].
@@ -38,7 +38,7 @@ pub trait Router {
         request: &RequestQuery,
     ) -> namada_storage::Result<EncodedResponseQuery>
     where
-        D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+        D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
         H: 'static + StorageHasher + Sync,
     {
         if !request.path.is_ascii() {
@@ -62,6 +62,6 @@ pub trait Router {
         start: usize,
     ) -> namada_storage::Result<EncodedResponseQuery>
     where
-        D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+        D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
         H: 'static + StorageHasher + Sync;
 }

@@ -1,10 +1,9 @@
 use std::cmp::Ordering;
-use std::ops::{Deref, DerefMut};
 
 use itertools::Either;
 use namada_core::address::Address;
 use namada_core::arith::checked;
-use namada_core::borsh::BorshSerializeExt;
+use namada_core::borsh::{BorshDeserialize, BorshSerializeExt};
 use namada_core::chain::ChainId;
 use namada_core::masp::MaspEpoch;
 use namada_core::parameters::{EpochDuration, Parameters};
@@ -17,31 +16,22 @@ use namada_replay_protection as replay_protection;
 use namada_storage::conversion_state::{
     ConversionState, ReadConversionState, WithConversionState,
 };
-use namada_storage::{
-    BlockHeight, BlockStateRead, BlockStateWrite, ResultExt, StorageRead,
-};
+use namada_storage::{BlockHeight, BlockStateRead, BlockStateWrite, ResultExt};
 
 use crate::in_memory::InMemory;
 use crate::write_log::{StorageModification, WriteLog};
 use crate::{
-    DB, DBIter, EPOCH_SWITCH_BLOCKS_DELAY, Epoch, Error, Hash, Key, KeySeg,
-    LastBlock, MembershipProof, MerkleTree, MerkleTreeError, ProofOps, Result,
-    STORAGE_ACCESS_GAS_PER_BYTE, State, StateError, StateRead, StorageHasher,
-    StoreType, is_pending_transfer_key,
+    DB, DBIter, DBRead, EPOCH_SWITCH_BLOCKS_DELAY, Epoch, Error, Hash, Key,
+    KeySeg, LastBlock, MembershipProof, MerkleTree, MerkleTreeError, ProofOps,
+    Result, STORAGE_ACCESS_GAS_PER_BYTE, State, StateError, StateRead,
+    StorageHasher, StoreType, is_pending_transfer_key,
 };
 
 /// Owned state with full R/W access.
 #[derive(Debug)]
-pub struct FullAccessState<D, H>(pub(crate) WlState<D, H>)
+pub struct FullAccessState<D, H>
 where
-    D: DB + for<'iter> DBIter<'iter>,
-    H: StorageHasher;
-
-/// State with a write-logged storage.
-#[derive(Debug)]
-pub struct WlState<D, H>
-where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DB + DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
 {
     /// Write log
@@ -56,9 +46,26 @@ where
     pub diff_key_filter: fn(&storage::Key) -> bool,
 }
 
-impl<D, H> ReadConversionState for WlState<D, H>
+/// State with a write-logged storage.
+#[derive(Debug)]
+pub struct WlState<'a, S, H>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    S: DBRead + for<'iter> DBIter<'iter>,
+    H: StorageHasher,
+{
+    /// Write log
+    pub(crate) write_log: &'a mut WriteLog,
+    /// Non-mutable DB snapshot (usually a MockDB or PersistentDB)
+    pub(crate) db: S,
+    /// State in memory
+    pub(crate) in_mem: &'a mut InMemory<H>,
+    /// Static diff storage key filter
+    pub diff_key_filter: fn(&storage::Key) -> bool,
+}
+
+impl<S, H> ReadConversionState for WlState<'_, S, H>
+where
+    S: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
 {
     fn conversion_state(&self) -> &ConversionState {
@@ -69,22 +76,22 @@ where
 /// State with a temporary write log. This is used for dry-running txs and ABCI
 /// prepare and processs proposal, which must not modify the actual state.
 #[derive(Debug)]
-pub struct TempWlState<'a, D, H>
+pub struct TempWlState<'a, S, H>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    S: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
 {
     /// Write log
     pub(crate) write_log: WriteLog,
-    // DB
-    pub(crate) db: &'a D,
+    // DB snapshot
+    pub(crate) db: S,
     /// State
     pub(crate) in_mem: &'a InMemory<H>,
 }
 
-impl<D, H> ReadConversionState for TempWlState<'_, D, H>
+impl<S, H> ReadConversionState for TempWlState<'_, S, H>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    S: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
 {
     fn conversion_state(&self) -> &ConversionState {
@@ -94,38 +101,85 @@ where
 
 impl<D, H> FullAccessState<D, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DB + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
+    /// Borrow write-log
+    pub fn write_log(&self) -> &WriteLog {
+        &self.write_log
+    }
+
     /// Mutably borrow write-log
     pub fn write_log_mut(&mut self) -> &mut WriteLog {
-        &mut self.0.write_log
+        &mut self.write_log
+    }
+
+    /// Borrow in-memory state
+    pub fn in_mem(&mut self) -> &InMemory<H> {
+        &self.in_mem
     }
 
     /// Mutably borrow in-memory state
     pub fn in_mem_mut(&mut self) -> &mut InMemory<H> {
-        &mut self.0.in_mem
+        &mut self.in_mem
     }
 
     /// Mutably borrow DB handle
     pub fn db_mut(&mut self) -> &mut D {
-        &mut self.0.db
+        &mut self.db
     }
 
-    /// Borrow state with mutable write-log.
-    pub fn restrict_writes_to_write_log(&mut self) -> &mut WlState<D, H> {
-        &mut self.0
+    /// write-log state with mutable write-log.
+    pub fn restrict_writes_to_write_log(
+        &mut self,
+    ) -> WlState<'_, impl DBRead + for<'iter> DBIter<'iter>, H> {
+        WlState {
+            write_log: &mut self.write_log,
+            db: self.db.read_only(),
+            in_mem: &mut self.in_mem,
+            diff_key_filter: self.diff_key_filter,
+        }
     }
 
-    /// Borrow read-only write-log and state
-    pub fn read_only(&self) -> &WlState<D, H> {
-        &self.0
+    /// in-memory state and DB handle with a mutable temporary write-log.
+    pub fn with_temp_write_log(
+        &self,
+    ) -> TempWlState<'_, impl DBRead + for<'iter> DBIter<'iter>, H> {
+        TempWlState {
+            write_log: WriteLog::default(),
+            db: self.db.read_only(),
+            in_mem: &self.in_mem,
+        }
+    }
+
+    /// Borrow in-memory state and DB handle with a mutable temporary write-log.
+    ///
+    /// The lifetime of borrows is unsafely extended to `'static` to allow usage
+    /// in node's `dry_run_tx`, which needs a static lifetime to be able to call
+    /// protocol's API that is generic over the state with a bound `S: 'static +
+    /// State` with a mutable reference to this struct.
+    /// Because the lifetime of `S` is invariant w.r.t. `&mut S`
+    /// (<https://doc.rust-lang.org/nomicon/subtyping.html>) we are faking a
+    /// static lifetime of `S` for `TempWlState`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must guarantee that the source `WlState` is not being
+    /// accessed mutably before `TempWlState` gets dropped.
+    pub unsafe fn with_static_temp_write_log(
+        &self,
+    ) -> TempWlState<'static, impl DBRead + for<'iter> DBIter<'iter>, H> {
+        TempWlState {
+            write_log: WriteLog::default(),
+            db: self.db.read_only(),
+            in_mem: &*(&self.in_mem as *const _),
+        }
     }
 
     /// Instantiate a full-access state. Loads the last state from a DB, if any.
     pub fn open(
         db_path: impl AsRef<std::path::Path>,
-        cache: Option<&D::Cache>,
+        cache: Option<&<D as DB>::Cache>,
         chain_id: ChainId,
         native_token: Address,
         storage_read_past_height_limit: Option<u64>,
@@ -138,48 +192,17 @@ where
             native_token,
             storage_read_past_height_limit,
         );
-        let mut state = Self(WlState {
+        let mut state = Self {
             write_log,
             db,
             in_mem,
             diff_key_filter,
-        });
-        state.load_last_state();
+        };
+
+        let mut wl_state = state.restrict_writes_to_write_log();
+        wl_state.load_last_state();
+
         state
-    }
-
-    /// Instantiate a full-access state. Loads the last state from a DB, if any.
-    pub fn open_read_only(
-        db_path: impl AsRef<std::path::Path>,
-        cache: Option<&D::Cache>,
-        chain_id: ChainId,
-        native_token: Address,
-        storage_read_past_height_limit: Option<u64>,
-        diff_key_filter: fn(&storage::Key) -> bool,
-    ) -> WlState<D, H> {
-        let write_log = WriteLog::default();
-        let db = D::open_read_only(db_path, cache);
-        let in_mem = InMemory::new(
-            chain_id,
-            native_token,
-            storage_read_past_height_limit,
-        );
-        let mut state = Self(WlState {
-            write_log,
-            db,
-            in_mem,
-            diff_key_filter,
-        });
-        state.load_last_state();
-        let Self(read_only) = state;
-        read_only
-    }
-
-    #[allow(dead_code)]
-    /// Check if the given address exists on chain and return the gas cost.
-    pub fn db_exists(&self, addr: &Address) -> Result<(bool, Gas)> {
-        let key = storage::Key::validity_predicate(addr);
-        self.db_has_key(&key)
     }
 
     /// Initialize a new epoch when the current epoch is finished. Returns
@@ -239,30 +262,6 @@ where
         Ok(new_epoch)
     }
 
-    /// Returns `true` if a new masp epoch has begun
-    pub fn is_masp_new_epoch(
-        &self,
-        is_new_epoch: bool,
-        masp_epoch_multiplier: u64,
-    ) -> Result<bool> {
-        let masp_new_epoch = is_new_epoch
-            && matches!(
-                self.in_mem.block.epoch.checked_rem(masp_epoch_multiplier),
-                Some(Epoch(0))
-            );
-
-        if masp_new_epoch {
-            let masp_epoch = MaspEpoch::try_from_epoch(
-                self.in_mem.block.epoch,
-                masp_epoch_multiplier,
-            )
-            .map_err(namada_storage::Error::new_const)?;
-            tracing::info!("Began a new masp epoch {masp_epoch}");
-        }
-
-        Ok(masp_new_epoch)
-    }
-
     /// Commit the current block's write log to the storage and commit the block
     /// to DB. Starts a new block write log.
     pub fn commit_block(&mut self) -> Result<()> {
@@ -285,7 +284,7 @@ where
         batch: &mut D::WriteBatch,
     ) -> Result<()> {
         for (key, entry) in
-            std::mem::take(&mut self.0.write_log.block_write_log).into_iter()
+            std::mem::take(&mut self.write_log.block_write_log).into_iter()
         {
             match entry {
                 StorageModification::Write { value } => {
@@ -299,19 +298,23 @@ where
                 }
             }
         }
-        debug_assert!(self.0.write_log.block_write_log.is_empty());
+        debug_assert!(self.write_log.block_write_log.is_empty());
 
         // Replay protections specifically. Starts with moving the current
         // hashes from the previous block to the general bucket
         self.move_current_replay_protection_entries(batch)?;
 
         let replay_prot_key = replay_protection::commitment_key();
-        let commitment: Hash = self
-            .read(&replay_prot_key)
-            .expect("Could not read db")
-            .unwrap_or_default();
+        let commitment = Hash::try_from_slice(
+            &self
+                .db
+                .read_subspace_val(&replay_prot_key)
+                .expect("Could not read db")
+                .unwrap_or_default(),
+        )
+        .map_err(namada_core::DecodeError::DeserializationError)?;
         let new_commitment =
-            std::mem::take(&mut self.0.write_log.replay_protection)
+            std::mem::take(&mut self.write_log.replay_protection)
                 .iter()
                 .try_fold(commitment, |mut acc, hash| {
                     self.write_replay_protection_entry(
@@ -323,10 +326,10 @@ where
                 })?;
         self.batch_write_subspace_val(batch, &replay_prot_key, new_commitment)?;
 
-        debug_assert!(self.0.write_log.replay_protection.is_empty());
+        debug_assert!(self.write_log.replay_protection.is_empty());
 
-        if let Some(address_gen) = self.0.write_log.block_address_gen.take() {
-            self.0.in_mem.address_gen = address_gen
+        if let Some(address_gen) = self.write_log.block_address_gen.take() {
+            self.in_mem.address_gen = address_gen
         }
         Ok(())
     }
@@ -419,7 +422,7 @@ where
             {
                 match st {
                     StoreType::Base => continue,
-                    _ => self.0.db.prune_merkle_tree_store(
+                    _ => self.db.prune_merkle_tree_store(
                         batch,
                         st,
                         Either::Left(prev_height),
@@ -435,7 +438,7 @@ where
         // Prune non-provable stores at the previous epoch
         if let Some(prev_epoch) = self.in_mem.block.epoch.prev() {
             for st in StoreType::iter_non_provable() {
-                self.0.db.prune_merkle_tree_store(
+                self.db.prune_merkle_tree_store(
                     batch,
                     st,
                     Either::Right(prev_epoch),
@@ -476,11 +479,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Check it the given transaction's hash is already present in storage
-    pub fn has_replay_protection_entry(&self, hash: &Hash) -> Result<bool> {
-        Ok(self.db.has_replay_protection_entry(hash)?)
     }
 
     /// Write the provided tx hash to storage
@@ -542,71 +540,6 @@ where
             }
         }
         Ok(Some(epoch))
-    }
-
-    /// Rebuild full Merkle tree after [`read_last_block()`]
-    fn rebuild_full_merkle_tree(
-        &self,
-        height: BlockHeight,
-    ) -> Result<MerkleTree<H>> {
-        self.get_merkle_tree(height, None)
-    }
-
-    /// Load the full state at the last committed height, if any. Returns the
-    /// Merkle root hash and the height of the committed block.
-    pub fn load_last_state(&mut self) {
-        if let Some(BlockStateRead {
-            height,
-            time,
-            epoch,
-            pred_epochs,
-            next_epoch_min_start_height,
-            next_epoch_min_start_time,
-            update_epoch_blocks_delay,
-            results,
-            address_gen,
-            conversion_state,
-            ethereum_height,
-            eth_events_queue,
-            commit_only_data,
-        }) = self
-            .0
-            .db
-            .read_last_block()
-            .expect("Read block call must not fail")
-        {
-            {
-                let in_mem = &mut self.0.in_mem;
-                in_mem.block.height = height;
-                in_mem.block.epoch = epoch;
-                in_mem.block.results = results;
-                in_mem.block.pred_epochs = pred_epochs;
-                in_mem.last_block = Some(LastBlock { height, time });
-                in_mem.last_epoch = epoch;
-                in_mem.next_epoch_min_start_height =
-                    next_epoch_min_start_height;
-                in_mem.next_epoch_min_start_time = next_epoch_min_start_time;
-                in_mem.update_epoch_blocks_delay = update_epoch_blocks_delay;
-                in_mem.address_gen = address_gen;
-                in_mem.commit_only_data = commit_only_data;
-            }
-
-            // Rebuild Merkle tree - requires the values above to be set first
-            let tree = self
-                .rebuild_full_merkle_tree(height)
-                .expect("Merkle tree should be restored");
-
-            tree.validate().unwrap();
-
-            let in_mem = &mut self.0.in_mem;
-            in_mem.block.tree = tree;
-            in_mem.conversion_state = conversion_state;
-            in_mem.ethereum_height = ethereum_height;
-            in_mem.eth_events_queue = eth_events_queue;
-            tracing::debug!("Loaded storage from DB");
-        } else {
-            tracing::info!("No state could be found");
-        }
     }
 
     /// Commit the data from in-memory state into the block's merkle tree.
@@ -706,70 +639,112 @@ where
         )?;
         Ok(())
     }
+
+    /// Write a value to the specified subspace and returns the gas cost and the
+    /// size difference
+    #[allow(clippy::arithmetic_side_effects)]
+    #[cfg(any(test, feature = "testing", feature = "benches"))]
+    pub fn db_write(
+        &mut self,
+        key: &Key,
+        value: impl AsRef<[u8]>,
+    ) -> Result<(u64, i64)> {
+        // Note that this method is the same as `StorageWrite::write_bytes`,
+        // but with gas and storage bytes len diff accounting
+        tracing::debug!("storage write key {}", key,);
+        let value = value.as_ref();
+        let persist_diffs = (self.diff_key_filter)(key);
+
+        if is_pending_transfer_key(key) {
+            // The tree of the bright pool stores the current height for the
+            // pending transfer
+            let height = self.in_mem.block.height.serialize_to_vec();
+            self.in_mem.block.tree.update(key, height)?;
+        } else {
+            // Update the merkle tree
+            if !persist_diffs {
+                let prefix =
+                    Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
+                self.in_mem.block.tree.update(&prefix.join(key), value)?;
+            } else {
+                self.in_mem.block.tree.update(key, value)?;
+            }
+        }
+
+        let len = value.len();
+        let gas =
+            (key.len() + len) as u64 * namada_gas::STORAGE_WRITE_GAS_PER_BYTE;
+        let size_diff = self.db.write_subspace_val(
+            self.in_mem.block.height,
+            key,
+            value,
+            persist_diffs,
+        )?;
+        Ok((gas, size_diff))
+    }
+
+    /// Delete the specified subspace and returns the gas cost and the size
+    /// difference
+    #[allow(
+        clippy::cast_sign_loss,
+        clippy::arithmetic_side_effects,
+        clippy::cast_possible_truncation
+    )]
+    #[cfg(any(test, feature = "testing", feature = "benches"))]
+    pub fn db_delete(&mut self, key: &Key) -> Result<(u64, i64)> {
+        // Note that this method is the same as `StorageWrite::delete`,
+        // but with gas and storage bytes len diff accounting
+        let mut deleted_bytes_len = 0;
+        if self.db.read_subspace_val(key)?.is_some() {
+            let persist_diffs = (self.diff_key_filter)(key);
+            if !persist_diffs {
+                let prefix =
+                    Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
+                self.in_mem.block.tree.delete(&prefix.join(key))?;
+            } else {
+                self.in_mem.block.tree.delete(key)?;
+            }
+            deleted_bytes_len = self.db.delete_subspace_val(
+                self.in_mem.block.height,
+                key,
+                persist_diffs,
+            )?;
+        }
+        let gas = (key.len() + deleted_bytes_len as usize) as u64
+            * namada_gas::STORAGE_WRITE_GAS_PER_BYTE;
+        Ok((gas, deleted_bytes_len))
+    }
 }
 
-impl<D, H> WlState<D, H>
+impl<S, H> WlState<'_, S, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    S: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     /// Borrow write-log
     pub fn write_log(&self) -> &WriteLog {
-        &self.write_log
+        self.write_log
     }
 
     /// Borrow in-memory state
     pub fn in_mem(&self) -> &InMemory<H> {
-        &self.in_mem
+        self.in_mem
     }
 
     /// Mutably borrow in-memory state
     pub fn in_mem_mut(&mut self) -> &mut InMemory<H> {
-        &mut self.in_mem
+        self.in_mem
     }
 
-    /// Borrow DB handle
-    pub fn db(&self) -> &D {
+    /// Borrow DB snapshot handle
+    pub fn db(&self) -> &S {
         // NOTE: `WlState` must not be allowed mutable access to DB
         &self.db
     }
 
     /// Mutably borrow write-log
     pub fn write_log_mut(&mut self) -> &mut WriteLog {
-        &mut self.write_log
-    }
-
-    /// Borrow in-memory state and DB handle with a mutable temporary write-log.
-    pub fn with_temp_write_log(&self) -> TempWlState<'_, D, H> {
-        TempWlState {
-            write_log: WriteLog::default(),
-            db: &self.db,
-            in_mem: &self.in_mem,
-        }
-    }
-
-    /// Borrow in-memory state and DB handle with a mutable temporary write-log.
-    ///
-    /// The lifetime of borrows is unsafely extended to `'static` to allow usage
-    /// in node's `dry_run_tx`, which needs a static lifetime to be able to call
-    /// protocol's API that is generic over the state with a bound `S: 'static +
-    /// State` with a mutable reference to this struct.
-    /// Because the lifetime of `S` is invariant w.r.t. `&mut S`
-    /// (<https://doc.rust-lang.org/nomicon/subtyping.html>) we are faking a
-    /// static lifetime of `S` for `TempWlState`.
-    ///
-    /// # Safety
-    ///
-    /// The caller must guarantee that the source `WlState` is not being
-    /// accessed mutably before `TempWlState` gets dropped.
-    pub unsafe fn with_static_temp_write_log(
-        &self,
-    ) -> TempWlState<'static, D, H> {
-        TempWlState {
-            write_log: WriteLog::default(),
-            db: &*(&self.db as *const _),
-            in_mem: &*(&self.in_mem as *const _),
-        }
+        self.write_log
     }
 
     /// Commit the current transaction's write log and the entire batch to the
@@ -861,81 +836,6 @@ where
         }
     }
 
-    /// Write a value to the specified subspace and returns the gas cost and the
-    /// size difference
-    #[allow(clippy::arithmetic_side_effects)]
-    #[cfg(any(test, feature = "testing", feature = "benches"))]
-    pub fn db_write(
-        &mut self,
-        key: &Key,
-        value: impl AsRef<[u8]>,
-    ) -> Result<(u64, i64)> {
-        // Note that this method is the same as `StorageWrite::write_bytes`,
-        // but with gas and storage bytes len diff accounting
-        tracing::debug!("storage write key {}", key,);
-        let value = value.as_ref();
-        let persist_diffs = (self.diff_key_filter)(key);
-
-        if is_pending_transfer_key(key) {
-            // The tree of the bright pool stores the current height for the
-            // pending transfer
-            let height = self.in_mem.block.height.serialize_to_vec();
-            self.in_mem.block.tree.update(key, height)?;
-        } else {
-            // Update the merkle tree
-            if !persist_diffs {
-                let prefix =
-                    Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
-                self.in_mem.block.tree.update(&prefix.join(key), value)?;
-            } else {
-                self.in_mem.block.tree.update(key, value)?;
-            }
-        }
-
-        let len = value.len();
-        let gas =
-            (key.len() + len) as u64 * namada_gas::STORAGE_WRITE_GAS_PER_BYTE;
-        let size_diff = self.db.write_subspace_val(
-            self.in_mem.block.height,
-            key,
-            value,
-            persist_diffs,
-        )?;
-        Ok((gas, size_diff))
-    }
-
-    /// Delete the specified subspace and returns the gas cost and the size
-    /// difference
-    #[allow(
-        clippy::cast_sign_loss,
-        clippy::arithmetic_side_effects,
-        clippy::cast_possible_truncation
-    )]
-    #[cfg(any(test, feature = "testing", feature = "benches"))]
-    pub fn db_delete(&mut self, key: &Key) -> Result<(u64, i64)> {
-        // Note that this method is the same as `StorageWrite::delete`,
-        // but with gas and storage bytes len diff accounting
-        let mut deleted_bytes_len = 0;
-        if self.db_has_key(key)?.0 {
-            let persist_diffs = (self.diff_key_filter)(key);
-            if !persist_diffs {
-                let prefix =
-                    Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
-                self.in_mem.block.tree.delete(&prefix.join(key))?;
-            } else {
-                self.in_mem.block.tree.delete(key)?;
-            }
-            deleted_bytes_len = self.db.delete_subspace_val(
-                self.in_mem.block.height,
-                key,
-                persist_diffs,
-            )?;
-        }
-        let gas = (key.len() + deleted_bytes_len as usize) as u64
-            * namada_gas::STORAGE_WRITE_GAS_PER_BYTE;
-        Ok((gas, deleted_bytes_len))
-    }
-
     /// Get a Tendermint-compatible existence proof.
     ///
     /// Proofs from the Ethereum bridge pool are not
@@ -1016,6 +916,43 @@ where
                 .map(Into::into)
                 .map_err(Into::into)
         }
+    }
+
+    /// Returns `true` if a new masp epoch has begun
+    pub fn is_masp_new_epoch(
+        &self,
+        is_new_epoch: bool,
+        masp_epoch_multiplier: u64,
+    ) -> Result<bool> {
+        let masp_new_epoch = is_new_epoch
+            && matches!(
+                self.in_mem.block.epoch.checked_rem(masp_epoch_multiplier),
+                Some(Epoch(0))
+            );
+
+        if masp_new_epoch {
+            let masp_epoch = MaspEpoch::try_from_epoch(
+                self.in_mem.block.epoch,
+                masp_epoch_multiplier,
+            )
+            .map_err(namada_storage::Error::new_const)?;
+            tracing::info!("Began a new masp epoch {masp_epoch}");
+        }
+
+        Ok(masp_new_epoch)
+    }
+
+    /// Check it the given transaction's hash is already present in storage
+    pub fn has_replay_protection_entry(&self, hash: &Hash) -> Result<bool> {
+        Ok(self.db.has_replay_protection_entry(hash)?)
+    }
+
+    /// Rebuild full Merkle tree after [`read_last_block()`]
+    fn rebuild_full_merkle_tree(
+        &self,
+        height: BlockHeight,
+    ) -> Result<MerkleTree<H>> {
+        self.get_merkle_tree(height, None)
     }
 
     /// Rebuild Merkle tree with diffs in the DB.
@@ -1182,6 +1119,62 @@ where
         Ok(tree)
     }
 
+    /// Load the full state at the last committed height, if any. Returns the
+    /// Merkle root hash and the height of the committed block.
+    pub fn load_last_state(&mut self) {
+        if let Some(BlockStateRead {
+            height,
+            time,
+            epoch,
+            pred_epochs,
+            next_epoch_min_start_height,
+            next_epoch_min_start_time,
+            update_epoch_blocks_delay,
+            results,
+            address_gen,
+            conversion_state,
+            ethereum_height,
+            eth_events_queue,
+            commit_only_data,
+        }) = self
+            .db
+            .read_last_block()
+            .expect("Read block call must not fail")
+        {
+            {
+                let in_mem = &mut self.in_mem;
+                in_mem.block.height = height;
+                in_mem.block.epoch = epoch;
+                in_mem.block.results = results;
+                in_mem.block.pred_epochs = pred_epochs;
+                in_mem.last_block = Some(LastBlock { height, time });
+                in_mem.last_epoch = epoch;
+                in_mem.next_epoch_min_start_height =
+                    next_epoch_min_start_height;
+                in_mem.next_epoch_min_start_time = next_epoch_min_start_time;
+                in_mem.update_epoch_blocks_delay = update_epoch_blocks_delay;
+                in_mem.address_gen = address_gen;
+                in_mem.commit_only_data = commit_only_data;
+            }
+
+            // Rebuild Merkle tree - requires the values above to be set first
+            let tree = self
+                .rebuild_full_merkle_tree(height)
+                .expect("Merkle tree should be restored");
+
+            tree.validate().unwrap();
+
+            let in_mem = &mut self.in_mem;
+            in_mem.block.tree = tree;
+            in_mem.conversion_state = conversion_state;
+            in_mem.ethereum_height = ethereum_height;
+            in_mem.eth_events_queue = eth_events_queue;
+            tracing::debug!("Loaded storage from DB");
+        } else {
+            tracing::info!("No state could be found");
+        }
+    }
+
     /// Get the timestamp of the last committed block, or the current timestamp
     /// if no blocks have been produced yet
     pub fn get_last_block_timestamp(&self) -> Result<DateTimeUtc> {
@@ -1195,9 +1188,9 @@ where
     }
 }
 
-impl<D, H> TempWlState<'_, D, H>
+impl<S, H> TempWlState<'_, S, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    S: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     /// Borrow write-log
@@ -1211,8 +1204,8 @@ where
     }
 
     /// Borrow DB handle
-    pub fn db(&self) -> &D {
-        self.db
+    pub fn db(&self) -> &S {
+        &self.db
     }
 
     /// Mutably borrow write-log
@@ -1242,84 +1235,19 @@ where
     }
 }
 
-impl<D, H> StateRead for FullAccessState<D, H>
-where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
-    H: 'static + StorageHasher,
-{
-    type D = D;
-    type H = H;
-
-    fn db(&self) -> &D {
-        &self.0.db
-    }
-
-    fn in_mem(&self) -> &InMemory<Self::H> {
-        &self.0.in_mem
-    }
-
-    fn write_log(&self) -> &WriteLog {
-        &self.0.write_log
-    }
-
-    fn charge_gas(&self, _gas: Gas) -> Result<()> {
-        Ok(())
-    }
-}
-
-impl<D, H> State for FullAccessState<D, H>
-where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
-    H: 'static + StorageHasher,
-{
-    fn write_log_mut(&mut self) -> &mut WriteLog {
-        &mut self.0.write_log
-    }
-
-    fn split_borrow(
-        &mut self,
-    ) -> (&mut WriteLog, &InMemory<Self::H>, &Self::D) {
-        (&mut self.0.write_log, &self.0.in_mem, &self.0.db)
-    }
-}
-
-impl<D, H> EmitEvents for FullAccessState<D, H>
-where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
-    H: 'static + StorageHasher,
-{
-    #[inline]
-    fn emit<E>(&mut self, event: E)
-    where
-        E: EventToEmit,
-    {
-        self.write_log_mut().emit_event(event);
-    }
-
-    fn emit_many<B, E>(&mut self, event_batch: B)
-    where
-        B: IntoIterator<Item = E>,
-        E: EventToEmit,
-    {
-        for event in event_batch {
-            self.emit(event.into());
-        }
-    }
-}
-
 impl<D, H> ReadConversionState for FullAccessState<D, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DB + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     fn conversion_state(&self) -> &ConversionState {
-        &self.in_mem().conversion_state
+        &self.in_mem.conversion_state
     }
 }
 
 impl<D, H> WithConversionState for FullAccessState<D, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DB + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     fn conversion_state_mut(&mut self) -> &mut ConversionState {
@@ -1327,85 +1255,20 @@ where
     }
 }
 
-impl<D, H> StateRead for WlState<D, H>
+impl<S, H> StateRead for WlState<'_, S, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    S: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
-    type D = D;
+    type D = S;
     type H = H;
 
     fn write_log(&self) -> &WriteLog {
-        &self.write_log
+        self.write_log
     }
 
-    fn db(&self) -> &D {
+    fn db(&self) -> &S {
         &self.db
-    }
-
-    fn in_mem(&self) -> &InMemory<Self::H> {
-        &self.in_mem
-    }
-
-    fn charge_gas(&self, _gas: Gas) -> Result<()> {
-        Ok(())
-    }
-}
-
-impl<D, H> State for WlState<D, H>
-where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
-    H: 'static + StorageHasher,
-{
-    fn write_log_mut(&mut self) -> &mut WriteLog {
-        &mut self.write_log
-    }
-
-    fn split_borrow(
-        &mut self,
-    ) -> (&mut WriteLog, &InMemory<Self::H>, &Self::D) {
-        (&mut self.write_log, &self.in_mem, &self.db)
-    }
-}
-
-impl<D, H> EmitEvents for WlState<D, H>
-where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
-    H: 'static + StorageHasher,
-{
-    #[inline]
-    fn emit<E>(&mut self, event: E)
-    where
-        E: EventToEmit,
-    {
-        self.write_log_mut().emit_event(event);
-    }
-
-    fn emit_many<B, E>(&mut self, event_batch: B)
-    where
-        B: IntoIterator<Item = E>,
-        E: EventToEmit,
-    {
-        for event in event_batch {
-            self.emit(event.into());
-        }
-    }
-}
-
-impl<D, H> StateRead for TempWlState<'_, D, H>
-where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
-    H: 'static + StorageHasher,
-{
-    type D = D;
-    type H = H;
-
-    fn write_log(&self) -> &WriteLog {
-        &self.write_log
-    }
-
-    fn db(&self) -> &D {
-        self.db
     }
 
     fn in_mem(&self) -> &InMemory<Self::H> {
@@ -1417,9 +1280,74 @@ where
     }
 }
 
-impl<D, H> State for TempWlState<'_, D, H>
+impl<S, H> State for WlState<'_, S, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    S: 'static + DBRead + for<'iter> DBIter<'iter>,
+    H: 'static + StorageHasher,
+{
+    fn write_log_mut(&mut self) -> &mut WriteLog {
+        self.write_log
+    }
+
+    fn split_borrow(
+        &mut self,
+    ) -> (&mut WriteLog, &InMemory<Self::H>, &Self::D) {
+        (self.write_log, self.in_mem, &self.db)
+    }
+}
+
+impl<S, H> EmitEvents for WlState<'_, S, H>
+where
+    S: 'static + DBRead + for<'iter> DBIter<'iter>,
+    H: 'static + StorageHasher,
+{
+    #[inline]
+    fn emit<E>(&mut self, event: E)
+    where
+        E: EventToEmit,
+    {
+        self.write_log_mut().emit_event(event);
+    }
+
+    fn emit_many<B, E>(&mut self, event_batch: B)
+    where
+        B: IntoIterator<Item = E>,
+        E: EventToEmit,
+    {
+        for event in event_batch {
+            self.emit(event.into());
+        }
+    }
+}
+
+impl<S, H> StateRead for TempWlState<'_, S, H>
+where
+    S: 'static + DBRead + for<'iter> DBIter<'iter>,
+    H: 'static + StorageHasher,
+{
+    type D = S;
+    type H = H;
+
+    fn write_log(&self) -> &WriteLog {
+        &self.write_log
+    }
+
+    fn db(&self) -> &S {
+        &self.db
+    }
+
+    fn in_mem(&self) -> &InMemory<Self::H> {
+        self.in_mem
+    }
+
+    fn charge_gas(&self, _gas: Gas) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl<S, H> State for TempWlState<'_, S, H>
+where
+    S: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     fn write_log_mut(&mut self) -> &mut WriteLog {
@@ -1429,36 +1357,14 @@ where
     fn split_borrow(
         &mut self,
     ) -> (&mut WriteLog, &InMemory<Self::H>, &Self::D) {
-        (&mut self.write_log, (self.in_mem), (self.db))
-    }
-}
-
-impl<D, H> Deref for FullAccessState<D, H>
-where
-    D: DB + for<'iter> DBIter<'iter>,
-    H: StorageHasher,
-{
-    type Target = WlState<D, H>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<D, H> DerefMut for FullAccessState<D, H>
-where
-    D: DB + for<'iter> DBIter<'iter>,
-    H: StorageHasher,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        (&mut self.write_log, (self.in_mem), (&self.db))
     }
 }
 
 #[cfg(any(test, feature = "testing"))]
 impl<D, H> namada_tx::action::Read for FullAccessState<D, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DB + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     type Err = Error;
@@ -1467,7 +1373,7 @@ where
         &self,
         key: &storage::Key,
     ) -> Result<Option<T>> {
-        let (log_val, _) = self.write_log().read_temp(key).unwrap();
+        let (log_val, _) = self.write_log.read_temp(key).unwrap();
         match log_val {
             Some(value) => {
                 let value = decode(value)?;
@@ -1481,7 +1387,7 @@ where
 #[cfg(any(test, feature = "testing"))]
 impl<D, H> namada_tx::action::Write for FullAccessState<D, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DB + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     fn write_temp<T: namada_core::borsh::BorshSerialize>(
@@ -1489,16 +1395,14 @@ where
         key: &storage::Key,
         val: T,
     ) -> Result<()> {
-        let _ = self
-            .write_log_mut()
-            .write_temp(key, val.serialize_to_vec())?;
+        let _ = self.write_log.write_temp(key, val.serialize_to_vec())?;
         Ok(())
     }
 }
 
-impl<D, H> namada_tx::action::Read for WlState<D, H>
+impl<S, H> namada_tx::action::Read for WlState<'_, S, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    S: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     type Err = Error;
@@ -1518,9 +1422,9 @@ where
     }
 }
 
-impl<D, H> namada_tx::action::Read for TempWlState<'_, D, H>
+impl<S, H> namada_tx::action::Read for TempWlState<'_, S, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    S: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     type Err = Error;

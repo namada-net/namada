@@ -5,7 +5,7 @@ use namada_core::token;
 use namada_proof_of_stake::rewards::{
     PosRewardsRates, estimate_staking_reward_rate,
 };
-use namada_state::{DB, DBIter, StorageHasher};
+use namada_state::{DBIter, DBRead, StorageHasher};
 use namada_token::{
     get_effective_total_native_supply, read_denom, read_total_supply,
 };
@@ -26,7 +26,7 @@ fn denomination<D, H, V, T>(
     token: Address,
 ) -> namada_storage::Result<Option<token::Denomination>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     read_denom(ctx.state, &token)
@@ -38,7 +38,7 @@ fn total_supply<D, H, V, T>(
     token: Address,
 ) -> namada_storage::Result<token::Amount>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     read_total_supply(ctx.state, &token)
@@ -49,7 +49,7 @@ fn effective_native_supply<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<token::Amount>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     get_effective_total_native_supply(ctx.state)
@@ -60,7 +60,7 @@ fn staking_rewards_rate<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<PosRewardsRates>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     estimate_staking_reward_rate::<

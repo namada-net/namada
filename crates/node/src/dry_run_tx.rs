@@ -7,7 +7,7 @@ use namada_sdk::gas::{GasMetering, TxGasMeter};
 use namada_sdk::parameters;
 use namada_sdk::queries::{EncodedResponseQuery, RequestQuery};
 use namada_sdk::state::{
-    DB, DBIter, Error, Result, ResultExt, StorageHasher, TxIndex,
+    DBIter, DBRead, Error, Result, ResultExt, StorageHasher, TxIndex,
 };
 use namada_sdk::tx::data::{DryRunResult, GasLimit, TxResult, TxType};
 use namada_sdk::tx::{self, Tx};
@@ -25,7 +25,7 @@ pub fn dry_run_tx<D, H, CA>(
     request: &RequestQuery,
 ) -> Result<EncodedResponseQuery>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     CA: 'static + WasmCacheAccess + Sync,
 {
@@ -246,16 +246,14 @@ mod test {
                     // This is safe because nothing else is using `self.state`
                     // concurrently and the `TempWlState` will be dropped right
                     // after dry-run.
-                    unsafe {
-                        self.state.read_only().with_static_temp_write_log()
-                    },
+                    self.state.with_temp_write_log(),
                     self.vp_wasm_cache.clone(),
                     self.tx_wasm_cache.clone(),
                     &request,
                 )
             } else {
                 let ctx = RequestCtx {
-                    state: self.state.read_only(),
+                    state: self.state.with_temp_write_log(),
                     event_log: &self.event_log,
                     vp_wasm_cache: self.vp_wasm_cache.clone(),
                     tx_wasm_cache: self.tx_wasm_cache.clone(),

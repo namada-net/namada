@@ -3,14 +3,14 @@
 
 use namada_core::collections::HashMap;
 
-use crate::{DB, DBIter, PrefixIter};
+use crate::{DBIter, DBRead, PrefixIter};
 
 /// A temporary iterators storage, used during a wasm run after which it's
 /// dropped. Each iterator is assigned a [`PrefixIteratorId`].
 #[derive(Debug)]
 pub struct PrefixIterators<'iter, D>
 where
-    D: DB + DBIter<'iter>,
+    D: DBRead + DBIter<'iter>,
 {
     index: PrefixIteratorId,
     iterators: HashMap<PrefixIteratorId, PrefixIter<'iter, D>>,
@@ -18,7 +18,7 @@ where
 
 impl<'iter, D> PrefixIterators<'iter, D>
 where
-    D: DB + DBIter<'iter>,
+    D: DBRead + DBIter<'iter>,
 {
     /// Insert a new prefix iterator to the temporary storage. Returns `None` on
     /// prefix iterator ID overflow
@@ -51,7 +51,7 @@ where
 
 impl<'iter, D> Default for PrefixIterators<'iter, D>
 where
-    D: DB + DBIter<'iter>,
+    D: DBRead + DBIter<'iter>,
 {
     fn default() -> Self {
         Self {

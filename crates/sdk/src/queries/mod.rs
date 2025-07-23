@@ -2,7 +2,7 @@
 //! defined via `router!` macro.
 
 // Re-export to show in rustdoc!
-use namada_state::{DB, DBIter, StorageHasher};
+use namada_state::{DBIter, DBRead, StorageHasher};
 use shell::SHELL;
 pub use shell::Shell;
 pub use types::{
@@ -38,7 +38,7 @@ pub fn handle_path<D, H, V, T>(
     request: &RequestQuery,
 ) -> namada_storage::Result<EncodedResponseQuery>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     RPC.handle(ctx, request)
@@ -53,7 +53,7 @@ pub fn require_latest_height<D, H, V, T>(
     request: &RequestQuery,
 ) -> namada_storage::Result<()>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     if request.height.value() != 0

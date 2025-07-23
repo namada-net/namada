@@ -858,7 +858,7 @@ macro_rules! router {
 mod test_rpc_handlers {
     use namada_core::chain::Epoch;
     use namada_core::token;
-    use namada_state::{DB, DBIter, StorageHasher};
+    use namada_state::{DBIter, DBRead, StorageHasher};
 
     use crate::borsh::BorshSerializeExt;
     use crate::queries::{
@@ -880,7 +880,7 @@ mod test_rpc_handlers {
                     $( $( $param: $param_ty ),* )?
                 ) -> namada_storage::Result<String>
                 where
-                    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+                    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
                     H: 'static + StorageHasher + Sync,
                 {
                     let data = stringify!($name).to_owned();
@@ -929,7 +929,7 @@ mod test_rpc_handlers {
         a3: Option<token::DenominatedAmount>,
     ) -> namada_storage::Result<String>
     where
-        D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+        D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
         H: 'static + StorageHasher + Sync,
     {
         let data = "b3iii".to_owned();
@@ -949,7 +949,7 @@ mod test_rpc_handlers {
         a4: Option<Epoch>,
     ) -> namada_storage::Result<String>
     where
-        D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+        D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
         H: 'static + StorageHasher + Sync,
     {
         let data = "b3iiii".to_owned();
@@ -967,7 +967,7 @@ mod test_rpc_handlers {
         _request: &RequestQuery,
     ) -> namada_storage::Result<EncodedResponseQuery>
     where
-        D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+        D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
         H: 'static + StorageHasher + Sync,
     {
         let data = "c".to_owned().serialize_to_vec();

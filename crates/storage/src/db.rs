@@ -185,7 +185,7 @@ pub trait DB: Debug {
     type Cache;
 
     /// A databse for read
-    type ReadOnly: DBRead;
+    type ReadOnly: DBRead + for<'iter> DBIter<'iter>;
 
     /// A handle for batch writes
     type WriteBatch: DBWriteBatch;

@@ -14,7 +14,7 @@ use namada_macros::BorshDeserializer;
 #[cfg(feature = "migrations")]
 use namada_migrations::*;
 use namada_proof_of_stake::queries::get_total_voting_power;
-use namada_state::{DB, DBIter, StorageHasher, StorageRead, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, StorageRead, WlState};
 use namada_systems::governance;
 
 use super::{ChangedKeys, read};
@@ -40,14 +40,14 @@ pub trait EpochedVotingPowerExt {
     /// Query the stake of the most secure [`Epoch`] referenced by an
     /// [`EpochedVotingPower`]. This translates to the [`Epoch`] with
     /// the most staked tokens.
-    fn epoch_max_voting_power<D, H, Gov>(
+    fn epoch_max_voting_power<'db, D, H, Gov>(
         &self,
-        state: &WlState<D, H>,
+        state: &WlState<'db, D, H>,
     ) -> Option<token::Amount>
     where
-        D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+        D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
         H: 'static + StorageHasher + Sync,
-        Gov: governance::Read<WlState<D, H>>;
+        Gov: governance::Read<WlState<'db, D, H>>;
 
     /// Fetch the sum of the stake tallied on an
     /// [`EpochedVotingPower`].
@@ -57,14 +57,14 @@ pub trait EpochedVotingPowerExt {
     /// [`EpochedVotingPower`], as a fraction over
     /// the maximum stake seen in the epochs voted on.
     #[inline]
-    fn fractional_stake<D, H, Gov>(
+    fn fractional_stake<'db, D, H, Gov>(
         &self,
-        state: &WlState<D, H>,
+        state: &WlState<'db, D, H>,
     ) -> FractionalVotingPower
     where
-        D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+        D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
         H: 'static + StorageHasher + Sync,
-        Gov: governance::Read<WlState<D, H>>,
+        Gov: governance::Read<WlState<'db, D, H>>,
     {
         let Some(max_voting_power) =
             self.epoch_max_voting_power::<_, _, Gov>(state)
@@ -81,11 +81,14 @@ pub trait EpochedVotingPowerExt {
     /// Check if the [`Tally`] associated with an [`EpochedVotingPower`]
     /// can be considered `seen`.
     #[inline]
-    fn has_majority_quorum<D, H, Gov>(&self, state: &WlState<D, H>) -> bool
+    fn has_majority_quorum<'db, D, H, Gov>(
+        &self,
+        state: &WlState<'db, D, H>,
+    ) -> bool
     where
-        D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+        D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
         H: 'static + StorageHasher + Sync,
-        Gov: governance::Read<WlState<D, H>>,
+        Gov: governance::Read<WlState<'db, D, H>>,
     {
         let Some(max_voting_power) =
             self.epoch_max_voting_power::<_, _, Gov>(state)
@@ -110,14 +113,14 @@ pub trait EpochedVotingPowerExt {
 }
 
 impl EpochedVotingPowerExt for EpochedVotingPower {
-    fn epoch_max_voting_power<D, H, Gov>(
+    fn epoch_max_voting_power<'db, D, H, Gov>(
         &self,
-        state: &WlState<D, H>,
+        state: &WlState<'db, D, H>,
     ) -> Option<token::Amount>
     where
-        D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+        D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
         H: 'static + StorageHasher + Sync,
-        Gov: governance::Read<WlState<D, H>>,
+        Gov: governance::Read<WlState<'db, D, H>>,
     {
         self.keys()
             .copied()
@@ -158,15 +161,15 @@ pub struct Tally {
 
 /// Calculate a new [`Tally`] based on some validators' fractional voting powers
 /// as specific block heights
-pub fn calculate_new<D, H, Gov>(
-    state: &WlState<D, H>,
+pub fn calculate_new<'db, D, H, Gov>(
+    state: &WlState<'db, D, H>,
     seen_by: Votes,
     voting_powers: &HashMap<(Address, BlockHeight), token::Amount>,
 ) -> Result<Tally>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     let mut seen_by_voting_power = EpochedVotingPower::new();
     for (validator, block_height) in seen_by.iter() {

@@ -337,7 +337,7 @@ impl DB for MockDB {
         Self::default()
     }
 
-    fn read_only(&self) -> Self {
+    fn read_only(&self) -> Self::ReadOnly {
         Self::default()
     }
 

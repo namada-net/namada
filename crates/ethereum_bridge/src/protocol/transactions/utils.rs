@@ -8,7 +8,7 @@ use namada_core::collections::{HashMap, HashSet};
 use namada_core::token;
 use namada_proof_of_stake::storage::read_consensus_validator_set_addresses_with_stake;
 use namada_proof_of_stake::types::WeightedValidator;
-use namada_state::{DB, DBIter, StorageHasher, StorageRead, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, StorageRead, WlState};
 
 /// Proof of some arbitrary tally whose voters can be queried.
 pub(super) trait GetVoters {
@@ -23,11 +23,11 @@ pub(super) trait GetVoters {
 /// which they signed some arbitrary object, and whose values are the voting
 /// powers of these validators at the key's given block height.
 pub(super) fn get_voting_powers<D, H, P>(
-    state: &WlState<D, H>,
+    state: &WlState<'_, D, H>,
     proof: P,
 ) -> eyre::Result<HashMap<(Address, BlockHeight), token::Amount>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     P: GetVoters,
 {
@@ -55,11 +55,11 @@ where
 }
 
 pub(super) fn get_consensus_validators<D, H>(
-    state: &WlState<D, H>,
+    state: &WlState<'_, D, H>,
     block_heights: HashSet<BlockHeight>,
 ) -> BTreeMap<BlockHeight, BTreeSet<WeightedValidator>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let mut consensus_validators = BTreeMap::default();

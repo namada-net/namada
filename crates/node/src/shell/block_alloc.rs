@@ -128,11 +128,11 @@ pub struct BlockAllocator<State> {
 impl<D, H> From<&WlState<D, H>>
     for BlockAllocator<states::BuildingProtocolTxBatch<WithNormalTxs>>
 where
-    D: 'static + state::DB + for<'iter> state::DBIter<'iter>,
+    D: 'static + state::DBRead + for<'iter> state::DBIter<'iter>,
     H: 'static + state::StorageHasher,
 {
     #[inline]
-    fn from(storage: &WlState<D, H>) -> Self {
+    fn from(storage: &WlState<'_, D, H>) -> Self {
         Self::init(
             parameters::read_max_proposal_bytes(storage)
                 .expect("Must be able to read ProposalBytes from storage")

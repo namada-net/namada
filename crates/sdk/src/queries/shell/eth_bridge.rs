@@ -34,7 +34,7 @@ use namada_macros::BorshDeserializer;
 #[cfg(feature = "migrations")]
 use namada_migrations::*;
 use namada_state::MembershipProof::BridgePool;
-use namada_state::{DB, DBIter, StorageHasher, StoreRef, StoreType};
+use namada_state::{DBIter, DBRead, StorageHasher, StoreRef, StoreType};
 use namada_storage::{CustomError, ResultExt, StorageRead};
 use namada_vote_ext::validator_set_update::{
     ValidatorSetArgs, VotingPowersMap,
@@ -243,7 +243,7 @@ fn pending_eth_transfer_status<D, H, V, T>(
     request: &RequestQuery,
 ) -> namada_storage::Result<EncodedResponseQuery>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let mut transfer_hashes: HashSet<KeccakHash> =
@@ -347,7 +347,7 @@ fn get_erc20_flow_control<D, H, V, T>(
     asset: EthAddress,
 ) -> namada_storage::Result<Erc20FlowControl>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let ethbridge_queries = ctx.state.ethbridge_queries();
@@ -371,7 +371,7 @@ fn read_contract<T, D, H, V, U>(
     ctx: RequestCtx<'_, D, H, V, U>,
 ) -> namada_storage::Result<T>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
     T: BorshDeserialize,
 {
@@ -391,7 +391,7 @@ fn read_bridge_contract<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<UpgradeableContract>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     read_contract(&bridge_contract_key(), ctx)
@@ -404,7 +404,7 @@ fn read_native_erc20_contract<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<EthAddress>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     read_contract(&native_erc20_key(), ctx)
@@ -416,7 +416,7 @@ fn read_ethereum_bridge_pool<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<Vec<PendingTransfer>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     Ok(read_ethereum_bridge_pool_at_height(
@@ -431,7 +431,7 @@ fn read_signed_ethereum_bridge_pool<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<Vec<PendingTransfer>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     // get the latest signed merkle root of the Ethereum bridge pool
@@ -452,7 +452,7 @@ fn read_ethereum_bridge_pool_at_height<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> Vec<PendingTransfer>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     // get the backing store of the merkle tree corresponding
@@ -489,7 +489,7 @@ fn generate_bridge_pool_proof<D, H, V, T>(
     request: &RequestQuery,
 ) -> namada_storage::Result<EncodedResponseQuery>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     if let Ok(GenBridgePoolProofReq {
@@ -621,7 +621,7 @@ fn transfer_to_ethereum_progress<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<HashMap<PendingTransfer, FractionalVotingPower>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let mut pending_events = HashMap::new();
@@ -693,7 +693,7 @@ fn read_valset_upd_proof<D, H, V, T>(
     epoch: Epoch,
 ) -> namada_storage::Result<EncodeCell<EthereumProof<(Epoch, VotingPowersMap)>>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     if epoch.0 == 0 {
@@ -743,7 +743,7 @@ fn read_bridge_valset<D, H, V, T>(
     epoch: Epoch,
 ) -> namada_storage::Result<ValidatorSetArgs>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let current_epoch = ctx.state.in_mem().last_epoch;
@@ -773,7 +773,7 @@ fn read_governance_valset<D, H, V, T>(
     epoch: Epoch,
 ) -> namada_storage::Result<ValidatorSetArgs>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let current_epoch = ctx.state.in_mem().last_epoch;
@@ -801,7 +801,7 @@ fn voting_powers_at_height<D, H, V, T>(
     height: BlockHeight,
 ) -> namada_storage::Result<VotingPowersMap>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let maybe_epoch = ctx.state.get_epoch_at_height(height).unwrap();
@@ -820,7 +820,7 @@ fn voting_powers_at_epoch<D, H, V, T>(
     epoch: Epoch,
 ) -> namada_storage::Result<VotingPowersMap>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let current_epoch = ctx.state.in_mem().get_current_epoch().0;

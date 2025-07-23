@@ -2,7 +2,7 @@
 
 use namada_core::chain::Epoch;
 use namada_proof_of_stake::queries::get_validator_eth_hot_key;
-use namada_state::{DB, DBIter, StorageHasher, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, WlState};
 use namada_systems::governance;
 use namada_vote_ext::validator_set_update;
 
@@ -29,15 +29,15 @@ use crate::storage::eth_bridge_queries::{
 ///    of the validators of `signing_epoch + 1`.
 ///  * The voting powers signed over were Ethereum ABI encoded, normalized to
 ///    `2^32`, and sorted in descending order.
-pub fn validate_valset_upd_vext<D, H, Gov>(
-    state: &WlState<D, H>,
+pub fn validate_valset_upd_vext<'db, D, H, Gov>(
+    state: &WlState<'db, D, H>,
     ext: &validator_set_update::SignedVext,
     last_epoch: Epoch,
 ) -> Result<(), VoteExtensionError>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     let signing_epoch = ext.data.signing_epoch;
     if !is_bridge_comptime_enabled() {

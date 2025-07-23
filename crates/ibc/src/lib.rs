@@ -97,8 +97,8 @@ use namada_core::masp_primitives::transaction::components::ValueSum;
 use namada_core::token::Amount;
 use namada_events::EmitEvents;
 use namada_state::{
-    DB, DBIter, Error as StorageError, Key, Result as StorageResult, ResultExt,
-    State, StorageHasher, StorageRead, StorageWrite, WlState,
+    DBIter, DBRead, Error as StorageError, Key, Result as StorageResult,
+    ResultExt, State, StorageHasher, StorageRead, StorageWrite, WlState,
 };
 use namada_systems::ibc::ChangedBalances;
 use namada_systems::trans_token;
@@ -1151,12 +1151,12 @@ where
 
 /// Update IBC-related data when finalizing block
 pub fn finalize_block<D, H>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
     _events: &mut impl EmitEvents,
     is_new_epoch: bool,
 ) -> Result<(), StorageError>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     if is_new_epoch {
@@ -1167,10 +1167,10 @@ where
 
 /// Clear the per-epoch throughputs (deposit and withdraw)
 fn clear_throughputs<D, H>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
 ) -> Result<(), StorageError>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     for prefix in [deposit_prefix(), withdraw_prefix()] {

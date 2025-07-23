@@ -968,7 +968,8 @@ mod tests {
 
     #[test]
     fn test_commit() {
-        let mut state = crate::testing::TestState::default();
+        let mut state = crate::testing::TestFullAccessState::default();
+        let wl_state = state.restrict_writes_to_write_log();
         let address_gen = EstablishedAddressGen::new("test");
 
         let key1 =
@@ -982,53 +983,57 @@ mod tests {
 
         // initialize an account
         let vp1 = Hash::sha256("vp1".as_bytes());
-        let (addr1, _) = state.write_log.init_account(&address_gen, vp1, &[]);
-        state.write_log.commit_batch_and_current_tx();
+        let (addr1, _) =
+            wl_state.write_log.init_account(&address_gen, vp1, &[]);
+        wl_state.write_log.commit_batch_and_current_tx();
 
         // write values
         let val1 = "val1".as_bytes().to_vec();
-        let _ = state.write_log.write(&key1, val1.clone()).unwrap();
-        let _ = state.write_log.write(&key2, val1.clone()).unwrap();
-        let _ = state.write_log.write(&key3, val1.clone()).unwrap();
-        let _ = state.write_log.write_temp(&key4, val1.clone()).unwrap();
-        state.write_log.commit_batch_and_current_tx();
+        let _ = wl_state.write_log.write(&key1, val1.clone()).unwrap();
+        let _ = wl_state.write_log.write(&key2, val1.clone()).unwrap();
+        let _ = wl_state.write_log.write(&key3, val1.clone()).unwrap();
+        let _ = wl_state.write_log.write_temp(&key4, val1.clone()).unwrap();
+        wl_state.write_log.commit_batch_and_current_tx();
 
         // these values are not written due to drop_tx
         let val2 = "val2".as_bytes().to_vec();
-        let _ = state.write_log.write(&key1, val2.clone()).unwrap();
-        let _ = state.write_log.write(&key2, val2.clone()).unwrap();
-        let _ = state.write_log.write(&key3, val2).unwrap();
-        state.write_log.drop_tx();
+        let _ = wl_state.write_log.write(&key1, val2.clone()).unwrap();
+        let _ = wl_state.write_log.write(&key2, val2.clone()).unwrap();
+        let _ = wl_state.write_log.write(&key3, val2).unwrap();
+        wl_state.write_log.drop_tx();
 
         // deletes and updates values
         let val3 = "val3".as_bytes().to_vec();
-        let _ = state.write_log.delete(&key2).unwrap();
-        let _ = state.write_log.write(&key3, val3.clone()).unwrap();
-        state.write_log.commit_batch_and_current_tx();
+        let _ = wl_state.write_log.delete(&key2).unwrap();
+        let _ = wl_state.write_log.write(&key3, val3.clone()).unwrap();
+        wl_state.write_log.commit_batch_and_current_tx();
 
         // commit a block
         state.commit_block().expect("commit failed");
+        // update the DB snapshot
+        let wl_state = state.restrict_writes_to_write_log();
 
-        let (vp_code_hash, _gas) = state
+        let (vp_code_hash, _gas) = wl_state
             .validity_predicate::<namada_parameters::Store<()>>(&addr1)
             .expect("vp read failed");
         assert_eq!(vp_code_hash, Some(vp1));
-        let (value, _) = state.db_read(&key1).expect("read failed");
+        let (value, _) = wl_state.db_read(&key1).expect("read failed");
         assert_eq!(value.expect("no read value"), val1);
-        let (value, _) = state.db_read(&key2).expect("read failed");
+        let (value, _) = wl_state.db_read(&key2).expect("read failed");
         assert!(value.is_none());
-        let (value, _) = state.db_read(&key3).expect("read failed");
+        let (value, _) = wl_state.db_read(&key3).expect("read failed");
         assert_eq!(value.expect("no read value"), val3);
-        let (value, _) = state.db_read(&key4).expect("read failed");
+        let (value, _) = wl_state.db_read(&key4).expect("read failed");
         assert_eq!(value, None);
     }
 
     #[test]
     fn test_replay_protection_commit() {
-        let mut state = crate::testing::TestState::default();
+        let mut state = crate::testing::TestFullAccessState::default();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         {
-            let write_log = state.write_log_mut();
+            let write_log = wl_state.write_log_mut();
             // write some replay protection keys
             write_log
                 .write_tx_hash(Hash::sha256("tx1".as_bytes()))
@@ -1043,19 +1048,20 @@ mod tests {
 
         // commit a block
         state.commit_block().expect("commit failed");
+        let mut wl_state = state.restrict_writes_to_write_log();
 
-        assert!(state.write_log.replay_protection.is_empty());
+        assert!(wl_state.write_log.replay_protection.is_empty());
         for tx in ["tx1", "tx2", "tx3"] {
             let hash = Hash::sha256(tx.as_bytes());
             assert!(
-                state
+                wl_state
                     .has_replay_protection_entry(&hash)
                     .expect("read failed")
             );
         }
 
         {
-            let write_log = state.write_log_mut();
+            let write_log = wl_state.write_log_mut();
             // write some replay protection keys
             write_log
                 .write_tx_hash(Hash::sha256("tx4".as_bytes()))
@@ -1075,22 +1081,23 @@ mod tests {
 
         // commit a block
         state.commit_block().expect("commit failed");
+        let mut wl_state = state.restrict_writes_to_write_log();
 
-        assert!(state.write_log.replay_protection.is_empty());
+        assert!(wl_state.write_log.replay_protection.is_empty());
         for tx in ["tx1", "tx2", "tx3", "tx5", "tx6"] {
             assert!(
-                state
+                wl_state
                     .has_replay_protection_entry(&Hash::sha256(tx.as_bytes()))
                     .expect("read failed")
             );
         }
         assert!(
-            !state
+            !wl_state
                 .has_replay_protection_entry(&Hash::sha256("tx4".as_bytes()))
                 .expect("read failed")
         );
         {
-            let write_log = state.write_log_mut();
+            let write_log = wl_state.write_log_mut();
             write_log
                 .write_tx_hash(Hash::sha256("tx7".as_bytes()))
                 .unwrap();
@@ -1113,15 +1120,16 @@ mod tests {
     // Test that writing a value on top of a temporary write is not allowed
     #[test]
     fn test_write_after_temp_disallowed() {
-        let mut state = crate::testing::TestState::default();
+        let mut state = crate::testing::TestFullAccessState::default();
+        let wl_state = state.restrict_writes_to_write_log();
 
         let key1 =
             storage::Key::parse("key1").expect("cannot parse the key string");
         let val1 = "val1".as_bytes().to_vec();
         // Test from tx_write_log
-        let _ = state.write_log.write_temp(&key1, val1.clone()).unwrap();
+        let _ = wl_state.write_log.write_temp(&key1, val1.clone()).unwrap();
         assert!(matches!(
-            state.write_log.write(&key1, val1.clone()),
+            wl_state.write_log.write(&key1, val1.clone()),
             Err(Error::UpdateTemporaryValue)
         ));
     }
@@ -1129,15 +1137,16 @@ mod tests {
     // Test that a temporary write on top of a write is not allowed
     #[test]
     fn test_write_temp_after_write_disallowed() {
-        let mut state = crate::testing::TestState::default();
+        let mut state = crate::testing::TestFullAccessState::default();
+        let wl_state = state.restrict_writes_to_write_log();
 
         let key1 =
             storage::Key::parse("key1").expect("cannot parse the key string");
         let val1 = "val1".as_bytes().to_vec();
         // Test from tx_write_log
-        let _ = state.write_log.write(&key1, val1.clone()).unwrap();
+        let _ = wl_state.write_log.write(&key1, val1.clone()).unwrap();
         assert!(matches!(
-            state.write_log.write_temp(&key1, val1.clone()),
+            wl_state.write_log.write_temp(&key1, val1.clone()),
             Err(Error::WriteTempAfterWrite)
         ));
     }
@@ -1145,7 +1154,7 @@ mod tests {
     // Test that a temporary write on top of a delete is not allowed
     #[test]
     fn test_write_temp_after_delete_disallowed() {
-        let mut state = crate::testing::TestState::default();
+        let mut state = crate::testing::TestFullAccessState::default();
 
         let key1 =
             storage::Key::parse("key1").expect("cannot parse the key string");

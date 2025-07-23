@@ -2,7 +2,7 @@
 
 use namada_core::chain::BlockHeight;
 use namada_proof_of_stake::queries::get_validator_protocol_key;
-use namada_state::{DB, DBIter, StorageHasher, StorageRead, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, StorageRead, WlState};
 use namada_systems::governance;
 use namada_tx::Signed;
 use namada_vote_ext::ethereum_events;
@@ -19,15 +19,15 @@ use crate::storage::eth_bridge_queries::EthBridgeQueries;
 ///  * The validator signed over the correct height inside of the extension.
 ///  * There are no duplicate Ethereum events in this vote extension, and the
 ///    events are sorted in ascending order.
-pub fn validate_eth_events_vext<D, H, Gov>(
-    state: &WlState<D, H>,
+pub fn validate_eth_events_vext<'db, D, H, Gov>(
+    state: &WlState<'db, D, H>,
     ext: &Signed<ethereum_events::Vext>,
     last_height: BlockHeight,
 ) -> Result<(), VoteExtensionError>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     // NOTE: for ABCI++, we should pass
     // `last_height` here, instead of `ext.data.block_height`
@@ -107,11 +107,11 @@ where
 /// ascending ordering, must not contain any dupes
 /// and must have valid nonces.
 fn validate_eth_events<D, H>(
-    state: &WlState<D, H>,
+    state: &WlState<'_, D, H>,
     ext: &ethereum_events::Vext,
 ) -> Result<(), VoteExtensionError>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     // verify if we have any duplicate Ethereum events,

@@ -25,7 +25,7 @@ use namada_gas::{
 use namada_state::prefix_iter::{PrefixIteratorId, PrefixIterators};
 use namada_state::write_log::{self, WriteLog};
 use namada_state::{
-    DB, DBIter, InMemory, OptionExt, ResultExt, State, StateRead,
+    DBIter, DBRead, InMemory, OptionExt, ResultExt, State, StateRead,
     StorageHasher, StorageRead, StorageWrite, TxHostEnvState, VpHostEnvState,
 };
 pub use namada_state::{Error, Result};
@@ -89,7 +89,7 @@ pub type TxResult<T> = namada_state::Result<T>;
 /// A transaction's host environment
 pub struct TxVmEnv<MEM, D, H, CA>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
 {
     /// The VM memory for bi-directional data passing
@@ -102,7 +102,7 @@ where
 #[derive(Debug)]
 pub struct TxCtx<D, H, CA>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
 {
     /// Mutable access to write log.
@@ -147,7 +147,7 @@ where
 
 impl<MEM, D, H, CA> TxVmEnv<MEM, D, H, CA>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -228,7 +228,7 @@ where
 impl<MEM, D, H, CA> Clone for TxVmEnv<MEM, D, H, CA>
 where
     MEM: Clone,
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -242,7 +242,7 @@ where
 
 impl<D, H, CA> TxCtx<D, H, CA>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -274,7 +274,7 @@ where
 
 impl<D, H, CA> Clone for TxCtx<D, H, CA>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -306,7 +306,7 @@ where
 /// A validity predicate's host environment
 pub struct VpVmEnv<MEM, D, H, EVAL, CA>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
 {
     /// The VM memory for bi-directional data passing
@@ -318,7 +318,7 @@ where
 /// A validity predicate's host context
 pub struct VpCtx<D, H, EVAL, CA>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
 {
     /// The address of the account that owns the VP
@@ -362,7 +362,7 @@ where
 /// A Validity predicate runner for calls from the [`vp_eval`] function.
 pub trait VpEvaluator {
     /// DB type
-    type Db: DB + for<'iter> DBIter<'iter>;
+    type Db: DBRead + for<'iter> DBIter<'iter>;
     /// Storage hasher type
     type H: StorageHasher;
     /// Recursive VP evaluator type
@@ -385,7 +385,7 @@ pub trait VpEvaluator {
 
 impl<MEM, D, H, EVAL, CA> VpVmEnv<MEM, D, H, EVAL, CA>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -447,7 +447,7 @@ where
 impl<MEM, D, H, EVAL, CA> Clone for VpVmEnv<MEM, D, H, EVAL, CA>
 where
     MEM: Clone,
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -462,7 +462,7 @@ where
 
 impl<D, H, EVAL, CA> VpCtx<D, H, EVAL, CA>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -553,7 +553,7 @@ where
 
 impl<D, H, EVAL, CA> Clone for VpCtx<D, H, EVAL, CA>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    D: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -589,7 +589,7 @@ pub fn tx_charge_gas<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -605,7 +605,7 @@ fn consume_tx_gas<MEM, D, H, CA>(
 ) -> Result<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -634,7 +634,7 @@ pub fn vp_charge_gas<MEM, D, H, EVAL, CA>(
 ) -> Result<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -652,7 +652,7 @@ pub fn tx_has_key<MEM, D, H, CA>(
 ) -> TxResult<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -684,7 +684,7 @@ pub fn tx_read<MEM, D, H, CA>(
 ) -> TxResult<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -727,7 +727,7 @@ pub fn tx_read_temp<MEM, D, H, CA>(
 ) -> TxResult<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -772,7 +772,7 @@ pub fn tx_result_buffer<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -797,7 +797,7 @@ pub fn tx_iter_prefix<MEM, D, H, CA>(
 ) -> TxResult<u64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -835,7 +835,7 @@ pub fn tx_iter_next<MEM, D, H, CA>(
 ) -> TxResult<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -900,7 +900,7 @@ pub fn tx_write<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -940,7 +940,7 @@ pub fn tx_write_temp<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -972,7 +972,7 @@ fn check_address_existence<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1021,7 +1021,7 @@ pub fn tx_delete<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1051,7 +1051,7 @@ pub fn tx_emit_event<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1086,7 +1086,7 @@ pub fn tx_get_events<MEM, D, H, CA>(
 ) -> TxResult<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1127,7 +1127,7 @@ pub fn vp_read_pre<MEM, D, H, EVAL, CA>(
 ) -> Result<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1173,7 +1173,7 @@ pub fn vp_read_post<MEM, D, H, EVAL, CA>(
 ) -> Result<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1214,7 +1214,7 @@ pub fn vp_read_temp<MEM, D, H, EVAL, CA>(
 ) -> Result<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1257,7 +1257,7 @@ pub fn vp_result_buffer<MEM, D, H, EVAL, CA>(
 ) -> Result<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1283,7 +1283,7 @@ pub fn vp_has_key_pre<MEM, D, H, EVAL, CA>(
 ) -> Result<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1313,7 +1313,7 @@ pub fn vp_has_key_post<MEM, D, H, EVAL, CA>(
 ) -> Result<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1345,7 +1345,7 @@ pub fn vp_iter_prefix_pre<MEM, D, H, EVAL, CA>(
 ) -> Result<u64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1384,7 +1384,7 @@ pub fn vp_iter_prefix_post<MEM, D, H, EVAL, CA>(
 ) -> Result<u64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1423,7 +1423,7 @@ pub fn vp_iter_next<MEM, D, H, EVAL, CA>(
 ) -> Result<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1453,7 +1453,7 @@ pub fn tx_insert_verifier<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1491,7 +1491,7 @@ pub fn tx_update_validity_predicate<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1540,7 +1540,7 @@ pub fn tx_init_account<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1590,7 +1590,7 @@ pub fn tx_get_chain_id<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1612,7 +1612,7 @@ pub fn tx_get_block_height<MEM, D, H, CA>(
 ) -> TxResult<u64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1630,7 +1630,7 @@ pub fn tx_get_tx_index<MEM, D, H, CA>(
 ) -> TxResult<u32>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1653,7 +1653,7 @@ pub fn vp_get_tx_index<MEM, D, H, EVAL, CA>(
 ) -> Result<u32>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1672,7 +1672,7 @@ pub fn tx_get_block_epoch<MEM, D, H, CA>(
 ) -> TxResult<u64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1688,7 +1688,7 @@ pub fn tx_get_pred_epochs<MEM, D, H, CA>(
 ) -> TxResult<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1716,7 +1716,7 @@ pub fn tx_get_native_token<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1745,7 +1745,7 @@ pub fn tx_get_block_header<MEM, D, H, CA>(
 ) -> TxResult<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -1776,7 +1776,7 @@ pub fn vp_get_chain_id<MEM, D, H, EVAL, CA>(
 ) -> Result<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1799,7 +1799,7 @@ pub fn vp_get_block_height<MEM, D, H, EVAL, CA>(
 ) -> Result<u64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1817,7 +1817,7 @@ pub fn vp_get_block_header<MEM, D, H, EVAL, CA>(
 ) -> Result<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1846,7 +1846,7 @@ pub fn vp_get_tx_code_hash<MEM, D, H, EVAL, CA>(
 ) -> Result<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1878,7 +1878,7 @@ pub fn vp_get_block_epoch<MEM, D, H, EVAL, CA>(
 ) -> Result<u64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1895,7 +1895,7 @@ pub fn vp_get_pred_epochs<MEM, D, H, EVAL, CA>(
 ) -> Result<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1918,7 +1918,7 @@ pub fn vp_get_events<MEM, D, H, EVAL, CA>(
 ) -> Result<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -1954,7 +1954,7 @@ pub fn vp_verify_tx_section_signature<MEM, D, H, EVAL, CA>(
 ) -> Result<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -2020,7 +2020,7 @@ pub fn tx_log_string<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -2040,7 +2040,7 @@ fn tx_validate_vp_code_hash<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -2094,7 +2094,7 @@ where
 pub fn tx_set_commitment_sentinel<MEM, D, H, CA>(
     env: &mut TxVmEnv<MEM, D, H, CA>,
 ) where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     MEM: VmMemory,
     CA: WasmCacheAccess,
@@ -2115,7 +2115,7 @@ pub fn tx_verify_tx_section_signature<MEM, D, H, CA>(
 ) -> TxResult<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -2174,7 +2174,7 @@ pub fn tx_update_masp_note_commitment_tree<MEM, D, H, CA>(
 ) -> TxResult<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -2209,7 +2209,7 @@ pub fn tx_yield_value<MEM, D, H, CA>(
 ) -> TxResult<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
@@ -2233,7 +2233,7 @@ pub fn vp_eval<MEM, D, H, EVAL, CA>(
 ) -> Result<i64>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator<Db = D, H = H, Eval = EVAL, CA = CA>,
     CA: WasmCacheAccess,
@@ -2281,7 +2281,7 @@ pub fn vp_get_native_token<MEM, D, H, EVAL, CA>(
 ) -> Result<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -2307,7 +2307,7 @@ pub fn vp_log_string<MEM, D, H, EVAL, CA>(
 ) -> Result<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,
@@ -2328,7 +2328,7 @@ pub fn vp_yield_value<MEM, D, H, EVAL, CA>(
 ) -> Result<()>
 where
     MEM: VmMemory,
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
     EVAL: VpEvaluator,
     CA: WasmCacheAccess,

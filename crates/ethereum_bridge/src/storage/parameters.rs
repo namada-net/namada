@@ -9,7 +9,7 @@ use namada_core::token::{DenominatedAmount, NATIVE_MAX_DECIMAL_PLACES};
 use namada_macros::BorshDeserializer;
 #[cfg(feature = "migrations")]
 use namada_migrations::*;
-use namada_state::{DB, DBIter, StorageHasher, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, WlState};
 use namada_storage::{Error, Result, StorageRead, StorageWrite};
 use serde::{Deserialize, Serialize};
 
@@ -175,9 +175,9 @@ impl EthereumBridgeParams {
     ///
     /// If these parameters are initialized, the storage subspaces
     /// for the Ethereum bridge VPs are also initialized.
-    pub fn init_storage<D, H>(&self, state: &mut WlState<D, H>)
+    pub fn init_storage<D, H>(&self, state: &mut WlState<'_, D, H>)
     where
-        D: 'static + DB + for<'iter> DBIter<'iter>,
+        D: 'static + DBRead + for<'iter> DBIter<'iter>,
         H: 'static + StorageHasher,
     {
         let Self {
@@ -287,9 +287,9 @@ impl EthereumOracleConfig {
     /// present, `None` will be returned - this could be the case if the bridge
     /// has not been bootstrapped yet. Panics if the storage appears to be
     /// corrupt.
-    pub fn read<D, H>(state: &WlState<D, H>) -> Option<Self>
+    pub fn read<D, H>(state: &WlState<'_, D, H>) -> Option<Self>
     where
-        D: 'static + DB + for<'iter> DBIter<'iter>,
+        D: 'static + DBRead + for<'iter> DBIter<'iter>,
         H: 'static + StorageHasher,
     {
         // TODO(namada#1720): remove present key check; `is_bridge_active`
@@ -340,11 +340,11 @@ where
 /// Reads the value of `key` from `storage` and deserializes it, or panics
 /// otherwise.
 fn must_read_key<D, H, T: BorshDeserialize>(
-    state: &WlState<D, H>,
+    state: &WlState<'_, D, H>,
     key: &Key,
 ) -> T
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     StorageRead::read::<T>(state, key).map_or_else(

@@ -19,7 +19,7 @@ use namada_core::time::DurationSecs;
 use namada_core::token::{Denomination, MaspDigitPos};
 use namada_core::uint::Uint;
 use namada_ibc::event::IbcEventType;
-use namada_state::{DB, DBIter, LastBlock, StateRead, StorageHasher};
+use namada_state::{DBIter, DBRead, LastBlock, StateRead, StorageHasher};
 use namada_storage::{ResultExt, StorageRead};
 use namada_token::masp::MaspTokenRewardData;
 use namada_token::storage_key::masp_token_map_key;
@@ -135,7 +135,7 @@ fn dry_run_tx<D, H, V, T>(
     _request: &RequestQuery,
 ) -> namada_storage::Result<EncodedResponseQuery>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     unimplemented!("Dry running tx requires \"wasm-runtime\" feature.")
@@ -146,7 +146,7 @@ fn max_block_time<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<DurationSecs>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     // NB: get max time over this num of blocks
@@ -165,7 +165,7 @@ fn block_header<D, H, V, T>(
     height: BlockHeight,
 ) -> namada_storage::Result<Option<BlockHeader>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     StorageRead::get_block_header(ctx.state, height)
@@ -176,7 +176,7 @@ pub fn read_results<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<Vec<BlockResults>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let (iter, _gas) = ctx.state.db_iter_results();
@@ -213,7 +213,7 @@ fn read_conversions<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<BTreeMap<AssetType, ConversionWithoutPath>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     Ok(ctx
@@ -243,7 +243,7 @@ fn read_conversion<D, H, V, T>(
     asset_type: AssetType,
 ) -> namada_storage::Result<Option<Conversion>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     // Conversion values are constructed on request
@@ -274,7 +274,7 @@ fn masp_reward_tokens<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<Vec<MaspTokenRewardData>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let token_map_key = masp_token_map_key();
@@ -354,7 +354,7 @@ fn epoch<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<Epoch>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let data = ctx.state.in_mem().last_epoch;
@@ -365,7 +365,7 @@ fn masp_epoch<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<MaspEpoch>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let epoch = ctx.state.in_mem().last_epoch;
@@ -379,7 +379,7 @@ fn native_token<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<Address>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let data = ctx.state.in_mem().native_token.clone();
@@ -391,7 +391,7 @@ fn epoch_at_height<D, H, V, T>(
     height: BlockHeight,
 ) -> namada_storage::Result<Option<Epoch>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     Ok(ctx.state.in_mem().block.pred_epochs.get_epoch(height))
@@ -401,7 +401,7 @@ fn last_block<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<Option<LastBlock>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     Ok(ctx.state.in_mem().last_block.clone())
@@ -411,7 +411,7 @@ fn first_block_height_of_current_epoch<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<BlockHeight>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     ctx.state
@@ -437,7 +437,7 @@ pub fn storage_value<D, H, V, T>(
     storage_key: storage::Key,
 ) -> namada_storage::Result<EncodedResponseQuery>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let last_committed_height = ctx.state.in_mem().get_last_block_height();
@@ -514,7 +514,7 @@ fn storage_prefix<D, H, V, T>(
     storage_key: storage::Key,
 ) -> namada_storage::Result<EncodedResponseQuery>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     require_latest_height(&ctx, request)?;
@@ -566,7 +566,7 @@ fn storage_has_key<D, H, V, T>(
     storage_key: storage::Key,
 ) -> namada_storage::Result<bool>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let data = StorageRead::has_key(ctx.state, &storage_key)?;
@@ -578,7 +578,7 @@ fn applied<D, H, V, T>(
     tx_hash: Hash,
 ) -> namada_storage::Result<Option<TxAppliedEvents>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     // Match all the events carrying the provided tx hash
@@ -610,7 +610,7 @@ fn ibc_client_update<D, H, V, T>(
     consensus_height: BlockHeight,
 ) -> namada_storage::Result<Option<Event>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let matcher = dumb_queries::QueryMatcher::ibc_update_client(
@@ -630,7 +630,7 @@ fn ibc_packet<D, H, V, T>(
     sequence: Sequence,
 ) -> namada_storage::Result<Option<Event>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let matcher = dumb_queries::QueryMatcher::ibc_packet(
@@ -649,7 +649,7 @@ fn account<D, H, V, T>(
     owner: Address,
 ) -> namada_storage::Result<Option<Account>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let account_exists = namada_account::exists(ctx.state, &owner)?;
@@ -673,7 +673,7 @@ fn revealed<D, H, V, T>(
     owner: Address,
 ) -> namada_storage::Result<bool>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let public_keys = namada_account::public_keys(ctx.state, &owner)?;

@@ -5,7 +5,7 @@ use namada_core::keccak::keccak_hash;
 use namada_proof_of_stake::queries::{
     get_validator_eth_hot_key, get_validator_protocol_key,
 };
-use namada_state::{DB, DBIter, StorageHasher, StorageRead, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, StorageRead, WlState};
 use namada_systems::governance;
 use namada_tx::{SignableEthMessage, Signed};
 use namada_vote_ext::bridge_pool_roots;
@@ -23,15 +23,15 @@ use crate::storage::eth_bridge_queries::EthBridgeQueries;
 ///  * The validator correctly signed the extension.
 ///  * The validator signed over the correct height inside of the extension.
 ///  * Check that the inner signature is valid.
-pub fn validate_bp_roots_vext<D, H, Gov>(
-    state: &WlState<D, H>,
+pub fn validate_bp_roots_vext<'db, D, H, Gov>(
+    state: &WlState<'db, D, H>,
     ext: &Signed<bridge_pool_roots::Vext>,
     last_height: BlockHeight,
 ) -> Result<(), VoteExtensionError>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     // NOTE: for ABCI++, we should pass
     // `last_height` here, instead of `ext.data.block_height`

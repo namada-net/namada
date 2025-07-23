@@ -17,7 +17,7 @@ use namada_core::storage::Key;
 use namada_core::token::Amount;
 use namada_proof_of_stake::storage::read_owned_pos_params;
 use namada_state::tx_queue::ExpiredTx;
-use namada_state::{DB, DBIter, StorageHasher, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, WlState};
 use namada_systems::governance;
 use namada_tx::data::BatchedTxResult;
 use namada_vote_ext::ethereum_events::{MultiSignedEthEvent, SignedVext, Vext};
@@ -46,13 +46,13 @@ impl utils::GetVoters for &HashSet<EthMsgUpdate> {
 /// __INVARIANT__: Assume `ethereum_events` are sorted in ascending
 /// order.
 pub fn sign_ethereum_events<D, H>(
-    state: &WlState<D, H>,
+    state: &WlState<'_, D, H>,
     validator_addr: &Address,
     protocol_key: &common::SecretKey,
     ethereum_events: Vec<EthereumEvent>,
 ) -> Option<SignedVext>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     if !state.ethbridge_queries().is_bridge_active() {
@@ -84,14 +84,14 @@ where
 ///
 /// This function is deterministic based on some existing blockchain state and
 /// the passed `events`.
-pub fn apply_derived_tx<D, H, Gov>(
-    state: &mut WlState<D, H>,
+pub fn apply_derived_tx<'db, D, H, Gov>(
+    state: &mut WlState<'db, D, H>,
     events: Vec<MultiSignedEthEvent>,
 ) -> Result<BatchedTxResult>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     let mut changed_keys = timeout_events::<D, H, Gov>(state)?;
     if events.is_empty() {
@@ -138,15 +138,15 @@ where
 ///
 /// The `voting_powers` map must contain a voting power for all
 /// `(Address, BlockHeight)`s that occur in any of the `updates`.
-pub(super) fn apply_updates<D, H, Gov>(
-    state: &mut WlState<D, H>,
+pub(super) fn apply_updates<'db, D, H, Gov>(
+    state: &mut WlState<'db, D, H>,
     updates: HashSet<EthMsgUpdate>,
     voting_powers: HashMap<(Address, BlockHeight), Amount>,
 ) -> Result<(ChangedKeys, BTreeSet<EthBridgeEvent>)>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     tracing::debug!(
         updates.len = updates.len(),
@@ -188,15 +188,15 @@ where
 ///
 /// The `voting_powers` map must contain a voting power for all
 /// `(Address, BlockHeight)`s that occur in `update`.
-fn apply_update<D, H, Gov>(
-    state: &mut WlState<D, H>,
+fn apply_update<'db, D, H, Gov>(
+    state: &mut WlState<'db, D, H>,
     update: EthMsgUpdate,
     voting_powers: &HashMap<(Address, BlockHeight), Amount>,
 ) -> Result<(ChangedKeys, bool)>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     let eth_msg_keys = vote_tallies::Keys::from(&update.body);
     let exists_in_storage = if let Some(seen) =
@@ -254,11 +254,13 @@ where
     Ok((changed, confirmed))
 }
 
-fn timeout_events<D, H, Gov>(state: &mut WlState<D, H>) -> Result<ChangedKeys>
+fn timeout_events<'db, D, H, Gov>(
+    state: &mut WlState<'db, D, H>,
+) -> Result<ChangedKeys>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     let mut changed = ChangedKeys::new();
     for keys in get_timed_out_eth_events(state)? {
@@ -291,10 +293,10 @@ where
 }
 
 fn get_timed_out_eth_events<D, H>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
 ) -> Result<Vec<Keys<EthereumEvent>>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let unbonding_len = read_owned_pos_params(state)?.unbonding_len;

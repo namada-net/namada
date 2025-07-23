@@ -487,13 +487,11 @@ where
         wasm_dir: PathBuf,
         broadcast_sender: UnboundedSender<Vec<u8>>,
         eth_oracle: Option<EthereumOracleChannels>,
-        db_cache: Option<&D::Cache>,
         scheduled_migration: Option<ScheduledMigration>,
         vp_wasm_compilation_cache: u64,
         tx_wasm_compilation_cache: u64,
     ) -> Self {
         let chain_id = config.chain_id;
-        let db_path = config.shell.db_dir(&chain_id);
         let base_dir = config.shell.base_dir;
         let mode = config.shell.tendermint_mode;
         let storage_read_past_height_limit =
@@ -503,38 +501,6 @@ where
                 .expect("Creating directory for Namada should not fail");
         }
 
-        // For tests, fuzzing and benches use hard-coded native token addr ...
-        #[cfg(any(test, fuzzing, feature = "benches"))]
-        let native_token = {
-            let chain_dir = base_dir.join(chain_id.as_str());
-            // Use genesis file only if it exists
-            if chain_dir
-                .join(genesis::templates::TOKENS_FILE_NAME)
-                .exists()
-            {
-                genesis::chain::Finalized::read_native_token(&chain_dir)
-                    .expect("Missing genesis files")
-            } else {
-                namada_sdk::address::testing::nam()
-            }
-        };
-        // ... Otherwise, look it up from the genesis file
-        #[cfg(not(any(test, fuzzing, feature = "benches")))]
-        let native_token = {
-            let chain_dir = base_dir.join(chain_id.as_str());
-            genesis::chain::Finalized::read_native_token(&chain_dir)
-                .expect("Missing genesis files")
-        };
-
-        // load last state from storage
-        let state = FullAccessState::open(
-            db_path,
-            db_cache,
-            chain_id.clone(),
-            native_token,
-            config.shell.storage_read_past_height_limit,
-            is_key_diff_storable,
-        );
         let vp_wasm_cache_dir =
             base_dir.join(chain_id.as_str()).join("vp_wasm_cache");
         let tx_wasm_cache_dir =

@@ -8,7 +8,9 @@ use namada_apps_lib::state::DbError;
 use namada_sdk::chain::BlockHeight;
 use namada_sdk::hash::Hash;
 use namada_sdk::migrations::ScheduledMigration;
-use namada_sdk::state::ProcessProposalCachedResult;
+use namada_sdk::state::{
+    FullAccessState, ProcessProposalCachedResult, Sha256Hasher,
+};
 use namada_sdk::tendermint::abci::response::ProcessProposal;
 use namada_sdk::time::{DateTimeUtc, Utc};
 use namada_sdk::tx::data::hash_tx;
@@ -25,7 +27,7 @@ use super::abcipp_shim_types::shim::{
 use crate::config;
 use crate::config::{Action, ActionAtHeight};
 use crate::shell::{EthereumOracleChannels, Shell};
-use crate::storage::DbSnapshot;
+use crate::storage::{DbSnapshot, PersistentDB};
 use crate::tendermint::abci::{Request as Req, Response as Resp, request};
 use crate::tower_abci::BoxError;
 
@@ -35,6 +37,7 @@ use crate::tower_abci::BoxError;
 #[derive(Debug)]
 pub struct AbcippShim {
     service: Shell,
+    state: FullAccessState<PersistentDB, Sha256Hasher>,
     begin_block_request: Option<request::BeginBlock>,
     delivered_txs: Vec<TxBytes>,
     shell_recv: std::sync::mpsc::Receiver<(
@@ -69,6 +72,42 @@ impl AbcippShim {
         let action_at_height = config.shell.action_at_height.clone();
         let snapshots_to_keep =
             config.shell.snapshots_to_keep.map(|n| n.get()).unwrap_or(1);
+
+        let chain_id = config.chain_id;
+        let db_path = config.shell.db_dir(&chain_id);
+        // For tests, fuzzing and benches use hard-coded native token addr ...
+        #[cfg(any(test, fuzzing, feature = "benches"))]
+        let native_token = {
+            let chain_dir = config.shell.base_dir.join(chain_id.as_str());
+            // Use genesis file only if it exists
+            if chain_dir
+                .join(genesis::templates::TOKENS_FILE_NAME)
+                .exists()
+            {
+                genesis::chain::Finalized::read_native_token(&chain_dir)
+                    .expect("Missing genesis files")
+            } else {
+                namada_sdk::address::testing::nam()
+            }
+        };
+        // ... Otherwise, look it up from the genesis file
+        #[cfg(not(any(test, fuzzing, feature = "benches")))]
+        let native_token = {
+            let chain_dir = config.shell.base_dir.join(chain_id.as_str());
+            genesis::chain::Finalized::read_native_token(&chain_dir)
+                .expect("Missing genesis files")
+        };
+
+        // load last state from storage
+        let state = FullAccessState::open(
+            db_path,
+            Some(db_cache),
+            chain_id,
+            native_token,
+            config.shell.storage_read_past_height_limit,
+            is_key_diff_storable,
+        );
+
         (
             Self {
                 service: Shell::new(
@@ -76,11 +115,11 @@ impl AbcippShim {
                     wasm_dir,
                     broadcast_sender,
                     eth_oracle,
-                    Some(db_cache),
                     scheduled_migration,
                     vp_wasm_compilation_cache,
                     tx_wasm_compilation_cache,
                 ),
+                state,
                 begin_block_request: None,
                 delivered_txs: vec![],
                 shell_recv,

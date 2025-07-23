@@ -6,7 +6,7 @@ use namada_core::address::Address;
 use namada_core::chain::BlockHeight;
 use namada_core::collections::{HashMap, HashSet};
 use namada_core::token;
-use namada_state::{DB, DBIter, StorageHasher, StorageRead, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, StorageRead, WlState};
 use namada_systems::governance;
 
 use super::{ChangedKeys, EpochedVotingPowerExt, Tally, Votes};
@@ -90,15 +90,15 @@ impl IntoIterator for NewVotes {
 /// would change. If [`Tally`] is already `seen = true` in storage, then no
 /// votes from `vote_info` should be applied, and the returned changed keys will
 /// be empty.
-pub(in super::super) fn calculate<D, H, Gov, T>(
-    state: &mut WlState<D, H>,
+pub(in super::super) fn calculate<'db, D, H, Gov, T>(
+    state: &mut WlState<'db, D, H>,
     keys: &vote_tallies::Keys<T>,
     vote_info: NewVotes,
 ) -> Result<(Tally, ChangedKeys)>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
     T: BorshDeserialize,
 {
     tracing::info!(
@@ -148,15 +148,15 @@ where
 /// Takes an existing [`Tally`] and calculates the new [`Tally`] based on new
 /// voters from `vote_info`. An error is returned if any validator which
 /// previously voted is present in `vote_info`.
-fn apply<D, H, Gov>(
-    state: &WlState<D, H>,
+fn apply<'db, D, H, Gov>(
+    state: &WlState<'db, D, H>,
     tally: &Tally,
     vote_info: NewVotes,
 ) -> Result<Tally>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     // TODO(namada#1305): remove the clone here
     let mut voting_power_post = tally.voting_power.clone();

@@ -7,7 +7,7 @@ use namada_core::collections::{HashMap, HashSet};
 use namada_core::keccak::keccak_hash;
 use namada_core::key::{SignableEthMessage, common};
 use namada_core::token::Amount;
-use namada_state::{DB, DBIter, StorageHasher, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, WlState};
 use namada_storage::{StorageRead, StorageWrite};
 use namada_systems::governance;
 use namada_tx::Signed;
@@ -26,13 +26,13 @@ use crate::storage::vote_tallies::{self, BridgePoolRoot};
 /// Sign the latest Bridge pool root, and return the associated
 /// vote extension protocol transaction.
 pub fn sign_bridge_pool_root<D, H>(
-    state: &WlState<D, H>,
+    state: &WlState<'_, D, H>,
     validator_addr: &Address,
     eth_hot_key: &common::SecretKey,
     protocol_key: &common::SecretKey,
 ) -> Option<bridge_pool_roots::SignedVext>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     if !state.ethbridge_queries().is_bridge_active() {
@@ -58,14 +58,14 @@ where
 /// For roots + nonces which have been seen by a quorum of
 /// validators, the signature is made available for bridge
 /// pool proofs.
-pub fn apply_derived_tx<D, H, Gov>(
-    state: &mut WlState<D, H>,
+pub fn apply_derived_tx<'db, D, H, Gov>(
+    state: &mut WlState<'db, D, H>,
     vext: MultiSignedVext,
 ) -> Result<BatchedTxResult>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     if vext.is_empty() {
         return Ok(BatchedTxResult::default());
@@ -156,14 +156,14 @@ impl GetVoters for &MultiSignedVext {
 
 /// Convert a set of signatures over bridge pool roots and nonces (at a certain
 /// height) into a partial proof and a new set of votes.
-fn parse_vexts<D, H, Gov>(
-    state: &WlState<D, H>,
+fn parse_vexts<'db, D, H, Gov>(
+    state: &WlState<'db, D, H>,
     multisigned: MultiSignedVext,
 ) -> (BridgePoolRoot, Votes)
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     let height = multisigned.iter().next().unwrap().data.block_height;
     let epoch = state.get_epoch_at_height(height).unwrap();
@@ -205,17 +205,17 @@ where
 /// indicating that it has been confirmed.
 ///
 /// In all instances, the changed storage keys are returned.
-fn apply_update<D, H, Gov>(
-    state: &mut WlState<D, H>,
+fn apply_update<'db, D, H, Gov>(
+    state: &mut WlState<'db, D, H>,
     bp_key: vote_tallies::Keys<BridgePoolRoot>,
     mut update: BridgePoolRoot,
     seen_by: Votes,
     voting_powers: &HashMap<(Address, BlockHeight), Amount>,
 ) -> Result<(ChangedKeys, Option<BridgePoolRoot>)>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     let partial_proof = votes::storage::read_body(state, &bp_key);
     let (vote_tracking, changed, confirmed, already_present) = if let Ok(

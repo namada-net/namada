@@ -2,7 +2,7 @@ use namada_core::address::Address;
 use namada_governance::pgf::parameters::PgfParameters;
 use namada_governance::pgf::storage::steward::StewardDetail;
 use namada_governance::storage::proposal::StoragePgfFunding;
-use namada_state::{DB, DBIter, StorageHasher};
+use namada_state::{DBIter, DBRead, StorageHasher};
 
 use crate::queries::types::RequestCtx;
 
@@ -19,7 +19,7 @@ fn stewards<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<Vec<StewardDetail>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     namada_governance::pgf::storage::get_stewards(ctx.state)
@@ -31,7 +31,7 @@ fn is_steward<D, H, V, T>(
     address: Address,
 ) -> namada_storage::Result<bool>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     namada_governance::pgf::storage::is_steward(ctx.state, &address)
@@ -42,7 +42,7 @@ fn funding<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<Vec<StoragePgfFunding>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     namada_governance::pgf::storage::get_continuous_pgf_payments(ctx.state)
@@ -53,7 +53,7 @@ fn parameters<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
 ) -> namada_storage::Result<PgfParameters>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     namada_governance::pgf::storage::get_parameters(ctx.state)

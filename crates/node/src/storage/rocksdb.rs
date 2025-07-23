@@ -1489,7 +1489,7 @@ impl DB for RocksDB {
         open(db_path, false, cache).expect("cannot open the DB")
     }
 
-    fn read_only(&self) -> ReadOnly {
+    fn read_only(&self) -> Self::ReadOnly {
         RocksDBSnapshot {
             db: &self.inner,
             snapshot: self.inner.snapshot(),

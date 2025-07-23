@@ -3,18 +3,18 @@ use eyre::Result;
 use namada_core::borsh::{BorshDeserialize, BorshSerialize};
 use namada_core::hash::StorageHasher;
 use namada_core::storage;
-use namada_state::{DB, DBIter, WlState};
+use namada_state::{DBIter, DBRead, WlState};
 use namada_storage::StorageWrite;
 
 #[allow(dead_code)]
 /// Reads an arbitrary value, applies update then writes it back
 pub fn value<D, H, T: BorshSerialize + BorshDeserialize>(
-    state: &mut WlState<D, H>,
+    state: &mut WlState<'_, D, H>,
     key: &storage::Key,
     update: impl FnOnce(&mut T),
 ) -> Result<T>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
 {
     let mut value = super::read::value(state, key)?;

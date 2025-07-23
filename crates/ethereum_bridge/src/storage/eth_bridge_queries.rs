@@ -20,7 +20,7 @@ use namada_proof_of_stake::storage::{
     read_consensus_validator_set_addresses_with_stake, read_pos_params,
     validator_eth_cold_key_handle, validator_eth_hot_key_handle,
 };
-use namada_state::{DB, DBIter, StorageHasher, StoreType, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, StoreType, WlState};
 use namada_storage::StorageRead;
 use namada_systems::governance;
 use namada_vote_ext::validator_set_update::{
@@ -128,9 +128,9 @@ pub trait EthBridgeQueries {
     fn ethbridge_queries(&self) -> EthBridgeQueriesHook<'_, Self::Storage>;
 }
 
-impl<D, H> EthBridgeQueries for WlState<D, H>
+impl<D, H> EthBridgeQueries for WlState<'_, D, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     type Storage = Self;
@@ -158,14 +158,14 @@ impl<S> Clone for EthBridgeQueriesHook<'_, S> {
 
 impl<S> Copy for EthBridgeQueriesHook<'_, S> {}
 
-impl<'db, D, H> EthBridgeQueriesHook<'db, WlState<D, H>>
+impl<'db, D, H> EthBridgeQueriesHook<'db, WlState<'_, D, H>>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    D: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     /// Return a handle to the inner [`WlState`].
     #[inline]
-    pub fn state(self) -> &'db WlState<D, H> {
+    pub fn state(self) -> &'db WlState<'db, D, H> {
         self.state
     }
 
@@ -317,7 +317,7 @@ where
         epoch: Option<Epoch>,
     ) -> Option<EthAddress>
     where
-        Gov: governance::Read<WlState<D, H>>,
+        Gov: governance::Read<WlState<'db, D, H>>,
     {
         let epoch =
             epoch.unwrap_or_else(|| self.state.in_mem().get_current_epoch().0);
@@ -337,7 +337,7 @@ where
         epoch: Option<Epoch>,
     ) -> Option<EthAddress>
     where
-        Gov: governance::Read<WlState<D, H>>,
+        Gov: governance::Read<WlState<'db, D, H>>,
     {
         let epoch =
             epoch.unwrap_or_else(|| self.state.in_mem().get_current_epoch().0);
@@ -357,7 +357,7 @@ where
         epoch: Option<Epoch>,
     ) -> Option<EthAddrBook>
     where
-        Gov: governance::Read<WlState<D, H>>,
+        Gov: governance::Read<WlState<'db, D, H>>,
     {
         let bridge =
             self.get_ethbridge_from_namada_addr::<Gov>(validator, epoch)?;
@@ -377,7 +377,7 @@ where
         epoch: Epoch,
     ) -> impl Iterator<Item = (EthAddrBook, Address, token::Amount)> + 'db
     where
-        Gov: governance::Read<WlState<D, H>>,
+        Gov: governance::Read<WlState<'db, D, H>>,
     {
         read_consensus_validator_set_addresses_with_stake(self.state, epoch)
             .unwrap()
@@ -400,7 +400,7 @@ where
         mut select_validator: F,
     ) -> (ValidatorSetArgs, VotingPowersMap)
     where
-        Gov: governance::Read<WlState<D, H>>,
+        Gov: governance::Read<WlState<'db, D, H>>,
         F: FnMut(&EthAddrBook) -> EthAddress,
     {
         let epoch =
@@ -444,7 +444,7 @@ where
         epoch: Option<Epoch>,
     ) -> (ValidatorSetArgs, VotingPowersMap)
     where
-        Gov: governance::Read<WlState<D, H>>,
+        Gov: governance::Read<WlState<'db, D, H>>,
     {
         self.get_validator_set_args::<Gov, _>(
             epoch,
@@ -460,7 +460,7 @@ where
         epoch: Option<Epoch>,
     ) -> (ValidatorSetArgs, VotingPowersMap)
     where
-        Gov: governance::Read<WlState<D, H>>,
+        Gov: governance::Read<WlState<'db, D, H>>,
     {
         self.get_validator_set_args::<Gov, _>(
             epoch,

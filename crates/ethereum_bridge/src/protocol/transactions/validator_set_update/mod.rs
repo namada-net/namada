@@ -6,7 +6,7 @@ use namada_core::chain::{BlockHeight, Epoch};
 use namada_core::collections::{HashMap, HashSet};
 use namada_core::key::common;
 use namada_core::token::Amount;
-use namada_state::{DB, DBIter, StorageHasher, WlState};
+use namada_state::{DBIter, DBRead, StorageHasher, WlState};
 use namada_systems::governance;
 use namada_tx::data::BatchedTxResult;
 use namada_vote_ext::validator_set_update;
@@ -34,15 +34,15 @@ impl utils::GetVoters for (&validator_set_update::VextDigest, BlockHeight) {
 
 /// Sign the next set of validators, and return the associated
 /// vote extension protocol transaction.
-pub fn sign_validator_set_update<D, H, Gov>(
-    state: &WlState<D, H>,
+pub fn sign_validator_set_update<'db, D, H, Gov>(
+    state: &WlState<'db, D, H>,
     validator_addr: &Address,
     eth_hot_key: &common::SecretKey,
 ) -> Option<validator_set_update::SignedVext>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     state
         .ethbridge_queries()
@@ -69,15 +69,15 @@ where
 }
 
 /// Aggregate validators' votes
-pub fn aggregate_votes<D, H, Gov>(
-    state: &mut WlState<D, H>,
+pub fn aggregate_votes<'db, D, H, Gov>(
+    state: &mut WlState<'db, D, H>,
     ext: validator_set_update::VextDigest,
     signing_epoch: Epoch,
 ) -> Result<BatchedTxResult>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     if ext.signatures.is_empty() {
         tracing::debug!("Ignoring empty validator set update");
@@ -103,7 +103,7 @@ where
         .next_height();
     let voting_powers =
         utils::get_voting_powers(state, (&ext, epoch_2nd_height))?;
-    let changed_keys = apply_update::<D, H, Gov>(
+    let changed_keys = apply_update::<'db, D, H, Gov>(
         state,
         ext,
         signing_epoch,
@@ -117,17 +117,17 @@ where
     })
 }
 
-fn apply_update<D, H, Gov>(
-    state: &mut WlState<D, H>,
+fn apply_update<'db, D, H, Gov>(
+    state: &mut WlState<'db, D, H>,
     ext: validator_set_update::VextDigest,
     signing_epoch: Epoch,
     epoch_2nd_height: BlockHeight,
     voting_powers: HashMap<(Address, BlockHeight), Amount>,
 ) -> Result<ChangedKeys>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,
-    Gov: governance::Read<WlState<D, H>>,
+    Gov: governance::Read<WlState<'db, D, H>>,
 {
     let next_epoch = {
         // proofs should be written to the sub-key space of the next epoch.
@@ -159,68 +159,60 @@ where
         }
     }
 
-    let (tally, proof, changed, confirmed, already_present) =
-        if let Some(mut proof) = maybe_proof {
-            tracing::debug!(
-                %valset_upd_keys.prefix,
-                "Validator set update votes already in storage",
-            );
-            let new_votes = NewVotes::new(seen_by, &voting_powers)?;
-            let (tally, changed) = votes::update::calculate::<_, _, Gov, _>(
-                state,
-                &valset_upd_keys,
-                new_votes,
-            )?;
-            if changed.is_empty() {
-                return Ok(changed);
-            }
-            let confirmed =
-                tally.seen && changed.contains(&valset_upd_keys.seen());
-            proof.attach_signature_batch(ext.signatures.into_iter().map(
-                |(addr, sig)| {
-                    (
-                        state
-                            .ethbridge_queries()
-                            .get_eth_addr_book::<Gov>(
-                                &addr,
-                                Some(signing_epoch),
-                            )
-                            .expect("All validators should have eth keys"),
-                        sig,
-                    )
-                },
-            ));
-            (tally, proof, changed, confirmed, true)
-        } else {
-            tracing::debug!(
-                %valset_upd_keys.prefix,
-                ?ext.voting_powers,
-                "New validator set update vote aggregation started"
-            );
-            let tally = votes::calculate_new::<D, H, Gov>(
-                state,
-                seen_by,
-                &voting_powers,
-            )?;
-            let mut proof = EthereumProof::new(ext.voting_powers);
-            proof.attach_signature_batch(ext.signatures.into_iter().map(
-                |(addr, sig)| {
-                    (
-                        state
-                            .ethbridge_queries()
-                            .get_eth_addr_book::<Gov>(
-                                &addr,
-                                Some(signing_epoch),
-                            )
-                            .expect("All validators should have eth keys"),
-                        sig,
-                    )
-                },
-            ));
-            let changed = valset_upd_keys.into_iter().collect();
-            let confirmed = tally.seen;
-            (tally, proof, changed, confirmed, false)
-        };
+    let (tally, proof, changed, confirmed, already_present) = if let Some(
+        mut proof,
+    ) = maybe_proof
+    {
+        tracing::debug!(
+            %valset_upd_keys.prefix,
+            "Validator set update votes already in storage",
+        );
+        let new_votes = NewVotes::new(seen_by, &voting_powers)?;
+        let (tally, changed) = votes::update::calculate::<'db, _, _, Gov, _>(
+            state,
+            &valset_upd_keys,
+            new_votes,
+        )?;
+        if changed.is_empty() {
+            return Ok(changed);
+        }
+        let confirmed = tally.seen && changed.contains(&valset_upd_keys.seen());
+        proof.attach_signature_batch(ext.signatures.into_iter().map(
+            |(addr, sig)| {
+                (
+                    state
+                        .ethbridge_queries()
+                        .get_eth_addr_book::<Gov>(&addr, Some(signing_epoch))
+                        .expect("All validators should have eth keys"),
+                    sig,
+                )
+            },
+        ));
+        (tally, proof, changed, confirmed, true)
+    } else {
+        tracing::debug!(
+            %valset_upd_keys.prefix,
+            ?ext.voting_powers,
+            "New validator set update vote aggregation started"
+        );
+        let tally =
+            votes::calculate_new::<D, H, Gov>(state, seen_by, &voting_powers)?;
+        let mut proof = EthereumProof::new(ext.voting_powers);
+        proof.attach_signature_batch(ext.signatures.into_iter().map(
+            |(addr, sig)| {
+                (
+                    state
+                        .ethbridge_queries()
+                        .get_eth_addr_book::<Gov>(&addr, Some(signing_epoch))
+                        .expect("All validators should have eth keys"),
+                    sig,
+                )
+            },
+        ));
+        let changed = valset_upd_keys.into_iter().collect();
+        let confirmed = tally.seen;
+        (tally, proof, changed, confirmed, false)
+    };
 
     tracing::debug!(
         ?tally,

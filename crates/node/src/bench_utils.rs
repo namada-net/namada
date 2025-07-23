@@ -912,7 +912,7 @@ impl Client for BenchShell {
                 // This is safe because nothing else is using `self.state`
                 // concurrently and the `TempWlState` will be dropped right
                 // after dry-run.
-                unsafe { shell.state.read_only().with_static_temp_write_log() },
+                unsafe { shell.state.with_static_temp_write_log() },
                 shell.vp_wasm_cache.read_only(),
                 shell.tx_wasm_cache.read_only(),
                 &request,

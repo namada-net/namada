@@ -7,20 +7,20 @@ use namada_tx::data::TxSentinel;
 use crate::in_memory::InMemory;
 use crate::write_log::WriteLog;
 use crate::{
-    DB, DBIter, Error, Result, State, StateError, StateRead, StorageHasher,
+    DBIter, DBRead, Error, Result, State, StateError, StateRead, StorageHasher,
 };
 
 /// State with mutable write log and gas metering for tx host env.
 #[derive(Debug)]
-pub struct TxHostEnvState<'a, D, H>
+pub struct TxHostEnvState<'a, S, H>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    S: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
 {
     /// Write log
     pub write_log: &'a mut WriteLog,
-    /// DB handle
-    pub db: &'a D,
+    /// DB snapshot handle
+    pub db: &'a S,
     /// State
     pub in_mem: &'a InMemory<H>,
     /// Tx gas meter
@@ -31,34 +31,34 @@ where
 
 /// Read-only state with gas metering for VP host env.
 #[derive(Debug)]
-pub struct VpHostEnvState<'a, D, H>
+pub struct VpHostEnvState<'a, S, H>
 where
-    D: DB + for<'iter> DBIter<'iter>,
+    S: DBRead + for<'iter> DBIter<'iter>,
     H: StorageHasher,
 {
     /// Write log
     pub write_log: &'a WriteLog,
-    /// DB handle
-    pub db: &'a D,
+    /// DB snapshot handle
+    pub db: &'a S,
     /// State
     pub in_mem: &'a InMemory<H>,
     /// VP gas meter
     pub gas_meter: &'a RefCell<VpGasMeter>,
 }
 
-impl<D, H> StateRead for TxHostEnvState<'_, D, H>
+impl<S, H> StateRead for TxHostEnvState<'_, S, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    S: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
-    type D = D;
+    type D = S;
     type H = H;
 
     fn write_log(&self) -> &WriteLog {
         self.write_log
     }
 
-    fn db(&self) -> &D {
+    fn db(&self) -> &S {
         self.db
     }
 
@@ -78,9 +78,9 @@ where
     }
 }
 
-impl<D, H> State for TxHostEnvState<'_, D, H>
+impl<S, H> State for TxHostEnvState<'_, S, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    S: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     fn write_log_mut(&mut self) -> &mut WriteLog {
@@ -94,9 +94,9 @@ where
     }
 }
 
-impl<D, H> EmitEvents for TxHostEnvState<'_, D, H>
+impl<S, H> EmitEvents for TxHostEnvState<'_, S, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    S: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
     #[inline]
@@ -118,19 +118,19 @@ where
     }
 }
 
-impl<D, H> StateRead for VpHostEnvState<'_, D, H>
+impl<S, H> StateRead for VpHostEnvState<'_, S, H>
 where
-    D: 'static + DB + for<'iter> DBIter<'iter>,
+    S: 'static + DBRead + for<'iter> DBIter<'iter>,
     H: 'static + StorageHasher,
 {
-    type D = D;
+    type D = S;
     type H = H;
 
     fn write_log(&self) -> &WriteLog {
         self.write_log
     }
 
-    fn db(&self) -> &D {
+    fn db(&self) -> &S {
         self.db
     }
 

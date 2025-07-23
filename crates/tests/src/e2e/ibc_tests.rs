@@ -1309,7 +1309,7 @@ fn ibc_unlimited_channel() -> Result<()> {
     )?;
 
     // Check if the token was refunded
-    check_balance(&test, ALBERT, NAM, 1_000_000)?;
+    check_balance(&test, ALBERT, APFEL, 1_000_000)?;
 
     // Proposal on Namada
     // Delegate some token

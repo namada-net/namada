@@ -1226,6 +1226,106 @@ fn ibc_rate_limit() -> Result<()> {
     Ok(())
 }
 
+/// Unlimited IBC transfer test
+#[test]
+fn ibc_unlimited_channel() -> Result<()> {
+    const PIPELINE_LEN: u64 = 5;
+    // No IBC transfer is not allowed first
+    let update_genesis =
+        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
+            genesis.parameters.parameters.epochs_per_year =
+                epochs_per_year_from_min_duration(20);
+            // for the trusting period of IBC client
+            genesis.parameters.pos_params.pipeline_len = PIPELINE_LEN;
+            genesis.parameters.gov_params.min_proposal_grace_epochs = 3;
+            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+        };
+    let (ledger, gaia, test, test_gaia) =
+        run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
+    let _bg_ledger = ledger.background();
+    let _bg_gaia = gaia.background();
+
+    let hermes_dir = setup_hermes(&test, &test_gaia)?;
+    let port_id_namada = FT_PORT_ID.parse().unwrap();
+    let port_id_gaia: PortId = FT_PORT_ID.parse().unwrap();
+    let (channel_id_namada, channel_id_gaia) = create_channel_with_hermes(
+        &hermes_dir,
+        &test,
+        &test_gaia,
+        &port_id_namada,
+        &port_id_gaia,
+    )?;
+
+    // Start relaying
+    let hermes = run_hermes(&hermes_dir)?;
+    let _bg_hermes = hermes.background();
+
+    let ibc_denom =
+        format!("{port_id_namada}/{channel_id_namada}/{COSMOS_COIN}");
+    let cosmos_token_addr = ibc_token(&ibc_denom).to_string();
+
+    // Try to transfer from Gaia, but it should be timed out
+    let namada_receiver = find_address(&test, ALBERT)?.to_string();
+    transfer_from_cosmos(
+        &test_gaia,
+        COSMOS_USER,
+        &namada_receiver,
+        COSMOS_COIN,
+        1,
+        &port_id_gaia,
+        &channel_id_gaia,
+        None,
+        Some(Duration::new(10, 0)),
+    )?;
+    wait_for_packet_relay(&hermes_dir, &port_id_gaia, &channel_id_gaia, &test)?;
+
+    // Check if Namada hasn't receive it
+    check_balance(&test, ALBERT, &cosmos_token_addr, 0)?;
+
+    // Proposal on Namada
+    // Delegate some token
+    delegate_token(&test)?;
+    let rpc = get_actor_rpc(&test, Who::Validator(0));
+    let mut epoch = get_epoch(&test, &rpc).unwrap();
+    let delegated = epoch + PIPELINE_LEN;
+    while epoch < delegated {
+        epoch = epoch_sleep(&test, &rpc, 120)?;
+    }
+    // proposal to set the unlimited channel
+    let start_epoch = propose_unlimited_channel(&test)?;
+    let mut epoch = get_epoch(&test, &rpc).unwrap();
+    // Vote
+    while epoch < start_epoch {
+        epoch = epoch_sleep(&test, &rpc, 120)?;
+    }
+    submit_votes(&test)?;
+
+    // wait for the grace
+    let grace_epoch = start_epoch + 6u64;
+    while epoch < grace_epoch {
+        epoch = epoch_sleep(&test, &rpc, 120)?;
+    }
+
+    // Retry transfer
+    transfer_from_cosmos(
+        &test_gaia,
+        COSMOS_USER,
+        &namada_receiver,
+        COSMOS_COIN,
+        1,
+        &port_id_gaia,
+        &channel_id_gaia,
+        None,
+        Some(Duration::new(10, 0)),
+    )?;
+    wait_for_packet_relay(&hermes_dir, &port_id_gaia, &channel_id_gaia, &test)?;
+
+    // Check if Namada has received it
+    check_balance(&test, ALBERT, &cosmos_token_addr, 1)?;
+
+    Ok(())
+}
+
 /// Create a packet forward memo and serialize it
 fn packet_forward_memo(
     receiver: Signer,
@@ -2870,6 +2970,50 @@ fn propose_gas_token(test: &Test) -> Result<Epoch> {
         proposal_json_path.to_str().unwrap(),
         "--gas-limit",
         "2000000",
+        "--node",
+        &rpc,
+    ]);
+    let mut client = run!(test, Bin::Client, submit_proposal_args, Some(100))?;
+    client.exp_string(TX_APPLIED_SUCCESS)?;
+    client.assert_success();
+    Ok(start_epoch.into())
+}
+
+fn propose_unlimited_channel(test: &Test) -> Result<Epoch> {
+    let albert = find_address(test, ALBERT)?;
+    let rpc = get_actor_rpc(test, Who::Validator(0));
+    let epoch = get_epoch(test, &rpc)?;
+    let start_epoch = (epoch.0 + 3) / 3 * 3;
+    let proposal_json = serde_json::json!({
+        "proposal": {
+            "content": {
+                "title": "IBC unlimited channel",
+                "authors": "test@test.com",
+                "discussions-to": "www.github.com/anoma/aip/1",
+                "created": "2022-03-10T08:54:37Z",
+                "license": "MIT",
+                "abstract": "IBC unlimited channel",
+                "motivation": "IBC unlimited channel",
+                "details": "IBC unlimited channel",
+                "requires": "2"
+            },
+            "author": albert,
+            "voting_start_epoch": start_epoch,
+            "voting_end_epoch": start_epoch + 3_u64,
+            "activation_epoch": start_epoch + 6_u64,
+        },
+        "data": TestWasms::TxProposalIbcUnlimitedChannel.read_bytes()
+    });
+
+    let proposal_json_path = test.test_dir.path().join("proposal.json");
+    write_json_file(proposal_json_path.as_path(), proposal_json);
+
+    let submit_proposal_args = apply_use_device(vec![
+        "init-proposal",
+        "--data-path",
+        proposal_json_path.to_str().unwrap(),
+        "--gas-limit",
+        "3000000",
         "--node",
         &rpc,
     ]);

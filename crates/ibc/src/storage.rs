@@ -624,10 +624,8 @@ pub fn throughput_limit_key(token: &Address) -> Key {
 /// Returns a key of the IBC unlimited channel
 pub fn unlimited_channel_key(channel_id: &ChannelId) -> Key {
     Key::from(Address::Internal(InternalAddress::Ibc).to_db_key())
-        .push(&UNLIMITED.to_string().to_db_key())
-        .expect("Cannot obtain a storage key")
-        .push(&channel_id.to_string().to_db_key())
-        .expect("Cannot obtain a storage key")
+        .with_segment(UNLIMITED.to_string())
+        .with_segment(channel_id.to_string())
 }
 
 /// Returns a prefix of the per-epoch deposit

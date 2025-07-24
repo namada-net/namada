@@ -5517,7 +5517,7 @@ dependencies = [
 
 [[package]]
 name = "namada_apps"
-version = "201.0.0"
+version = "201.0.1"
 dependencies = [
  "cargo_metadata 0.19.1",
  "clap_complete",

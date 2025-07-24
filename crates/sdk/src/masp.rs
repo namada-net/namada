@@ -81,7 +81,7 @@ fn extract_masp_tx(
 
             if let Some(transaction) = extract_masp_tx_from_envelope(&envelope)
             {
-                Ok(transaction)
+                Ok(transaction.masp_tx)
             } else {
                 Err(Error::Other(
                     "Failed to retrieve MASP over IBC transaction".to_string(),

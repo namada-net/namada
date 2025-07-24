@@ -92,7 +92,7 @@ use crate::signing::{
 use crate::tendermint_rpc::endpoint::broadcast::tx_sync::Response;
 use crate::tendermint_rpc::error::Error as RpcError;
 use crate::wallet::WalletIo;
-use crate::{Namada, args, events};
+use crate::{Namada, args, error, events};
 
 /// Initialize account transaction WASM
 pub const TX_INIT_ACCOUNT_WASM: &str = "tx_init_account.wasm";
@@ -2747,9 +2747,12 @@ pub async fn build_ibc_transfer(
         Some(source.clone()),
         Some(source.clone()),
         vec![],
-        args.ibc_shielding_data
-            .as_ref()
-            .map(|shielding_data| shielding_data.shielding_fee_payer.clone()),
+        args.ibc_shielding_data.as_ref().map(|shielding_data| {
+            shielding_data
+                .get_signer()
+                .cloned()
+                .expect("A MASP fee payer should have been provided")
+        }),
         args.source.spending_key().is_some(),
         vec![],
         None,
@@ -2767,17 +2770,15 @@ pub async fn build_ibc_transfer(
             // check that if there is a shielding fee payer, they have enough
             // balance to cover the fee
 
-            let shielding_fee_payer = if let Some(IbcShieldingData {
-                shielding_fee_payer: payer,
-                shielding_fee_token,
-                ..
-            }) = &args.ibc_shielding_data
+            let shielding_fee_payer = if let Some(data) =
+                &args.ibc_shielding_data
             {
                 validate_shielding_fee(
                     context,
                     Some(&mut updated_balance),
-                    payer,
-                    shielding_fee_token,
+                    data.get_signer()
+                        .expect("A MASP fee payer should have been provided"),
+                    &data.shielding_fee_token,
                     args.tx.force,
                 )
                 .await?
@@ -2920,16 +2921,14 @@ pub async fn build_ibc_transfer(
     if let Some(memo) = &args.tx.memo {
         tx.add_memo(memo);
     }
-    if let Some(IbcShieldingData {
-        shielding_fee_payer: payer,
-        shielding_fee_token: token,
-        masp_tx,
-    }) = &args.ibc_shielding_data
-    {
+    if let Some(data) = &args.ibc_shielding_data {
         tx.add_section(Section::ShieldingFee {
-            payer: payer.clone(),
-            token: token.clone(),
-            cmt: MaspTxId::from(masp_tx.txid()),
+            payer: data
+                .get_signer()
+                .cloned()
+                .expect("A MASP fee payer should have been provided"),
+            token: data.shielding_fee_token.clone(),
+            cmt: MaspTxId::from(data.masp_tx.txid()),
         });
     }
 
@@ -4633,4 +4632,35 @@ where
 fn proposal_to_vec(proposal: OnChainProposal) -> Result<Vec<u8>> {
     borsh::to_vec(&proposal.content)
         .map_err(|e| Error::from(EncodingError::Conversion(e.to_string())))
+}
+
+/// Get IBC memo string from MASP transaction for receiving
+pub async fn convert_masp_tx_to_ibc_memo_data(
+    context: &impl Namada,
+    transaction: &MaspTransaction,
+    shielding_fee_payer: common::PublicKey,
+    shielding_fee_token: Address,
+) -> std::result::Result<IbcShieldingData, error::Error> {
+    let mut wallet = context.wallet_lock().write().await;
+    let secret_key = wallet
+        .find_key_by_pk(&shielding_fee_payer, None)
+        .map_err(|err| {
+            Error::Other(format!(
+                "Unable to load the keypair from the wallet for public key \
+                 {}. Failed with: {}",
+                shielding_fee_payer, err
+            ))
+        })?;
+
+    let target = MaspTxId::from(transaction.txid());
+    let authorization = Authorization::new(
+        vec![target.into()],
+        BTreeMap::from([(0, secret_key)]),
+        None,
+    );
+    Ok(IbcShieldingData {
+        masp_tx: transaction.clone(),
+        shielding_fee_authorization: authorization,
+        shielding_fee_token,
+    })
 }

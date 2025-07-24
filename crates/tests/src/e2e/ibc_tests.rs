@@ -2988,7 +2988,7 @@ fn transfer_from_cosmos(
     let chain_type =
         CosmosChainType::chain_type(test.net.chain_id.as_str()).unwrap();
     let rpc = format!("tcp://127.0.0.1:{}", chain_type.get_rpc_port_number());
-    // If the receiver is a pyament address we want to mask it to the more
+    // If the receiver is a payment address we want to mask it to the more
     // general MASP internal address to improve on privacy
     let receiver = match PaymentAddress::from_str(receiver.as_ref()) {
         Ok(_) => MASP.to_string(),

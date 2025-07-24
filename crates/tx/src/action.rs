@@ -10,6 +10,7 @@ use std::fmt;
 
 use namada_core::address::Address;
 use namada_core::borsh::{BorshDeserialize, BorshSerialize};
+use namada_core::key::common;
 use namada_core::masp::MaspTxId;
 use namada_core::storage::KeySeg;
 use namada_core::{address, storage};
@@ -17,19 +18,48 @@ use namada_core::{address, storage};
 pub use crate::data::pos::{
     Bond, ClaimRewards, Redelegation, Unbond, Withdraw,
 };
+use crate::{Authorization, Signer};
 
 /// Actions applied from txs.
 pub type Actions = Vec<Action>;
 
 /// An action applied from a tx.
 #[allow(missing_docs)]
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq)]
 pub enum Action {
     Pos(PosAction),
     Gov(GovAction),
     Pgf(PgfAction),
     Masp(MaspAction),
-    IbcShielding,
+    IbcShielding(IbcShieldingAction),
+}
+
+#[allow(missing_docs)]
+#[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+pub struct IbcShieldingAction {
+    /// The account that will pay the shielding fee
+    pub shielding_fee_authorization: Authorization,
+    /// The token that the shielding fee will be paid in
+    pub shielding_fee_token: Address,
+}
+
+impl IbcShieldingAction {
+    /// Creat a new [`IbcShieldingAction`]
+    pub fn new(auth: Authorization, token: Address) -> Self {
+        Self {
+            shielding_fee_authorization: auth,
+            shielding_fee_token: token,
+        }
+    }
+
+    /// Get the public key of the account that is paying the shielding fee
+    pub fn get_signer(&self) -> Option<&common::PublicKey> {
+        match &self.shielding_fee_authorization.signer {
+            Signer::Address(_) => None,
+            Signer::PubKeys(pks) => pks.first(),
+        }
+    }
 }
 
 /// PoS tx actions.
@@ -155,5 +185,5 @@ pub fn is_ibc_shielding_transfer<T: Read>(
     Ok(reader
         .read_actions()?
         .iter()
-        .any(|action| matches!(action, Action::IbcShielding)))
+        .any(|action| matches!(action, Action::IbcShielding(_))))
 }

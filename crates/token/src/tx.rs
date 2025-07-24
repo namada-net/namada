@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use namada_core::address::PGF;
 use namada_core::arith::CheckedSub;
 use namada_core::collections::HashSet;
+use namada_core::key::common;
 use namada_core::masp::encode_asset_type;
 use namada_core::masp_primitives::transaction::Transaction;
 use namada_core::token::{DenominatedAmount, MaspDigitPos};
@@ -204,49 +205,18 @@ where
             "Transfer transaction does not debit all the expected accounts",
         ));
     }
-
     for authorizer in masp_authorizers {
         env.push_action(Action::Masp(MaspAction::MaspAuthorizer(authorizer)))?;
     }
     if !vin_addresses.is_empty() {
-        if let Some((payer, token)) =
-            tx_data.tx.get_shielding_fee_section(&masp_section_ref)
+        if let Some((fee_payer, fee_token)) = tx_data
+            .tx
+            .get_shielding_fee_section(&shielded.txid().into())
         {
+            apply_masp_fees(env, fee_payer, fee_token)?;
             env.push_action(Action::Masp(MaspAction::MaspAuthorizer(
-                Address::from(payer),
+                Address::from(fee_payer),
             )))?;
-            // transfer the shielding fee
-            let amount: DenominatedAmount = env
-                .get_masp_shielding_fee_amount(token)
-                .expect("Failed to read storage")
-                .ok_or_else(|| {
-                    Error::AllocMessage(format!(
-                        "The token {token} cannot be used to pay shielding \
-                         fees"
-                    ))
-                })?;
-            let sources = BTreeMap::from([(
-                Account {
-                    owner: Address::from(payer),
-                    token: token.clone(),
-                },
-                amount,
-            )]);
-            let targets = BTreeMap::from([(
-                Account {
-                    owner: PGF,
-                    token: token.clone(),
-                },
-                amount,
-            )]);
-            apply_transparent_transfers(
-                env,
-                TransparentTransfersRef {
-                    sources: &sources,
-                    targets: &targets,
-                },
-                Cow::Borrowed("shielding-fee-from-wasm"),
-            )?;
         } else {
             return Err(Error::SimpleMessage(
                 "A fee payer was not provided for a shielding transaction",
@@ -254,6 +224,49 @@ where
         }
     }
 
+    Ok(())
+}
+
+/// Transfer the fee for MASP shielding to PGF
+pub fn apply_masp_fees<ENV>(
+    env: &mut ENV,
+    fee_payer: &common::PublicKey,
+    fee_token: &Address,
+) -> Result<()>
+where
+    ENV: TxEnv + EmitEvents + action::Write<Err = Error>,
+{
+    // transfer the shielding fee
+    let amount: DenominatedAmount = env
+        .get_masp_shielding_fee_amount(fee_token)
+        .expect("Failed to read storage")
+        .ok_or_else(|| {
+            Error::AllocMessage(format!(
+                "The token {fee_token} cannot be used to pay shielding fees"
+            ))
+        })?;
+    let sources = BTreeMap::from([(
+        Account {
+            owner: Address::from(fee_payer),
+            token: fee_token.clone(),
+        },
+        amount,
+    )]);
+    let targets = BTreeMap::from([(
+        Account {
+            owner: PGF,
+            token: fee_token.clone(),
+        },
+        amount,
+    )]);
+    apply_transparent_transfers(
+        env,
+        TransparentTransfersRef {
+            sources: &sources,
+            targets: &targets,
+        },
+        Cow::Borrowed("shielding-fee-from-wasm"),
+    )?;
     Ok(())
 }
 

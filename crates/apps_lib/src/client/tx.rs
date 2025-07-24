@@ -22,13 +22,15 @@ use namada_sdk::collections::HashMap;
 use namada_sdk::governance::cli::onchain::{
     DefaultProposal, PgfFundingProposal, PgfStewardProposal,
 };
-use namada_sdk::ibc::convert_masp_tx_to_ibc_memo;
 use namada_sdk::io::{Io, display_line, edisplay_line};
 use namada_sdk::key::*;
 use namada_sdk::rpc::{InnerTxResult, TxBroadcastData, TxResponse};
 use namada_sdk::state::EPOCH_SWITCH_BLOCKS_DELAY;
 use namada_sdk::tx::data::compute_inner_tx_hash;
-use namada_sdk::tx::{CompressedAuthorization, Section, Signer, Tx};
+use namada_sdk::tx::{
+    CompressedAuthorization, Section, Signer, Tx,
+    convert_masp_tx_to_ibc_memo_data,
+};
 use namada_sdk::wallet::alias::{validator_address, validator_consensus_key};
 use namada_sdk::wallet::{Wallet, WalletIo};
 use namada_sdk::{ExtendedViewingKey, Namada, error, signing, tx};
@@ -2024,10 +2026,14 @@ pub async fn gen_ibc_shielding_transfer(
         };
         let mut out = File::create(&output_path)
             .expect("Creating a new file for IBC MASP transaction failed.");
-        let bytes = convert_masp_tx_to_ibc_memo(
-            &masp_tx,
-            shielding_fee_payer,
-            shielding_fee_token,
+        let bytes = String::from(
+            convert_masp_tx_to_ibc_memo_data(
+                context,
+                &masp_tx,
+                shielding_fee_payer,
+                shielding_fee_token,
+            )
+            .await?,
         );
         out.write_all(bytes.as_bytes())
             .expect("Writing IBC MASP transaction file failed.");

@@ -40,6 +40,7 @@ use crate::rpc::{
     query_ibc_denom, query_osmosis_pool_routes,
 };
 use crate::signing::{SigningTxData, gen_disposable_signing_key};
+use crate::tx::convert_masp_tx_to_ibc_memo_data;
 use crate::wallet::{DatedSpendingKey, DatedViewingKey};
 use crate::{Namada, rpc, tx};
 
@@ -745,19 +746,17 @@ impl TxOsmosisSwap<SdkTypes> {
                         "Failed to generate IBC shielding transfer".to_owned(),
                     )
                 })?;
-
+                let ibc_memo_data = convert_masp_tx_to_ibc_memo_data(
+                    ctx,
+                    &shielding_tx,
+                    shielded_recipient.shielding_fee_payer,
+                    shielded_recipient.shielding_fee_token,
+                )
+                .await?;
                 let memo = assert_json_obj(
                     serde_json::to_value(&NamadaMemo {
                         namada: NamadaMemoData::OsmosisSwap {
-                            shielding_data: StringEncoded::new(
-                                IbcShieldingData {
-                                    masp_tx: shielding_tx,
-                                    shielding_fee_payer: shielded_recipient
-                                        .shielding_fee_payer,
-                                    shielding_fee_token: shielded_recipient
-                                        .shielding_fee_token,
-                                },
-                            ),
+                            shielding_data: StringEncoded::new(ibc_memo_data),
                             shielded_amount: amount_to_shield,
                             overflow_receiver,
                         },

@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## v201.0.1
+
+Namada apps v201.0.1 patch release
+
+### FEATURES
+
+- Allow unlimited transfers through a specified channel
+  ([\#4762](https://github.com/anoma/namada/issues/4762))
+
+### IMPROVEMENTS
+
+- Changed the note selection algorithm to try and reduce the number of notes used
+  in MASP transactions. ([\#4748](https://github.com/anoma/namada/pull/4748))
+
+### MISCELLANEOUS
+
+- Updated to Rust edition 2024 and increased the MSRV to 1.85.
+  ([\#4523](https://github.com/anoma/namada/pull/4523))
+
 ## v201.0.0
 
 Namada apps v201.0.0 Consensus breaking release.

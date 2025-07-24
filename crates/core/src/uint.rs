@@ -23,8 +23,8 @@ use uint::construct_uint;
 
 use super::dec::{Dec, POS_DECIMAL_PRECISION};
 use crate::arith::{
-    self, CheckedAdd, CheckedNeg, CheckedSub, OverflowingAdd, OverflowingSub,
-    checked,
+    self, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedSub, One,
+    OverflowingAdd, OverflowingSub, Zero, checked,
 };
 use crate::token;
 use crate::token::{AmountParseError, MaspDigitPos};
@@ -763,6 +763,26 @@ impl I256 {
     }
 }
 
+impl Zero for I256 {
+    fn zero() -> Self {
+        Self(ZERO)
+    }
+
+    fn is_zero(&self) -> bool {
+        self.0 == ZERO
+    }
+}
+
+impl One for I256 {
+    fn one() -> Self {
+        Self(ONE)
+    }
+
+    fn is_one(&self) -> bool {
+        self.0 == ONE
+    }
+}
+
 // NOTE: This is here only because MASP requires it for `ValueSum` addition
 impl CheckedAdd for &I256 {
     type Output = I256;
@@ -797,12 +817,19 @@ impl CheckedSub for I256 {
     }
 }
 
-// NOTE: This is here only because num_traits::CheckedAdd requires it
-impl std::ops::Add for I256 {
-    type Output = Self;
+impl CheckedMul for I256 {
+    type Output = I256;
 
-    fn add(self, rhs: Self) -> Self::Output {
-        self.checked_add(rhs).unwrap()
+    fn checked_mul(self, rhs: Self) -> Option<Self::Output> {
+        I256::checked_mul(&self, rhs)
+    }
+}
+
+impl CheckedDiv for I256 {
+    type Output = I256;
+
+    fn checked_div(self, rhs: Self) -> Option<Self::Output> {
+        I256::checked_div(&self, rhs)
     }
 }
 
@@ -941,6 +968,26 @@ construct_uint! {
     Default,
 )]
 pub struct I320(SignedAmountInt);
+
+impl Zero for I320 {
+    fn zero() -> Self {
+        Self(SignedAmountInt::from(0))
+    }
+
+    fn is_zero(&self) -> bool {
+        self.0 == SignedAmountInt::from(0)
+    }
+}
+
+impl One for I320 {
+    fn one() -> Self {
+        Self(SignedAmountInt::from(1))
+    }
+
+    fn is_one(&self) -> bool {
+        self.0 == SignedAmountInt::from(1)
+    }
+}
 
 impl<T> OverflowingAdd<T> for I320
 where
@@ -1170,6 +1217,14 @@ pub mod testing {
         /// Panics if `denom` is zero.
         pub fn mul_div(&self, num: Self, denom: Self) -> (Self, Self) {
             self.checked_mul_div(num, denom).unwrap()
+        }
+    }
+
+    impl std::ops::Add for I256 {
+        type Output = Self;
+
+        fn add(self, rhs: Self) -> Self::Output {
+            self.checked_add(rhs).unwrap()
         }
     }
 

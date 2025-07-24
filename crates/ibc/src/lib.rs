@@ -243,8 +243,8 @@ where
         let msg = decode_message::<Transfer>(tx_data)
             .into_storage_result()
             .ok();
-        let tx = if let Some(IbcMessage::Envelope(ref envelope)) = msg {
-            Some(extract_masp_tx_from_envelope(envelope).ok_or_else(|| {
+        let tx = if let Some(IbcMessage::Envelope(envelope)) = msg {
+            Some(extract_masp_tx_from_envelope(&envelope).ok_or_else(|| {
                 StorageError::new_const(
                     "Missing MASP transaction in IBC message",
                 )

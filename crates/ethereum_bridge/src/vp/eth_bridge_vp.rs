@@ -190,7 +190,7 @@ mod tests {
     /// Return some arbitrary random key belonging to this account
     fn arbitrary_key() -> Key {
         let mut rng = rand::thread_rng();
-        let rn = rng.gen::<u64>();
+        let rn = rng.r#gen::<u64>();
         storage::prefix()
             .push(&format!("arbitrary key segment {}", rn))
             .expect("should always be able to construct this key")

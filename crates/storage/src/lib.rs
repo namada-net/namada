@@ -163,7 +163,7 @@ pub trait StorageWrite {
     where
         Self: StorageRead + Sized,
     {
-        let keys = iter_prefix_bytes(self, prefix)?
+        let keys = iter_prefix_bytes(self, prefix.clone())?
             .map(|res| {
                 let (key, _val) = res?;
                 Ok(key)
@@ -182,9 +182,9 @@ pub trait StorageWrite {
 /// Iterate items matching the given prefix, ordered by the storage keys.
 pub fn iter_prefix_bytes<'a>(
     storage: &'a impl StorageRead,
-    prefix: &Key,
+    prefix: Key,
 ) -> Result<impl Iterator<Item = Result<(Key, Vec<u8>)>> + 'a> {
-    let mut iter = storage.iter_prefix(prefix)?;
+    let mut iter = storage.iter_prefix(&prefix)?;
     let iter = std::iter::from_fn(move || {
         match storage.iter_next(&mut iter) {
             Ok(Some((key, val))) => {
@@ -211,12 +211,12 @@ pub fn iter_prefix_bytes<'a>(
 /// storage keys.
 pub fn iter_prefix<'a, T>(
     storage: &'a impl StorageRead,
-    prefix: &Key,
+    prefix: Key,
 ) -> Result<impl Iterator<Item = Result<(Key, T)>> + 'a>
 where
     T: BorshDeserialize,
 {
-    let mut iter = storage.iter_prefix(prefix)?;
+    let mut iter = storage.iter_prefix(&prefix)?;
     let iter = std::iter::from_fn(move || {
         match storage.iter_next(&mut iter) {
             Ok(Some((key, val))) => {
@@ -257,14 +257,14 @@ where
 /// don't pass the filter. For `iter_prefix_bytes`, `filter` works fine.
 pub fn iter_prefix_with_filter_map<'a, K, T, F>(
     storage: &'a impl StorageRead,
-    prefix: &Key,
+    prefix: Key,
     filter_map: F,
 ) -> Result<impl Iterator<Item = Result<(K, T)>> + 'a>
 where
     T: BorshDeserialize,
     F: Fn(&Key) -> Option<K> + 'a,
 {
-    let mut iter = storage.iter_prefix(prefix)?;
+    let mut iter = storage.iter_prefix(&prefix)?;
     let iter = std::iter::from_fn(move || {
         // The loop is for applying filter - we `continue` when the current key
         // doesn't pass the predicate.
@@ -316,14 +316,14 @@ where
 /// don't pass the filter. For `iter_prefix_bytes`, `filter` works fine.
 pub fn iter_prefix_with_filter<'a, T, F>(
     storage: &'a impl StorageRead,
-    prefix: &Key,
+    prefix: Key,
     filter: F,
 ) -> Result<impl Iterator<Item = Result<(Key, T)>> + 'a>
 where
     T: BorshDeserialize,
     F: Fn(&Key) -> bool + 'a,
 {
-    let mut iter = storage.iter_prefix(prefix)?;
+    let mut iter = storage.iter_prefix(&prefix)?;
     let iter = std::iter::from_fn(move || {
         // The loop is for applying filter - we `continue` when the current key
         // doesn't pass the predicate.

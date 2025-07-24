@@ -275,7 +275,7 @@ where
         &self,
         storage: &'iter impl StorageRead,
     ) -> Result<impl Iterator<Item = Result<T>> + 'iter> {
-        let iter = crate::iter_prefix(storage, &self.get_data_prefix())?;
+        let iter = crate::iter_prefix(storage, self.get_data_prefix())?;
         Ok(iter.map(|key_val_res| {
             let (_key, val) = key_val_res?;
             Ok(val)

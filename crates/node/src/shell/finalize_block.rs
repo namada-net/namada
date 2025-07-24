@@ -4298,7 +4298,7 @@ mod test_finalize_block {
 
         let num_slashes = namada_sdk::state::iter_prefix_bytes(
             &shell.state,
-            &slashes_prefix(),
+            slashes_prefix(),
         )?
         .filter(|kv_res| {
             let (k, _v) = kv_res.as_ref().unwrap();

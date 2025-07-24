@@ -23,10 +23,10 @@ pub use namada_core::internal::{HostEnvResult, KeyVal};
 macro_rules! extern_c {
     ($($defs:tt)*) => {
         #[cfg(feature = "c_unwind")]
-        extern "C-unwind" { $($defs)* }
+        unsafe extern "C-unwind" { $($defs)* }
 
         #[cfg(not(feature = "c_unwind"))]
-        extern "C" { $($defs)* }
+        unsafe extern "C" { $($defs)* }
     }
 }
 

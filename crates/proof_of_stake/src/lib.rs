@@ -295,7 +295,7 @@ where
     let prefix = bonds_for_source_prefix(address);
     match epoch {
         Some(epoch) => {
-            let iter = iter_prefix_bytes(storage, &prefix)?;
+            let iter = iter_prefix_bytes(storage, prefix)?;
             for res in iter {
                 let (key, _) = res?;
                 if let Some((bond_id, bond_epoch)) = is_bond_key(&key) {
@@ -309,7 +309,7 @@ where
             Ok(false)
         }
         None => {
-            let iter = iter_prefix_bytes(storage, &prefix)?;
+            let iter = iter_prefix_bytes(storage, prefix)?;
             for res in iter {
                 let (key, _) = res?;
                 if let Some((bond_id, _epoch)) = is_bond_key(&key) {

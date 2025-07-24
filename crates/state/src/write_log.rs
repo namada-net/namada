@@ -209,12 +209,12 @@ impl WriteLog {
                 self.block_write_log.get(key)
             }) {
             Some(v) => {
-                let gas = match v {
-                    StorageModification::Write { ref value } => {
+                let gas = match &v {
+                    StorageModification::Write { value } => {
                         checked!(key.len() + value.len())?
                     }
                     StorageModification::Delete => key.len(),
-                    StorageModification::InitAccount { ref vp_code_hash } => {
+                    StorageModification::InitAccount { vp_code_hash } => {
                         checked!(key.len() + vp_code_hash.len())?
                     }
                 } as u64;
@@ -246,12 +246,12 @@ impl WriteLog {
             .chain([&self.block_write_log])
         {
             if let Some(v) = bucket.get(key) {
-                let gas = match v {
-                    StorageModification::Write { ref value } => {
+                let gas = match &v {
+                    StorageModification::Write { value } => {
                         checked!(key.len() + value.len())?
                     }
                     StorageModification::Delete => key.len(),
-                    StorageModification::InitAccount { ref vp_code_hash } => {
+                    StorageModification::InitAccount { vp_code_hash } => {
                         checked!(key.len() + vp_code_hash.len())?
                     }
                 } as u64;
@@ -306,8 +306,8 @@ impl WriteLog {
         let len_signed =
             i64::try_from(len).map_err(|_| Error::ValueLenOverflow)?;
         let size_diff = match self.tx_write_log.write_log.get(key) {
-            Some(prev) => match prev {
-                StorageModification::Write { ref value } => {
+            Some(prev) => match &prev {
+                StorageModification::Write { value } => {
                     let val_len = i64::try_from(value.len())
                         .map_err(|_| Error::ValueLenOverflow)?;
                     checked!(len_signed - val_len)?
@@ -428,8 +428,8 @@ impl WriteLog {
             return Err(Error::DeleteVp);
         }
         let size_diff = match self.tx_write_log.write_log.get(key) {
-            Some(prev) => match prev {
-                StorageModification::Write { ref value } => value.len(),
+            Some(prev) => match &prev {
+                StorageModification::Write { value } => value.len(),
                 StorageModification::Delete => 0,
                 StorageModification::InitAccount { .. } => {
                     return Err(Error::DeleteVp);

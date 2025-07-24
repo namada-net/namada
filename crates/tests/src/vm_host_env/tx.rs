@@ -359,7 +359,7 @@ mod native_tx_host_env {
             // unit return type
             ( $fn:ident ( $($arg:ident : $type:ty),* $(,)?) ) => {
                 concat_idents!(extern_fn_name = namada, _, $fn {
-                    #[no_mangle]
+                    #[unsafe(no_mangle)]
                     extern "C-unwind" fn extern_fn_name( $($arg: $type),* ) {
                         with(|TestTxEnv {
                                 state,
@@ -404,7 +404,7 @@ mod native_tx_host_env {
             // non-unit return type
             ( $fn:ident ( $($arg:ident : $type:ty),* $(,)?) -> $ret:ty ) => {
                 concat_idents!(extern_fn_name = namada, _, $fn {
-                    #[no_mangle]
+                    #[unsafe(no_mangle)]
                     extern "C-unwind" fn extern_fn_name( $($arg: $type),* ) -> $ret {
                         with(|TestTxEnv {
                                 tx_index,
@@ -449,7 +449,7 @@ mod native_tx_host_env {
             // unit, non-result, return type
             ( "non-result", $fn:ident ( $($arg:ident : $type:ty),* $(,)?) ) => {
                 concat_idents!(extern_fn_name = namada, _, $fn {
-                    #[no_mangle]
+                    #[unsafe(no_mangle)]
                     extern "C-unwind" fn extern_fn_name( $($arg: $type),* ) {
                         with(|TestTxEnv {
                                 state,

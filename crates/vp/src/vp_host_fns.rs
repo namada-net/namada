@@ -64,17 +64,15 @@ where
     let (log_val, gas) =
         state.write_log().read_pre(key).into_storage_result()?;
     add_gas(gas_meter, gas)?;
-    match log_val {
-        Some(write_log::StorageModification::Write { ref value }) => {
+    match &log_val {
+        Some(write_log::StorageModification::Write { value }) => {
             Ok(Some(value.clone()))
         }
-        Some(&write_log::StorageModification::Delete) => {
+        Some(write_log::StorageModification::Delete) => {
             // Given key has been deleted
             Ok(None)
         }
-        Some(write_log::StorageModification::InitAccount {
-            ref vp_code_hash,
-        }) => {
+        Some(write_log::StorageModification::InitAccount { vp_code_hash }) => {
             // Read the VP of a new account
             Ok(Some(vp_code_hash.to_vec()))
         }

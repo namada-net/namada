@@ -783,8 +783,8 @@ where
     ) -> TempWlState<'static, D, H> {
         TempWlState {
             write_log: WriteLog::default(),
-            db: &*(&self.db as *const _),
-            in_mem: &*(&self.in_mem as *const _),
+            db: unsafe { &*(&self.db as *const _) },
+            in_mem: unsafe { &*(&self.in_mem as *const _) },
         }
     }
 

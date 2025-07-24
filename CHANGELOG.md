@@ -89,6 +89,10 @@ Namada v1.0.0 is the first stable release of the Namada apps.
 - updated namada libraries to libs-v0.46.1
   ([\#4123](https://github.com/anoma/namada/pull/4123))
 
+## libs-v0.251.1
+
+Namada libs 0.251.1 minor release.
+
 ## libs-v0.251.0
 
 Namada libs v0.251.0 Consensus and API breaking release.

@@ -5088,8 +5088,9 @@ dependencies = [
 
 [[package]]
 name = "masp_note_encryption"
-version = "1.4.0"
-source = "git+https://github.com/namada-net/masp.git?rev=fac6e3239d17acb1eb6e609223efe377c7b47312#fac6e3239d17acb1eb6e609223efe377c7b47312"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4ada01979db25a366c3e7382d0693fc65571dea7dc81960ef03a00aa4bb12f3"
 dependencies = [
  "arbitrary",
  "borsh",
@@ -5102,8 +5103,9 @@ dependencies = [
 
 [[package]]
 name = "masp_primitives"
-version = "1.4.0"
-source = "git+https://github.com/namada-net/masp.git?rev=fac6e3239d17acb1eb6e609223efe377c7b47312#fac6e3239d17acb1eb6e609223efe377c7b47312"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4fc77ab4163be1a72719a6cd27f9ab1f86dc9080a3d42aa2edd41e687aa97d5"
 dependencies = [
  "aes",
  "arbitrary",
@@ -5135,8 +5137,9 @@ dependencies = [
 
 [[package]]
 name = "masp_proofs"
-version = "1.4.0"
-source = "git+https://github.com/namada-net/masp.git?rev=fac6e3239d17acb1eb6e609223efe377c7b47312#fac6e3239d17acb1eb6e609223efe377c7b47312"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26a2bf8522c7f7a6529c7c450119e3fb06c2be638894866f3ad9e5a133a5d048"
 dependencies = [
  "bellman",
  "blake2b_simd",

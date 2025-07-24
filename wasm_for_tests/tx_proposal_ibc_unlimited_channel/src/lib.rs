@@ -9,7 +9,7 @@ fn apply_tx(ctx: &mut Ctx, _tx_data: BatchedTx) -> TxResult {
     let unlimited_channel_key =
         ibc::unlimited_channel_key(&unlimited_channel_id);
 
-    ctx.write(&unlimited_channel_key, unlimited_channel_id)?;
+    ctx.write(&unlimited_channel_key, ())?;
 
     Ok(())
 }

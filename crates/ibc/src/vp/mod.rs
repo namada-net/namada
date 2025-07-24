@@ -410,7 +410,7 @@ where
         };
         if let Some(channel) = transfer_channel {
             let unlimited_channel_key = unlimited_channel_key(channel);
-            if self.ctx.has_key_post(&unlimited_channel_key)? {
+            if self.ctx.has_key_pre(&unlimited_channel_key)? {
                 return Ok(true);
             }
         }

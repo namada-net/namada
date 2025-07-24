@@ -154,8 +154,7 @@ mod tests {
 
         let empty_key = storage::Key::parse("empty").unwrap();
         let mut iter =
-            namada_tx_prelude::iter_prefix_bytes(tx::ctx(), &empty_key)
-                .unwrap();
+            namada_tx_prelude::iter_prefix_bytes(tx::ctx(), empty_key).unwrap();
         assert!(
             iter.next().is_none(),
             "Trying to iter a prefix that doesn't have any matching keys \
@@ -175,7 +174,7 @@ mod tests {
         });
 
         // Then try to iterate over their prefix
-        let iter = namada_tx_prelude::iter_prefix(tx::ctx(), &prefix)
+        let iter = namada_tx_prelude::iter_prefix(tx::ctx(), prefix.clone())
             .unwrap()
             .map(Result::unwrap);
 
@@ -498,7 +497,7 @@ mod tests {
         });
 
         let ctx_pre = vp::CTX.pre();
-        let iter_pre = namada_vp_prelude::iter_prefix(&ctx_pre, &prefix)
+        let iter_pre = namada_vp_prelude::iter_prefix(&ctx_pre, prefix.clone())
             .unwrap()
             .map(|item| item.unwrap());
 
@@ -510,9 +509,10 @@ mod tests {
         itertools::assert_equal(iter_pre, expected_pre);
 
         let ctx_post = vp::CTX.post();
-        let iter_post = namada_vp_prelude::iter_prefix(&ctx_post, &prefix)
-            .unwrap()
-            .map(|item| item.unwrap());
+        let iter_post =
+            namada_vp_prelude::iter_prefix(&ctx_post, prefix.clone())
+                .unwrap()
+                .map(|item| item.unwrap());
 
         // The order in post also has to be sorted
         let mut expected_keys = sub_keys.to_vec();

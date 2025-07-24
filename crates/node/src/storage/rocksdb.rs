@@ -626,7 +626,7 @@ impl RocksDB {
         let reprot_cf = self.get_column_family(REPLAY_PROTECTION_CF)?;
         tracing::info!("Restoring replay protection state");
         // Remove the "current" tx hashes
-        for (ref current_key, _, _) in self.iter_current_replay_protection() {
+        for (current_key, _, _) in self.iter_current_replay_protection() {
             batch.0.delete_cf(reprot_cf, current_key);
         }
 
@@ -1738,13 +1738,13 @@ impl DB for RocksDB {
             self.get_column_family(REPLAY_PROTECTION_CF)?;
         let stripped_prefix = Some(replay_protection::current_prefix());
 
-        for (ref hash_str, _, _) in iter_prefix(
+        for (hash_str, _, _) in iter_prefix(
             self,
             replay_protection_cf,
             stripped_prefix.as_ref(),
             None,
         ) {
-            let hash = namada_sdk::hash::Hash::from_str(hash_str)
+            let hash = namada_sdk::hash::Hash::from_str(&hash_str)
                 .expect("Failed hash conversion");
             let current_key = replay_protection::current_key(&hash);
             let key = replay_protection::key(&hash);

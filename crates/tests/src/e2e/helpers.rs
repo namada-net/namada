@@ -568,7 +568,9 @@ fn make_hermes_chain_config(hermes_dir: &TestDir, test: &Test) -> Value {
     chain.insert("store_prefix".to_owned(), Value::String("ibc".to_owned()));
     let mut table = toml::map::Map::new();
     table.insert("price".to_owned(), Value::Float(0.000001));
-    std::env::set_var(ENV_VAR_CHAIN_ID, test.net.chain_id.to_string());
+    unsafe {
+        std::env::set_var(ENV_VAR_CHAIN_ID, test.net.chain_id.to_string())
+    };
     let nam_addr = find_address(test, setup::constants::NAM).unwrap();
     table.insert("denom".to_owned(), Value::String(nam_addr.to_string()));
     chain.insert("gas_price".to_owned(), Value::Table(table));

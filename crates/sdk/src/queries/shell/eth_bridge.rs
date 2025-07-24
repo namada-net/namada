@@ -634,7 +634,7 @@ where
                  un-parsable keys.",
             );
             match key.segments.last() {
-                Some(DbKeySeg::StringSeg(ref seg))
+                Some(DbKeySeg::StringSeg(seg))
                     if seg == Keys::segments().body =>
                 {
                     Some((key, v))

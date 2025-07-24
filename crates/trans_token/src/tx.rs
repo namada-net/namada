@@ -76,7 +76,7 @@ where
     let mut any_balance_changed = false;
     // To store all the tokens used in the transfer
     let mut tokens = HashSet::new();
-    for ref account @ (ref owner, ref token) in accounts {
+    for account @ (owner, token) in &accounts {
         // Record the encountered tokens
         tokens.insert(token.clone());
         let overflow_err = || {

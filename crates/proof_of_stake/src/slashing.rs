@@ -865,7 +865,7 @@ pub fn compute_slashable_amount(
 ) -> std::result::Result<token::Amount, arith::Error> {
     let updated_amount = computed_slashes
         .iter()
-        .filter(|(&epoch, _)| {
+        .filter(|(epoch, _)| {
             // Keep slashes that have been applied and processed before the
             // current slash occurred. We use `<=` because slashes processed at
             // `slash.epoch` (at the start of the epoch) are also processed
@@ -887,7 +887,7 @@ where
     let mut slashes: HashMap<Address, Vec<Slash>> = HashMap::new();
     let slashes_iter = iter_prefix_bytes(
         storage,
-        &storage_key::slashes_prefix(),
+        storage_key::slashes_prefix(),
     )?
     .filter_map(|result| {
         if let Ok((key, val_bytes)) = result {

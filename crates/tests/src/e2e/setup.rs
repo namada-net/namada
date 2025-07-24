@@ -473,10 +473,12 @@ pub fn network(
 
     // Set the network archive dir to make it available for `join-network`
     // commands
-    std::env::set_var(
-        namada_apps_lib::client::utils::ENV_VAR_NETWORK_CONFIGS_DIR,
-        archive_dir,
-    );
+    unsafe {
+        std::env::set_var(
+            namada_apps_lib::client::utils::ENV_VAR_NETWORK_CONFIGS_DIR,
+            archive_dir,
+        )
+    };
 
     let validator_aliases = templates
         .transactions
@@ -585,7 +587,7 @@ pub fn network(
     copy_wasm_to_chain_dir(&working_dir, test_dir.path(), &net.chain_id);
 
     // Set the chain id
-    std::env::set_var(ENV_VAR_CHAIN_ID, net.chain_id.to_string());
+    unsafe { std::env::set_var(ENV_VAR_CHAIN_ID, net.chain_id.to_string()) };
 
     Ok(Test {
         working_dir,
@@ -1202,7 +1204,7 @@ where
                 .unwrap()
                 .as_micros(),
             bin_name,
-            rng.gen::<u64>()
+            rng.r#gen::<u64>()
         ))
     };
     let logger = OpenOptions::new()
@@ -1426,7 +1428,7 @@ where
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_micros(),
-            rng.gen::<u64>()
+            rng.r#gen::<u64>()
         ))
     };
     let logger = OpenOptions::new()
@@ -1689,7 +1691,7 @@ where
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_micros(),
-            rng.gen::<u64>()
+            rng.r#gen::<u64>()
         ))
     };
     let logger = OpenOptions::new()
@@ -1752,7 +1754,7 @@ where
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_micros(),
-            rng.gen::<u64>()
+            rng.r#gen::<u64>()
         ))
     };
     let logger = OpenOptions::new()

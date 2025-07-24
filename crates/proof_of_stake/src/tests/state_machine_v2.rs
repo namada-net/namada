@@ -3735,9 +3735,9 @@ impl ReferenceStateMachine for AbstractPosState {
         // Transitions that can be applied if there are no bonds and unbonds
         let basic = prop_oneof![
             4 => Just(Transition::NextEpoch),
-            6 => add_arb_bond_amount(state),
-            5 => arb_delegation(state),
-            3 => arb_self_bond(state),
+            6 => add_arb_bond_amount(state.clone()),
+            5 => arb_delegation(state.clone()),
+            3 => arb_self_bond(state.clone()),
             1 => (
                 address::testing::arb_established_address(),
                 key::testing::arb_common_keypair(),
@@ -3768,7 +3768,7 @@ impl ReferenceStateMachine for AbstractPosState {
                         }
                     },
                 ),
-            1 => arb_slash(state),
+            1 => arb_slash(state.clone()),
         ];
 
         // Add unjailing, if any eligible
@@ -4521,7 +4521,7 @@ impl ReferenceStateMachine for AbstractPosState {
 
 /// Arbitrary bond transition that adds tokens to an existing bond
 fn add_arb_bond_amount(
-    state: &AbstractPosState,
+    state: AbstractPosState,
 ) -> impl Strategy<Value = Transition> {
     let bond_ids = state.existing_bond_ids();
     let arb_bond_id = prop::sample::select(bond_ids);
@@ -4531,7 +4531,7 @@ fn add_arb_bond_amount(
 
 /// Arbitrary delegation to one of the validators
 fn arb_delegation(
-    state: &AbstractPosState,
+    state: AbstractPosState,
 ) -> impl Strategy<Value = Transition> {
     // Bond is allowed to any validator in any set - including jailed validators
     let validators = state
@@ -4556,9 +4556,7 @@ fn arb_delegation(
 }
 
 /// Arbitrary validator self-bond
-fn arb_self_bond(
-    state: &AbstractPosState,
-) -> impl Strategy<Value = Transition> {
+fn arb_self_bond(state: AbstractPosState) -> impl Strategy<Value = Transition> {
     // Bond is allowed to any validator in any set - including jailed validators
     let validator_vec = state
         .validator_states
@@ -4585,7 +4583,7 @@ pub fn arb_bond_amount() -> impl Strategy<Value = token::Amount> {
 }
 
 /// Arbitrary validator misbehavior
-fn arb_slash(state: &AbstractPosState) -> impl Strategy<Value = Transition> {
+fn arb_slash(state: AbstractPosState) -> impl Strategy<Value = Transition> {
     let validators = state.consensus_set.iter().fold(
         Vec::new(),
         |mut acc, (_epoch, vals)| {

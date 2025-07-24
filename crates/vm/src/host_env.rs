@@ -553,8 +553,7 @@ where
 
     /// Use gas meter
     pub fn gas_meter(&self) -> &RefCell<gas_meter::GasMeter<VpGasMeter>> {
-        let gas_meter = unsafe { self.gas_meter.get() };
-        gas_meter
+        unsafe { self.gas_meter.get() }
     }
 }
 
@@ -1548,8 +1547,8 @@ where
         .map_err(|e| TxRuntimeError::InvalidVpCodeHash(e.to_string()))?;
     let mut state = env.state();
     let (write_log, in_mem, _db) = state.split_borrow();
-    let gen = &in_mem.address_gen;
-    let (addr, gas) = write_log.init_account(gen, code_hash, &entropy_source);
+    let r#gen = &in_mem.address_gen;
+    let (addr, gas) = write_log.init_account(r#gen, code_hash, &entropy_source);
     let addr_bytes = addr.serialize_to_vec();
     consume_tx_gas::<MEM, D, H, CA>(env, gas)?;
     let gas = env
@@ -2122,7 +2121,7 @@ where
     let tx = unsafe { env.ctx.tx.get() };
 
     let (gas_meter, sentinel) = env.ctx.gas_meter_and_sentinel();
-    let result = match tx.verify_signatures(
+    match tx.verify_signatures(
         &HashSet::from_iter(hashes),
         public_keys_map,
         &None,
@@ -2145,9 +2144,7 @@ where
             _ => Ok(HostEnvResult::Fail.to_i64()),
         },
     }
-    .into_storage_result();
-
-    result
+    .into_storage_result()
 }
 
 /// Appends the new note commitments to the tree in storage
@@ -2343,7 +2340,7 @@ where
     let (gas_meter, sentinel) = env.ctx.gas_meter_and_sentinel();
 
     // if we run out of gas, we need to stop the execution
-    let result = gas_meter
+    gas_meter
         .borrow_mut()
         .consume(used_gas)
         .map_err(|err| {
@@ -2355,9 +2352,7 @@ where
 
             TxRuntimeError::OutOfGas(err)
         })
-        .into_storage_result();
-
-    result
+        .into_storage_result()
 }
 
 /// A helper module for testing

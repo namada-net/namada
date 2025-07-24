@@ -247,7 +247,7 @@ where
     // We have to iterate raw bytes, cause the epoched data `last_update` field
     // gets matched here too
     let mut raw_bonds =
-        iter_prefix_bytes(storage, &prefix)?.filter_map(|result| {
+        iter_prefix_bytes(storage, prefix)?.filter_map(|result| {
             if let Ok((key, val_bytes)) = result {
                 if let Some((bond_id, start)) = storage_key::is_bond_key(&key) {
                     if source.is_some()
@@ -276,7 +276,7 @@ where
         None => storage_key::unbonds_prefix(),
     };
     let mut raw_unbonds =
-        iter_prefix_bytes(storage, &prefix)?.filter_map(|result| {
+        iter_prefix_bytes(storage, prefix)?.filter_map(|result| {
             if let Ok((key, val_bytes)) = result {
                 if let Some((bond_id, start, withdraw)) =
                     storage_key::is_unbond_key(&key)

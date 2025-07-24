@@ -347,16 +347,16 @@ mod tests {
                         max_proposal_period: GovernanceParameters::default()
                             .max_proposal_period,
                     };
-                    arb_valid_pos_action(&state).prop_map(move |valid_action| {
-                        Self {
+                    arb_valid_pos_action(state.clone()).prop_map(
+                        move |valid_action| Self {
                             epoch,
                             params: params.clone(),
                             valid_actions: vec![],
                             invalid_pos_changes: vec![],
                             invalid_arbitrary_changes: vec![],
                             committed_valid_actions: vec![valid_action],
-                        }
-                    })
+                        },
+                    )
                 })
                 .boxed()
         }
@@ -366,9 +366,9 @@ mod tests {
             prop_oneof![
                 Just(Transition::CommitTx),
                 Just(Transition::NextEpoch),
-                arb_valid_pos_action(&valid_actions)
+                arb_valid_pos_action(valid_actions.clone())
                     .prop_map(Transition::Valid),
-                arb_invalid_pos_action(&valid_actions)
+                arb_invalid_pos_action(valid_actions.clone())
                     .prop_map(Transition::InvalidPos),
             ]
             .boxed()
@@ -730,7 +730,7 @@ pub mod testing {
     }
 
     pub fn arb_valid_pos_action(
-        valid_actions: &[ValidPosAction],
+        valid_actions: Vec<ValidPosAction>,
     ) -> impl Strategy<Value = ValidPosAction> {
         let validators: Vec<Address> = valid_actions
             .iter()
@@ -1518,7 +1518,7 @@ pub mod testing {
     }
 
     pub fn arb_invalid_pos_action(
-        valid_actions: &[ValidPosAction],
+        valid_actions: Vec<ValidPosAction>,
     ) -> impl Strategy<Value = InvalidPosAction> {
         let arb_epoch = 0..10_000_u64;
         proptest::collection::vec(
@@ -1534,7 +1534,7 @@ pub mod testing {
     }
 
     pub fn arb_invalid_pos_storage_changes(
-        valid_actions: &[ValidPosAction],
+        valid_actions: Vec<ValidPosAction>,
     ) -> impl Strategy<Value = PosStorageChanges> {
         let validators: Vec<Address> = valid_actions
             .iter()

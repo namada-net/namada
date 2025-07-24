@@ -519,7 +519,7 @@ where
 {
     require_latest_height(&ctx, request)?;
 
-    let iter = namada_storage::iter_prefix_bytes(ctx.state, &storage_key)?;
+    let iter = namada_storage::iter_prefix_bytes(ctx.state, storage_key)?;
     let data: namada_storage::Result<Vec<PrefixValue>> = iter
         .map(|iter_result| {
             let (key, value) = iter_result?;

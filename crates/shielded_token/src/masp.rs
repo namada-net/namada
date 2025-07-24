@@ -338,7 +338,9 @@ mod tests {
                 .expect("expected a writable temp file (on sync)");
         }
 
-        std::env::set_var(ENV_VAR_MASP_PARAMS_DIR, tempdir.as_os_str());
+        unsafe {
+            std::env::set_var(ENV_VAR_MASP_PARAMS_DIR, tempdir.as_os_str())
+        };
         // should panic here
         masp_proofs::load_parameters(
             &fake_params_paths[0],
@@ -414,7 +416,9 @@ mod tests {
                 .expect("expected a writable temp file (on sync)");
         }
 
-        std::env::set_var(ENV_VAR_MASP_PARAMS_DIR, tempdir.as_os_str());
+        unsafe {
+            std::env::set_var(ENV_VAR_MASP_PARAMS_DIR, tempdir.as_os_str())
+        };
         // should panic here
         masp_proofs::load_parameters(
             &fake_params_paths[0].0,

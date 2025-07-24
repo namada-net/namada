@@ -10,7 +10,7 @@ use namada_ibc::context::middlewares::create_transfer_middlewares;
 pub use namada_ibc::event::{IbcEvent, IbcEventType};
 pub use namada_ibc::storage::{
     burn_tokens, client_state_key, is_ibc_key, mint_limit_key, mint_tokens,
-    throughput_limit_key, upgraded_client_state_key,
+    throughput_limit_key, unlimited_channel_key, upgraded_client_state_key,
     upgraded_consensus_state_key,
 };
 pub use namada_ibc::trace::ibc_token;

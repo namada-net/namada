@@ -12,6 +12,7 @@ members = [
     "tx_no_op_event",
     "tx_proposal_code",
     "tx_proposal_ibc_token_inflation",
+    "tx_proposal_ibc_unlimited_channel",
     "tx_proposal_masp_reward",
     "tx_proposal_token_gas",
     "tx_read_storage_key",

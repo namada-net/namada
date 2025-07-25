@@ -445,6 +445,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bridgetree"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3990cc973c3b9c41c4dbb66cde22e3af77c4c7b133008d81f292ad12c27ed794"
+dependencies = [
+ "incrementalmerkletree",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2848,6 +2857,7 @@ version = "0.251.1"
 dependencies = [
  "async-trait",
  "borsh",
+ "bridgetree",
  "eyre",
  "futures",
  "itertools 0.14.0",

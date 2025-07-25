@@ -113,7 +113,7 @@ pub struct EpochedConversions {
 
 /// Represents the current state of the shielded pool from the perspective of
 /// the chosen viewing keys.
-#[derive(BorshSerialize, BorshDeserialize, Debug)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, Default)]
 pub struct ShieldedWallet<U: ShieldedUtils> {
     /// Location where this shielded context is saved
     #[borsh(skip)]
@@ -147,6 +147,7 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     pub sync_status: ContextSyncStatus,
 }
 
+<<<<<<< HEAD
 /// Default implementation to ease construction of TxContexts. Derive cannot be
 /// used here due to CommitmentTree not implementing Default.
 impl<U: ShieldedUtils + Default> Default for ShieldedWallet<U> {
@@ -168,6 +169,17 @@ impl<U: ShieldedUtils + Default> Default for ShieldedWallet<U> {
             sync_status: ContextSyncStatus::Confirmed,
         }
     }
+=======
+/// The data for an indexed masp transaction
+#[derive(BorshSerialize, BorshDeserialize, Debug, Default)]
+pub struct TxHistoryEntry {
+    /// The inputs of the indexed transaction
+    pub inputs: HashMap<Address, Amount>,
+    /// The outputs of the indexed transaction
+    pub outputs: HashMap<Address, Amount>,
+    /// A flag to mark the presence of conversions in the transaction
+    pub conversions: bool,
+>>>>>>> a3f44a9c0 (Derive default on shielded wallet)
 }
 
 impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {

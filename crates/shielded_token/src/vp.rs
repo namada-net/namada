@@ -1,5 +1,6 @@
 //! MASP native VP
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
@@ -480,7 +481,7 @@ where
         ctx: &'ctx CTX,
         shielded_tx: &MaspFeeType,
         batched_tx: &BatchedTxRef<'_>,
-        actions_authorizers: &mut HashSet<&Address>,
+        actions_authorizers: &mut HashSet<Cow<'_, Address>>,
     ) -> Result<()> {
         let has_trans_inputs = shielded_tx
             .masp_tx()
@@ -690,14 +691,17 @@ where
             }
         }
 
-        let mut actions_authorizers: HashSet<&Address> = actions
+        let mut actions_authorizers: HashSet<Cow<'_, Address>> = actions
             .iter()
             .filter_map(|action| {
                 if let namada_tx::action::Action::Masp(
                     namada_tx::action::MaspAction::MaspAuthorizer(addr),
                 ) = action
                 {
-                    Some(addr)
+                    Some(Cow::Borrowed(addr))
+                } else if let namada_tx::action::Action::IbcShielding ( data ) = action
+                {
+                    data.get_signer().map(|s| Cow::Owned(Address::from(s)))
                 } else {
                     None
                 }

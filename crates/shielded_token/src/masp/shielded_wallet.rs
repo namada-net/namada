@@ -1,7 +1,7 @@
 //! The shielded wallet implementation
 use std::collections::{BTreeMap, BTreeSet, btree_map};
 
-use eyre::{Context, eyre};
+use eyre::{ContextCompat, WrapErr, eyre};
 use masp_primitives::asset_type::AssetType;
 #[cfg(feature = "mainnet")]
 use masp_primitives::consensus::MainNetwork as Network;
@@ -1294,33 +1294,10 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
 
             // Commit the conversions that were used to exchange
             *usages += proposed_usages;
-            let position: bridgetree::Position = note_idx
-                .try_into()
-                .expect("note position conversion shouldn't fail");
-            let merkle_path = self
-                .tree
-                .as_ref()
-                .witness(position, 0 /* don't use checkpoints */)
-                .map_err(|err| {
-                    eyre!(
-                        "Unable to get merkle path to note {note_idx}: {err:?}"
-                    )
-                })?
-                .into_iter()
-                .fold(
-                    (
-                        MerklePath::from_path(vec![], position.into()),
-                        bridgetree::Address::from(position),
-                    ),
-                    |(mut merkle_path, addr), node| {
-                        merkle_path.auth_path.push((
-                            Node::from(node),
-                            addr.sibling().is_right_child(),
-                        ));
-                        (merkle_path, addr.parent())
-                    },
-                )
-                .0;
+            let merkle_path =
+                self.tree.witness(note_idx).wrap_err_with(|| {
+                    format!("Unable to get merkle path to note {note_idx}")
+                })?;
             let diversifier = self
                 .div_map
                 .get(&note_idx)

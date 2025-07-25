@@ -2143,9 +2143,20 @@ pub async fn query_conversions(
         .wallet()
         .await
         .get_addresses_with_vp_type(AddressVpType::Token);
-    let conversions = rpc::query_conversions(context.client())
+
+    // Download conversions from all epochs to facilitate decoding asset types
+    let mut conversions = BTreeMap::new();
+    let from = MaspEpoch::zero();
+    let to = rpc::query_masp_epoch(context.client())
         .await
-        .expect("Conversions should be defined");
+        .expect("Unable to query current MASP epoch");
+    for epoch in MaspEpoch::iter_bounds_inclusive(from, to) {
+        conversions.append(
+            &mut rpc::query_conversions(context.client(), &epoch)
+                .await
+                .expect("Conversions should be defined"),
+        );
+    }
 
     if args.dump_tree {
         display_line!(context.io(), "Conversions: {conversions:?}");
@@ -2153,6 +2164,7 @@ pub async fn query_conversions(
 
     // Track whether any non-sentinel conversions are found
     let mut conversions_found = false;
+
     for (addr, _denom, digit, epoch, amt) in conversions.values() {
         // If the user has specified any targets, then meet them
         // If we have a sentinel conversion, then skip printing

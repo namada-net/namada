@@ -3,15 +3,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::str::FromStr;
+
+use borsh::{BorshDeserialize, BorshSerialize};
 use masp_primitives::transaction::TransparentAddress;
 use masp_primitives::transaction::components::ValueSum;
 use namada_core::address::Address;
-use borsh::{BorshDeserialize, BorshSerialize};
-use namada_core::masp::{MaspTransaction, TAddrData};
-use namada_core::{masp_primitives, storage, token};
 use namada_core::borsh::BorshSerializeExt;
 use namada_core::bytes::HEXUPPER;
 use namada_core::key::common;
+use namada_core::masp::{MaspTransaction, TAddrData};
+use namada_core::{masp_primitives, storage, token};
 pub use namada_storage::Result;
 use namada_tx::{Authorization, Signer};
 
@@ -67,7 +68,6 @@ impl FromStr for IbcShieldingData {
 
 /// Abstract IBC storage read interface
 pub trait Read<S> {
-
     /// Extract MASP transaction from IBC envelope
     fn try_extract_masp_tx_from_envelope<Transfer: BorshDeserialize>(
         tx_data: &[u8],

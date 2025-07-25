@@ -15,9 +15,10 @@ use ibc::core::channel::types::packet::Packet;
 use ibc::core::handler::types::msgs::MsgEnvelope;
 use ibc::core::host::types::identifiers::PortId;
 use ibc::primitives::proto::Protobuf;
-use serde::{Deserialize, Serialize};
 use namada_core::string_encoding::StringEncoded;
 use namada_systems::ibc::IbcShieldingData;
+use serde::{Deserialize, Serialize};
+
 use crate::trace;
 
 trait Sealed {}
@@ -230,7 +231,6 @@ impl<Transfer: BorshSchema> BorshSchema for MsgNftTransfer<Transfer> {
         "MsgNftTransfer".into()
     }
 }
-
 
 /// Extract MASP transaction from IBC envelope
 pub fn extract_masp_tx_from_envelope(

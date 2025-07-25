@@ -29,8 +29,8 @@ use namada_core::uint::I320;
 use namada_state::{
     ConversionState, OptionExt, ReadConversionState, ResultExt,
 };
-use namada_systems::{governance, ibc, parameters, trans_token};
 use namada_systems::ibc::IbcShieldingData;
+use namada_systems::{governance, ibc, parameters, trans_token};
 use namada_tx::{BatchedTxRef, Signer};
 use namada_vp_env::{Error, Result, VpEnv};
 
@@ -140,9 +140,7 @@ where
         + ReadConversionState,
     Params: parameters::Read<<CTX as VpEnv<'ctx>>::Pre>,
     Gov: governance::Read<<CTX as VpEnv<'ctx>>::Pre>,
-    Ibc: ibc::Read<
-            <CTX as VpEnv<'ctx>>::Post,
-        >,
+    Ibc: ibc::Read<<CTX as VpEnv<'ctx>>::Post>,
     TransToken:
         trans_token::Keys + trans_token::Read<<CTX as VpEnv<'ctx>>::Pre>,
     Transfer: BorshDeserialize,
@@ -699,7 +697,8 @@ where
                 ) = action
                 {
                     Some(Cow::Borrowed(addr))
-                } else if let namada_tx::action::Action::IbcShielding ( data ) = action
+                } else if let namada_tx::action::Action::IbcShielding(data) =
+                    action
                 {
                     data.get_signer().map(|s| Cow::Owned(Address::from(s)))
                 } else {

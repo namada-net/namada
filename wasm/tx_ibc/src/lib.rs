@@ -48,8 +48,23 @@ fn apply_tx(ctx: &mut Ctx, tx_data: BatchedTx) -> TxResult {
                     ctx.set_commitment_sentinel();
                 })?,
         )
+    } else if let Some(shielded) = data.shielded {
+        let signer = shielded.get_signer().ok_or_err_msg(
+            "Unable to find a public key signing a shielding IBC tx.",
+        )?;
+        token::apply_masp_fees(ctx, signer, &shielded.shielding_fee_token)
+            .wrap_err(
+                "Encountered error while paying the shielding fee for IBC",
+            )?;
+        ctx.push_action(Action::IbcShielding(
+            action::IbcShieldingAction::new(
+                shielded.shielding_fee_authorization,
+                shielded.shielding_fee_token,
+            ),
+        ))?;
+        Some(shielded.masp_tx)
     } else {
-        data.shielded
+        None
     };
     if let Some(shielded) = shielded {
         token::utils::handle_masp_tx(ctx, &shielded)
@@ -60,8 +75,6 @@ fn apply_tx(ctx: &mut Ctx, tx_data: BatchedTx) -> TxResult {
             ctx.push_action(Action::Masp(MaspAction::MaspSectionRef(
                 masp_section_ref,
             )))?;
-        } else {
-            ctx.push_action(Action::IbcShielding)?;
         }
         token::update_undated_balances(ctx, &shielded, token_addrs)?;
     }

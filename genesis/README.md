@@ -120,7 +120,7 @@ For non-validator transactions, a helper tool for producing signatures for trans
 
 ```shell
 namada client utils \
-  sign-genesis-tx \
+  sign-genesis-txs \
   --path "unsigned-tx.toml" \
   --output "signed-txs.toml"
 ```

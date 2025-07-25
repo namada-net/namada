@@ -270,6 +270,14 @@ pub mod vp {
             threshold: u8,
         );
 
+        /// Verify the signatures of an authorization
+        pub fn namada_vp_verify_signature(
+            public_key_ptr: u64,
+            public_key_len: u64,
+            auth_ptr: u64,
+            auth_len: u64,
+        );
+
         /// Evaluate a validity-predicate
         pub fn namada_vp_eval(
             vp_code_hash_ptr: u64,

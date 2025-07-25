@@ -55,6 +55,7 @@ namada_wallet = { workspace = true, optional = true }
 
 async-trait.workspace = true
 borsh.workspace = true
+bridgetree.workspace = true
 eyre.workspace = true
 futures.workspace = true
 flume = { workspace = true, optional = true }

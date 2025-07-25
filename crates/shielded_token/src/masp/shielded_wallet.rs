@@ -234,7 +234,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
                 "note commitment tree is full"
             );
 
-            if trial_decrypted.has_indexed_tx(&masp_indexed_tx) {
+            if trial_decrypted.decrypted_by_any_vk(&masp_indexed_tx) {
                 // Finally, make it easier to construct merkle paths to this new
                 // note that we own
                 eyre::ensure!(

@@ -4278,7 +4278,7 @@ dependencies = [
 
 [[package]]
 name = "tx_proposal_ibc_unlimited_channel"
-version = "0.150.0"
+version = "0.251.0"
 dependencies = [
  "getrandom 0.2.15",
  "namada_tx_prelude",

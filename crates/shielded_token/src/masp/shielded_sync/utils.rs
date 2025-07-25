@@ -235,8 +235,12 @@ impl TrialDecrypted {
     }
 
     /// Check if the tx with  [`MaspIndexedTx`] was successfully decrypted
-    pub fn has_indexed_tx(&self, ix: &MaspIndexedTx) -> bool {
-        self.inner.contains_key(ix)
+    pub fn decrypted_by_any_vk(&self, ix: &MaspIndexedTx) -> bool {
+        self.inner.get(ix).is_some_and(|viewing_keys_to_notes| {
+            viewing_keys_to_notes
+                .values()
+                .any(|decrypted_notes| !decrypted_notes.is_empty())
+        })
     }
 }
 

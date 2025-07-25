@@ -2073,11 +2073,11 @@ dependencies = [
 
 [[package]]
 name = "incrementalmerkletree"
-version = "0.3.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5ad43a3f5795945459d577f6589cf62a476e92c79b75e70cd954364e14ce17b"
+checksum = "30821f91f0fa8660edca547918dc59812893b497d07c1144f326f07fdd94aba9"
 dependencies = [
- "serde",
+ "either",
 ]
 
 [[package]]
@@ -2274,8 +2274,7 @@ checksum = "04cbf5b083de1c7e0222a7a51dbfdba1cbe1c6ab0b15e29fff3f6c077fd9cd9f"
 [[package]]
 name = "masp_note_encryption"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4ada01979db25a366c3e7382d0693fc65571dea7dc81960ef03a00aa4bb12f3"
+source = "git+https://github.com/namada-net/masp?rev=ffdcd0a73db1471199ced6e729b46d31a57317dc#ffdcd0a73db1471199ced6e729b46d31a57317dc"
 dependencies = [
  "borsh",
  "chacha20",
@@ -2288,8 +2287,7 @@ dependencies = [
 [[package]]
 name = "masp_primitives"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4fc77ab4163be1a72719a6cd27f9ab1f86dc9080a3d42aa2edd41e687aa97d5"
+source = "git+https://github.com/namada-net/masp?rev=ffdcd0a73db1471199ced6e729b46d31a57317dc#ffdcd0a73db1471199ced6e729b46d31a57317dc"
 dependencies = [
  "aes",
  "bip0039",
@@ -2320,8 +2318,7 @@ dependencies = [
 [[package]]
 name = "masp_proofs"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26a2bf8522c7f7a6529c7c450119e3fb06c2be638894866f3ad9e5a133a5d048"
+source = "git+https://github.com/namada-net/masp?rev=ffdcd0a73db1471199ced6e729b46d31a57317dc#ffdcd0a73db1471199ced6e729b46d31a57317dc"
 dependencies = [
  "bellman",
  "blake2b_simd",

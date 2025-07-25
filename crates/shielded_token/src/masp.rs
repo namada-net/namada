@@ -1286,7 +1286,7 @@ pub mod fs {
                     ..Default::default()
                 };
                 BorshSerialize::serialize(
-                    &VersionedWalletRef::V1(&shielded),
+                    &VersionedWalletRef::V2(&shielded),
                     &mut bytes,
                 )
                 .expect("Test failed");

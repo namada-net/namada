@@ -15,7 +15,9 @@ pub enum VersionedWallet<U: ShieldedUtils> {
     /// Version 0
     V0(v0::ShieldedWallet<U>),
     /// Version 1
-    V1(ShieldedWallet<U>),
+    V1(v1::ShieldedWallet<U>),
+    /// Version 2
+    V2(ShieldedWallet<U>),
 }
 
 impl<U: ShieldedUtils> VersionedWallet<U> {
@@ -24,7 +26,8 @@ impl<U: ShieldedUtils> VersionedWallet<U> {
     pub fn migrate(self) -> eyre::Result<ShieldedWallet<U>> {
         match self {
             VersionedWallet::V0(w) => Ok(w.into()),
-            VersionedWallet::V1(w) => Ok(w),
+            VersionedWallet::V1(w) => Ok(w.into()),
+            VersionedWallet::V2(w) => Ok(w),
         }
     }
 }
@@ -35,10 +38,14 @@ pub enum VersionedWalletRef<'w, U: ShieldedUtils> {
     /// Version 0
     V0(&'w v0::ShieldedWallet<U>),
     /// Version 1
-    V1(&'w ShieldedWallet<U>),
+    V1(&'w v1::ShieldedWallet<U>),
+    /// Version 2
+    V2(&'w ShieldedWallet<U>),
 }
 
 pub mod v0 {
+    //! Version 0 of the shielded wallet, which is used for migration purposes.
+
     use std::collections::{BTreeMap, BTreeSet};
 
     use masp_primitives::asset_type::AssetType;
@@ -91,6 +98,7 @@ pub mod v0 {
         /// The sync state of the context
         pub sync_status: ContextSyncStatus,
     }
+
     impl<U: ShieldedUtils + Default> Default for ShieldedWallet<U> {
         fn default() -> ShieldedWallet<U> {
             ShieldedWallet::<U> {
@@ -114,6 +122,7 @@ pub mod v0 {
 
     impl<U: ShieldedUtils> From<ShieldedWallet<U>> for super::ShieldedWallet<U> {
         fn from(wallet: ShieldedWallet<U>) -> Self {
+<<<<<<< HEAD
             Self {
                 utils: wallet.utils,
                 tree: wallet.tree,
@@ -130,6 +139,138 @@ pub mod v0 {
                 vk_map: wallet.vk_map,
                 note_index: wallet.note_index,
                 sync_status: wallet.sync_status,
+=======
+            #[cfg(not(feature = "historic"))]
+            {
+                use crate::masp::bridge_tree::BridgeTree;
+
+                Self {
+                    utils: wallet.utils,
+                    // TODO: write proper migrations here
+                    tree: BridgeTree::empty(),
+                    vk_heights: wallet.vk_heights,
+                    pos_map: wallet.pos_map,
+                    nf_map: wallet.nf_map,
+                    note_map: wallet.note_map,
+                    memo_map: wallet.memo_map,
+                    div_map: wallet.div_map,
+                    spents: wallet.spents,
+                    asset_types: wallet.asset_types,
+                    conversions: Default::default(),
+                    vk_map: wallet.vk_map,
+                    note_index: wallet.note_index,
+                    sync_status: wallet.sync_status,
+                }
+            }
+            #[cfg(feature = "historic")]
+            {
+                drop(wallet);
+
+                // NB: Need to return an empty wallet because
+                // we can not rebuild the shielded history.
+                Default::default()
+            }
+        }
+    }
+}
+
+pub mod v1 {
+    //! Version 1 of the shielded wallet, which is used for migration purposes.
+
+    #![allow(missing_docs)]
+
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use masp_primitives::asset_type::AssetType;
+    use masp_primitives::memo::MemoBytes;
+    use masp_primitives::merkle_tree::CommitmentTree;
+    use masp_primitives::sapling::{
+        Diversifier, Node, Note, Nullifier, ViewingKey,
+    };
+    use namada_core::borsh::{BorshDeserialize, BorshSerialize};
+    use namada_core::collections::{HashMap, HashSet};
+    use namada_core::masp::AssetData;
+
+    use crate::masp::shielded_wallet::EpochedConversions;
+    use crate::masp::utils::MaspIndexedTx;
+    use crate::masp::{
+        ContextSyncStatus, NoteIndex, ShieldedUtils, WitnessMap,
+    };
+
+    #[derive(BorshSerialize, BorshDeserialize, Debug)]
+    pub struct ShieldedWallet<U: ShieldedUtils> {
+        #[borsh(skip)]
+        pub utils: U,
+        pub tree: CommitmentTree<Node>,
+        pub vk_heights: BTreeMap<ViewingKey, Option<MaspIndexedTx>>,
+        pub pos_map: HashMap<ViewingKey, BTreeSet<usize>>,
+        pub nf_map: HashMap<Nullifier, usize>,
+        pub note_map: HashMap<usize, Note>,
+        pub memo_map: HashMap<usize, MemoBytes>,
+        pub div_map: HashMap<usize, Diversifier>,
+        pub witness_map: WitnessMap,
+        pub spents: HashSet<usize>,
+        pub asset_types: HashMap<AssetType, AssetData>,
+        pub conversions: EpochedConversions,
+        pub vk_map: HashMap<usize, ViewingKey>,
+        pub note_index: NoteIndex,
+        pub sync_status: ContextSyncStatus,
+    }
+
+    impl<U: ShieldedUtils + Default> Default for ShieldedWallet<U> {
+        fn default() -> ShieldedWallet<U> {
+            ShieldedWallet::<U> {
+                utils: U::default(),
+                vk_heights: BTreeMap::new(),
+                note_index: BTreeMap::default(),
+                tree: CommitmentTree::empty(),
+                pos_map: HashMap::default(),
+                nf_map: HashMap::default(),
+                note_map: HashMap::default(),
+                memo_map: HashMap::default(),
+                div_map: HashMap::default(),
+                witness_map: HashMap::default(),
+                spents: HashSet::default(),
+                conversions: Default::default(),
+                asset_types: HashMap::default(),
+                vk_map: HashMap::default(),
+                sync_status: ContextSyncStatus::Confirmed,
+            }
+        }
+    }
+
+    impl<U: ShieldedUtils> From<ShieldedWallet<U>> for super::ShieldedWallet<U> {
+        fn from(wallet: ShieldedWallet<U>) -> Self {
+            #[cfg(not(feature = "historic"))]
+            {
+                use crate::masp::bridge_tree::BridgeTree;
+
+                Self {
+                    utils: wallet.utils,
+                    // TODO: write proper migrations here
+                    tree: BridgeTree::empty(),
+                    vk_heights: wallet.vk_heights,
+                    pos_map: wallet.pos_map,
+                    nf_map: wallet.nf_map,
+                    note_map: wallet.note_map,
+                    memo_map: wallet.memo_map,
+                    div_map: wallet.div_map,
+                    spents: wallet.spents,
+                    asset_types: wallet.asset_types,
+                    conversions: wallet.conversions,
+                    vk_map: wallet.vk_map,
+                    note_index: wallet.note_index,
+                    sync_status: wallet.sync_status,
+                }
+            }
+            #[cfg(feature = "historic")]
+            {
+                drop(wallet);
+
+                // NB: Need to return an empty wallet because
+                // we can not rebuild the shielded history.
+                Default::default()
+>>>>>>> f7ef28fd4 (Build MASP witnesses locally)
             }
         }
     }

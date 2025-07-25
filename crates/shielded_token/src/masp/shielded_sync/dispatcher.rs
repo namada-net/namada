@@ -11,11 +11,9 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use eyre::{WrapErr, eyre};
 use futures::future::{Either, select};
 use futures::task::AtomicWaker;
-use masp_primitives::merkle_tree::{CommitmentTree, IncrementalWitness};
-use masp_primitives::sapling::{Node, ViewingKey};
+use masp_primitives::sapling::ViewingKey;
 use masp_primitives::transaction::Transaction;
 use namada_core::chain::BlockHeight;
-use namada_core::collections::HashMap;
 use namada_core::control_flow::ShutdownSignal;
 use namada_core::control_flow::time::{Duration, LinearBackoff, Sleep};
 use namada_core::hints;
@@ -31,7 +29,7 @@ use crate::masp::utils::{
 };
 use crate::masp::{
     MaspExtendedSpendingKey, NoteIndex, ShieldedUtils, ShieldedWallet,
-    WitnessMap, to_viewing_key,
+    to_viewing_key,
 };
 
 struct AsyncCounterInner {
@@ -152,16 +150,6 @@ struct TaskError<C> {
 
 #[allow(clippy::large_enum_variant)]
 enum Message {
-    UpdateCommitmentTree(Result<CommitmentTree<Node>, TaskError<BlockHeight>>),
-    UpdateNotesMap(
-        Result<BTreeMap<MaspIndexedTx, usize>, TaskError<BlockHeight>>,
-    ),
-    UpdateWitnessMap(
-        Result<
-            HashMap<usize, IncrementalWitness<Node>>,
-            TaskError<BlockHeight>,
-        >,
-    ),
     FetchTxs(
         Result<
             (BlockHeight, BlockHeight, Vec<IndexedNoteEntry>),
@@ -208,8 +196,6 @@ impl<Spawner> DispatcherTasks<Spawner> {
 /// Shielded sync cache.
 #[derive(Default, BorshSerialize, BorshDeserialize)]
 pub struct DispatcherCache {
-    pub(crate) commitment_tree: Option<(BlockHeight, CommitmentTree<Node>)>,
-    pub(crate) witness_map: Option<(BlockHeight, WitnessMap)>,
     pub(crate) note_index: Option<(BlockHeight, NoteIndex)>,
     pub(crate) fetched: Fetched,
     pub(crate) trial_decrypted: TrialDecrypted,
@@ -391,17 +377,12 @@ where
             ..
         }: &InitialState,
     ) -> Result<(), eyre::Error> {
-        if let Some((_, cmt)) = self.cache.commitment_tree.take() {
-            self.ctx.tree = cmt;
-        }
-        if let Some((_, wm)) = self.cache.witness_map.take() {
-            self.ctx.witness_map = wm;
-        }
         if let Some((_, nm)) = self.cache.note_index.take() {
             self.ctx.note_index = nm;
         }
 
         for (masp_indexed_tx, stx_batch) in self.cache.fetched.take() {
+<<<<<<< HEAD
             let needs_witness_map_update =
                 self.client.capabilities().needs_witness_map_update();
             self.ctx
@@ -410,6 +391,15 @@ where
                 && Some(&masp_indexed_tx) > last_witnessed_tx.as_ref()
             {
                 self.ctx.update_witness_map(
+=======
+            self.ctx.save_shielded_spends(
+                &stx_batch,
+                #[cfg(feature = "historic")]
+                Some(masp_indexed_tx.indexed_tx),
+            )?;
+            if Some(&masp_indexed_tx) > last_witnessed_tx.as_ref() {
+                self.ctx.update_witnesses(
+>>>>>>> f7ef28fd4 (Build MASP witnesses locally)
                     masp_indexed_tx,
                     &stx_batch,
                     &self.cache.trial_decrypted,
@@ -606,18 +596,6 @@ where
     }
 
     fn spawn_initial_set_of_tasks(&mut self, initial_state: &InitialState) {
-        if self.client.capabilities().may_fetch_pre_built_notes_index() {
-            self.spawn_update_note_index(initial_state.last_query_height);
-        }
-
-        if self.client.capabilities().may_fetch_pre_built_tree() {
-            self.spawn_update_commitment_tree(initial_state.last_query_height);
-        }
-
-        if self.client.capabilities().may_fetch_pre_built_witness_map() {
-            self.spawn_update_witness_map(initial_state.last_query_height);
-        }
-
         let mut number_of_fetches = 0;
         let batch_size = self.config.block_batch_size;
         for from in (initial_state.start_height.0
@@ -641,42 +619,6 @@ where
 
     fn handle_incoming_message(&mut self, message: Message) {
         match message {
-            Message::UpdateCommitmentTree(Ok(ct)) => {
-                _ = self
-                    .cache
-                    .commitment_tree
-                    .insert((self.height_to_sync, ct));
-            }
-            Message::UpdateCommitmentTree(Err(TaskError {
-                error,
-                context: height,
-            })) => {
-                if self.can_launch_new_fetch_retry(error) {
-                    self.spawn_update_commitment_tree(height);
-                }
-            }
-            Message::UpdateNotesMap(Ok(nm)) => {
-                _ = self.cache.note_index.insert((self.height_to_sync, nm));
-            }
-            Message::UpdateNotesMap(Err(TaskError {
-                error,
-                context: height,
-            })) => {
-                if self.can_launch_new_fetch_retry(error) {
-                    self.spawn_update_note_index(height);
-                }
-            }
-            Message::UpdateWitnessMap(Ok(wm)) => {
-                _ = self.cache.witness_map.insert((self.height_to_sync, wm));
-            }
-            Message::UpdateWitnessMap(Err(TaskError {
-                error,
-                context: height,
-            })) => {
-                if self.can_launch_new_fetch_retry(error) {
-                    self.spawn_update_witness_map(height);
-                }
-            }
             Message::FetchTxs(Ok((from, to, tx_batch))) => {
                 for (itx, tx) in &tx_batch {
                     self.spawn_trial_decryptions(*itx, tx);
@@ -725,63 +667,6 @@ where
             self.state = DispatcherState::Errored(error);
             false
         }
-    }
-
-    fn spawn_update_witness_map(&mut self, height: BlockHeight) {
-        if pre_built_in_cache(self.cache.witness_map.as_ref(), height) {
-            return;
-        }
-        let client = self.client.clone();
-        self.spawn_async(Box::pin(async move {
-            Message::UpdateWitnessMap(
-                client
-                    .fetch_witness_map(height)
-                    .await
-                    .wrap_err("Failed to fetch witness map")
-                    .map_err(|error| TaskError {
-                        error,
-                        context: height,
-                    }),
-            )
-        }));
-    }
-
-    fn spawn_update_commitment_tree(&mut self, height: BlockHeight) {
-        if pre_built_in_cache(self.cache.commitment_tree.as_ref(), height) {
-            return;
-        }
-        let client = self.client.clone();
-        self.spawn_async(Box::pin(async move {
-            Message::UpdateCommitmentTree(
-                client
-                    .fetch_commitment_tree(height)
-                    .await
-                    .wrap_err("Failed to fetch commitment tree")
-                    .map_err(|error| TaskError {
-                        error,
-                        context: height,
-                    }),
-            )
-        }));
-    }
-
-    fn spawn_update_note_index(&mut self, height: BlockHeight) {
-        if pre_built_in_cache(self.cache.note_index.as_ref(), height) {
-            return;
-        }
-        let client = self.client.clone();
-        self.spawn_async(Box::pin(async move {
-            Message::UpdateNotesMap(
-                client
-                    .fetch_note_index(height)
-                    .await
-                    .wrap_err("Failed to fetch note index")
-                    .map_err(|error| TaskError {
-                        error,
-                        context: height,
-                    }),
-            )
-        }));
     }
 
     fn spawn_fetch_txs(&self, from: BlockHeight, to: BlockHeight) -> u64 {
@@ -868,14 +753,6 @@ where
             sender.send(job(interrupt)).unwrap();
         });
     }
-}
-
-#[inline(always)]
-fn pre_built_in_cache<T>(
-    pre_built_data: Option<&(BlockHeight, T)>,
-    desired_height: BlockHeight,
-) -> bool {
-    matches!(pre_built_data, Some((h, _)) if *h == desired_height)
 }
 
 #[cfg(test)]
@@ -1046,9 +923,12 @@ mod dispatcher_tests {
                     let barrier = barrier.clone();
                     dispatcher.spawn_async(Box::pin(async move {
                         barrier.wait().await;
-                        Message::UpdateWitnessMap(Err(TaskError {
+                        Message::FetchTxs(Err(TaskError {
                             error: eyre!("Test"),
-                            context: BlockHeight::first(),
+                            context: [
+                                BlockHeight::first(),
+                                BlockHeight::first(),
+                            ],
                         }))
                     }));
                 }
@@ -1431,14 +1311,10 @@ mod dispatcher_tests {
                 assert!(res.is_none());
 
                 let DispatcherCache {
-                    commitment_tree,
-                    witness_map,
                     note_index,
                     fetched,
                     trial_decrypted,
                 } = utils.cache_load().await.expect("Test failed");
-                assert!(commitment_tree.is_none());
-                assert!(witness_map.is_none());
                 assert!(note_index.is_none());
                 assert!(fetched.is_empty());
                 assert!(trial_decrypted.is_empty());

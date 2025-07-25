@@ -391,6 +391,7 @@ pub async fn query_conversion<C: namada_io::Client + Sync>(
 /// Query conversions
 pub async fn query_conversions<C: namada_io::Client + Sync>(
     client: &C,
+    masp_epoch: &MaspEpoch,
 ) -> Result<
     BTreeMap<
         AssetType,
@@ -404,7 +405,9 @@ pub async fn query_conversions<C: namada_io::Client + Sync>(
     >,
     error::Error,
 > {
-    convert_response::<C, _>(RPC.shell().read_conversions(client).await)
+    convert_response::<C, _>(
+        RPC.shell().read_conversions(client, masp_epoch).await,
+    )
 }
 
 /// Query the total rewards minted by MASP

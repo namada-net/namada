@@ -109,6 +109,7 @@ impl Display for MaspTxId {
     Clone,
     Copy,
     Debug,
+    Default,
     PartialOrd,
     Ord,
     PartialEq,

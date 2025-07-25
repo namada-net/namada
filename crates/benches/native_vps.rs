@@ -19,7 +19,7 @@ use namada_apps_lib::eth_bridge::read_native_erc20_address;
 use namada_apps_lib::eth_bridge::storage::eth_bridge_queries::is_bridge_comptime_enabled;
 use namada_apps_lib::eth_bridge::storage::whitelist;
 use namada_apps_lib::eth_bridge_pool::{GasFee, PendingTransfer};
-use namada_apps_lib::gas::{TxGasMeter, VpGasMeter};
+use namada_apps_lib::gas::{GasMeterKind, TxGasMeter, VpGasMeter};
 use namada_apps_lib::governance::pgf::storage::steward::StewardDetail;
 use namada_apps_lib::governance::storage::proposal::ProposalType;
 use namada_apps_lib::governance::storage::vote::ProposalVote;
@@ -231,6 +231,7 @@ fn governance(c: &mut Criterion) {
             &keys_changed,
             &verifiers,
             shell.vp_wasm_cache.clone(),
+            GasMeterKind::MutGlobal,
         );
 
         group.bench_function(bench_name, |b| {
@@ -459,6 +460,7 @@ fn ibc(c: &mut Criterion) {
             &keys_changed,
             &verifiers,
             shell_read.vp_wasm_cache.clone(),
+            GasMeterKind::MutGlobal,
         ));
 
         group.bench_function(bench_name, |b| {
@@ -526,6 +528,7 @@ fn vp_multitoken(c: &mut Criterion) {
             &keys_changed,
             &verifiers,
             shell.vp_wasm_cache.clone(),
+            GasMeterKind::MutGlobal,
         );
 
         group.bench_function(bench_name, |b| {
@@ -651,6 +654,7 @@ fn masp(c: &mut Criterion) {
                 &keys_changed,
                 &verifiers,
                 shell_read.vp_wasm_cache.clone(),
+                GasMeterKind::MutGlobal,
             );
 
             b.iter(|| {
@@ -1264,6 +1268,7 @@ fn pgf(c: &mut Criterion) {
             &keys_changed,
             &verifiers,
             shell.vp_wasm_cache.clone(),
+            GasMeterKind::MutGlobal,
         );
 
         group.bench_function(bench_name, |b| {
@@ -1341,6 +1346,7 @@ fn eth_bridge_nut(c: &mut Criterion) {
         &keys_changed,
         &verifiers,
         shell.vp_wasm_cache.clone(),
+        GasMeterKind::MutGlobal,
     );
 
     c.bench_function("vp_eth_bridge_nut", |b| {
@@ -1414,6 +1420,7 @@ fn eth_bridge(c: &mut Criterion) {
         &keys_changed,
         &verifiers,
         shell.vp_wasm_cache.clone(),
+        GasMeterKind::MutGlobal,
     );
 
     c.bench_function("vp_eth_bridge", |b| {
@@ -1512,6 +1519,7 @@ fn eth_bridge_pool(c: &mut Criterion) {
         &keys_changed,
         &verifiers,
         shell.vp_wasm_cache.clone(),
+        GasMeterKind::MutGlobal,
     );
 
     c.bench_function("vp_eth_bridge_pool", |b| {
@@ -1585,6 +1593,7 @@ fn parameters(c: &mut Criterion) {
             &keys_changed,
             &verifiers,
             shell.vp_wasm_cache.clone(),
+            GasMeterKind::MutGlobal,
         );
 
         group.bench_function(bench_name, |b| {
@@ -1661,6 +1670,7 @@ fn pos(c: &mut Criterion) {
             &keys_changed,
             &verifiers,
             shell.vp_wasm_cache.clone(),
+            GasMeterKind::MutGlobal,
         );
 
         group.bench_function(bench_name, |b| {
@@ -1714,6 +1724,7 @@ fn ibc_vp_validate_action(c: &mut Criterion) {
             &keys_changed,
             &verifiers,
             shell_read.vp_wasm_cache.clone(),
+            GasMeterKind::MutGlobal,
         ));
         // Use an empty verifiers set placeholder for validation, this is only
         // needed in actual txs to addresses whose VPs should be triggered
@@ -1777,6 +1788,7 @@ fn ibc_vp_execute_action(c: &mut Criterion) {
             &keys_changed,
             &verifiers,
             shell_read.vp_wasm_cache.clone(),
+            GasMeterKind::MutGlobal,
         ));
         // Use an empty verifiers set placeholder for validation, this is only
         // needed in actual txs to addresses whose VPs should be triggered

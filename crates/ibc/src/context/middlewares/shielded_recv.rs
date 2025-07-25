@@ -31,7 +31,7 @@ use ibc_middleware_module::MiddlewareModule;
 use ibc_middleware_module_macros::from_middleware;
 use ibc_middleware_overflow_receive::OverflowRecvContext;
 use ibc_middleware_packet_forward::PacketForwardMiddleware;
-use namada_core::address::{Address, MASP, MULTITOKEN};
+use namada_core::address::{Address, InternalAddress, MULTITOKEN};
 use namada_core::token;
 use serde_json::{Map, Value};
 
@@ -127,21 +127,42 @@ where
             return self.next.on_recv_packet_execute(packet, relayer);
         };
 
-        if data.receiver.as_ref() != MASP.to_string() {
-            let ack = AcknowledgementStatus::error(
-                AckStatusValue::new(format!(
-                    "Shielded receive error: Address {:?} is not the MASP",
-                    data.receiver.as_ref()
-                ))
-                .expect("Ack is not empty"),
-            );
-            return (ModuleExtras::empty(), Some(ack.into()));
-        }
-
+        // NB: add shielded receiver as a tx verifier, since we
+        // have confirmed this packet should be handled by the
+        // shielded recv middleware
         self.insert_verifier(memo.namada.osmosis_swap.overflow_receiver);
+
+        // NB: probably not needed to add the multitoken as a verifier
+        // again, but we do it anyway, for good measure
         self.insert_verifier(MULTITOKEN);
 
-        self.next.on_recv_packet_execute(packet, relayer)
+        let result: Result<Address, _> = data.receiver.as_ref().parse();
+        match result {
+            Err(err) => {
+                let ack = AcknowledgementStatus::error(
+                    AckStatusValue::new(format!(
+                        "Address {:?} is not the MASP: Failed to parse MASP \
+                         address: {err}",
+                        data.receiver.as_ref()
+                    ))
+                    .expect("Ack is not empty"),
+                );
+                (ModuleExtras::empty(), Some(ack.into()))
+            }
+            Ok(Address::Internal(InternalAddress::Masp)) => {
+                self.next.on_recv_packet_execute(packet, relayer)
+            }
+            Ok(addr) => {
+                let ack = AcknowledgementStatus::error(
+                    AckStatusValue::new(format!(
+                        "Shielded receive error: Address {addr} is not the \
+                         MASP",
+                    ))
+                    .expect("Ack is not empty"),
+                );
+                (ModuleExtras::empty(), Some(ack.into()))
+            }
+        }
     }
 }
 

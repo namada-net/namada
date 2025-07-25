@@ -441,7 +441,7 @@ async fn construct_bridge_pool_proof(
 
     let warnings: Vec<_> = in_progress
         .into_iter()
-        .filter_map(|(ref transfer, voting_power)| {
+        .filter_map(|(transfer, voting_power)| {
             if voting_power >= FractionalVotingPower::ONE_THIRD {
                 let hash = transfer.keccak256();
                 args.transfers.contains(&hash).then_some(hash)
@@ -1005,17 +1005,17 @@ mod recommendations {
         sigs: &HashMap<EthAddrBook, T>,
     ) -> Result<Uint, Error> {
         let voting_powers = voting_powers.get_sorted();
-        let total_power = Amount::sum(voting_powers.iter().map(|(_, &y)| y))
+        let total_power = Amount::sum(voting_powers.iter().map(|(_, y)| **y))
             .ok_or_else(|| {
-                Error::Other("Voting power sum overflow".to_owned())
-            })?;
+            Error::Other("Voting power sum overflow".to_owned())
+        })?;
 
         // Find the total number of signature checks Ethereum will make
         let mut power = FractionalVotingPower::NULL;
         Ok(Uint::from_u64(
             voting_powers
                 .iter()
-                .filter_map(|(a, &p)| sigs.get(*a).map(|_| p))
+                .filter_map(|(a, p)| sigs.get(*a).map(|_| **p))
                 .take_while(|p| {
                     if power <= FractionalVotingPower::TWO_THIRDS {
                         power += FractionalVotingPower::new(

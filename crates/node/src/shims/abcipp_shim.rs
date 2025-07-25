@@ -442,7 +442,7 @@ impl AbciService {
         let (resp_send, recv) = tokio::sync::oneshot::channel();
         let result = self.shell_send.send((req.clone(), resp_send));
         async move {
-            let genesis_time = if let Req::InitChain(ref init) = req {
+            let genesis_time = if let Req::InitChain(init) = req {
                 Some(
                     DateTimeUtc::try_from(init.time)
                         .expect("Should be able to parse genesis time."),

@@ -113,8 +113,8 @@ mod test_bridge_pool_vp {
         tx_host_env::set(env);
         let mut tx_env = tx_host_env::take();
         tx_env.execute_tx().expect("Test failed.");
-        let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
-            &tx_env.gas_meter.borrow(),
+        let gas_meter = RefCell::new(VpGasMeter::new_from_meter(
+            &*tx_env.gas_meter.borrow(),
         ));
         let vp_env = TestNativeVpEnv::from_tx_env(tx_env, BRIDGE_POOL_ADDRESS);
 

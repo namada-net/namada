@@ -218,8 +218,8 @@ mod tests {
             ]
         };
 
-        for (ref ev, status) in tests {
-            if matcher.matches(ev) != status {
+        for (ev, status) in tests {
+            if matcher.matches(&ev) != status {
                 panic!("Test failed");
             }
         }
@@ -273,8 +273,8 @@ mod tests {
             [(event_1, applied_1), (event_2, applied_2)]
         };
 
-        for (ref ev, status) in tests {
-            if matcher.matches(ev) != status {
+        for (ev, status) in tests {
+            if matcher.matches(&ev) != status {
                 panic!("Test failed");
             }
         }

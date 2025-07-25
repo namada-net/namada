@@ -11,9 +11,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  MINOR_VERSION_RELEASE: "0.150.999" # bump on a major release
-  BACKPORT_LIBS_LABEL: "backport-libs-0.150" # also bump on major release
-  MAINT_LIBS_BRANCH: "maint-libs-0.150" # also bump on major release
+  MINOR_VERSION_RELEASE: "0.251.999" # bump on a major release
+  BACKPORT_LIBS_LABEL: "backport-libs-0.251" # also bump on major release
+  MAINT_LIBS_BRANCH: "maint-libs-0.251" # also bump on major release
 
 jobs:
   # Check if a PR has no major breaking changes to be backported to library
@@ -70,7 +70,7 @@ jobs:
         # TODO: Temp using fork for baseline args support.
         # Switch back once is merged and released https://github.com/obi1kenobi/cargo-semver-checks-action/pull/96
         # uses: obi1kenobi/cargo-semver-checks-action@v2
-        uses: anoma/cargo-semver-checks-action@8ce111a9587c085c03ca615d22a585da0ce31a93
+        uses: namada-net/cargo-semver-checks-action@8ce111a9587c085c03ca615d22a585da0ce31a93
         with:
           exclude: namada_apps, namada_benchmarks, namada_light_sdk, namada_examples, namada_fuzz
           baseline-root: ../baseline

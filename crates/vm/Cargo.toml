@@ -33,6 +33,7 @@ namada_events.workspace = true
 namada_gas.workspace = true
 namada_parameters.workspace = true
 namada_state.workspace = true
+namada_storage.workspace = true
 namada_token.workspace = true
 namada_tx.workspace = true
 namada_vp.workspace = true

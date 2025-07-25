@@ -11,6 +11,7 @@ use namada_sdk::tx::Tx;
 use namada_sdk::tx::data::TxType;
 use namada_tx_prelude::BatchedTx;
 use namada_vm::WasmCacheRwAccess;
+use namada_vm::host_env::gas_meter::GasMeter;
 use namada_vm::wasm::{self, VpCache};
 use namada_vp_prelude::Ctx;
 use tempfile::TempDir;
@@ -44,7 +45,7 @@ pub struct TestVpEnv {
     pub addr: Address,
     pub state: TestState,
     pub iterators: PrefixIterators<'static, MockDB>,
-    pub gas_meter: RefCell<VpGasMeter>,
+    pub gas_meter: RefCell<GasMeter<VpGasMeter>>,
     pub batched_tx: BatchedTx,
     pub tx_index: TxIndex,
     pub keys_changed: BTreeSet<storage::Key>,
@@ -72,8 +73,11 @@ impl Default for TestVpEnv {
             addr: address::testing::established_address_1(),
             state,
             iterators: PrefixIterators::default(),
-            gas_meter: RefCell::new(VpGasMeter::new_from_tx_meter(
-                &TxGasMeter::new(1_000_000_000_000, 1),
+            gas_meter: RefCell::new(GasMeter::Native(
+                VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
+                    1_000_000_000_000,
+                    1,
+                )),
             )),
             batched_tx,
             tx_index: TxIndex::default(),
@@ -225,7 +229,7 @@ mod native_vp_host_env {
             // unit return type
             ( $fn:ident ( $($arg:ident : $type:ty),* $(,)?) ) => {
                 concat_idents!(extern_fn_name = namada, _, $fn {
-                    #[no_mangle]
+                    #[unsafe(no_mangle)]
                     extern "C-unwind" fn extern_fn_name( $($arg: $type),* ) {
                         with(|TestVpEnv {
                                 addr,
@@ -270,7 +274,7 @@ mod native_vp_host_env {
             // non-unit return type
             ( $fn:ident ( $($arg:ident : $type:ty),* $(,)?) -> $ret:ty ) => {
                 concat_idents!(extern_fn_name = namada, _, $fn {
-                    #[no_mangle]
+                    #[unsafe(no_mangle)]
                     extern "C-unwind" fn extern_fn_name( $($arg: $type),* ) -> $ret {
                         with(|TestVpEnv {
                                 addr,

@@ -9,9 +9,7 @@ use namada_core::chain::{BlockHeader, BlockHeight, ChainId, Epoch, Epochs};
 use namada_core::hash::{HASH_LENGTH, Hash};
 use namada_core::storage::{Key, TX_INDEX_LENGTH, TxIndex};
 use namada_events::{Event, EventTypeBuilder};
-use namada_gas::{
-    self as gas, Gas, GasMetering, MEMORY_ACCESS_GAS_PER_BYTE, VpGasMeter,
-};
+use namada_gas::{self as gas, Gas, GasMetering, MEMORY_ACCESS_GAS_PER_BYTE};
 use namada_tx::{BatchedTxRef, Section};
 use thiserror::Error;
 
@@ -43,7 +41,10 @@ impl From<RuntimeError> for Error {
 pub type EnvResult<T> = std::result::Result<T, RuntimeError>;
 
 /// Add a gas cost incured in a validity predicate
-pub fn add_gas(gas_meter: &RefCell<VpGasMeter>, used_gas: Gas) -> Result<()> {
+pub fn add_gas(
+    gas_meter: &RefCell<impl GasMetering>,
+    used_gas: Gas,
+) -> Result<()> {
     gas_meter.borrow_mut().consume(used_gas).map_err(|err| {
         tracing::info!("Stopping VP execution because of gas error: {}", err);
         Error::new(RuntimeError::OutOfGas(err))
@@ -53,7 +54,7 @@ pub fn add_gas(gas_meter: &RefCell<VpGasMeter>, used_gas: Gas) -> Result<()> {
 /// Storage read prior state (before tx execution). It will try to read from the
 /// storage.
 pub fn read_pre<S>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     state: &S,
     key: &Key,
 ) -> Result<Option<Vec<u8>>>
@@ -63,17 +64,15 @@ where
     let (log_val, gas) =
         state.write_log().read_pre(key).into_storage_result()?;
     add_gas(gas_meter, gas)?;
-    match log_val {
-        Some(write_log::StorageModification::Write { ref value }) => {
+    match &log_val {
+        Some(write_log::StorageModification::Write { value }) => {
             Ok(Some(value.clone()))
         }
-        Some(&write_log::StorageModification::Delete) => {
+        Some(write_log::StorageModification::Delete) => {
             // Given key has been deleted
             Ok(None)
         }
-        Some(write_log::StorageModification::InitAccount {
-            ref vp_code_hash,
-        }) => {
+        Some(write_log::StorageModification::InitAccount { vp_code_hash }) => {
             // Read the VP of a new account
             Ok(Some(vp_code_hash.to_vec()))
         }
@@ -89,7 +88,7 @@ where
 /// Storage read posterior state (after tx execution). It will try to read from
 /// the write log first and if no entry found then from the storage.
 pub fn read_post<S>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     state: &S,
     key: &Key,
 ) -> Result<Option<Vec<u8>>>
@@ -124,7 +123,7 @@ where
 /// Storage read temporary state (after tx execution). It will try to read from
 /// only the write log.
 pub fn read_temp<S>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     state: &S,
     key: &Key,
 ) -> Result<Option<Vec<u8>>>
@@ -140,7 +139,7 @@ where
 /// Storage `has_key` in prior state (before tx execution). It will try to read
 /// from the storage.
 pub fn has_key_pre<S>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     state: &S,
     key: &Key,
 ) -> Result<bool>
@@ -170,7 +169,7 @@ where
 /// Storage `has_key` in posterior state (after tx execution). It will try to
 /// check the write log first and if no entry found then the storage.
 pub fn has_key_post<S>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     state: &S,
     key: &Key,
 ) -> Result<bool>
@@ -199,7 +198,7 @@ where
 
 /// Getting the chain ID.
 pub fn get_chain_id<S>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     state: &S,
 ) -> Result<ChainId>
 where
@@ -211,9 +210,12 @@ where
 }
 
 /// Getting the block height. The height is that of the block to which the
-/// current transaction is being applied.
+/// current transaction is being applied if we are in between the
+/// `FinalizeBlock` and the `Commit` phases. For all the other phases we return
+/// the block height of next block that the consensus process will decide upon
+/// (i.e. the block height of the last committed block + 1)
 pub fn get_block_height<S>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     state: &S,
 ) -> Result<BlockHeight>
 where
@@ -226,7 +228,7 @@ where
 
 /// Getting the block header.
 pub fn get_block_header<S>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     state: &S,
     height: BlockHeight,
 ) -> Result<Option<BlockHeader>>
@@ -241,7 +243,7 @@ where
 /// Getting the block hash. The height is that of the block to which the
 /// current transaction is being applied.
 pub fn get_tx_code_hash(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     batched_tx: &BatchedTxRef<'_>,
 ) -> Result<Option<Hash>> {
     add_gas(
@@ -262,7 +264,7 @@ pub fn get_tx_code_hash(
 /// Getting the block epoch. The epoch is that of the block to which the
 /// current transaction is being applied.
 pub fn get_block_epoch<S>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     state: &S,
 ) -> Result<Epoch>
 where
@@ -276,7 +278,7 @@ where
 /// Getting the block epoch. The epoch is that of the block to which the
 /// current transaction is being applied.
 pub fn get_tx_index(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     tx_index: &TxIndex,
 ) -> Result<TxIndex> {
     add_gas(
@@ -291,7 +293,7 @@ pub fn get_tx_index(
 
 /// Getting the native token's address.
 pub fn get_native_token<S>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     state: &S,
 ) -> Result<Address>
 where
@@ -309,7 +311,7 @@ where
 
 /// Given the information about predecessor block epochs
 pub fn get_pred_epochs<S>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     state: &S,
 ) -> Result<Epochs>
 where
@@ -325,7 +327,7 @@ where
 
 /// Query events emitted by the current transaction.
 pub fn get_events<S>(
-    _gas_meter: &RefCell<VpGasMeter>,
+    _gas_meter: &RefCell<impl GasMetering>,
     state: &S,
     event_type: String,
 ) -> Result<Vec<Event>>
@@ -344,7 +346,7 @@ where
 /// Storage prefix iterator for prior state (before tx execution), ordered by
 /// storage keys. It will try to get an iterator from the storage.
 pub fn iter_prefix_pre<'a, D>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     // We cannot use e.g. `&'a State`, because it doesn't live long
     // enough - the lifetime of the `PrefixIter` must depend on the lifetime of
     // references to the `WriteLog` and `DB`.
@@ -363,7 +365,7 @@ where
 /// Storage prefix iterator for posterior state (after tx execution), ordered by
 /// storage keys. It will try to get an iterator from the storage.
 pub fn iter_prefix_post<'a, D>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     // We cannot use e.g. `&'a State`, because it doesn't live long
     // enough - the lifetime of the `PrefixIter` must depend on the lifetime of
     // references to the `WriteLog` and `DB`.
@@ -381,7 +383,7 @@ where
 
 /// Get the next item in a storage prefix iterator (pre or post).
 pub fn iter_next<DB>(
-    gas_meter: &RefCell<VpGasMeter>,
+    gas_meter: &RefCell<impl GasMetering>,
     iter: &mut PrefixIter<'_, DB>,
 ) -> Result<Option<(String, Vec<u8>)>>
 where

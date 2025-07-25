@@ -6,6 +6,7 @@
     "e2e::ibc_tests::fee_payment_with_ibc_token": 357,
     "e2e::ibc_tests::ibc_token_inflation": 840,
     "e2e::ibc_tests::ibc_rate_limit": 485,
+    "e2e::ibc_tests::ibc_unlimited_channel": 485,
     "e2e::ibc_tests::ibc_pfm_happy_flows": 485,
     "e2e::ibc_tests::ibc_pfm_unhappy_flows": 485,
     "e2e::ibc_tests::ibc_upgrade_client": 280,

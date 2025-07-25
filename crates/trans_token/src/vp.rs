@@ -354,7 +354,7 @@ mod tests {
     };
     use namada_core::borsh::BorshSerializeExt;
     use namada_core::key::testing::keypair_1;
-    use namada_gas::{TxGasMeter, VpGasMeter};
+    use namada_gas::{GasMeterKind, TxGasMeter, VpGasMeter};
     use namada_ibc::trace::ibc_token;
     use namada_parameters::storage::get_native_token_transferable_key;
     use namada_state::testing::TestState;
@@ -468,6 +468,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert!(
@@ -515,6 +516,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert!(
@@ -587,6 +589,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert!(
@@ -653,6 +656,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert!(
@@ -712,6 +716,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert!(
@@ -780,6 +785,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert!(
@@ -828,6 +834,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert!(
@@ -877,6 +884,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert!(
@@ -921,6 +929,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert_matches!(
@@ -973,6 +982,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert_matches!(
@@ -1022,6 +1032,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert_matches!(
@@ -1072,6 +1083,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert_matches!(
@@ -1127,6 +1139,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert_matches!(
@@ -1179,6 +1192,7 @@ mod tests {
                 &keys_changed,
                 &verifiers,
                 vp_vp_cache.clone(),
+                GasMeterKind::MutGlobal,
             );
 
             let err_msg = format!(
@@ -1210,6 +1224,7 @@ mod tests {
             &keys_changed,
             &parties,
             vp_vp_cache,
+            GasMeterKind::MutGlobal,
         );
 
         assert!(

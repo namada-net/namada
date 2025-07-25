@@ -57,4 +57,4 @@ The message should outline the exact API change, along with a small section desc
 ## Development priorities
 
 
-If you’d like to follow the development or contribute with new or unimplemented features, we recommend to check [the issues](https://github.com/anoma/namada/issues) that are in current focus of the ledger team.
+If you’d like to follow the development or contribute with new or unimplemented features, we recommend to check [the issues](https://github.com/namada-net/namada/issues) that are in current focus of the ledger team.

@@ -21,7 +21,9 @@ use namada_token::masp::shielded_wallet::ShieldedQueries;
 pub use namada_token::masp::{utils, *};
 use namada_tx::event::{MaspEvent, MaspEventKind, MaspTxRef};
 use namada_tx::{IndexedTx, Tx};
-pub use utilities::{IndexerMaspClient, LedgerMaspClient};
+pub use utilities::{
+    IndexerMaspClient, LedgerMaspClient, LinearBackoffSleepMaspClient,
+};
 
 use crate::error::{Error, QueryError};
 use crate::rpc::{

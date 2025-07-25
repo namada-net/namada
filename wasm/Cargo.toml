@@ -30,9 +30,9 @@ members = [
 
 [workspace.package]
 authors = ["Heliax AG <hello@heliax.dev>"]
-edition = "2021"
+edition = "2024"
 license = "GPL-3.0"
-version = "0.150.0"
+version = "0.251.0"
 
 [workspace.dependencies]
 namada_tx_prelude = { path = "../crates/tx_prelude" }

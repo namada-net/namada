@@ -278,6 +278,20 @@ impl Address {
         string_encoding::Format::encode(self)
     }
 
+    /// Encode an address in compatibility mode (i.e. with the legacy Bech32
+    /// encoding)
+    pub fn encode_compat(&self) -> String {
+        use crate::string_encoding::Format;
+
+        bech32::encode::<bech32::Bech32>(Self::HRP, self.to_bytes().as_ref())
+            .unwrap_or_else(|_| {
+                panic!(
+                    "The human-readable part {} should never cause a failure",
+                    Self::HRP
+                )
+            })
+    }
+
     /// Decode an address from Bech32m encoding
     pub fn decode(string: impl AsRef<str>) -> Result<Self> {
         string_encoding::Format::decode(string)
@@ -410,17 +424,25 @@ impl TryFrom<&Signer> for Address {
     type Error = DecodeError;
 
     fn try_from(signer: &Signer) -> Result<Self> {
-        // The given address should be an address or payment address. When
-        // sending a token from a spending key, it has been already
-        // replaced with the MASP address.
-        Address::decode(signer.as_ref()).or(
-            match crate::masp::PaymentAddress::from_str(signer.as_ref()) {
-                Ok(_) => Ok(MASP),
-                Err(_) => Err(DecodeError::InvalidInnerEncoding(format!(
-                    "Invalid address for IBC transfer: {signer}"
-                ))),
-            },
-        )
+        let signer: &str = signer.as_ref();
+
+        #[cold]
+        fn is_znam(signer: &str) -> bool {
+            crate::masp::PaymentAddress::from_str(signer).is_ok()
+        }
+
+        Address::decode(signer).map_err(|err| {
+            let err_msg = if is_znam(signer) {
+                format!(
+                    "MASP IBC shielding transfers should target the \
+                     transparent address {MASP}"
+                )
+            } else {
+                format!("Invalid address {signer:?} for IBC transfer: {err}")
+            };
+
+            DecodeError::InvalidInnerEncoding(err_msg)
+        })
     }
 }
 
@@ -719,6 +741,19 @@ mod tests {
             let address = Address::Established(address);
             let bytes = address.serialize_to_vec();
             assert_eq!(bytes.len(), ESTABLISHED_ADDRESS_BYTES_LEN);
+        }
+
+        #[test]
+        fn test_compat_addr_decode_bech32(address in testing::arb_address()) {
+            let encoded: String = address.encode();
+            let encoded_compat: String = address.encode_compat();
+
+            assert_ne!(encoded, encoded_compat);
+
+            let decoded: Address = encoded.parse().unwrap();
+            let decoded_compat: Address = encoded_compat.parse().unwrap();
+
+            assert_eq!(decoded, decoded_compat);
         }
     }
 }

@@ -30,7 +30,7 @@ pub fn gen_and_store(
     store_dir: &Path,
 ) -> std::io::Result<ValidatorWallet> {
     let password = read_and_confirm_encryption_password(unsafe_dont_encrypt);
-    let validator = gen(scheme, password);
+    let validator = r#gen(scheme, password);
     let data = validator.store.encode();
     let wallet_path = validator_file_name(store_dir);
     // Make sure the dir exists
@@ -106,7 +106,7 @@ pub fn load(store_dir: &Path) -> Result<ValidatorWallet, ReadError> {
 
 /// Generate a new [`ValidatorWallet`] with required pre-genesis keys. Will
 /// prompt for password when `!unsafe_dont_encrypt`.
-fn gen(
+fn r#gen(
     scheme: SchemeType,
     password: Option<Zeroizing<String>>,
 ) -> ValidatorWallet {

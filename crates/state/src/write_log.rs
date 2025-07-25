@@ -209,12 +209,12 @@ impl WriteLog {
                 self.block_write_log.get(key)
             }) {
             Some(v) => {
-                let gas = match v {
-                    StorageModification::Write { ref value } => {
+                let gas = match &v {
+                    StorageModification::Write { value } => {
                         checked!(key.len() + value.len())?
                     }
                     StorageModification::Delete => key.len(),
-                    StorageModification::InitAccount { ref vp_code_hash } => {
+                    StorageModification::InitAccount { vp_code_hash } => {
                         checked!(key.len() + vp_code_hash.len())?
                     }
                 } as u64;
@@ -246,12 +246,12 @@ impl WriteLog {
             .chain([&self.block_write_log])
         {
             if let Some(v) = bucket.get(key) {
-                let gas = match v {
-                    StorageModification::Write { ref value } => {
+                let gas = match &v {
+                    StorageModification::Write { value } => {
                         checked!(key.len() + value.len())?
                     }
                     StorageModification::Delete => key.len(),
-                    StorageModification::InitAccount { ref vp_code_hash } => {
+                    StorageModification::InitAccount { vp_code_hash } => {
                         checked!(key.len() + vp_code_hash.len())?
                     }
                 } as u64;
@@ -306,8 +306,8 @@ impl WriteLog {
         let len_signed =
             i64::try_from(len).map_err(|_| Error::ValueLenOverflow)?;
         let size_diff = match self.tx_write_log.write_log.get(key) {
-            Some(prev) => match prev {
-                StorageModification::Write { ref value } => {
+            Some(prev) => match &prev {
+                StorageModification::Write { value } => {
                     let val_len = i64::try_from(value.len())
                         .map_err(|_| Error::ValueLenOverflow)?;
                     checked!(len_signed - val_len)?
@@ -428,8 +428,8 @@ impl WriteLog {
             return Err(Error::DeleteVp);
         }
         let size_diff = match self.tx_write_log.write_log.get(key) {
-            Some(prev) => match prev {
-                StorageModification::Write { ref value } => value.len(),
+            Some(prev) => match &prev {
+                StorageModification::Write { value } => value.len(),
                 StorageModification::Delete => 0,
                 StorageModification::InitAccount { .. } => {
                     return Err(Error::DeleteVp);
@@ -1264,12 +1264,22 @@ mod tests {
 
                 // Prefix iter prior state for this key and assert that the
                 // values match
+                let mut found_match = false;
                 for (key_str, modification_from_iter) in
                     write_log.iter_prefix_pre(&key)
                 {
-                    assert_eq!(key.to_string(), key_str);
-                    assert_eq!(modification, &modification_from_iter);
+                    // This key might be a prefix of a matched key
+                    if key_str == key.to_string() {
+                        found_match = true;
+                        assert_eq!(modification, &modification_from_iter);
+                    } else {
+                        assert!(key_str.contains(&key.to_string()));
+                    }
                 }
+                assert!(
+                    found_match,
+                    "Expected key {key} not found in iter_prefix_pre"
+                );
             }
 
             // And then commit them to batch
@@ -1286,7 +1296,7 @@ mod tests {
 
             // Iterate through all the modified keys again to check posterior
             // state
-            for key in keys {
+            for key in keys.clone() {
                 // Read the modification associated with this key from posterior
                 // state
                 let (modification, _gas) = write_log.read(&key).unwrap();
@@ -1294,12 +1304,22 @@ mod tests {
 
                 // Prefix iter posterior state for this key and assert that the
                 // values match
+                let mut found_match = false;
                 for (key_str, modification_from_iter) in
                     write_log.iter_prefix_post(&key)
                 {
-                    assert_eq!(key.to_string(), key_str);
-                    assert_eq!(modification, &modification_from_iter);
+                    // This key might be a prefix of a matched key
+                    if key_str == key.to_string() {
+                        found_match = true;
+                        assert_eq!(modification, &modification_from_iter);
+                    } else {
+                        assert!(key_str.contains(&key.to_string()));
+                    }
                 }
+                assert!(
+                    found_match,
+                    "Expected key {key} not found in iter_prefix_post"
+                );
             }
         }
     }

@@ -413,7 +413,7 @@ where
                     let gas_scale = tx_data.tx_gas_meter.get_gas_scale();
                     let scaled_gas = tx_data
                         .tx_gas_meter
-                        .get_tx_consumed_gas()
+                        .get_consumed_gas()
                         .get_whole_gas_units(gas_scale);
                     tx_logs
                         .tx_event
@@ -446,7 +446,7 @@ where
                     let gas_scale = tx_data.tx_gas_meter.get_gas_scale();
                     let scaled_gas = tx_data
                         .tx_gas_meter
-                        .get_tx_consumed_gas()
+                        .get_consumed_gas()
                         .get_whole_gas_units(gas_scale);
 
                     tx_logs
@@ -523,7 +523,7 @@ where
         let gas_scale = tx_data.tx_gas_meter.get_gas_scale();
         let scaled_gas = tx_data
             .tx_gas_meter
-            .get_tx_consumed_gas()
+            .get_consumed_gas()
             .get_whole_gas_units(gas_scale);
 
         tx_logs
@@ -806,7 +806,7 @@ where
                 &mut self.state,
             );
             let tx_gas_meter = tx_gas_meter.into_inner();
-            let consumed_gas = tx_gas_meter.get_tx_consumed_gas();
+            let consumed_gas = tx_gas_meter.get_consumed_gas();
 
             // save the gas cost
             self.update_tx_gas(tx_hash, consumed_gas);
@@ -880,7 +880,7 @@ where
                 &mut self.state,
             );
             let tx_gas_meter = tx_gas_meter.into_inner();
-            let consumed_gas = tx_gas_meter.get_tx_consumed_gas();
+            let consumed_gas = tx_gas_meter.get_consumed_gas();
 
             // update the gas cost of the corresponding wrapper
             self.update_tx_gas(tx_hash, consumed_gas);
@@ -1303,7 +1303,7 @@ mod test_finalize_block {
     use namada_sdk::ethereum_events::{EthAddress, Uint as ethUint};
     use namada_sdk::events::Event;
     use namada_sdk::events::extend::Log;
-    use namada_sdk::gas::VpGasMeter;
+    use namada_sdk::gas::{GasMeterKind, VpGasMeter};
     use namada_sdk::governance::storage::keys::get_proposal_execution_key;
     use namada_sdk::governance::storage::proposal::ProposalType;
     use namada_sdk::governance::{
@@ -4298,7 +4298,7 @@ mod test_finalize_block {
 
         let num_slashes = namada_sdk::state::iter_prefix_bytes(
             &shell.state,
-            &slashes_prefix(),
+            slashes_prefix(),
         )?
         .filter(|kv_res| {
             let (k, _v) = kv_res.as_ref().unwrap();
@@ -5717,6 +5717,7 @@ mod test_finalize_block {
             &keys_changed,
             &verifiers,
             shell.vp_wasm_cache.clone(),
+            GasMeterKind::MutGlobal,
         );
         assert!(
             ParametersVp::validate_tx(

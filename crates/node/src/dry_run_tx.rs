@@ -33,7 +33,7 @@ where
     tx.validate_tx().into_storage_result()?;
 
     let gas_scale = parameters::get_gas_scale(&state)?;
-    let height = state.in_mem().get_last_block_height();
+    let height = state.in_mem().get_block_height().0;
 
     // Wrapper dry run to allow estimating the entire gas cost of a transaction
     let (wrapper_hash, tx_result, tx_gas_meter) = match tx.header().tx_type {
@@ -106,6 +106,7 @@ where
         &mut state,
         &mut vp_wasm_cache,
         &mut tx_wasm_cache,
+        protocol::GasMeterKind::MutGlobal,
     )
     .map_err(|err| err.error)
     .into_storage_result()?;
@@ -114,7 +115,7 @@ where
         tx_result_string,
         tx_gas_meter
             .borrow()
-            .get_tx_consumed_gas()
+            .get_consumed_gas()
             .get_whole_gas_units(gas_scale),
     );
 

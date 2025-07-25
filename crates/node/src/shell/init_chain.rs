@@ -410,9 +410,15 @@ where
 
                 #[cfg(not(any(test, fuzzing)))]
                 if name.starts_with("tx_") {
-                    self.tx_wasm_cache.pre_compile(&code);
+                    self.tx_wasm_cache.pre_compile(
+                        &code,
+                        namada_sdk::gas::GasMeterKind::MutGlobal,
+                    );
                 } else if name.starts_with("vp_") {
-                    self.vp_wasm_cache.pre_compile(&code);
+                    self.vp_wasm_cache.pre_compile(
+                        &code,
+                        namada_sdk::gas::GasMeterKind::MutGlobal,
+                    );
                 }
 
                 let code_key = Key::wasm_code(&code_hash);

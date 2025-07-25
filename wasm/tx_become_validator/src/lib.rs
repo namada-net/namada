@@ -277,8 +277,8 @@ mod tests {
     /// Use the `tx_host_env` to run PoS VP
     fn run_pos_vp() -> TxResult {
         let tx_env = tx_host_env::take();
-        let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
-            &tx_env.gas_meter.borrow(),
+        let gas_meter = RefCell::new(VpGasMeter::new_from_meter(
+            &*tx_env.gas_meter.borrow(),
         ));
         let vp_env = TestNativeVpEnv::from_tx_env(tx_env, address::POS);
         let ctx = vp_env.ctx(&gas_meter);

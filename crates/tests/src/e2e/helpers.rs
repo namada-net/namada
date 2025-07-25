@@ -18,7 +18,6 @@ use eyre::eyre;
 use namada_apps_lib::cli::context::ENV_VAR_CHAIN_ID;
 use namada_apps_lib::config::utils::convert_tm_addr_to_socket_addr;
 use namada_apps_lib::config::{Config, TendermintMode};
-use namada_core::masp::PaymentAddress;
 use namada_core::token::NATIVE_MAX_DECIMAL_PLACES;
 use namada_sdk::address::Address;
 use namada_sdk::chain::Epoch;
@@ -120,34 +119,6 @@ pub fn find_address(test: &Test, alias: impl AsRef<str>) -> Result<Address> {
         .unwrap()
         .1;
     let address = Address::from_str(address_str).map_err(|e| {
-        eyre!(format!(
-            "Address: {} parsed from {}, Error: {}\n\nOutput: {}",
-            address_str, matched, e, unread
-        ))
-    })?;
-    println!("Found {}", address);
-    Ok(address)
-}
-
-/// Find the address of an account by its alias from the wallet
-pub fn find_payment_address(
-    test: &Test,
-    alias: impl AsRef<str>,
-) -> Result<PaymentAddress> {
-    let mut find = run!(
-        test,
-        Bin::Wallet,
-        &["find", "--addr", "--alias", alias.as_ref()],
-        Some(10)
-    )?;
-    find.exp_string("Found payment address:")?;
-    let (unread, matched) = find.exp_regex("\".*\": .*")?;
-    let address_str = strip_trailing_newline(&matched)
-        .trim()
-        .rsplit_once(' ')
-        .unwrap()
-        .1;
-    let address = PaymentAddress::from_str(address_str).map_err(|e| {
         eyre!(format!(
             "Address: {} parsed from {}, Error: {}\n\nOutput: {}",
             address_str, matched, e, unread
@@ -597,7 +568,9 @@ fn make_hermes_chain_config(hermes_dir: &TestDir, test: &Test) -> Value {
     chain.insert("store_prefix".to_owned(), Value::String("ibc".to_owned()));
     let mut table = toml::map::Map::new();
     table.insert("price".to_owned(), Value::Float(0.000001));
-    std::env::set_var(ENV_VAR_CHAIN_ID, test.net.chain_id.to_string());
+    unsafe {
+        std::env::set_var(ENV_VAR_CHAIN_ID, test.net.chain_id.to_string())
+    };
     let nam_addr = find_address(test, setup::constants::NAM).unwrap();
     table.insert("denom".to_owned(), Value::String(nam_addr.to_string()));
     chain.insert("gas_price".to_owned(), Value::Table(table));

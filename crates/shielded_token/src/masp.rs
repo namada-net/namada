@@ -6,6 +6,7 @@ mod shielded_sync;
 pub mod shielded_wallet;
 #[cfg(test)]
 mod test_utils;
+mod wallet_migrations;
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Debug};
@@ -50,6 +51,9 @@ pub use crate::masp::shielded_sync::MaspLocalTaskEnv;
 pub use crate::masp::shielded_sync::dispatcher::{Dispatcher, DispatcherCache};
 pub use crate::masp::shielded_sync::{
     ShieldedSyncConfig, ShieldedSyncConfigBuilder, utils,
+};
+pub use crate::masp::wallet_migrations::{
+    VersionedWallet, VersionedWalletRef, v0,
 };
 pub use crate::validation::{
     CONVERT_NAME, ENV_VAR_MASP_PARAMS_DIR, OUTPUT_NAME, PVKs, SPEND_NAME,
@@ -226,9 +230,10 @@ pub trait ShieldedUtils:
     ) -> std::io::Result<()>;
 
     /// Save the given ShieldedContext for future loads
-    async fn save<U: ShieldedUtils + MaybeSync>(
-        &self,
-        ctx: &ShieldedWallet<U>,
+    async fn save<'a, U: ShieldedUtils + MaybeSync>(
+        &'a self,
+        ctx: VersionedWalletRef<'a, U>,
+        sync_status: ContextSyncStatus,
     ) -> std::io::Result<()>;
 
     /// Save a cache of data as part of shielded sync if that
@@ -285,7 +290,7 @@ pub type SpentNotesTracker = HashMap<ViewingKey, HashSet<usize>>;
 
 /// Represents the amount used of different conversions
 pub type Conversions =
-    BTreeMap<AssetType, (AllowedConversion, MerklePath<Node>, i128)>;
+    BTreeMap<AssetType, (AllowedConversion, MerklePath<Node>)>;
 
 /// Represents the changes that were made to a list of transparent accounts
 pub type TransferDelta = HashMap<Address, MaspChange>;
@@ -299,7 +304,7 @@ pub type NoteIndex = BTreeMap<MaspIndexedTx, usize>;
 /// Maps the note index (in the commitment tree) to a witness
 pub type WitnessMap = HashMap<usize, IncrementalWitness<Node>>;
 
-#[derive(BorshSerialize, BorshDeserialize, Debug)]
+#[derive(Copy, Clone, BorshSerialize, BorshDeserialize, Debug)]
 /// The possible sync states of the shielded context
 pub enum ContextSyncStatus {
     /// The context contains data that has been confirmed by the protocol
@@ -335,7 +340,9 @@ mod tests {
                 .expect("expected a writable temp file (on sync)");
         }
 
-        std::env::set_var(ENV_VAR_MASP_PARAMS_DIR, tempdir.as_os_str());
+        unsafe {
+            std::env::set_var(ENV_VAR_MASP_PARAMS_DIR, tempdir.as_os_str())
+        };
         // should panic here
         masp_proofs::load_parameters(
             &fake_params_paths[0],
@@ -411,7 +418,9 @@ mod tests {
                 .expect("expected a writable temp file (on sync)");
         }
 
-        std::env::set_var(ENV_VAR_MASP_PARAMS_DIR, tempdir.as_os_str());
+        unsafe {
+            std::env::set_var(ENV_VAR_MASP_PARAMS_DIR, tempdir.as_os_str())
+        };
         // should panic here
         masp_proofs::load_parameters(
             &fake_params_paths[0].0,
@@ -958,6 +967,7 @@ pub mod fs {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::masp::wallet_migrations::{VersionedWallet, v0};
     use crate::validation::{
         CONVERT_NAME, ENV_VAR_MASP_PARAMS_DIR, OUTPUT_NAME, SPEND_NAME,
         get_params_dir,
@@ -1111,24 +1121,42 @@ pub mod fs {
                     ContextSyncStatus::Speculative => SPECULATIVE_FILE_NAME,
                 }
             };
-            let mut ctx_file = File::open(self.context_dir.join(file_name))?;
+            let mut ctx_file =
+                match File::open(self.context_dir.join(file_name)) {
+                    Ok(file) => file,
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                        // a missing file means there is nothing to load.
+                        return Ok(());
+                    }
+                    Err(e) => return Err(e),
+                };
             let mut bytes = Vec::new();
             ctx_file.read_to_end(&mut bytes)?;
             // Fill the supplied context with the deserialized object
+            let wallet =
+                match VersionedWallet::<U>::deserialize(&mut &bytes[..]) {
+                    Ok(w) => w,
+                    Err(_) => VersionedWallet::V0(
+                        v0::ShieldedWallet::<U>::deserialize(&mut &bytes[..])?,
+                    ),
+                }
+                .migrate()
+                .map_err(std::io::Error::other)?;
             *ctx = ShieldedWallet {
                 utils: ctx.utils.clone(),
-                ..ShieldedWallet::<U>::deserialize(&mut &bytes[..])?
+                ..wallet
             };
             Ok(())
         }
 
         /// Save this confirmed shielded context into its associated context
         /// directory. At the same time, delete the speculative file if present
-        async fn save<U: ShieldedUtils + MaybeSync>(
-            &self,
-            ctx: &ShieldedWallet<U>,
+        async fn save<'a, U: ShieldedUtils + MaybeSync>(
+            &'a self,
+            ctx: VersionedWalletRef<'a, U>,
+            sync_status: ContextSyncStatus,
         ) -> std::io::Result<()> {
-            let (tmp_file_pref, file_name) = match ctx.sync_status {
+            let (tmp_file_pref, file_name) = match sync_status {
                 ContextSyncStatus::Confirmed => (TMP_FILE_PREFIX, FILE_NAME),
                 ContextSyncStatus::Speculative => {
                     (SPECULATIVE_TMP_FILE_PREFIX, SPECULATIVE_FILE_NAME)
@@ -1144,7 +1172,7 @@ pub mod fs {
 
             // Remove the speculative file if present since it's state is
             // overruled by the confirmed one we just saved
-            if let ContextSyncStatus::Confirmed = ctx.sync_status {
+            if let ContextSyncStatus::Confirmed = sync_status {
                 let _ = std::fs::remove_file(
                     self.context_dir.join(SPECULATIVE_FILE_NAME),
                 );
@@ -1171,6 +1199,141 @@ pub mod fs {
             let file_name = self.context_dir.join(CACHE_FILE_NAME);
             let mut file = File::open(file_name)?;
             DispatcherCache::try_from_reader(&mut file)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// Test that trying to load a missing file does not
+        /// change the context
+        #[tokio::test]
+        async fn test_missing_file_no_op() {
+            let utils = FsShieldedUtils {
+                context_dir: PathBuf::from("does/not/exist"),
+            };
+            assert!(!utils.context_dir.exists());
+            let mut shielded = ShieldedWallet {
+                utils,
+                ..Default::default()
+            };
+            assert!(
+                shielded
+                    .utils
+                    .clone()
+                    .load(&mut shielded, false)
+                    .await
+                    .is_ok()
+            );
+        }
+
+        /// Test that if the backing file isn't versioned but contains V0 data,
+        /// we can still successfully load it.
+        #[tokio::test]
+        async fn test_non_versioned_file() {
+            let temp = tempfile::tempdir().expect("Test failed");
+            let utils = FsShieldedUtils {
+                context_dir: temp.path().to_path_buf(),
+            };
+
+            let mut shielded = ShieldedWallet {
+                utils: utils.clone(),
+                ..Default::default()
+            };
+
+            let serialized = {
+                let mut bytes: Vec<u8> = Vec::new();
+                let shielded = v0::ShieldedWallet {
+                    utils,
+                    spents: HashSet::from([42]),
+                    ..Default::default()
+                };
+                BorshSerialize::serialize(&shielded, &mut bytes)
+                    .expect("Test failed");
+                bytes
+            };
+
+            std::fs::write(temp.path().join(FILE_NAME), &serialized)
+                .expect("Test failed");
+            shielded
+                .utils
+                .clone()
+                .load(&mut shielded, true)
+                .await
+                .expect("Test failed");
+            assert_eq!(shielded.spents, HashSet::from([42]));
+        }
+
+        #[tokio::test]
+        async fn test_happy_flow() {
+            let temp = tempfile::tempdir().expect("Test failed");
+            let utils = FsShieldedUtils {
+                context_dir: temp.path().to_path_buf(),
+            };
+
+            let mut shielded = ShieldedWallet {
+                utils: utils.clone(),
+                ..Default::default()
+            };
+
+            let serialized = {
+                let mut bytes: Vec<u8> = Vec::new();
+                let shielded = ShieldedWallet {
+                    utils,
+                    spents: HashSet::from([42]),
+                    ..Default::default()
+                };
+                BorshSerialize::serialize(
+                    &VersionedWalletRef::V1(&shielded),
+                    &mut bytes,
+                )
+                .expect("Test failed");
+                bytes
+            };
+
+            std::fs::write(temp.path().join(FILE_NAME), &serialized)
+                .expect("Test failed");
+            shielded
+                .utils
+                .clone()
+                .load(&mut shielded, true)
+                .await
+                .expect("Test failed");
+            assert_eq!(shielded.spents, HashSet::from([42]));
+        }
+
+        /// Check that we error out if the file cannot be loaded and migrated
+        #[tokio::test]
+        async fn test_load_fail() {
+            let temp = tempfile::tempdir().expect("Test failed");
+            let utils = FsShieldedUtils {
+                context_dir: temp.path().to_path_buf(),
+            };
+
+            let mut shielded = ShieldedWallet {
+                utils: utils.clone(),
+                ..Default::default()
+            };
+
+            let serialized = {
+                let mut bytes: Vec<u8> = Vec::new();
+                let shielded = "bloopity bloop doop doop";
+                BorshSerialize::serialize(&shielded, &mut bytes)
+                    .expect("Test failed");
+                bytes
+            };
+
+            std::fs::write(temp.path().join(FILE_NAME), &serialized)
+                .expect("Test failed");
+            assert!(
+                shielded
+                    .utils
+                    .clone()
+                    .load(&mut shielded, true)
+                    .await
+                    .is_err()
+            );
         }
     }
 }

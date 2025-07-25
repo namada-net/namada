@@ -1718,7 +1718,7 @@ fn offline_sign() -> Result<()> {
             apply_use_device(vec![
                 "transparent-transfer",
                 "--source",
-                bradley_alias.as_ref(),
+                bradley_alias,
                 "--target",
                 ALBERT,
                 "--token",
@@ -1730,7 +1730,7 @@ fn offline_sign() -> Result<()> {
                 "--gas-price",
                 "1",
                 "--gas-payer",
-                cooper_alias.as_ref(),
+                cooper_alias,
                 "--node",
                 &validator_one_rpc,
                 "--dump-wrapper-tx",
@@ -1760,9 +1760,9 @@ fn offline_sign() -> Result<()> {
                 "--data-path",
                 &offline_tx,
                 "--secret-keys",
-                &bradley_alias.as_ref(),
+                &bradley_alias,
                 "--secret-key",
-                &cooper_alias.as_ref(),
+                &cooper_alias,
                 "--output-folder-path",
                 &output_folder.path().to_str().unwrap(),
             ],
@@ -1828,7 +1828,7 @@ fn offline_sign() -> Result<()> {
             vec![
                 "balance",
                 "--owner",
-                bradley_alias.as_ref(),
+                bradley_alias,
                 "--token",
                 NAM,
                 "--node",
@@ -1845,7 +1845,7 @@ fn offline_sign() -> Result<()> {
             vec![
                 "balance",
                 "--owner",
-                cooper_alias.as_ref(),
+                cooper_alias,
                 "--token",
                 NAM,
                 "--node",
@@ -1883,7 +1883,7 @@ fn enforce_fee_payment() -> Result<()> {
             vec![
                 "balance",
                 "--owner",
-                adam_alias.as_ref(),
+                adam_alias,
                 "--token",
                 NAM,
                 "--node",
@@ -1900,7 +1900,7 @@ fn enforce_fee_payment() -> Result<()> {
         apply_use_device(vec![
             "transparent-transfer",
             "--source",
-            adam_alias.as_ref(),
+            adam_alias,
             "--target",
             BERTHA,
             "--token",
@@ -1936,7 +1936,7 @@ fn enforce_fee_payment() -> Result<()> {
         apply_use_device(vec![
             "transparent-transfer",
             "--source",
-            adam_alias.as_ref(),
+            adam_alias,
             "--target",
             CHRISTEL,
             "--token",
@@ -1944,7 +1944,7 @@ fn enforce_fee_payment() -> Result<()> {
             "--amount",
             "50",
             "--gas-payer",
-            adam_alias.as_ref(),
+            adam_alias,
             "--output-folder-path",
             tempdir.path().to_str().unwrap(),
             "--dump-tx",
@@ -2029,7 +2029,7 @@ fn enforce_fee_payment() -> Result<()> {
             vec![
                 "balance",
                 "--owner",
-                adam_alias.as_ref(),
+                adam_alias,
                 "--token",
                 NAM,
                 "--node",
@@ -2325,7 +2325,7 @@ fn scheduled_migration() -> Result<()> {
         locked.scheduled_migration = Some(scheduled_migration);
     }
 
-    while node.block_height().0 != 4 {
+    while node.last_block_height().0 != 4 {
         node.finalize_and_commit(None)
     }
     // check that the key doesn't exist before the scheduled block

@@ -1,0 +1,1 @@
+ - When using the ledger client, we update witness maps manually. We now add notes to the witness map only if there were successfully trial decrypted. ([\#2693](https://github.com/anoma/namada/pull/4693))

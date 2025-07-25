@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v201.0.0
+
+Namada apps v201.0.0 Consensus breaking release.
+
+### MISCELLANEOUS
+
+- Updated Namada libraries to libs-v0.251.0
+  ([\#4742](https://github.com/anoma/namada/pull/4742))
+
 ## v101.1.2
 
 Namada apps v101.1.2 release.
@@ -14,6 +23,8 @@ Namada apps v101.1.1
   ([\#4680](https://github.com/anoma/namada/pull/4680))
 
 ## v101.1.0
+
+Namada apps v101.1.0 minor release
 
 ### MISCELLANEOUS
 
@@ -86,6 +97,71 @@ Namada v1.0.0 is the first stable release of the Namada apps.
 
 - updated namada libraries to libs-v0.46.1
   ([\#4123](https://github.com/anoma/namada/pull/4123))
+
+## libs-v0.251.0
+
+Namada libs v0.251.0 Consensus and API breaking release.
+
+### BUG FIXES
+
+- Fix to receive IBC denom whose base token includes slash
+  ([\#4643](https://github.com/anoma/namada/issues/4643))
+- Fixed a possible overflow of the masp expiration height in the SDK.
+  ([\#4725](https://github.com/anoma/namada/pull/4725))
+- Allow to execute WASM with a tx payload that doesn't fit into the initial WASM
+  memory. ([\#4729](https://github.com/anoma/namada/pull/4729))
+- Validate the base denom in MsgTransfer
+  ([\#4733](https://github.com/anoma/namada/issues/4733))
+
+### IMPROVEMENTS
+
+- Display payment addresses instead of extended full
+  viewing keys on the hardware wallet to save screen space.
+  ([\#4436](https://github.com/anoma/namada/pull/4436))
+- Forbid targeting MASP payment addresses in IBC transfers.
+  ([\#4593](https://github.com/anoma/namada/pull/4593))
+- Currently, the shielded wallet attempts to find a file and deserialize it, both of which are fallible. Upon failure, 
+  a default (empty) wallet is created. This is fine if the file is missing, but causes unexpeceted behavior when we've changed
+  the wallet format and deserialize fails. This PR changes the logic to the following:
+
+  - If the file is missing, use a default
+  - If deserialization fails, try to run a migration (this requires versioning shielded wallets)
+  - If deserializing / migration fails, error out explicitly
+  
+  ([\#4664](https://github.com/anoma/namada/pull/4664))
+ - Conversions are cached when performing Masp balance queries. Futhermore, the decoded asset type cache is used more
+ - effectively. Care must be taken to clear the masp conversions cache on load if the masp epoch has changed. If the 
+ - masp epoch changes during a balance query, it may produce invalid output. However, repeating the query after the epoch
+ - has completed will yield the correct result. The new cache resides on the shielded wallet, so a migration has been added.
+
+ ([\#4671](https://github.com/anoma/namada/pull/4671))
+- Perform wasm gas accounting using mutable global, to avoid frequent host/guest
+  vm context switches. ([\#4685](https://github.com/anoma/namada/pull/4685))
+ - When using the ledger client, we update witness maps manually. We now add notes to the witness map only if there were successfully trial decrypted. ([\#2693](https://github.com/anoma/namada/pull/4693))
+- Add backoff sleep between MASP indexer client failed requests.
+  ([\#4702](https://github.com/anoma/namada/pull/4702))
+- Added a VP check that gov updated parameters are readable.
+  ([\#4708](https://github.com/anoma/namada/pull/4708))
+- Allow bech32 encoding of MASP address in shielded receive middleware.
+  ([\#4722](https://github.com/anoma/namada/pull/4722))
+- Improve the UX of Osmosis swaps in various ways. Moreover, start encoding the
+  MASP address with `bech32`, rather than `bech32m`, when shielding the output
+  of the trade. ([\#4723](https://github.com/anoma/namada/pull/4723))
+
+### MISCELLANEOUS
+
+- Make CometBFT max_tx_bytes configurable
+  ([\#4712](https://github.com/anoma/namada/issues/4712))
+
+### SDK
+
+- Introduced the possibility to skip fee checks when MASP fee payment is
+  expected. ([\#4730](https://github.com/anoma/namada/pull/4730))
+
+### TESTING
+
+- Added Cargo example that derives bounds on shielded reward parameters to
+  ensure non-zero rewards ([\#4573](https://github.com/anoma/namada/pull/4573))
 
 ## libs-v0.150.2
 
@@ -2385,9 +2461,9 @@ Namada 0.24.0 is a minor release that introduces an SDK crate, PoS redelegation,
 
 ### MISCELLANEOUS
 
-- Switched from using `libsecp256k1` to `k256` crate.
-  ([\#1958](https://github.com/anoma/namada/pull/1958))
 - Tag `ed25519` keys with `ZeroizeOnDrop`
+  ([\#1958](https://github.com/anoma/namada/pull/1958))
+- Switched from using `libsecp256k1` to `k256` crate.
   ([\#1958](https://github.com/anoma/namada/pull/1958))
 
 ### SDK

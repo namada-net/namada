@@ -55,55 +55,55 @@ exclude = [
 
 [workspace.package]
 authors = ["Heliax AG <hello@heliax.dev>"]
-edition = "2021"
+edition = "2024"
 documentation = "https://docs.namada.net/"
 homepage = "https://namada.net/"
 keywords = ["blockchain", "privacy", "crypto", "protocol", "network"]
 license = "GPL-3.0"
 readme = "README.md"
-repository = "https://github.com/anoma/namada"
-version = "0.150.0"
-rust-version = "1.83" # MSRV
+repository = "https://github.com/namada-net/namada"
+version = "0.251.0"
+rust-version = "1.85" # MSRV
 
 [workspace.dependencies]
-namada_account = { version = "0.150.0", path = "crates/account" }
-namada_apps_lib = { version = "0.150.0", path = "crates/apps_lib" }
-namada_controller = { version = "0.150.0", path = "crates/controller" }
-namada_core = { version = "0.150.0", path = "crates/core" }
-namada_encoding_spec = { version = "0.150.0", path = "crates/encoding_spec" }
-namada_ethereum_bridge = { version = "0.150.0", path = "crates/ethereum_bridge" }
-namada_events = { version = "0.150.0", path = "crates/events" }
-namada_gas = { version = "0.150.0", path = "crates/gas" }
-namada_governance = { version = "0.150.0", path = "crates/governance" }
-namada_ibc = { version = "0.150.0", path = "crates/ibc" }
-namada_io = { version = "0.150.0", path = "crates/io" }
-namada_light_sdk = { version = "0.150.0", path = "crates/light_sdk" }
-namada_macros = { version = "0.150.0", path = "crates/macros" }
-namada_migrations = { version = "0.150.0", path = "crates/migrations" }
-namada_merkle_tree = { version = "0.150.0", path = "crates/merkle_tree" }
-namada_parameters = { version = "0.150.0", path = "crates/parameters" }
-namada_proof_of_stake = { version = "0.150.0", path = "crates/proof_of_stake" }
-namada_replay_protection = { version = "0.150.0", path = "crates/replay_protection" }
-namada_node = { version = "0.150.0", path = "crates/node" }
-namada_sdk = { version = "0.150.0", path = "crates/sdk", default-features = false }
-namada_shielded_token = { version = "0.150.0", path = "crates/shielded_token" }
-namada_state = { version = "0.150.0", path = "crates/state" }
-namada_storage = { version = "0.150.0", path = "crates/storage" }
-namada_systems = { version = "0.150.0", path = "crates/systems" }
-namada_test_utils = { version = "0.150.0", path = "crates/test_utils" }
-namada_tests = { version = "0.150.0", path = "crates/tests" }
-namada_token = { version = "0.150.0", path = "crates/token" }
-namada_trans_token = { version = "0.150.0", path = "crates/trans_token" }
-namada_tx = { version = "0.150.0", path = "crates/tx" }
-namada_tx_env = { version = "0.150.0", path = "crates/tx_env" }
-namada_tx_prelude = { version = "0.150.0", path = "crates/tx_prelude" }
-namada_vm = { version = "0.150.0", path = "crates/vm", default-features = false }
-namada_vm_env = { version = "0.150.0", path = "crates/vm_env" }
-namada_vote_ext = { version = "0.150.0", path = "crates/vote_ext" }
-namada_vp = { version = "0.150.0", path = "crates/vp" }
-namada_vp_env = { version = "0.150.0", path = "crates/vp_env" }
-namada_vp_prelude = { version = "0.150.0", path = "crates/vp_prelude" }
-namada_wallet = { version = "0.150.0", path = "crates/wallet" }
+namada_account = { version = "0.251.0", path = "crates/account" }
+namada_apps_lib = { version = "0.251.0", path = "crates/apps_lib" }
+namada_controller = { version = "0.251.0", path = "crates/controller" }
+namada_core = { version = "0.251.0", path = "crates/core" }
+namada_encoding_spec = { version = "0.251.0", path = "crates/encoding_spec" }
+namada_ethereum_bridge = { version = "0.251.0", path = "crates/ethereum_bridge" }
+namada_events = { version = "0.251.0", path = "crates/events" }
+namada_gas = { version = "0.251.0", path = "crates/gas" }
+namada_governance = { version = "0.251.0", path = "crates/governance" }
+namada_ibc = { version = "0.251.0", path = "crates/ibc" }
+namada_io = { version = "0.251.0", path = "crates/io" }
+namada_light_sdk = { version = "0.251.0", path = "crates/light_sdk" }
+namada_macros = { version = "0.251.0", path = "crates/macros" }
+namada_migrations = { version = "0.251.0", path = "crates/migrations" }
+namada_merkle_tree = { version = "0.251.0", path = "crates/merkle_tree" }
+namada_parameters = { version = "0.251.0", path = "crates/parameters" }
+namada_proof_of_stake = { version = "0.251.0", path = "crates/proof_of_stake" }
+namada_replay_protection = { version = "0.251.0", path = "crates/replay_protection" }
+namada_node = { version = "0.251.0", path = "crates/node" }
+namada_sdk = { version = "0.251.0", path = "crates/sdk", default-features = false }
+namada_shielded_token = { version = "0.251.0", path = "crates/shielded_token" }
+namada_state = { version = "0.251.0", path = "crates/state" }
+namada_storage = { version = "0.251.0", path = "crates/storage" }
+namada_systems = { version = "0.251.0", path = "crates/systems" }
+namada_test_utils = { version = "0.251.0", path = "crates/test_utils" }
+namada_tests = { version = "0.251.0", path = "crates/tests" }
+namada_token = { version = "0.251.0", path = "crates/token" }
+namada_trans_token = { version = "0.251.0", path = "crates/trans_token" }
+namada_tx = { version = "0.251.0", path = "crates/tx" }
+namada_tx_env = { version = "0.251.0", path = "crates/tx_env" }
+namada_tx_prelude = { version = "0.251.0", path = "crates/tx_prelude" }
+namada_vm = { version = "0.251.0", path = "crates/vm", default-features = false }
+namada_vm_env = { version = "0.251.0", path = "crates/vm_env" }
+namada_vote_ext = { version = "0.251.0", path = "crates/vote_ext" }
+namada_vp = { version = "0.251.0", path = "crates/vp" }
+namada_vp_env = { version = "0.251.0", path = "crates/vp_env" }
+namada_vp_prelude = { version = "0.251.0", path = "crates/vp_prelude" }
+namada_wallet = { version = "0.251.0", path = "crates/wallet" }
 
 arbitrary = {version = "1.4", features = ["derive"]}
 ark-bls12-381 = {version = "0.5"}
@@ -189,8 +189,8 @@ libfuzzer-sys = "0.4"
 libloading = "0.8"
 linkme = "0.3"
 madato = "0.7"
-masp_primitives = { version = "1.4" }
-masp_proofs = { version = "1.4", default-features = false, features = ["local-prover"] }
+masp_primitives = "2.0.0"
+masp_proofs = { version = "2.0.0", default-features = false, features = ["local-prover"] }
 num256 = "0.6"
 num_cpus = "1.13"
 num_enum = "0.7"
@@ -263,7 +263,7 @@ typed-builder = "0.20"
 uint = "0.10"
 warp = "0.3"
 wasmparser = "0.121"
-wasm-instrument = {version = "0.4.0", features = ["sign_ext"]}
+wasm-instrument = { package = "nam-wasm-instrument", version = "0.5.2", features = ["sign_ext"] }
 wasmer = "4.3.5"
 wasmer-cache = "4.3.5"
 wasmer-compiler = "4.3.5"

@@ -108,7 +108,7 @@ mod test_nuts {
     use namada_core::borsh::BorshSerializeExt;
     use namada_core::ethereum_events::testing::DAI_ERC20_ETH_ADDRESS;
     use namada_core::storage::TxIndex;
-    use namada_gas::{TxGasMeter, VpGasMeter};
+    use namada_gas::{GasMeterKind, TxGasMeter, VpGasMeter};
     use namada_state::testing::TestState;
     use namada_state::{StateRead, StorageWrite};
     use namada_trans_token::storage_key::balance_key;
@@ -196,6 +196,7 @@ mod test_nuts {
             &keys_changed,
             &verifiers,
             VpCache::new(temp_dir(), 100usize),
+            GasMeterKind::MutGlobal,
         );
 
         // print debug info in case we run into failures

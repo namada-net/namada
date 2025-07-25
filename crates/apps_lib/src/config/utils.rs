@@ -104,7 +104,7 @@ mod test {
         #[test]
         fn test_num_of_threads_from_valid_env_var(value in 1_usize..) {
             let env_var = "anythingXYZ1";
-            env::set_var(env_var, value.to_string());
+            unsafe { env::set_var(env_var, value.to_string()) };
             assert_eq!(num_of_threads_aux(env_var, value), Either::Left(value));
         }
 
@@ -114,7 +114,7 @@ mod test {
         fn test_num_of_threads_from_invalid_env_var(value in ..1_usize) {
             let env_var = "anythingXYZ2";
             let val_string = value.to_string();
-            env::set_var(env_var, &val_string);
+            unsafe { env::set_var(env_var, &val_string) };
             assert_eq!(
                 num_of_threads_aux(env_var, value),
                 Either::Right(val_string)

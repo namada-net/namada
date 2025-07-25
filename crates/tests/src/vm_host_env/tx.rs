@@ -18,6 +18,7 @@ use namada_sdk::{account, token};
 use namada_tx_prelude::transaction::TxSentinel;
 use namada_tx_prelude::{BorshSerializeExt, Ctx};
 use namada_vm::WasmCacheRwAccess;
+use namada_vm::host_env::gas_meter::GasMeter;
 use namada_vm::wasm::run::Error;
 use namada_vm::wasm::{self, TxCache, VpCache};
 use namada_vp_prelude::key::common;
@@ -52,7 +53,7 @@ pub struct TestTxEnv {
     pub state: TestState,
     pub iterators: PrefixIterators<'static, MockDB>,
     pub verifiers: BTreeSet<Address>,
-    pub gas_meter: RefCell<TxGasMeter>,
+    pub gas_meter: RefCell<GasMeter<TxGasMeter>>,
     pub sentinel: RefCell<TxSentinel>,
     pub tx_index: TxIndex,
     pub result_buffer: Option<Vec<u8>>,
@@ -64,6 +65,7 @@ pub struct TestTxEnv {
     pub batched_tx: BatchedTx,
     pub wasmer_store: Rc<RefCell<wasmer::Store>>,
 }
+
 impl Default for TestTxEnv {
     fn default() -> Self {
         let (vp_wasm_cache, vp_cache_dir) =
@@ -83,7 +85,10 @@ impl Default for TestTxEnv {
         Self {
             state,
             iterators: PrefixIterators::default(),
-            gas_meter: RefCell::new(TxGasMeter::new(1_000_000_000_000, 1)),
+            gas_meter: RefCell::new(GasMeter::Native(TxGasMeter::new(
+                1_000_000_000_000,
+                1,
+            ))),
             sentinel: RefCell::new(TxSentinel::default()),
             tx_index: TxIndex::default(),
             verifiers: BTreeSet::default(),
@@ -226,17 +231,32 @@ impl TestTxEnv {
 
     /// Apply the tx changes to the write log.
     pub fn execute_tx(&mut self) -> Result<(), Error> {
-        wasm::run::tx(
+        let gas_meter = RefCell::new(
+            if let GasMeter::Native(meter) = &mut *self.gas_meter.borrow_mut() {
+                std::mem::replace(meter, unsafe { TxGasMeter::placeholder() })
+            } else {
+                unreachable!()
+            },
+        );
+
+        let res = wasm::run::tx(
             &mut self.state,
-            &self.gas_meter,
+            &gas_meter,
             None,
             &self.tx_index,
             &self.batched_tx.tx,
             &self.batched_tx.cmt,
             &mut self.vp_wasm_cache,
             &mut self.tx_wasm_cache,
+            wasm::run::GasMeterKind::MutGlobal,
         )
-        .and(Ok(()))
+        .and(Ok(()));
+
+        *self.gas_meter.borrow_mut() = GasMeter::Native(
+            gas_meter.replace_with(|_| unsafe { TxGasMeter::placeholder() }),
+        );
+
+        res
     }
 }
 
@@ -339,7 +359,7 @@ mod native_tx_host_env {
             // unit return type
             ( $fn:ident ( $($arg:ident : $type:ty),* $(,)?) ) => {
                 concat_idents!(extern_fn_name = namada, _, $fn {
-                    #[no_mangle]
+                    #[unsafe(no_mangle)]
                     extern "C-unwind" fn extern_fn_name( $($arg: $type),* ) {
                         with(|TestTxEnv {
                                 state,
@@ -384,7 +404,7 @@ mod native_tx_host_env {
             // non-unit return type
             ( $fn:ident ( $($arg:ident : $type:ty),* $(,)?) -> $ret:ty ) => {
                 concat_idents!(extern_fn_name = namada, _, $fn {
-                    #[no_mangle]
+                    #[unsafe(no_mangle)]
                     extern "C-unwind" fn extern_fn_name( $($arg: $type),* ) -> $ret {
                         with(|TestTxEnv {
                                 tx_index,
@@ -429,7 +449,7 @@ mod native_tx_host_env {
             // unit, non-result, return type
             ( "non-result", $fn:ident ( $($arg:ident : $type:ty),* $(,)?) ) => {
                 concat_idents!(extern_fn_name = namada, _, $fn {
-                    #[no_mangle]
+                    #[unsafe(no_mangle)]
                     extern "C-unwind" fn extern_fn_name( $($arg: $type),* ) {
                         with(|TestTxEnv {
                                 state,

@@ -216,12 +216,23 @@ where
         )
     }
 
-    /// Get the block height
+    /// Get the block height. The height is that of the block to which the
+    /// current transaction is being applied if we are in between the
+    /// `FinalizeBlock` and the `Commit` phases. For all the other phases we
+    /// return the block height of next block that the consensus process
+    /// will decide upon (i.e. the block height of the last committed block
+    /// + 1)
     pub fn get_block_height(&self) -> (BlockHeight, Gas) {
+        let height = match self.header {
+            Some(_) => self.block.height,
+            // When not finalizing a decided block, increase the block height to
+            // match that of the next block that will be proposed
+            None => self.block.height.next_height(),
+        };
         // Adding consts that cannot overflow
         #[allow(clippy::arithmetic_side_effects)]
         (
-            self.block.height,
+            height,
             (BLOCK_HEIGHT_LENGTH as u64 * MEMORY_ACCESS_GAS_PER_BYTE).into(),
         )
     }

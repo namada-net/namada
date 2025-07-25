@@ -2685,10 +2685,12 @@ fn test_localnet_genesis() -> Result<()> {
     test_genesis_result.exp_string("Able to sign with")?;
 
     // Use a non-default "NAMADA_GENESIS_TX_CHAIN_ID"
-    env::set_var(
-        config::genesis::transactions::NAMADA_GENESIS_TX_ENV_VAR,
-        "e2e-test-genesis",
-    );
+    unsafe {
+        env::set_var(
+            config::genesis::transactions::NAMADA_GENESIS_TX_ENV_VAR,
+            "e2e-test-genesis",
+        )
+    };
 
     let mut test_genesis_result = setup::run_cmd(
         Bin::Node,
@@ -2718,10 +2720,12 @@ fn test_localnet_genesis() -> Result<()> {
 #[test]
 fn test_genesis_chain_id_change() -> Result<()> {
     // Use a non-default "NAMADA_GENESIS_TX_CHAIN_ID"
-    env::set_var(
-        config::genesis::transactions::NAMADA_GENESIS_TX_ENV_VAR,
-        "e2e-test-genesis",
-    );
+    unsafe {
+        env::set_var(
+            config::genesis::transactions::NAMADA_GENESIS_TX_ENV_VAR,
+            "e2e-test-genesis",
+        )
+    };
 
     let working_dir = working_dir();
     let wasm_dir = working_dir.join(config::DEFAULT_WASM_DIR);
@@ -2769,7 +2773,11 @@ fn test_genesis_chain_id_change() -> Result<()> {
 
     // Unset the chain ID - the transaction signatures have been validated at
     // init-network so we don't need it anymore
-    env::remove_var(config::genesis::transactions::NAMADA_GENESIS_TX_ENV_VAR);
+    unsafe {
+        env::remove_var(
+            config::genesis::transactions::NAMADA_GENESIS_TX_ENV_VAR,
+        )
+    };
     // Start the ledger as a validator
     let _bg_validator_0 =
         start_namada_ledger_node_wait_wasm(&test, Some(0), Some(40))?

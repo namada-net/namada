@@ -3,7 +3,7 @@
 # A helper to merge e.g. a PR from draft to an RC branch where any neccessary
 # conflicts resolutions are expected to have been trained with rerere.
 #
-# It merges PRs from "origin" remote which should be set to "git@github.com:anoma/namada.git".
+# It merges PRs from "origin" remote which should be set to "git@github.com:namada-net/namada.git".
 # Make sure to fetch latest before running with e.g. `git fetch origin`.
 #
 # Requires `gh` to be installed and authenticated.
@@ -21,7 +21,7 @@ set -Eo pipefail
 PR_NUM=$1
 
 BRANCH=$(gh pr view "$PR_NUM" --json headRefName -q .headRefName)
-echo "🔴 Merging branch $BRANCH https://github.com/anoma/namada/pull/$PR_NUM ..."
+echo "🔴 Merging branch $BRANCH https://github.com/namada-net/namada/pull/$PR_NUM ..."
 
 # TODO: handle cross-repository PRs (and remote & fetch)
 IS_CROSS=$(gh pr view "$PR_NUM" --json isCrossRepository -q .isCrossRepository)

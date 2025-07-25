@@ -181,7 +181,7 @@ mod tests {
                 .ref_to();
 
             match hot_key {
-                common::PublicKey::Secp256k1(ref k) => k.into(),
+                common::PublicKey::Secp256k1(k) => k.into(),
                 _ => panic!("Test failed"),
             }
         };
@@ -190,7 +190,7 @@ mod tests {
                 &keys.get(&validator).expect("Test failed").eth_gov.ref_to();
 
             match cold_key {
-                common::PublicKey::Secp256k1(ref k) => k.into(),
+                common::PublicKey::Secp256k1(k) => k.into(),
                 _ => panic!("Test failed"),
             }
         };

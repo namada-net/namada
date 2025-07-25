@@ -42,7 +42,7 @@ use namada_sdk::eth_bridge::protocol::validation::validator_set_update::validate
 use namada_sdk::eth_bridge::{EthBridgeQueries, EthereumOracleConfig};
 use namada_sdk::ethereum_events::EthereumEvent;
 use namada_sdk::events::log::EventLog;
-use namada_sdk::gas::{Gas, TxGasMeter};
+use namada_sdk::gas::{Gas, GasMetering, TxGasMeter};
 use namada_sdk::hash::Hash;
 use namada_sdk::key::*;
 use namada_sdk::migrations::ScheduledMigration;
@@ -1306,7 +1306,7 @@ where
                 let block_gas_limit: Gas =
                     Gas::from_whole_units(max_block_gas.into(), gas_scale)
                         .expect("Gas limit from parameter must not overflow");
-                if gas_meter.tx_gas_limit > block_gas_limit {
+                if gas_meter.get_gas_limit() > block_gas_limit {
                     response.code = ResultCode::AllocationError.into();
                     response.log = format!(
                         "{INVALID_MSG}: Wrapper transaction exceeds the \
@@ -1644,7 +1644,7 @@ pub mod test_utils {
     /// Invalidate a valid signature `sig`.
     pub fn invalidate_signature(sig: common::Signature) -> common::Signature {
         match sig {
-            common::Signature::Ed25519(ed25519::Signature(ref sig)) => {
+            common::Signature::Ed25519(ed25519::Signature(sig)) => {
                 let mut sig_bytes = sig.to_bytes();
                 sig_bytes[0] = sig_bytes[0].wrapping_add(1);
                 common::Signature::Ed25519(ed25519::Signature(sig_bytes.into()))

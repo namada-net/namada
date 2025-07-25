@@ -16,6 +16,7 @@ use namada_core::address::{Address, InternalAddress};
 use namada_core::arith::checked;
 use namada_core::chain::{BlockHeight, Epoch};
 use namada_core::collections::{HashMap, HashSet};
+use namada_core::dec::{Dec, POS_DECIMAL_PRECISION};
 use namada_core::hash::Hash;
 use namada_core::ibc::IbcTokenHash;
 use namada_core::ibc::apps::transfer::types::PrefixedDenom;
@@ -27,6 +28,7 @@ use namada_core::time::DurationSecs;
 use namada_core::token::{
     Amount, DenominatedAmount, Denomination, MaspDigitPos,
 };
+use namada_core::uint::Uint;
 use namada_core::{storage, token};
 use namada_events::extend::InnerTxHash;
 use namada_gas::WholeGas;
@@ -60,7 +62,7 @@ use namada_tx::data::{BatchedTxResult, DryRunResult, ResultCode, TxResult};
 use namada_tx::event::{Batch as BatchAttr, Code as CodeAttr};
 use serde::{Deserialize, Serialize};
 
-use crate::args::{InputAmount, OsmosisPoolHop};
+use crate::args::{InputAmount, OsmosisPoolHop, Slippage};
 use crate::control_flow::time;
 use crate::error::{EncodingError, Error, QueryError, TxSubmitError};
 use crate::events::{Event, extend};
@@ -1498,39 +1500,29 @@ pub async fn format_denominated_amount(
 /// Look up IBC tokens. The given base token can be non-Namada token.
 pub async fn query_ibc_tokens<N: Namada>(
     context: &N,
-    base_token: Option<String>,
     owner: Option<&Address>,
 ) -> Result<BTreeMap<String, Address>, Error> {
-    // Check the base token
-    let prefixes = match (base_token, owner) {
-        (Some(base_token), Some(owner)) => vec![
-            ibc_trace_key_prefix(Some(base_token)),
-            ibc_trace_key_prefix(Some(owner.to_string())),
-        ],
-        (Some(base_token), None) => {
-            vec![ibc_trace_key_prefix(Some(base_token))]
-        }
-        _ => {
+    let prefix = match owner {
+        Some(owner) => ibc_trace_key_prefix(Some(owner.to_string())),
+        None => {
             // Check all IBC denoms because the owner might not know IBC token
             // transfers in the same chain
-            vec![ibc_trace_key_prefix(None)]
+            ibc_trace_key_prefix(None)
         }
     };
 
     let mut tokens = BTreeMap::new();
-    for prefix in prefixes {
-        let ibc_traces =
-            query_storage_prefix::<_, String>(context, &prefix).await?;
-        if let Some(ibc_traces) = ibc_traces {
-            for (key, ibc_trace) in ibc_traces {
-                if let Some((_, hash)) = is_ibc_trace_key(&key) {
-                    let hash: IbcTokenHash = hash.parse().expect(
-                        "Parsing an IBC token hash from storage shouldn't fail",
-                    );
-                    let ibc_token =
-                        Address::Internal(InternalAddress::IbcToken(hash));
-                    tokens.insert(ibc_trace, ibc_token);
-                }
+    let ibc_traces =
+        query_storage_prefix::<_, String>(context, &prefix).await?;
+    if let Some(ibc_traces) = ibc_traces {
+        for (key, ibc_trace) in ibc_traces {
+            if let Some((_, hash)) = is_ibc_trace_key(&key) {
+                let hash: IbcTokenHash = hash.parse().expect(
+                    "Parsing an IBC token hash from storage shouldn't fail",
+                );
+                let ibc_token =
+                    Address::Internal(InternalAddress::IbcToken(hash));
+                tokens.insert(ibc_trace, ibc_token);
             }
         }
     }
@@ -1580,7 +1572,7 @@ pub async fn query_ibc_denom<N: Namada>(
 /// Query the registry contract embedded in the state of
 /// an input Crosschain Swaps Osmosis contract.
 pub async fn get_registry_from_xcs_osmosis_contract(
-    rest_rpc_addr: &str,
+    lcd_rpc_addr: &str,
     xcs_contract_addr: &str,
 ) -> Result<String, Error> {
     #[derive(Deserialize)]
@@ -1600,7 +1592,7 @@ pub async fn get_registry_from_xcs_osmosis_contract(
     }
 
     let request_url = format!(
-        "{rest_rpc_addr}/cosmwasm/wasm/v1/contract/{xcs_contract_addr}/state"
+        "{lcd_rpc_addr}/cosmwasm/wasm/v1/contract/{xcs_contract_addr}/state"
     );
     let RespData { models } = reqwest::get(&request_url)
         .await
@@ -1653,13 +1645,13 @@ pub async fn get_registry_from_xcs_osmosis_contract(
 /// This is done by querying the XCS registry contract. The Namada asset
 /// is also returned, parsed as an [`Address`].
 pub async fn osmosis_denom_from_namada_denom(
-    rest_rpc_addr: &str,
+    lcd_rpc_addr: &str,
     registry_contract_addr: &str,
     namada_denom: &str,
 ) -> Result<(String, Address), Error> {
     async fn fetch_contract_data(
         contract_addr: &str,
-        rest_rpc_addr: &str,
+        lcd_rpc_addr: &str,
         json_query: &str,
     ) -> Result<String, Error> {
         #[derive(Deserialize)]
@@ -1669,7 +1661,7 @@ pub async fn osmosis_denom_from_namada_denom(
 
         let encoded_query = data_encoding::BASE64.encode(json_query.as_bytes());
         let request_url = format!(
-            "{rest_rpc_addr}/cosmwasm/wasm/v1/contract/{contract_addr}/smart/\
+            "{lcd_rpc_addr}/cosmwasm/wasm/v1/contract/{contract_addr}/smart/\
              {encoded_query}"
         );
 
@@ -1717,13 +1709,13 @@ pub async fn osmosis_denom_from_namada_denom(
 
     let namada_chain_name = fetch_contract_data(
         registry_contract_addr,
-        rest_rpc_addr,
+        lcd_rpc_addr,
         &chain_name_req("tnam"),
     )
     .await?;
     let osmosis_chain_name = fetch_contract_data(
         registry_contract_addr,
-        rest_rpc_addr,
+        lcd_rpc_addr,
         &chain_name_req("osmo"),
     )
     .await?;
@@ -1752,7 +1744,7 @@ pub async fn osmosis_denom_from_namada_denom(
 
         let channel_from_osmosis_to_namada = fetch_contract_data(
             registry_contract_addr,
-            rest_rpc_addr,
+            lcd_rpc_addr,
             &channel_pair_req(&osmosis_chain_name, &namada_chain_name),
         )
         .await?;
@@ -1787,7 +1779,7 @@ pub async fn osmosis_denom_from_namada_denom(
         // we get chain name from which the base denom originated
         let src_chain_name = fetch_contract_data(
             registry_contract_addr,
-            rest_rpc_addr,
+            lcd_rpc_addr,
             &dest_chain_req(
                 &namada_chain_name,
                 channel_from_namada_to_src.as_str(),
@@ -1805,7 +1797,7 @@ pub async fn osmosis_denom_from_namada_denom(
             // this asset is not native to osmosis
             let channel_from_osmosis_to_src = fetch_contract_data(
                 registry_contract_addr,
-                rest_rpc_addr,
+                lcd_rpc_addr,
                 &channel_pair_req(&osmosis_chain_name, &src_chain_name),
             )
             .await?;
@@ -1821,9 +1813,116 @@ pub async fn osmosis_denom_from_namada_denom(
     }
 }
 
+/// Query the optiomal Osmosis pool route to take, to swap
+/// `input_denom` for `output_denom`.
+///
+/// The minimum and quote price amounts of the trade are also returned.
+#[allow(clippy::too_many_arguments)]
+pub async fn query_osmosis_route_and_min_out(
+    ctx: &impl Namada,
+    input_token: &Address,
+    input_denom: &str,
+    amount: InputAmount,
+    output_denom: &str,
+    osmosis_sqs_server_url: &str,
+    fixed_route: Option<Vec<OsmosisPoolHop>>,
+    slippage: Option<Slippage>,
+) -> Result<(Vec<OsmosisPoolHop>, Amount, Option<Amount>), Error> {
+    let slippage = match (fixed_route, slippage) {
+        // fixed routes
+        (Some(_), None) => {
+            return Err(Error::Other(
+                "Slippage must be set manually with fixed routes".to_owned(),
+            ));
+        }
+        (Some(_), Some(Slippage::Twap { .. })) => {
+            return Err(Error::Other(
+                "TWAP slippage not supported with fixed routes".to_owned(),
+            ));
+        }
+        (Some(route), Some(Slippage::MinOutputAmount(min))) => {
+            return Ok((route, min, None));
+        }
+        // non-fixed routes
+        (None, None) => Slippage::Twap {
+            // NB: 0.5% slippage by default
+            slippage_percentage: Dec::new(5, 1).unwrap(),
+        },
+        (None, Some(slippage)) => slippage,
+    };
+
+    let (mut routes, amount_out_from_routes) = query_osmosis_pool_routes(
+        ctx,
+        input_token,
+        input_denom,
+        amount,
+        output_denom,
+        osmosis_sqs_server_url,
+    )
+    .await?;
+
+    let route = routes.pop().ok_or_else(|| {
+        Error::Other(format!(
+            "No route found to swap {amount:?} of {input_denom} with \
+             {output_denom}",
+        ))
+    })?;
+
+    let min_amount_out = match slippage {
+        Slippage::MinOutputAmount(min_out)
+            if min_out > amount_out_from_routes =>
+        {
+            return Err(Error::Other(format!(
+                "The specified min output amount {min_out} is greater than \
+                 the amount {amount_out_from_routes} yielded from the \
+                 computed route: {route:?}"
+            )));
+        }
+        Slippage::MinOutputAmount(min_out) => min_out,
+        Slippage::Twap {
+            slippage_percentage,
+        } => {
+            // get a value in the range [0, 1]
+            let normalized_slippage =
+                checked!(slippage_percentage / Dec::new(100, 0).unwrap())?;
+            let slippage_complement =
+                checked!(Dec::one() - normalized_slippage)?;
+
+            Amount::from_uint(
+                amount_out_from_routes
+                    .raw_amount()
+                    .checked_mul_div(
+                        slippage_complement.abs(),
+                        Uint::exp10(POS_DECIMAL_PRECISION as _),
+                    )
+                    .ok_or_else(|| {
+                        Error::Other("Failed to compute slippage".to_owned())
+                    })?
+                    .0,
+                0,
+            )
+            .unwrap()
+        }
+    };
+
+    if min_amount_out.is_zero() {
+        return Err(Error::Other(
+            "Forbidding trade with maximum slippage (i.e. 0 as the minimum \
+             output amount)"
+                .to_owned(),
+        ));
+    }
+
+    Ok((route, min_amount_out, Some(amount_out_from_routes)))
+}
+
 /// Query a route of Osmosis liquidity pools
 /// for swapping betwixt token and output_denom
 /// assets.
+///
+/// Also returns the output amount resulting from the
+/// trade. Slippage still needs to be subtracted from
+/// this output amount.
 pub async fn query_osmosis_pool_routes(
     ctx: &impl Namada,
     input_token: &Address,
@@ -1831,7 +1930,7 @@ pub async fn query_osmosis_pool_routes(
     amount: InputAmount,
     output_denom: &str,
     osmosis_sqs_server_url: &str,
-) -> Result<Vec<Vec<OsmosisPoolHop>>, Error> {
+) -> Result<(Vec<Vec<OsmosisPoolHop>>, Amount), Error> {
     #[derive(Deserialize)]
     struct PoolHop {
         id: u64,
@@ -1855,6 +1954,7 @@ pub async fn query_osmosis_pool_routes(
     #[derive(Deserialize)]
     struct ResponseOk {
         route: Vec<Route>,
+        amount_out: Amount,
     }
 
     #[derive(Deserialize)]
@@ -1927,16 +2027,20 @@ pub async fn query_osmosis_pool_routes(
         )));
     }
 
-    let ResponseOk { route } = response.json().await.map_err(|err| {
-        Error::Other(format!(
-            "Failed to read success response from HTTP request body: {err}"
-        ))
-    })?;
+    let ResponseOk { route, amount_out } =
+        response.json().await.map_err(|err| {
+            Error::Other(format!(
+                "Failed to read success response from HTTP request body: {err}"
+            ))
+        })?;
 
-    Ok(route
-        .into_iter()
-        .map(|r| r.pools.into_iter().map(OsmosisPoolHop::from).collect())
-        .collect())
+    Ok((
+        route
+            .into_iter()
+            .map(|r| r.pools.into_iter().map(OsmosisPoolHop::from).collect())
+            .collect(),
+        amount_out,
+    ))
 }
 
 /// Query the IBC rate limit for the provided token

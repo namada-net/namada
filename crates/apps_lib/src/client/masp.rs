@@ -8,8 +8,8 @@ use namada_sdk::error::Error;
 use namada_sdk::io::DevNullProgressBar;
 use namada_sdk::io::{Client, Io, MaybeSend, MaybeSync, display, display_line};
 use namada_sdk::masp::{
-    IndexerMaspClient, LedgerMaspClient, MaspLocalTaskEnv, ShieldedContext,
-    ShieldedSyncConfig, ShieldedUtils,
+    IndexerMaspClient, LedgerMaspClient, LinearBackoffSleepMaspClient,
+    MaspLocalTaskEnv, ShieldedContext, ShieldedSyncConfig, ShieldedUtils,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -126,11 +126,14 @@ pub async fn syncing<
             ))
         })?;
 
-        dispatch_client!(IndexerMaspClient::new(
-            client,
-            url,
-            true,
-            args.max_concurrent_fetches,
+        dispatch_client!(LinearBackoffSleepMaspClient::new(
+            IndexerMaspClient::new(
+                client,
+                url,
+                true,
+                args.max_concurrent_fetches,
+            ),
+            Duration::from_millis(5)
         ))?
     } else {
         display_line!(
@@ -139,10 +142,9 @@ pub async fn syncing<
             "==== Shielded sync started using ledger client ====".bold()
         );
 
-        dispatch_client!(LedgerMaspClient::new(
-            client,
-            args.max_concurrent_fetches,
-            Duration::from_millis(5),
+        dispatch_client!(LinearBackoffSleepMaspClient::new(
+            LedgerMaspClient::new(client, args.max_concurrent_fetches,),
+            Duration::from_millis(5)
         ))?
     };
 

@@ -16,6 +16,7 @@ use clru::{CLruCache, CLruCacheConfig, WeightScale};
 use namada_core::collections::HashMap;
 use namada_core::control_flow::time::{ExponentialBackoff, SleepStrategy};
 use namada_core::hash::Hash;
+use namada_gas::GasMeterKind;
 use wasmer::{Module, Store};
 use wasmer_cache::{FileSystemCache, Hash as CacheHash};
 
@@ -29,7 +30,7 @@ pub struct Cache<N, A> {
     /// Cached files directory
     dir: PathBuf,
     /// Compilation progress
-    progress: Arc<RwLock<HashMap<Hash, Compilation>>>,
+    progress: Arc<RwLock<HashMap<CacheKey, Compilation>>>,
     /// In-memory LRU cache of compiled modules
     in_memory: Arc<RwLock<MemoryCache>>,
     /// The cache's name
@@ -53,8 +54,15 @@ pub trait CacheName: Clone + std::fmt::Debug {
     fn name() -> &'static str;
 }
 
+/// WASM cache key consists of the code hash and gas meter kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CacheKey {
+    code_hash: Hash,
+    gas_meter_kind: GasMeterKind,
+}
+
 /// In-memory LRU cache of compiled modules
-type MemoryCache = CLruCache<Hash, Module, RandomState, ModuleCacheScale>;
+type MemoryCache = CLruCache<CacheKey, Module, RandomState, ModuleCacheScale>;
 
 /// Compilation progress
 #[derive(Debug)]
@@ -68,8 +76,8 @@ enum Compilation {
 #[derive(Debug)]
 struct ModuleCacheScale;
 
-impl WeightScale<Hash, Module> for ModuleCacheScale {
-    fn weight(&self, _key: &Hash, _value: &Module) -> usize {
+impl WeightScale<CacheKey, Module> for ModuleCacheScale {
+    fn weight(&self, _key: &CacheKey, _value: &Module) -> usize {
         1
     }
 }
@@ -120,13 +128,14 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
     pub fn fetch(
         &mut self,
         code_hash: &Hash,
+        gas_meter_kind: GasMeterKind,
     ) -> Result<Option<(Module, Store)>, wasm::run::Error> {
         if A::is_read_write() {
-            let module = self.get(code_hash)?;
+            let module = self.get(code_hash, gas_meter_kind)?;
             Ok(module.map(|module| (module, store())))
         } else {
             let store = store();
-            let module = self.peek(code_hash, &store)?;
+            let module = self.peek(code_hash, gas_meter_kind, &store)?;
             Ok(module.map(|module| (module, store)))
         }
     }
@@ -143,9 +152,17 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
 
     /// Get a WASM module from LRU cache, from a file or compile it and cache
     /// it. Updates the position in the LRU cache.
-    fn get(&mut self, hash: &Hash) -> Result<Option<Module>, wasm::run::Error> {
+    fn get(
+        &mut self,
+        hash: &Hash,
+        gas_meter_kind: GasMeterKind,
+    ) -> Result<Option<Module>, wasm::run::Error> {
+        let key = CacheKey {
+            code_hash: *hash,
+            gas_meter_kind,
+        };
         let mut in_memory = self.in_memory.write().unwrap();
-        if let Some(module) = in_memory.get(hash) {
+        if let Some(module) = in_memory.get(&key) {
             tracing::trace!(
                 "{} found {} in cache.",
                 N::name(),
@@ -164,11 +181,11 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
         };
         loop {
             let progress = self.progress.read().unwrap();
-            match progress.get(hash) {
+            match progress.get(&key) {
                 Some(Compilation::Done) => {
                     drop(progress);
                     let mut in_memory = self.in_memory.write().unwrap();
-                    if let Some(module) = in_memory.get(hash) {
+                    if let Some(module) = in_memory.get(&key) {
                         tracing::info!(
                             "{} found {} in memory cache.",
                             N::name(),
@@ -177,17 +194,19 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
                         return Ok(Some(module.clone()));
                     }
 
-                    if let Ok(module) =
-                        file_load_module(&self.dir, hash, &self.store)
-                    {
+                    if let Ok(module) = file_load_module(
+                        &self.dir,
+                        hash,
+                        gas_meter_kind,
+                        &self.store,
+                    ) {
                         tracing::info!(
                             "{} found {} in file cache.",
                             N::name(),
                             hash.to_string()
                         );
                         // Put into cache, ignore result if it's full
-                        let _ =
-                            in_memory.put_with_weight(*hash, module.clone());
+                        let _ = in_memory.put_with_weight(key, module.clone());
 
                         return Ok(Some(module));
                     } else {
@@ -211,15 +230,22 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
                 }
                 None => {
                     drop(progress);
-                    let module = if module_file_exists(&self.dir, hash) {
+                    let module = if module_file_exists(
+                        &self.dir,
+                        hash,
+                        gas_meter_kind,
+                    ) {
                         tracing::info!(
                             "Trying to load {} {} from file.",
                             N::name(),
                             hash.to_string()
                         );
-                        if let Ok(module) =
-                            file_load_module(&self.dir, hash, &self.store)
-                        {
+                        if let Ok(module) = file_load_module(
+                            &self.dir,
+                            hash,
+                            gas_meter_kind,
+                            &self.store,
+                        ) {
                             module
                         } else {
                             return Ok(None);
@@ -230,12 +256,12 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
 
                     // Update progress
                     let mut progress = self.progress.write().unwrap();
-                    progress.insert(*hash, Compilation::Done);
+                    progress.insert(key, Compilation::Done);
 
                     // Put into cache, ignore the result (fails if the module
                     // cannot fit into the cache)
                     let mut in_memory = self.in_memory.write().unwrap();
-                    let _ = in_memory.put_with_weight(*hash, module.clone());
+                    let _ = in_memory.put_with_weight(key, module.clone());
 
                     return Ok(Some(module));
                 }
@@ -248,10 +274,15 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
     fn peek(
         &self,
         hash: &Hash,
+        gas_meter_kind: GasMeterKind,
         store: &Store,
     ) -> Result<Option<Module>, wasm::run::Error> {
+        let key = CacheKey {
+            code_hash: *hash,
+            gas_meter_kind,
+        };
         let in_memory = self.in_memory.read().unwrap();
-        if let Some(module) = in_memory.peek(hash) {
+        if let Some(module) = in_memory.peek(&key) {
             tracing::info!(
                 "{} found {} in cache.",
                 N::name(),
@@ -270,11 +301,11 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
         };
         loop {
             let progress = self.progress.read().unwrap();
-            match progress.get(hash) {
+            match progress.get(&key) {
                 Some(Compilation::Done) => {
                     drop(progress);
                     let in_memory = self.in_memory.read().unwrap();
-                    if let Some(module) = in_memory.peek(hash) {
+                    if let Some(module) = in_memory.peek(&key) {
                         tracing::info!(
                             "{} found {} in memory cache.",
                             N::name(),
@@ -283,7 +314,8 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
                         return Ok(Some(module.clone()));
                     }
 
-                    if let Ok(module) = file_load_module(&self.dir, hash, store)
+                    if let Ok(module) =
+                        file_load_module(&self.dir, hash, gas_meter_kind, store)
                     {
                         tracing::info!(
                             "{} found {} in file cache.",
@@ -313,15 +345,22 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
                 None => {
                     drop(progress);
 
-                    return if module_file_exists(&self.dir, hash) {
+                    return if module_file_exists(
+                        &self.dir,
+                        hash,
+                        gas_meter_kind,
+                    ) {
                         tracing::info!(
                             "Trying to load {} {} from file.",
                             N::name(),
                             hash.to_string()
                         );
-                        if let Ok(module) =
-                            file_load_module(&self.dir, hash, store)
-                        {
+                        if let Ok(module) = file_load_module(
+                            &self.dir,
+                            hash,
+                            gas_meter_kind,
+                            store,
+                        ) {
                             return Ok(Some(module));
                         } else {
                             return Ok(None);
@@ -338,20 +377,26 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
     pub fn compile_or_fetch(
         &mut self,
         code: impl AsRef<[u8]>,
+        gas_meter_kind: GasMeterKind,
     ) -> Result<Option<(Module, Store)>, wasm::run::Error> {
         let hash = hash_of_code(&code);
+        let key = CacheKey {
+            code_hash: hash,
+            gas_meter_kind,
+        };
 
         if !A::is_read_write() {
             // It doesn't update the cache and files
             let progress = self.progress.read().unwrap();
-            match progress.get(&hash) {
+            match progress.get(&key) {
                 Some(_) => {
                     let store = store();
-                    let module = self.peek(&hash, &store)?;
+                    let module = self.peek(&hash, gas_meter_kind, &store)?;
                     return Ok(module.map(|module| (module, store)));
                 }
                 None => {
-                    let code = wasm::run::prepare_wasm_code(code)?;
+                    let code =
+                        wasm::run::prepare_wasm_code(code, gas_meter_kind)?;
                     let store = store();
                     let module = compile(code, &store)?;
                     return Ok(Some((module, store)));
@@ -360,28 +405,39 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
         }
 
         let mut progress = self.progress.write().unwrap();
-        if progress.get(&hash).is_some() {
+        if progress.get(&key).is_some() {
             drop(progress);
-            return self.fetch(&hash);
+            return self.fetch(&hash, gas_meter_kind);
         }
-        progress.insert(hash, Compilation::Compiling);
+        progress.insert(key, Compilation::Compiling);
         drop(progress);
 
         tracing::info!("Compiling {} {}.", N::name(), hash.to_string());
 
-        match wasm::run::prepare_wasm_code(code) {
+        match wasm::run::prepare_wasm_code(code, gas_meter_kind) {
             Ok(code) => match compile(code, &self.store) {
                 Ok(module) => {
                     // Write the file
-                    file_write_module(&self.dir, &module, &hash);
+                    file_write_module(
+                        &self.dir,
+                        &module,
+                        &hash,
+                        gas_meter_kind,
+                    );
 
                     // Update progress
                     let mut progress = self.progress.write().unwrap();
-                    progress.insert(hash, Compilation::Done);
+                    progress.insert(key, Compilation::Done);
 
                     // Put into cache, ignore result if it's full
                     let mut in_memory = self.in_memory.write().unwrap();
-                    let _ = in_memory.put_with_weight(hash, module.clone());
+                    let _ = in_memory.put_with_weight(
+                        CacheKey {
+                            code_hash: hash,
+                            gas_meter_kind,
+                        },
+                        module.clone(),
+                    );
 
                     Ok(Some((module, store())))
                 }
@@ -392,7 +448,7 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
                         err
                     );
                     let mut progress = self.progress.write().unwrap();
-                    progress.swap_remove(&hash);
+                    progress.swap_remove(&key);
                     Err(err)
                 }
             },
@@ -403,7 +459,7 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
                     err
                 );
                 let mut progress = self.progress.write().unwrap();
-                progress.swap_remove(&hash);
+                progress.swap_remove(&key);
                 Err(err)
             }
         }
@@ -411,20 +467,28 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
 
     /// Pre-compile a WASM module to a file. The compilation runs in a new OS
     /// thread and the function returns immediately.
-    pub fn pre_compile(&mut self, code: impl AsRef<[u8]>) {
+    pub fn pre_compile(
+        &mut self,
+        code: impl AsRef<[u8]>,
+        gas_meter_kind: GasMeterKind,
+    ) {
         if A::is_read_write() {
             let hash = hash_of_code(&code);
+            let key = CacheKey {
+                code_hash: hash,
+                gas_meter_kind,
+            };
             let mut progress = self.progress.write().unwrap();
-            match progress.get(&hash) {
+            match progress.get(&key) {
                 Some(_) => {
                     // Already known, do nothing
                 }
                 None => {
-                    if module_file_exists(&self.dir, &hash) {
-                        progress.insert(hash, Compilation::Done);
+                    if module_file_exists(&self.dir, &hash, gas_meter_kind) {
+                        progress.insert(key, Compilation::Done);
                         return;
                     }
-                    progress.insert(hash, Compilation::Compiling);
+                    progress.insert(key, Compilation::Compiling);
                     drop(progress);
                     let progress = self.progress.clone();
                     let code = code.as_ref().to_vec();
@@ -433,18 +497,25 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
                     std::thread::spawn(move || {
                         tracing::info!("Compiling WASM {}.", hash.to_string());
 
-                        let _module = match wasm::run::prepare_wasm_code(code) {
+                        let _module = match wasm::run::prepare_wasm_code(
+                            code,
+                            gas_meter_kind,
+                        ) {
                             Ok(code) => {
                                 match compile(code, &store) {
                                     Ok(module) => {
                                         // Write the file
-                                        file_write_module(&dir, &module, &hash);
+                                        file_write_module(
+                                            &dir,
+                                            &module,
+                                            &hash,
+                                            gas_meter_kind,
+                                        );
 
                                         // Update progress
                                         let mut progress =
                                             progress.write().unwrap();
-                                        progress
-                                            .insert(hash, Compilation::Done);
+                                        progress.insert(key, Compilation::Done);
                                         tracing::info!(
                                             "Finished compiling WASM {hash}."
                                         );
@@ -471,7 +542,7 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
                                             hash.to_string(),
                                             err
                                         );
-                                        progress.swap_remove(&hash);
+                                        progress.swap_remove(&key);
                                         return Err(err);
                                     }
                                 }
@@ -483,7 +554,7 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
                                     hash.to_string(),
                                     err
                                 );
-                                progress.swap_remove(&hash);
+                                progress.swap_remove(&key);
                                 return Err(err);
                             }
                         };
@@ -532,19 +603,25 @@ pub(crate) fn store() -> Store {
     universal::store()
 }
 
-fn file_write_module(dir: impl AsRef<Path>, module: &Module, hash: &Hash) {
+fn file_write_module(
+    dir: impl AsRef<Path>,
+    module: &Module,
+    hash: &Hash,
+    gas_meter_kind: GasMeterKind,
+) {
     use wasmer_cache::Cache;
-    let mut fs_cache = fs_cache(dir, hash);
+    let mut fs_cache = fs_cache(dir, hash, gas_meter_kind);
     fs_cache.store(CacheHash::new(hash.0), module).unwrap();
 }
 
 fn file_load_module(
     dir: impl AsRef<Path>,
     hash: &Hash,
+    gas_meter_kind: GasMeterKind,
     store: &Store,
 ) -> Result<Module, wasmer::DeserializeError> {
     use wasmer_cache::Cache;
-    let fs_cache = fs_cache(dir, hash);
+    let fs_cache = fs_cache(dir, hash, gas_meter_kind);
     let hash = CacheHash::new(hash.0);
     let module = unsafe { fs_cache.load(store, hash) };
     if let Err(err) = module.as_ref() {
@@ -556,22 +633,42 @@ fn file_load_module(
     module
 }
 
-fn fs_cache(dir: impl AsRef<Path>, hash: &Hash) -> FileSystemCache {
-    let path = dir.as_ref().join(hash.to_string().to_lowercase());
+fn fs_cache(
+    dir: impl AsRef<Path>,
+    hash: &Hash,
+    gas_meter_kind: GasMeterKind,
+) -> FileSystemCache {
+    let kind = gas_meter_kind_dir(gas_meter_kind);
+    let path = dir
+        .as_ref()
+        .join(kind)
+        .join(hash.to_string().to_lowercase());
     let mut fs_cache = FileSystemCache::new(path).unwrap();
     fs_cache.set_cache_extension(Some(file_ext()));
     fs_cache
 }
 
-fn module_file_exists(dir: impl AsRef<Path>, hash: &Hash) -> bool {
-    let file =
-        dir.as_ref()
-            .join(hash.to_string().to_lowercase())
-            .join(format!(
-                "{}.{}",
-                hash.to_string().to_lowercase(),
-                file_ext()
-            ));
+fn gas_meter_kind_dir(gas_meter_kind: GasMeterKind) -> &'static str {
+    match gas_meter_kind {
+        GasMeterKind::HostFn => "host_fn",
+        GasMeterKind::MutGlobal => "mut_global",
+    }
+}
+
+fn module_file_exists(
+    dir: impl AsRef<Path>,
+    hash: &Hash,
+    gas_meter_kind: GasMeterKind,
+) -> bool {
+    let file = dir
+        .as_ref()
+        .join(gas_meter_kind_dir(gas_meter_kind))
+        .join(hash.to_string().to_lowercase())
+        .join(format!(
+            "{}.{}",
+            hash.to_string().to_lowercase(),
+            file_ext()
+        ));
     file.exists()
 }
 
@@ -652,7 +749,7 @@ mod test {
         // Load some WASMs and find their hashes and in-memory size
         let tx_read_storage_key = load_wasm(TestWasms::TxReadStorageKey.path());
         let tx_no_op = load_wasm(TestWasms::TxNoOp.path());
-
+        let gas_meter_kind = GasMeterKind::MutGlobal;
         // Create a new cache with the limit set to
         // `max(tx_read_storage_key.size, tx_no_op.size) + 1`
         {
@@ -668,15 +765,21 @@ mod test {
 
             // Fetch `tx_read_storage_key`
             {
-                let fetched = cache.fetch(&tx_read_storage_key.hash).unwrap();
+                let fetched = cache
+                    .fetch(&tx_read_storage_key.hash, gas_meter_kind)
+                    .unwrap();
                 assert_matches!(
                     fetched,
                     None,
                     "The module should not be in cache"
                 );
 
-                let fetched =
-                    cache.compile_or_fetch(&tx_read_storage_key.code).unwrap();
+                let fetched = cache
+                    .compile_or_fetch(
+                        &tx_read_storage_key.code,
+                        GasMeterKind::MutGlobal,
+                    )
+                    .unwrap();
                 assert_matches!(
                     fetched,
                     Some(_),
@@ -685,20 +788,30 @@ mod test {
 
                 let in_memory = cache.in_memory.read().unwrap();
                 assert_matches!(
-                    in_memory.peek(&tx_read_storage_key.hash),
+                    in_memory.peek(&CacheKey {
+                        code_hash: tx_read_storage_key.hash,
+                        gas_meter_kind
+                    }),
                     Some(_),
                     "The module must be in memory"
                 );
 
                 let progress = cache.progress.read().unwrap();
                 assert_matches!(
-                    progress.get(&tx_read_storage_key.hash),
+                    progress.get(&CacheKey {
+                        code_hash: tx_read_storage_key.hash,
+                        gas_meter_kind
+                    }),
                     Some(Compilation::Done),
                     "The progress must be updated"
                 );
 
                 assert!(
-                    module_file_exists(&cache.dir, &tx_read_storage_key.hash),
+                    module_file_exists(
+                        &cache.dir,
+                        &tx_read_storage_key.hash,
+                        gas_meter_kind
+                    ),
                     "The file must be written"
                 );
             }
@@ -706,14 +819,17 @@ mod test {
             // Fetch `tx_no_op`. Fetching another module should get us over the
             // limit, so the previous one should be popped from the cache
             {
-                let fetched = cache.fetch(&tx_no_op.hash).unwrap();
+                let fetched =
+                    cache.fetch(&tx_no_op.hash, gas_meter_kind).unwrap();
                 assert_matches!(
                     fetched,
                     None,
                     "The module must not be in cache"
                 );
 
-                let fetched = cache.compile_or_fetch(&tx_no_op.code).unwrap();
+                let fetched = cache
+                    .compile_or_fetch(&tx_no_op.code, GasMeterKind::MutGlobal)
+                    .unwrap();
                 assert_matches!(
                     fetched,
                     Some(_),
@@ -722,31 +838,48 @@ mod test {
 
                 let in_memory = cache.in_memory.read().unwrap();
                 assert_matches!(
-                    in_memory.peek(&tx_no_op.hash),
+                    in_memory.peek(&CacheKey {
+                        code_hash: tx_no_op.hash,
+                        gas_meter_kind
+                    }),
                     Some(_),
                     "The module must be in memory"
                 );
 
                 let progress = cache.progress.read().unwrap();
                 assert_matches!(
-                    progress.get(&tx_no_op.hash),
+                    progress.get(&CacheKey {
+                        code_hash: tx_no_op.hash,
+                        gas_meter_kind
+                    }),
                     Some(Compilation::Done),
                     "The progress must be updated"
                 );
 
                 assert!(
-                    module_file_exists(&cache.dir, &tx_no_op.hash),
+                    module_file_exists(
+                        &cache.dir,
+                        &tx_no_op.hash,
+                        gas_meter_kind
+                    ),
                     "The file must be written"
                 );
 
                 // The previous module's file should still exist
                 assert!(
-                    module_file_exists(&cache.dir, &tx_read_storage_key.hash),
+                    module_file_exists(
+                        &cache.dir,
+                        &tx_read_storage_key.hash,
+                        gas_meter_kind
+                    ),
                     "The file must be written"
                 );
                 // But it should not be in-memory
                 assert_matches!(
-                    in_memory.peek(&tx_read_storage_key.hash),
+                    in_memory.peek(&CacheKey {
+                        code_hash: tx_read_storage_key.hash,
+                        gas_meter_kind
+                    }),
                     None,
                     "The module should have been popped from memory"
                 );
@@ -763,7 +896,9 @@ mod test {
             cache.in_memory = in_memory;
             cache.progress = Default::default();
             {
-                let fetched = cache.fetch(&tx_read_storage_key.hash).unwrap();
+                let fetched = cache
+                    .fetch(&tx_read_storage_key.hash, gas_meter_kind)
+                    .unwrap();
                 assert_matches!(
                     fetched,
                     Some(_),
@@ -772,31 +907,48 @@ mod test {
 
                 let in_memory = cache.in_memory.read().unwrap();
                 assert_matches!(
-                    in_memory.peek(&tx_read_storage_key.hash),
+                    in_memory.peek(&CacheKey {
+                        code_hash: tx_read_storage_key.hash,
+                        gas_meter_kind
+                    }),
                     Some(_),
                     "The module must be in memory"
                 );
 
                 let progress = cache.progress.read().unwrap();
                 assert_matches!(
-                    progress.get(&tx_read_storage_key.hash),
+                    progress.get(&CacheKey {
+                        code_hash: tx_read_storage_key.hash,
+                        gas_meter_kind
+                    }),
                     Some(Compilation::Done),
                     "The progress must be updated"
                 );
 
                 assert!(
-                    module_file_exists(&cache.dir, &tx_read_storage_key.hash),
+                    module_file_exists(
+                        &cache.dir,
+                        &tx_read_storage_key.hash,
+                        gas_meter_kind
+                    ),
                     "The file must be written"
                 );
 
                 // The previous module's file should still exist
                 assert!(
-                    module_file_exists(&cache.dir, &tx_no_op.hash),
+                    module_file_exists(
+                        &cache.dir,
+                        &tx_no_op.hash,
+                        gas_meter_kind
+                    ),
                     "The file must be written"
                 );
                 // But it should not be in-memory
                 assert_matches!(
-                    in_memory.peek(&tx_no_op.hash),
+                    in_memory.peek(&CacheKey {
+                        code_hash: tx_no_op.hash,
+                        gas_meter_kind
+                    }),
                     None,
                     "The module should have been popped from memory"
                 );
@@ -804,7 +956,9 @@ mod test {
 
             // Fetch `tx_read_storage_key` again, now it should be in-memory
             {
-                let fetched = cache.fetch(&tx_read_storage_key.hash).unwrap();
+                let fetched = cache
+                    .fetch(&tx_read_storage_key.hash, gas_meter_kind)
+                    .unwrap();
                 assert_matches!(
                     fetched,
                     Some(_),
@@ -813,31 +967,48 @@ mod test {
 
                 let in_memory = cache.in_memory.read().unwrap();
                 assert_matches!(
-                    in_memory.peek(&tx_read_storage_key.hash),
+                    in_memory.peek(&CacheKey {
+                        code_hash: tx_read_storage_key.hash,
+                        gas_meter_kind
+                    }),
                     Some(_),
                     "The module must be in memory"
                 );
 
                 let progress = cache.progress.read().unwrap();
                 assert_matches!(
-                    progress.get(&tx_read_storage_key.hash),
+                    progress.get(&CacheKey {
+                        code_hash: tx_read_storage_key.hash,
+                        gas_meter_kind
+                    }),
                     Some(Compilation::Done),
                     "The progress must be updated"
                 );
 
                 assert!(
-                    module_file_exists(&cache.dir, &tx_read_storage_key.hash),
+                    module_file_exists(
+                        &cache.dir,
+                        &tx_read_storage_key.hash,
+                        gas_meter_kind
+                    ),
                     "The file must be written"
                 );
 
                 // The previous module's file should still exist
                 assert!(
-                    module_file_exists(&cache.dir, &tx_no_op.hash),
+                    module_file_exists(
+                        &cache.dir,
+                        &tx_no_op.hash,
+                        gas_meter_kind
+                    ),
                     "The file must be written"
                 );
                 // But it should not be in-memory
                 assert_matches!(
-                    in_memory.peek(&tx_no_op.hash),
+                    in_memory.peek(&CacheKey {
+                        code_hash: tx_no_op.hash,
+                        gas_meter_kind
+                    }),
                     None,
                     "The module should have been popped from memory"
                 );
@@ -847,7 +1018,8 @@ mod test {
             {
                 let mut cache = cache.read_only();
 
-                let fetched = cache.fetch(&tx_no_op.hash).unwrap();
+                let fetched =
+                    cache.fetch(&tx_no_op.hash, gas_meter_kind).unwrap();
                 assert_matches!(
                     fetched,
                     Some(_),
@@ -855,7 +1027,9 @@ mod test {
                 );
 
                 // Fetching with read-only should not modify the in-memory cache
-                let fetched = cache.compile_or_fetch(&tx_no_op.code).unwrap();
+                let fetched = cache
+                    .compile_or_fetch(&tx_no_op.code, gas_meter_kind)
+                    .unwrap();
                 assert_matches!(
                     fetched,
                     Some(_),
@@ -864,14 +1038,20 @@ mod test {
 
                 let in_memory = cache.in_memory.read().unwrap();
                 assert_matches!(
-                    in_memory.peek(&tx_no_op.hash),
+                    in_memory.peek(&CacheKey {
+                        code_hash: tx_no_op.hash,
+                        gas_meter_kind
+                    }),
                     None,
                     "The module should not be added back to in-memory cache"
                 );
 
                 let in_memory = cache.in_memory.read().unwrap();
                 assert_matches!(
-                    in_memory.peek(&tx_read_storage_key.hash),
+                    in_memory.peek(&CacheKey {
+                        code_hash: tx_read_storage_key.hash,
+                        gas_meter_kind
+                    }),
                     Some(_),
                     "The previous module must still be in memory"
                 );
@@ -884,26 +1064,37 @@ mod test {
         // Some random bytes
         let invalid_wasm = vec![1_u8, 0, 8, 10, 6, 1];
         let hash = hash_of_code(&invalid_wasm);
+        let gas_meter_kind = GasMeterKind::HostFn;
         let (mut cache, _) = testing::cache::<TestCache>();
 
         // Try to compile it
         let error = cache
-            .compile_or_fetch(&invalid_wasm)
+            .compile_or_fetch(&invalid_wasm, GasMeterKind::MutGlobal)
             .expect_err("Compilation should fail");
         println!("Error: {}", error);
 
         let in_memory = cache.in_memory.read().unwrap();
         assert_matches!(
-            in_memory.peek(&hash),
+            in_memory.peek(&CacheKey {
+                code_hash: hash,
+                gas_meter_kind
+            }),
             None,
             "There should be no entry for this hash in memory"
         );
 
         let progress = cache.progress.read().unwrap();
-        assert_matches!(progress.get(&hash), None, "Any progress is removed");
+        assert_matches!(
+            progress.get(&CacheKey {
+                code_hash: hash,
+                gas_meter_kind
+            }),
+            None,
+            "Any progress is removed"
+        );
 
         assert!(
-            !module_file_exists(&cache.dir, &hash),
+            !module_file_exists(&cache.dir, &hash, gas_meter_kind),
             "The file must not be written"
         );
     }
@@ -926,14 +1117,19 @@ mod test {
                 max_bytes
             );
             let (mut cache, _tmp_dir) = cache(max_bytes);
+            let gas_meter_kind = GasMeterKind::MutGlobal;
 
             // Pre-compile `vp_always_true`
             {
-                cache.pre_compile(&vp_always_true.code);
+                cache
+                    .pre_compile(&vp_always_true.code, GasMeterKind::MutGlobal);
 
                 let progress = cache.progress.read().unwrap();
                 assert_matches!(
-                    progress.get(&vp_always_true.hash),
+                    progress.get(&CacheKey {
+                        code_hash: vp_always_true.hash,
+                        gas_meter_kind
+                    }),
                     Some(Compilation::Done | Compilation::Compiling),
                     "The progress must be updated"
                 );
@@ -941,7 +1137,8 @@ mod test {
 
             // Now fetch it to wait for it finish compilation
             {
-                let fetched = cache.fetch(&vp_always_true.hash).unwrap();
+                let fetched =
+                    cache.fetch(&vp_always_true.hash, gas_meter_kind).unwrap();
                 assert_matches!(
                     fetched,
                     Some(_),
@@ -950,20 +1147,30 @@ mod test {
 
                 let in_memory = cache.in_memory.read().unwrap();
                 assert_matches!(
-                    in_memory.peek(&vp_always_true.hash),
+                    in_memory.peek(&CacheKey {
+                        code_hash: vp_always_true.hash,
+                        gas_meter_kind
+                    }),
                     Some(_),
                     "The module must be in memory"
                 );
 
                 let progress = cache.progress.read().unwrap();
                 assert_matches!(
-                    progress.get(&vp_always_true.hash),
+                    progress.get(&CacheKey {
+                        code_hash: vp_always_true.hash,
+                        gas_meter_kind
+                    }),
                     Some(Compilation::Done),
                     "The progress must be updated"
                 );
 
                 assert!(
-                    module_file_exists(&cache.dir, &vp_always_true.hash),
+                    module_file_exists(
+                        &cache.dir,
+                        &vp_always_true.hash,
+                        gas_meter_kind
+                    ),
                     "The file must be written"
                 );
             }
@@ -972,11 +1179,14 @@ mod test {
             // over the limit, so the previous one should be popped
             // from the cache
             {
-                cache.pre_compile(&vp_eval.code);
+                cache.pre_compile(&vp_eval.code, GasMeterKind::MutGlobal);
 
                 let progress = cache.progress.read().unwrap();
                 assert_matches!(
-                    progress.get(&vp_eval.hash),
+                    progress.get(&CacheKey {
+                        code_hash: vp_eval.hash,
+                        gas_meter_kind
+                    }),
                     Some(Compilation::Done | Compilation::Compiling),
                     "The progress must be updated"
                 );
@@ -984,7 +1194,8 @@ mod test {
 
             // Now fetch it to wait for it finish compilation
             {
-                let fetched = cache.fetch(&vp_eval.hash).unwrap();
+                let fetched =
+                    cache.fetch(&vp_eval.hash, gas_meter_kind).unwrap();
                 assert_matches!(
                     fetched,
                     Some(_),
@@ -993,24 +1204,38 @@ mod test {
 
                 let in_memory = cache.in_memory.read().unwrap();
                 assert_matches!(
-                    in_memory.peek(&vp_eval.hash),
+                    in_memory.peek(&CacheKey {
+                        code_hash: vp_eval.hash,
+                        gas_meter_kind
+                    }),
                     Some(_),
                     "The module must be in memory"
                 );
 
                 assert!(
-                    module_file_exists(&cache.dir, &vp_eval.hash),
+                    module_file_exists(
+                        &cache.dir,
+                        &vp_eval.hash,
+                        gas_meter_kind
+                    ),
                     "The file must be written"
                 );
 
                 // The previous module's file should still exist
                 assert!(
-                    module_file_exists(&cache.dir, &vp_always_true.hash),
+                    module_file_exists(
+                        &cache.dir,
+                        &vp_always_true.hash,
+                        gas_meter_kind
+                    ),
                     "The file must be written"
                 );
                 // But it should not be in-memory
                 assert_matches!(
-                    in_memory.peek(&vp_always_true.hash),
+                    in_memory.peek(&CacheKey {
+                        code_hash: vp_always_true.hash,
+                        gas_meter_kind
+                    }),
                     None,
                     "The module should have been popped from memory"
                 );
@@ -1024,13 +1249,17 @@ mod test {
         let invalid_wasm = vec![1_u8];
         let hash = hash_of_code(&invalid_wasm);
         let (mut cache, _) = testing::cache::<TestCache>();
+        let gas_meter_kind = GasMeterKind::HostFn;
 
         // Try to pre-compile it
         {
-            cache.pre_compile(&invalid_wasm);
+            cache.pre_compile(&invalid_wasm, GasMeterKind::MutGlobal);
             let progress = cache.progress.read().unwrap();
             assert_matches!(
-                progress.get(&hash),
+                progress.get(&CacheKey {
+                    code_hash: hash,
+                    gas_meter_kind
+                }),
                 Some(Compilation::Done | Compilation::Compiling) | None,
                 "The progress must be updated"
             );
@@ -1038,7 +1267,7 @@ mod test {
 
         // Now fetch it to wait for it finish compilation
         {
-            let fetched = cache.fetch(&hash).unwrap();
+            let fetched = cache.fetch(&hash, gas_meter_kind).unwrap();
             assert_matches!(
                 fetched,
                 None,
@@ -1047,20 +1276,26 @@ mod test {
 
             let in_memory = cache.in_memory.read().unwrap();
             assert_matches!(
-                in_memory.peek(&hash),
+                in_memory.peek(&CacheKey {
+                    code_hash: hash,
+                    gas_meter_kind
+                }),
                 None,
                 "There should be no entry for this hash in memory"
             );
 
             let progress = cache.progress.read().unwrap();
             assert_matches!(
-                progress.get(&hash),
+                progress.get(&CacheKey {
+                    code_hash: hash,
+                    gas_meter_kind
+                }),
                 None,
                 "Any progress is removed"
             );
 
             assert!(
-                !module_file_exists(&cache.dir, &hash),
+                !module_file_exists(&cache.dir, &hash, gas_meter_kind),
                 "The file must not be written"
             );
         }
@@ -1077,8 +1312,10 @@ mod test {
                 // No in-memory cache needed, but must be non-zero
                 1,
             );
-            let (_module, _store) =
-                cache.compile_or_fetch(&code).unwrap().unwrap();
+            let (_module, _store) = cache
+                .compile_or_fetch(&code, GasMeterKind::MutGlobal)
+                .unwrap()
+                .unwrap();
             1
         };
         println!(

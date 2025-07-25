@@ -1136,7 +1136,7 @@ fn format_timestamp(datetime: DateTimeUtc) -> String {
     for (i, ch) in datetime.char_indices() {
         if ch == '.' {
             secfrac_width = Some(0);
-        } else if let Some(ref mut secfrac_width) = &mut secfrac_width {
+        } else if let Some(secfrac_width) = &mut secfrac_width {
             if ch.is_ascii_digit() {
                 *secfrac_width += 1;
             } else {
@@ -2821,7 +2821,7 @@ mod test_signing {
             let mut cmt = cmts.first().expect("Test failed").clone();
             for section in tx_malformed.sections.iter_mut() {
                 if section.get_hash() == cmt.code_hash {
-                    if let Section::Code(ref mut data) = section {
+                    if let Section::Code(data) = section {
                         data.tag = Some(tag.to_string());
                         cmt.code_hash = section.get_hash();
                     }

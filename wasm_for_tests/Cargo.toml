@@ -12,6 +12,7 @@ members = [
     "tx_no_op_event",
     "tx_proposal_code",
     "tx_proposal_ibc_token_inflation",
+    "tx_proposal_ibc_unlimited_channel",
     "tx_proposal_masp_reward",
     "tx_proposal_token_gas",
     "tx_read_storage_key",
@@ -28,9 +29,9 @@ members = [
 
 [workspace.package]
 authors = ["Heliax AG <hello@heliax.dev>"]
-edition = "2021"
+edition = "2024"
 license = "GPL-3.0"
-version = "0.150.0"
+version = "0.251.0"
 
 [workspace.dependencies]
 namada_test_utils = { path = "../crates/test_utils" }

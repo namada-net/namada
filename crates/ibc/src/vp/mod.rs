@@ -32,17 +32,19 @@ use namada_vp::native_vp::{Ctx, CtxPreStorageRead, NativeVp, VpEvaluator};
 use thiserror::Error;
 
 use crate::context::middlewares::create_transfer_middlewares;
+use crate::core::channel::types::msgs::PacketMsg;
+use crate::core::handler::types::msgs::MsgEnvelope;
 use crate::core::host::types::identifiers::ChainId as IbcChainId;
 use crate::core::host::types::path::UPGRADED_IBC_STATE;
 use crate::event::IbcEvent;
 use crate::storage::{
     deposit_key, get_limits, is_ibc_key, is_ibc_trace_key, mint_amount_key,
-    withdraw_key,
+    unlimited_channel_key, withdraw_key,
 };
 use crate::trace::calc_hash;
 use crate::{
-    COMMITMENT_PREFIX, Error as ActionError, IbcActions, NftTransferModule,
-    ValidationParams,
+    COMMITMENT_PREFIX, Error as ActionError, IbcActions, IbcMessage,
+    NftTransferModule, ValidationParams,
 };
 
 #[allow(missing_docs)]
@@ -177,7 +179,7 @@ where
         self.validate_trace(keys_changed)?;
 
         // Check the limits
-        self.check_limits(keys_changed)?;
+        self.check_limits(&tx_data, keys_changed)?;
 
         Ok(())
     }
@@ -384,7 +386,35 @@ where
         Ok(())
     }
 
-    fn check_limits(&self, keys_changed: &BTreeSet<Key>) -> Result<bool> {
+    fn check_limits(
+        &self,
+        tx_data: &[u8],
+        keys_changed: &BTreeSet<Key>,
+    ) -> Result<bool> {
+        // Check the unlimited channels
+        let message = crate::decode_message::<Transfer>(tx_data)?;
+        let transfer_channel = match &message {
+            IbcMessage::Transfer(msg_transfer) => {
+                Some(&msg_transfer.message.chan_id_on_a)
+            }
+            IbcMessage::NftTransfer(msg_nft_transfer) => {
+                Some(&msg_nft_transfer.message.chan_id_on_a)
+            }
+            IbcMessage::Envelope(boxed) => {
+                if let MsgEnvelope::Packet(PacketMsg::Recv(msg)) = &**boxed {
+                    Some(&msg.packet.chan_id_on_b)
+                } else {
+                    None
+                }
+            }
+        };
+        if let Some(channel) = transfer_channel {
+            let unlimited_channel_key = unlimited_channel_key(channel);
+            if self.ctx.has_key_pre(&unlimited_channel_key)? {
+                return Ok(true);
+            }
+        }
+
         let tokens: BTreeSet<&Address> = keys_changed
             .iter()
             .filter_map(|k| {
@@ -476,7 +506,9 @@ mod tests {
     use std::str::FromStr;
 
     use assert_matches::assert_matches;
+    use ibc::apps::transfer::types::error::TokenTransferError;
     use ibc::core::channel::types::timeout::TimeoutTimestamp;
+    use ibc::core::host::types::error::HostError;
     use ibc::primitives::IntoTimestamp;
     use ibc_testkit::testapp::ibc::clients::mock::client_state::{
         MOCK_CLIENT_TYPE, MockClientState, client_type,
@@ -485,7 +517,7 @@ mod tests {
     use ibc_testkit::testapp::ibc::clients::mock::header::MockHeader;
     use namada_core::address::InternalAddress;
     use namada_core::address::testing::{
-        established_address_1, established_address_2, nam,
+        apfel, established_address_1, established_address_2, nam,
     };
     use namada_core::borsh::{BorshDeserialize, BorshSerializeExt};
     use namada_core::chain::testing::get_dummy_header;
@@ -494,7 +526,7 @@ mod tests {
     use namada_core::storage::TxIndex;
     use namada_core::tendermint::time::Time as TmTime;
     use namada_core::time::DurationSecs;
-    use namada_gas::{TxGasMeter, VpGasMeter};
+    use namada_gas::{GasMeterKind, TxGasMeter, VpGasMeter};
     use namada_governance::parameters::GovernanceParameters;
     use namada_parameters::EpochDuration;
     use namada_parameters::storage::get_epoch_duration_storage_key;
@@ -1060,6 +1092,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
 
         let ibc = Ibc::new(ctx);
@@ -1136,6 +1169,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
 
         let ibc = Ibc::new(ctx);
@@ -1262,6 +1296,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         // this should return true because state has been stored
@@ -1371,6 +1406,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         // this should return true because state has been stored
@@ -1465,6 +1501,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         // this should fail because no event
@@ -1586,6 +1623,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         // this should return true because state has been stored
@@ -1696,6 +1734,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         assert_matches!(
@@ -1791,6 +1830,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         assert_matches!(
@@ -1914,6 +1954,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         assert_matches!(
@@ -2036,6 +2077,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         assert_matches!(
@@ -2143,6 +2185,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         assert_matches!(
@@ -2245,6 +2288,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         assert_matches!(
@@ -2401,6 +2445,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         assert_matches!(
@@ -2530,13 +2575,6 @@ mod tests {
             .write(&trace_key, bytes)
             .expect("write failed");
         keys_changed.insert(trace_key);
-        let trace_key = ibc_trace_key(nam().to_string(), &trace_hash);
-        let bytes = coin.denom.to_string().serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&trace_key, bytes)
-            .expect("write failed");
-        keys_changed.insert(trace_key);
         // event
         let recv_event = RecvEvent {
             sender: sender.to_string().into(),
@@ -2612,6 +2650,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         assert_matches!(
@@ -2767,6 +2806,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         assert_matches!(
@@ -2925,6 +2965,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         assert_matches!(
@@ -3083,6 +3124,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         assert_matches!(
@@ -3261,6 +3303,7 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         assert_matches!(
@@ -3369,13 +3412,6 @@ mod tests {
         let ibc_trace = format!("{class_id}/{token_id}");
         let trace_hash = calc_hash(&ibc_trace);
         let trace_key = ibc_trace_key(receiver.to_string(), &trace_hash);
-        let bytes = ibc_trace.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&trace_key, bytes)
-            .expect("write failed");
-        keys_changed.insert(trace_key);
-        let trace_key = ibc_trace_key(token_id, &trace_hash);
         let bytes = ibc_trace.serialize_to_vec();
         let _ = state
             .write_log_mut()
@@ -3495,11 +3531,185 @@ mod tests {
             &keys_changed,
             &verifiers,
             vp_wasm_cache,
+            GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
         assert_matches!(
             ibc.validate_tx(&batched_tx, &keys_changed, &verifiers),
             Ok(_)
         );
+    }
+
+    #[test]
+    fn test_send_invalid_base_denom() {
+        let mut keys_changed = BTreeSet::new();
+        let mut state = init_storage();
+        insert_init_client(&mut state);
+
+        // insert an open connection
+        let conn_key = connection_key(&get_connection_id());
+        let conn = get_connection(ConnState::Open);
+        let bytes = conn.encode_vec();
+        let _ = state
+            .write_log_mut()
+            .write(&conn_key, bytes)
+            .expect("write failed");
+        // insert an Open channel
+        let channel_key = channel_key(&get_port_id(), &get_channel_id());
+        let channel = get_channel(ChanState::Open, Order::Unordered);
+        let bytes = channel.encode_vec();
+        let _ = state
+            .write_log_mut()
+            .write(&channel_key, bytes)
+            .expect("write failed");
+        // init balance
+        let sender = established_address_1();
+        let ibc_token = ibc_token(format!(
+            "{}/{}/{}",
+            get_port_id(),
+            get_channel_id(),
+            apfel()
+        ));
+        let balance_key = balance_key(&ibc_token, &sender);
+        let amount = Amount::from_u64(100);
+        let _ = state
+            .write_log_mut()
+            .write(&balance_key, amount.serialize_to_vec())
+            .expect("write failed");
+        state.write_log_mut().commit_batch_and_current_tx();
+        state.commit_block().expect("commit failed");
+        // for next block
+        state
+            .in_mem_mut()
+            .set_header(get_dummy_header())
+            .expect("Setting a dummy header shouldn't fail");
+        state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+
+        // prepare data with an invalid message
+        let msg = IbcMsgTransfer {
+            port_id_on_a: get_port_id(),
+            chan_id_on_a: get_channel_id(),
+            packet_data: PacketData {
+                token: PrefixedCoin {
+                    // Invalid denom with IbcToken address
+                    denom: ibc_token.to_string().parse().unwrap(),
+                    amount: amount.into(),
+                },
+                sender: sender.to_string().into(),
+                receiver: "receiver".to_string().into(),
+                memo: "memo".to_string().into(),
+            },
+            timeout_height_on_b: TimeoutHeight::At(Height::new(0, 10).unwrap()),
+            timeout_timestamp_on_b: TimeoutTimestamp::Never,
+        };
+
+        // the sequence send
+        let seq_key = next_sequence_send_key(&get_port_id(), &get_channel_id());
+        let sequence = get_next_seq(&state, &seq_key);
+        let _ = state
+            .write_log_mut()
+            .write(&seq_key, (u64::from(sequence) + 1).to_be_bytes().to_vec())
+            .expect("write failed");
+        keys_changed.insert(seq_key);
+        // packet commitment
+        let packet =
+            packet_from_message(&msg, sequence, &get_channel_counterparty());
+        let commitment_key =
+            commitment_key(&msg.port_id_on_a, &msg.chan_id_on_a, sequence);
+        let commitment = commitment(&packet);
+        let bytes = commitment.into_vec();
+        let _ = state
+            .write_log_mut()
+            .write(&commitment_key, bytes)
+            .expect("write failed");
+        keys_changed.insert(commitment_key);
+        // withdraw
+        let withdraw_key = withdraw_key(&ibc_token);
+        let bytes = amount.serialize_to_vec();
+        let _ = state
+            .write_log_mut()
+            .write(&withdraw_key, bytes)
+            .expect("write failed");
+        keys_changed.insert(withdraw_key);
+        // event
+        let transfer_event = TransferEvent {
+            sender: msg.packet_data.sender.clone(),
+            receiver: msg.packet_data.receiver.clone(),
+            amount: msg.packet_data.token.amount,
+            denom: msg.packet_data.token.denom.clone(),
+            memo: msg.packet_data.memo.clone(),
+        };
+        let event = RawIbcEvent::Module(ModuleEvent::from(transfer_event));
+        state
+            .write_log_mut()
+            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        let event = RawIbcEvent::SendPacket(SendPacket::new(
+            packet,
+            Order::Unordered,
+            get_connection_id(),
+        ));
+        let message_event = RawIbcEvent::Message(MessageEvent::Channel);
+        state
+            .write_log_mut()
+            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
+        state
+            .write_log_mut()
+            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        let message_event =
+            RawIbcEvent::Message(MessageEvent::Module("transfer".to_owned()));
+        state
+            .write_log_mut()
+            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
+
+        let tx_index = TxIndex::default();
+        let tx_code = vec![];
+        let tx_data = MsgTransfer::<Transfer> {
+            message: msg,
+            transfer: None,
+        }
+        .serialize_to_vec();
+
+        let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
+        tx.add_code(tx_code, None)
+            .add_serialized_data(tx_data)
+            .sign_wrapper(keypair_1());
+
+        let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
+            &TxGasMeter::new(TX_GAS_LIMIT, GAS_SCALE),
+        ));
+        let (vp_wasm_cache, _vp_cache_dir) =
+            wasm::compilation_cache::common::testing::vp_cache();
+
+        let verifiers = BTreeSet::new();
+        let batched_tx = tx.batch_ref_first_tx().unwrap();
+        let ctx = Ctx::new(
+            &ADDRESS,
+            &state,
+            batched_tx.tx,
+            batched_tx.cmt,
+            &tx_index,
+            &gas_meter,
+            &keys_changed,
+            &verifiers,
+            vp_wasm_cache,
+            GasMeterKind::MutGlobal,
+        );
+        let ibc = Ibc::new(ctx);
+        // this should fail because of the invalid message
+        let result = ibc
+            .validate_tx(&batched_tx, &keys_changed, &verifiers)
+            .unwrap_err();
+        println!("DEBUG: {result:?}");
+        let error = result.downcast_ref::<ActionError>().unwrap();
+
+        // check the error is related to "base denom"
+        match error {
+            ActionError::TokenTransfer(TokenTransferError::Host(
+                HostError::Other { description: e },
+            )) => {
+                assert!(e.contains("base denom"));
+            }
+            _ => panic!("Unexpected error: {error}"),
+        }
     }
 }

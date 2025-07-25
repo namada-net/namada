@@ -2728,6 +2728,7 @@ pub async fn build_ibc_transfer(
     context: &impl Namada,
     args: &args::TxIbcTransfer,
     bparams: &mut impl BuildParams,
+    skip_fee_handling: bool,
 ) -> Result<(Tx, SigningTxData, Option<MaspEpoch>)> {
     if args.ibc_shielding_data.is_some() && args.ibc_memo.is_some() {
         return Err(Error::Other(
@@ -2850,25 +2851,33 @@ pub async fn build_ibc_transfer(
     let mut transfer = token::Transfer::default();
 
     // Add masp fee payment if necessary
-    let masp_fee_data = get_masp_fee_payment_amount(
-        context,
-        &args.tx,
-        fee_per_gas_unit,
-        // If no custom gas spending key is provided default to the source
-        fee_payer,
-        args.gas_spending_key.or(args.source.spending_key()),
-    )
-    .await?;
-    if let Some(fee_data) = &masp_fee_data {
-        transfer = transfer
-            .transfer(
-                MASP,
-                fee_data.target.to_owned(),
-                fee_data.token.to_owned(),
-                fee_data.amount,
-            )
-            .ok_or(Error::Other("Combined transfer overflows".to_string()))?;
-    }
+    let masp_fee_data = if skip_fee_handling {
+        None
+    } else {
+        let masp_fee_data = get_masp_fee_payment_amount(
+            context,
+            &args.tx,
+            fee_per_gas_unit,
+            // If no custom gas spending key is provided default to the source
+            fee_payer,
+            args.gas_spending_key.or(args.source.spending_key()),
+        )
+        .await?;
+        if let Some(fee_data) = &masp_fee_data {
+            transfer = transfer
+                .transfer(
+                    MASP,
+                    fee_data.target.to_owned(),
+                    fee_data.token.to_owned(),
+                    fee_data.amount,
+                )
+                .ok_or(Error::Other(
+                    "Combined transfer overflows".to_string(),
+                ))?;
+        }
+
+        masp_fee_data
+    };
 
     // For transfer from a spending key
     let shielded_parts = construct_shielded_parts(
@@ -3373,6 +3382,7 @@ pub async fn build_shielded_transfer<N: Namada>(
     context: &N,
     args: &mut args::TxShieldedTransfer,
     bparams: &mut impl BuildParams,
+    skip_fee_handling: bool,
 ) -> Result<(Tx, SigningTxData)> {
     let mut signing_data = signing::aux_signing_data(
         context,
@@ -3429,29 +3439,37 @@ pub async fn build_shielded_transfer<N: Namada>(
     // Construct the tx data with a placeholder shielded section hash
     let mut data = token::Transfer::default();
 
-    let fee_payer = signing_data.fee_payer_or_err()?;
-    // Add masp fee payment if necessary
-    let masp_fee_data = get_masp_fee_payment_amount(
-        context,
-        &args.tx,
-        fee_per_gas_unit,
-        fee_payer,
-        // If no custom gas spending key is provided default to the first
-        // source
-        args.gas_spending_key
-            .or(args.sources.first().map(|data| data.source)),
-    )
-    .await?;
-    if let Some(fee_data) = &masp_fee_data {
-        data = data
-            .transfer(
-                MASP,
-                fee_data.target.to_owned(),
-                fee_data.token.to_owned(),
-                fee_data.amount,
-            )
-            .ok_or(Error::Other("Combined transfer overflows".to_string()))?;
-    }
+    let masp_fee_data = if skip_fee_handling {
+        None
+    } else {
+        let fee_payer = signing_data.fee_payer_or_err()?;
+        // Add masp fee payment if necessary
+        let masp_fee_data = get_masp_fee_payment_amount(
+            context,
+            &args.tx,
+            fee_per_gas_unit,
+            fee_payer,
+            // If no custom gas spending key is provided default to the first
+            // source
+            args.gas_spending_key
+                .or(args.sources.first().map(|data| data.source)),
+        )
+        .await?;
+        if let Some(fee_data) = &masp_fee_data {
+            data = data
+                .transfer(
+                    MASP,
+                    fee_data.target.to_owned(),
+                    fee_data.token.to_owned(),
+                    fee_data.amount,
+                )
+                .ok_or(Error::Other(
+                    "Combined transfer overflows".to_string(),
+                ))?;
+        }
+
+        masp_fee_data
+    };
 
     let shielded_parts = construct_shielded_parts(
         context,
@@ -3729,6 +3747,7 @@ pub async fn build_unshielding_transfer<N: Namada>(
     context: &N,
     args: &mut args::TxUnshieldingTransfer,
     bparams: &mut impl BuildParams,
+    skip_fee_handling: bool,
 ) -> Result<(Tx, SigningTxData)> {
     let mut signing_data = signing::aux_signing_data(
         context,
@@ -3792,28 +3811,36 @@ pub async fn build_unshielding_transfer<N: Namada>(
     }
 
     // Add masp fee payment if necessary
-    let fee_payer = signing_data.fee_payer_or_err()?;
-    let masp_fee_data = get_masp_fee_payment_amount(
-        context,
-        &args.tx,
-        fee_per_gas_unit,
-        fee_payer,
-        // If no custom gas spending key is provided default to the source
-        args.gas_spending_key
-            .or(args.sources.first().map(|x| x.source)),
-    )
-    .await?;
-    if let Some(fee_data) = &masp_fee_data {
-        // Add another unshield to the list
-        data = data
-            .transfer(
-                MASP,
-                fee_data.target.to_owned(),
-                fee_data.token.to_owned(),
-                fee_data.amount,
-            )
-            .ok_or(Error::Other("Combined transfer overflows".to_string()))?;
-    }
+    let masp_fee_data = if skip_fee_handling {
+        None
+    } else {
+        let fee_payer = signing_data.fee_payer_or_err()?;
+        let masp_fee_data = get_masp_fee_payment_amount(
+            context,
+            &args.tx,
+            fee_per_gas_unit,
+            fee_payer,
+            // If no custom gas spending key is provided default to the source
+            args.gas_spending_key
+                .or(args.sources.first().map(|x| x.source)),
+        )
+        .await?;
+        if let Some(fee_data) = &masp_fee_data {
+            // Add another unshield to the list
+            data = data
+                .transfer(
+                    MASP,
+                    fee_data.target.to_owned(),
+                    fee_data.token.to_owned(),
+                    fee_data.amount,
+                )
+                .ok_or(Error::Other(
+                    "Combined transfer overflows".to_string(),
+                ))?;
+        }
+
+        masp_fee_data
+    };
 
     let shielded_parts = construct_shielded_parts(
         context,
@@ -4540,10 +4567,10 @@ async fn check_balance_too_low_err<N: Namada>(
 ) -> Result<TxSourcePostBalance> {
     let balance = match balance {
         CheckBalance::Balance(amt) => amt,
-        CheckBalance::Query(ref balance_key) => {
+        CheckBalance::Query(balance_key) => {
             match rpc::query_storage_value::<N::Client, token::Amount>(
                 context.client(),
-                balance_key,
+                &balance_key,
             )
             .await
             {

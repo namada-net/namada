@@ -10,7 +10,7 @@ use std::marker::PhantomData;
 use namada_core::borsh;
 use namada_core::borsh::BorshDeserialize;
 use namada_core::chain::{ChainId, Epochs};
-use namada_gas::{Gas, GasMetering, VpGasMeter};
+use namada_gas::{Gas, GasMeterKind, GasMetering, VpGasMeter};
 use namada_state::{ConversionState, ReadConversionState};
 use namada_tx::{BatchedTxRef, Tx, TxCommitments};
 
@@ -68,6 +68,8 @@ where
     pub vp_wasm_cache: CA,
     /// VP evaluator type
     pub eval: PhantomData<EVAL>,
+    /// WASM instructions gas meter kind
+    pub gas_meter_kind: GasMeterKind,
 }
 
 /// A Validity predicate runner for calls from the host env `vp_eval` function.
@@ -127,6 +129,7 @@ where
         keys_changed: &'a BTreeSet<Key>,
         verifiers: &'a BTreeSet<Address>,
         vp_wasm_cache: CA,
+        gas_meter_kind: GasMeterKind,
     ) -> Self {
         Self {
             address,
@@ -140,6 +143,7 @@ where
             verifiers,
             vp_wasm_cache,
             eval: PhantomData,
+            gas_meter_kind,
         }
     }
 

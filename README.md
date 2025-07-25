@@ -1,7 +1,7 @@
 # Namada
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE)
-![CI Status](https://github.com/anoma/namada/actions/workflows/ci.yml/badge.svg?branch=main)
+![CI Status](https://github.com/namada-net/namada/actions/workflows/ci.yml/badge.svg?branch=main)
 
 ## Overview
 

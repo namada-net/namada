@@ -9,7 +9,7 @@ use ibc_testkit::testapp::ibc::clients::mock::header::MockHeader;
 use namada_core::chain::testing::get_dummy_header;
 use namada_core::collections::HashMap;
 use namada_sdk::address::{self, Address, InternalAddress};
-use namada_sdk::gas::{TxGasMeter, VpGasMeter};
+use namada_sdk::gas::{GasMeterKind, TxGasMeter, VpGasMeter};
 use namada_sdk::governance::parameters::GovernanceParameters;
 use namada_sdk::hash::Hash;
 use namada_sdk::ibc::apps::transfer::types::error::TokenTransferError;
@@ -133,6 +133,7 @@ pub fn validate_ibc_vp_from_tx<'a>(
         &keys_changed,
         &verifiers,
         vp_wasm_cache,
+        GasMeterKind::MutGlobal,
     );
     let ibc = IbcVp::new(ctx);
 
@@ -172,6 +173,7 @@ pub fn validate_multitoken_vp_from_tx<'a>(
         &keys_changed,
         &verifiers,
         vp_wasm_cache,
+        GasMeterKind::MutGlobal,
     );
 
     MultitokenVp::validate_tx(&ctx, batched_tx, ctx.keys_changed, ctx.verifiers)

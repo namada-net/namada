@@ -347,16 +347,16 @@ mod tests {
                         max_proposal_period: GovernanceParameters::default()
                             .max_proposal_period,
                     };
-                    arb_valid_pos_action(&state).prop_map(move |valid_action| {
-                        Self {
+                    arb_valid_pos_action(state.clone()).prop_map(
+                        move |valid_action| Self {
                             epoch,
                             params: params.clone(),
                             valid_actions: vec![],
                             invalid_pos_changes: vec![],
                             invalid_arbitrary_changes: vec![],
                             committed_valid_actions: vec![valid_action],
-                        }
-                    })
+                        },
+                    )
                 })
                 .boxed()
         }
@@ -366,9 +366,9 @@ mod tests {
             prop_oneof![
                 Just(Transition::CommitTx),
                 Just(Transition::NextEpoch),
-                arb_valid_pos_action(&valid_actions)
+                arb_valid_pos_action(valid_actions.clone())
                     .prop_map(Transition::Valid),
-                arb_invalid_pos_action(&valid_actions)
+                arb_invalid_pos_action(valid_actions.clone())
                     .prop_map(Transition::InvalidPos),
             ]
             .boxed()
@@ -445,8 +445,8 @@ mod tests {
             // Use the tx_env to run PoS VP
             let tx_env = tx_host_env::take();
 
-            let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
-                &tx_env.gas_meter.borrow(),
+            let gas_meter = RefCell::new(VpGasMeter::new_from_meter(
+                &*tx_env.gas_meter.borrow(),
             ));
             let vp_env = TestNativeVpEnv::from_tx_env(tx_env, address::POS);
             let ctx = vp_env.ctx(&gas_meter);
@@ -597,7 +597,7 @@ pub mod testing {
     use itertools::Either;
     use namada_sdk::chain::Epoch;
     use namada_sdk::dec::Dec;
-    use namada_sdk::gas::TxGasMeter;
+    use namada_sdk::gas::{GasMetering, TxGasMeter};
     use namada_sdk::key::RefTo;
     use namada_sdk::key::common::PublicKey;
     use namada_sdk::proof_of_stake::ADDRESS as POS_ADDRESS;
@@ -611,6 +611,7 @@ pub mod testing {
     use namada_sdk::token::{Amount, Change};
     use namada_sdk::{address, governance, key, token};
     use namada_tx_prelude::{Address, StorageRead, StorageWrite};
+    use namada_vm::host_env::gas_meter::GasMeter;
     use proptest::prelude::*;
 
     use crate::tx::{self, tx_host_env};
@@ -729,7 +730,7 @@ pub mod testing {
     }
 
     pub fn arb_valid_pos_action(
-        valid_actions: &[ValidPosAction],
+        valid_actions: Vec<ValidPosAction>,
     ) -> impl Strategy<Value = ValidPosAction> {
         let validators: Vec<Address> = valid_actions
             .iter()
@@ -881,11 +882,13 @@ pub mod testing {
             let current_epoch = tx_host_env::with(|env| {
                 // Reset the gas meter on each change, so that we never run
                 // out in this test
-                let gas_limit = env.gas_meter.borrow().tx_gas_limit.clone();
-                env.gas_meter = RefCell::new(TxGasMeter::new(
-                    gas_limit,
-                    namada_sdk::parameters::get_gas_scale(tx::ctx()).unwrap(),
-                ));
+                let gas_limit = env.gas_meter.borrow().get_gas_limit();
+                env.gas_meter =
+                    RefCell::new(GasMeter::Native(TxGasMeter::new(
+                        gas_limit,
+                        namada_sdk::parameters::get_gas_scale(tx::ctx())
+                            .unwrap(),
+                    )));
                 env.state.in_mem().block.epoch
             });
             println!("Current epoch {}", current_epoch);
@@ -1515,7 +1518,7 @@ pub mod testing {
     }
 
     pub fn arb_invalid_pos_action(
-        valid_actions: &[ValidPosAction],
+        valid_actions: Vec<ValidPosAction>,
     ) -> impl Strategy<Value = InvalidPosAction> {
         let arb_epoch = 0..10_000_u64;
         proptest::collection::vec(
@@ -1531,7 +1534,7 @@ pub mod testing {
     }
 
     pub fn arb_invalid_pos_storage_changes(
-        valid_actions: &[ValidPosAction],
+        valid_actions: Vec<ValidPosAction>,
     ) -> impl Strategy<Value = PosStorageChanges> {
         let validators: Vec<Address> = valid_actions
             .iter()

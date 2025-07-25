@@ -633,7 +633,7 @@ mod test_bridge_pool_vp {
     use namada_core::borsh::BorshSerializeExt;
     use namada_core::eth_bridge_pool::{GasFee, TransferToEthereum};
     use namada_core::hash::Hash;
-    use namada_gas::{TxGasMeter, VpGasMeter};
+    use namada_gas::{GasMeterKind, TxGasMeter, VpGasMeter};
     use namada_state::testing::TestState;
     use namada_state::write_log::WriteLog;
     use namada_state::{StateRead, StorageWrite, TxIndex};
@@ -925,6 +925,7 @@ mod test_bridge_pool_vp {
             keys_changed,
             verifiers,
             VpCache::new(temp_dir(), 100usize),
+            GasMeterKind::MutGlobal,
         )
     }
 

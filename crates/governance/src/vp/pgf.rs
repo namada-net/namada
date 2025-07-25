@@ -281,7 +281,7 @@ mod test {
     use namada_core::key::RefTo;
     use namada_core::key::testing::keypair_1;
     use namada_core::token;
-    use namada_gas::{TxGasMeter, VpGasMeter};
+    use namada_gas::{GasMeterKind, TxGasMeter, VpGasMeter};
     use namada_proof_of_stake::test_utils::get_dummy_genesis_validator;
     use namada_state::testing::TestState;
     use namada_state::{BlockHeight, Epoch, State, StateRead, TxIndex};
@@ -415,6 +415,7 @@ mod test {
             &keys_changed,
             &verifiers,
             vp_wasm_cache.clone(),
+            GasMeterKind::MutGlobal,
         );
 
         let res =
@@ -501,6 +502,7 @@ mod test {
             &keys_changed,
             &verifiers,
             vp_wasm_cache.clone(),
+            GasMeterKind::MutGlobal,
         );
 
         let res =

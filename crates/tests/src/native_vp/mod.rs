@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 
 use namada_sdk::address::Address;
-use namada_sdk::gas::VpGasMeter;
+use namada_sdk::gas::{GasMeterKind, VpGasMeter};
 use namada_sdk::state::StateRead;
 use namada_sdk::state::testing::TestState;
 use namada_sdk::storage;
@@ -71,6 +71,7 @@ impl TestNativeVpEnv {
             &self.keys_changed,
             &self.verifiers,
             self.tx_env.vp_wasm_cache.clone(),
+            GasMeterKind::MutGlobal,
         );
         init_native_vp(ctx)
     }
@@ -90,6 +91,7 @@ impl TestNativeVpEnv {
             &self.keys_changed,
             &self.verifiers,
             self.tx_env.vp_wasm_cache.clone(),
+            GasMeterKind::MutGlobal,
         )
     }
 

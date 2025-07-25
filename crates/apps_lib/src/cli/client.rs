@@ -125,7 +125,48 @@ impl CliApi {
 
                         let args = args.to_sdk(&mut ctx)?;
                         let namada = ctx.to_sdk(client, io);
-                        let args = args.into_ibc_transfer(&namada).await?;
+                        let args = args
+                            .into_ibc_transfer(
+                                &namada,
+                                |_route, min_amount, quote_amount| {
+                                    use std::io::Write;
+
+                                    if let Some(quote_amount) = quote_amount {
+                                        print!(
+                                            "Minimum output is {min_amount}, \
+                                             while the quote price is \
+                                             {quote_amount}, proceed with \
+                                             trade (y/n)? "
+                                        );
+                                    } else {
+                                        print!(
+                                            "Minimum output is {min_amount}, \
+                                             proceed with trade (y/n)? "
+                                        );
+                                    }
+
+                                    std::io::stdout()
+                                        .flush()
+                                        .expect("Failed to flush stdout");
+
+                                    let line = {
+                                        let mut line = String::new();
+                                        std::io::stdin()
+                                            .read_line(&mut line)
+                                            .expect(
+                                                "Failed to read line from \
+                                                 stdin",
+                                            );
+                                        line
+                                    };
+
+                                    matches!(
+                                        line.trim(),
+                                        "y" | "Y" | "yes" | "YES" | "Yes"
+                                    )
+                                },
+                            )
+                            .await?;
 
                         tx::submit_ibc_transfer(&namada, args).await?;
                     }

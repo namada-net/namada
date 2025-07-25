@@ -233,6 +233,11 @@ impl TrialDecrypted {
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
+
+    /// Check if the tx with  [`MaspIndexedTx`] was successfully decrypted
+    pub fn has_indexed_tx(&self, ix: &MaspIndexedTx) -> bool {
+        self.inner.contains_key(ix)
+    }
 }
 
 /// A cache of fetched indexed transactions.

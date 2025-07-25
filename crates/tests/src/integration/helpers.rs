@@ -87,10 +87,10 @@ pub fn find_keypair(
 pub fn make_temp_account(
     node: &MockNode,
     ledger_address: &str,
-    key_alias: impl AsRef<str>,
-    token: impl AsRef<str>,
+    key_alias: &'static str,
+    token: &str,
     amount: u64,
-) -> eyre::Result<(impl AsRef<str>, common::SecretKey)> {
+) -> eyre::Result<(&'static str, common::SecretKey)> {
     // a. Generate a new key for an implicit account.
     run(
         node,
@@ -98,7 +98,7 @@ pub fn make_temp_account(
         vec![
             "gen",
             "--alias",
-            key_alias.as_ref(),
+            key_alias,
             "--unsafe-dont-encrypt",
             "--raw",
         ],
@@ -107,7 +107,7 @@ pub fn make_temp_account(
     let reveal_args = vec![
         "reveal-pk",
         "--public-key",
-        key_alias.as_ref(),
+        key_alias,
         "--gas-payer",
         FRANK_KEY,
         "--node",
@@ -123,9 +123,9 @@ pub fn make_temp_account(
         "--source",
         FRANK,
         "--target",
-        key_alias.as_ref(),
+        key_alias,
         "--token",
-        token.as_ref(),
+        token,
         "--amount",
         &amount,
         "--signing-keys",
@@ -137,7 +137,7 @@ pub fn make_temp_account(
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
     // d. Obtain the key pair associated with the new address
-    let keypair = find_keypair(node, key_alias.as_ref())?;
+    let keypair = find_keypair(node, key_alias)?;
     Ok((key_alias, keypair))
 }
 

@@ -1,8 +1,8 @@
 [package]
 name = "namada_fuzz"
-version = "0.150.0"
+version = "0.251.0"
 publish = false
-edition = "2021"
+edition = "2024"
 
 [package.metadata]
 cargo-fuzz = true

@@ -37,6 +37,8 @@ use namada_sdk::validation::{
     MultitokenVp, NativeVpCtx, ParametersVp, PgfVp, PosVp,
 };
 use namada_sdk::{governance, parameters, state, storage, token};
+#[doc(inline)]
+pub use namada_vm::wasm::run::GasMeterKind;
 use namada_vm::wasm::{TxCache, VpCache};
 use namada_vm::{self, WasmCacheAccess, wasm};
 use namada_vote_ext::EthereumTxData;
@@ -249,6 +251,7 @@ where
                     state,
                     vp_wasm_cache,
                     tx_wasm_cache,
+                    GasMeterKind::MutGlobal,
                 )
             } else {
                 // Governance proposal. We don't allow tx batches in this case,
@@ -266,6 +269,7 @@ where
                         vp_wasm_cache,
                         tx_wasm_cache,
                     },
+                    GasMeterKind::MutGlobal,
                 )
                 .map_err(|e| Box::new(DispatchError::from(e)))?;
 
@@ -343,6 +347,7 @@ pub(crate) fn dispatch_inner_txs<'a, S, D, H, CA>(
     state: &'a mut S,
     vp_wasm_cache: &'a mut VpCache<CA>,
     tx_wasm_cache: &'a mut TxCache<CA>,
+    gas_meter_kind: GasMeterKind,
 ) -> std::result::Result<TxResult<Error>, Box<DispatchError>>
 where
     S: 'static
@@ -378,8 +383,9 @@ where
                 vp_wasm_cache,
                 tx_wasm_cache,
             },
+            gas_meter_kind,
         ) {
-            Err(Error::GasError(ref msg)) => {
+            Err(Error::GasError(msg)) => {
                 // Gas error aborts the execution of the entire batch
                 tx_result.insert_inner_tx_result(
                     wrapper_hash,
@@ -826,6 +832,7 @@ where
                 vp_wasm_cache,
                 tx_wasm_cache,
             },
+            GasMeterKind::MutGlobal,
         ) {
             Ok(result) => {
                 // NOTE: do not commit yet cause this could be exploited to get
@@ -881,7 +888,7 @@ where
 
     tx_gas_meter
         .borrow_mut()
-        .consume(masp_gas_meter.borrow().get_tx_consumed_gas())
+        .consume(masp_gas_meter.borrow().get_consumed_gas())
         .map_err(|e| Error::GasError(e.to_string()))?;
 
     Ok(valid_batched_tx_result)
@@ -1022,6 +1029,7 @@ fn apply_wasm_tx<S, D, H, CA>(
     batched_tx: &BatchedTxRef<'_>,
     tx_index: &TxIndex,
     shell_params: ShellParams<'_, S, D, H, CA>,
+    gas_meter_kind: GasMeterKind,
 ) -> Result<BatchedTxResult>
 where
     S: 'static + State<D = D, H = H> + ReadConversionState + Sync,
@@ -1044,6 +1052,7 @@ where
         tx_gas_meter,
         vp_wasm_cache,
         tx_wasm_cache,
+        gas_meter_kind,
     )?;
 
     let vps_result = check_vps(CheckVps {
@@ -1053,6 +1062,7 @@ where
         tx_gas_meter: &mut tx_gas_meter.borrow_mut(),
         verifiers_from_tx: &verifiers,
         vp_wasm_cache,
+        gas_meter_kind,
     })?;
 
     let initialized_accounts = state.write_log().get_initialized_accounts();
@@ -1161,6 +1171,7 @@ fn execute_tx<S, D, H, CA>(
     tx_gas_meter: &RefCell<TxGasMeter>,
     vp_wasm_cache: &mut VpCache<CA>,
     tx_wasm_cache: &mut TxCache<CA>,
+    gas_meter_kind: GasMeterKind,
 ) -> Result<BTreeSet<Address>>
 where
     S: State<D = D, H = H>,
@@ -1177,6 +1188,7 @@ where
         batched_tx.cmt,
         vp_wasm_cache,
         tx_wasm_cache,
+        gas_meter_kind,
     )
     .map_err(|err| match err {
         wasm::run::Error::GasError(msg) => Error::GasError(msg),
@@ -1197,6 +1209,7 @@ where
     tx_gas_meter: &'a mut TxGasMeter,
     verifiers_from_tx: &'a BTreeSet<Address>,
     vp_wasm_cache: &'a mut VpCache<CA>,
+    gas_meter_kind: GasMeterKind,
 }
 
 /// Check the acceptance of a transaction by validity predicates
@@ -1208,6 +1221,7 @@ fn check_vps<S, CA>(
         tx_gas_meter,
         verifiers_from_tx,
         vp_wasm_cache,
+        gas_meter_kind,
     }: CheckVps<'_, S, CA>,
 ) -> Result<VpsResult>
 where
@@ -1226,6 +1240,7 @@ where
         state,
         tx_gas_meter,
         vp_wasm_cache,
+        gas_meter_kind,
     )?;
     tracing::debug!("Total VPs gas cost {:?}", vps_gas);
 
@@ -1246,6 +1261,7 @@ fn execute_vps<S, CA>(
     state: &S,
     tx_gas_meter: &TxGasMeter,
     vp_wasm_cache: &mut VpCache<CA>,
+    gas_meter_kind: GasMeterKind,
 ) -> Result<(VpsResult, namada_sdk::gas::Gas)>
 where
     S: 'static + ReadConversionState + State + Sync,
@@ -1257,7 +1273,7 @@ where
             || (VpsResult::default(), Gas::from(0)),
             |(mut result, mut vps_gas), addr| {
                 let gas_meter =
-                    RefCell::new(VpGasMeter::new_from_tx_meter(tx_gas_meter));
+                    RefCell::new(VpGasMeter::new_from_meter(tx_gas_meter));
                 let tx_accepted = match &addr {
                     Address::Implicit(_) | Address::Established(_) => {
                         let (vp_hash, gas) = state
@@ -1281,6 +1297,7 @@ where
                             &keys_changed,
                             &verifiers,
                             vp_wasm_cache.clone(),
+                            gas_meter_kind,
                         )
                         .map_err(|err| match err {
                             wasm::run::Error::GasError(msg) => {
@@ -1303,6 +1320,7 @@ where
                             &keys_changed,
                             &verifiers,
                             vp_wasm_cache.clone(),
+                            GasMeterKind::MutGlobal,
                         );
 
                         match internal_addr {
@@ -1453,7 +1471,7 @@ where
                     ))?;
                 gas_meter
                     .borrow()
-                    .check_vps_limit(vps_gas.clone())
+                    .check_limit(vps_gas.clone())
                     .map_err(|err| Error::GasError(err.to_string()))?;
 
                 Ok((result, vps_gas))
@@ -1485,7 +1503,7 @@ fn merge_vp_results(
         .checked_add(b_gas)
         .ok_or(Error::GasError(gas::Error::GasOverflow.to_string()))?;
     tx_gas_meter
-        .check_vps_limit(vps_gas.clone())
+        .check_limit(vps_gas.clone())
         .map_err(|err| Error::GasError(err.to_string()))?;
 
     Ok((
@@ -1736,6 +1754,7 @@ mod tests {
             &state,
             &gas_meter,
             &mut vp_cache,
+            GasMeterKind::MutGlobal,
         );
         assert!(matches!(result.unwrap_err(), Error::GasError(_)));
     }
@@ -1788,6 +1807,7 @@ mod tests {
                             &Default::default(),
                             &Default::default(),
                             vp_cache.clone(),
+                            GasMeterKind::MutGlobal,
                         )
                         .is_ok()
                     );
@@ -1817,6 +1837,7 @@ mod tests {
                         &Default::default(),
                         &Default::default(),
                         vp_cache.clone(),
+                        GasMeterKind::MutGlobal,
                     )
                     .is_err()
                 );

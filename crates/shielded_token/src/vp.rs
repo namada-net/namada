@@ -1116,7 +1116,7 @@ mod shielded_token_tests {
     use namada_core::address::MASP;
     use namada_core::address::testing::nam;
     use namada_core::borsh::BorshSerializeExt;
-    use namada_gas::{TxGasMeter, VpGasMeter};
+    use namada_gas::{GasMeterKind, TxGasMeter, VpGasMeter};
     use namada_state::testing::{TestState, arb_account_storage_key, arb_key};
     use namada_state::{StateRead, TxIndex};
     use namada_trans_token::Amount;
@@ -1203,6 +1203,7 @@ mod shielded_token_tests {
                 &keys_changed,
                 &verifiers,
                 vp_vp_cache,
+                GasMeterKind::MutGlobal,
             );
 
             // We don't care about the specific error so long as it fails
@@ -1252,6 +1253,7 @@ mod shielded_token_tests {
                 &keys_changed,
                 &verifiers,
                 vp_vp_cache,
+                GasMeterKind::MutGlobal,
             );
 
             assert!(MaspVp::validate_tx(
@@ -1301,6 +1303,7 @@ mod shielded_token_tests {
                 &keys_changed,
                 &verifiers,
                 vp_vp_cache,
+                GasMeterKind::MutGlobal,
             );
 
             assert!(matches!(

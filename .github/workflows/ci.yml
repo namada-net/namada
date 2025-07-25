@@ -562,7 +562,7 @@ jobs:
   upload-coverage:
     runs-on: [ubuntu-latest]
     timeout-minutes: 10
-    if: ${{ github.event.pull_request.head.repo.full_name == 'anoma/namada' }}
+    if: ${{ github.event.pull_request.head.repo.full_name == 'namada-net/namada' }}
     needs: [test-unit, test-integration, test-wasm]
 
     steps:

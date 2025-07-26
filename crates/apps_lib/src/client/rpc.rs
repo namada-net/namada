@@ -46,7 +46,8 @@ use namada_sdk::proof_of_stake::{self, OwnedPosParams, PosParams};
 use namada_sdk::queries::RPC;
 use namada_sdk::rpc::{
     self, TxAppliedEvents, TxResponse, enriched_bonds_and_unbonds,
-    format_denominated_amount, query_epoch, query_ibc_params,
+    format_denominated_amount, get_effective_native_supply, query_epoch,
+    query_ibc_params,
 };
 use namada_sdk::state::LastBlock;
 use namada_sdk::storage::BlockResults;
@@ -92,7 +93,7 @@ pub async fn query_and_print_masp_epoch(context: &impl Namada) -> MaspEpoch {
 /// begin.
 pub async fn query_and_print_next_epoch_info(context: &impl Namada) {
     println!();
-    query_block(context).await.unwrap();
+    let current_block = query_block(context).await.unwrap();
 
     let current_epoch = query_epoch(context.client()).await.unwrap();
     let (this_epoch_first_height, epoch_duration) =
@@ -110,6 +111,9 @@ pub async fn query_and_print_next_epoch_info(context: &impl Namada) {
     #[allow(clippy::disallowed_methods)]
     let current_time = DateTimeUtc::now();
     let seconds_left = next_epoch_time.time_diff(current_time).0;
+    let blocks_left =
+        (this_epoch_first_height.0 + epoch_duration.min_num_of_blocks + 2u64)
+            .saturating_sub(current_block.height.0);
     let time_remaining_str = convert_to_hours(seconds_left);
 
     display_line!(context.io(), "\nCurrent epoch: {current_epoch}.");
@@ -128,14 +132,30 @@ pub async fn query_and_print_next_epoch_info(context: &impl Namada) {
         "Minimum amount of time for an epoch: {}.",
         convert_to_hours(epoch_duration.min_duration.0)
     );
-    display_line!(
-        context.io(),
-        "\nNext epoch ({}) begins in {} or at block height {}, whichever \
-         occurs later.\n",
-        current_epoch.next(),
-        time_remaining_str,
-        this_epoch_first_height.0 + epoch_duration.min_num_of_blocks
-    );
+    if seconds_left == 0 {
+        display_line!(
+            context.io(),
+            "\nNext epoch ({}) begins in {} blocks\n",
+            current_epoch.next(),
+            blocks_left
+        );
+    } else if blocks_left == 0 {
+        display_line!(
+            context.io(),
+            "\nNext epoch ({}) begins in {}\n",
+            current_epoch.next(),
+            time_remaining_str
+        );
+    } else {
+        display_line!(
+            context.io(),
+            "\nNext epoch ({}) begins in {} or in {} blocks, whichever occurs \
+             later.\n",
+            current_epoch.next(),
+            time_remaining_str,
+            blocks_left
+        );
+    }
 }
 
 fn convert_to_hours(seconds: u64) -> String {
@@ -2211,15 +2231,62 @@ pub async fn query_masp_reward_tokens(context: &impl Namada) {
         locked_amount_target,
     } in tokens
     {
-        display_line!(context.io(), "{}: {}", name, address);
+        display_line!(context.io(), "\n{}: {}", name, address);
         display_line!(context.io(), "  Max reward rate: {}", max_reward_rate);
         display_line!(context.io(), "  Kp gain: {}", kp_gain);
         display_line!(context.io(), "  Kd gain: {}", kd_gain);
         display_line!(
             context.io(),
-            "  Locked amount target: {}",
+            "  Locked amount target (raw): {}",
             locked_amount_target
         );
+
+        let key = token::storage_key::masp_reward_precision_key(&address);
+        let precision = query_storage_value::<_, u128>(context.client(), &key)
+            .await
+            .expect("Precision should be present");
+        display_line!(context.io(), "  Reward precision: {}", precision);
+
+        if !max_reward_rate.is_zero() {
+            let last_inflation = query_storage_value::<_, token::Amount>(
+                context.client(),
+                &token::storage_key::masp_last_inflation_key(&address),
+            )
+            .await
+            .expect("Last inflation should be present");
+
+            let key = param_storage::get_masp_epoch_multiplier_key();
+            let masp_epoch_multiplier: u64 =
+                query_storage_value(context.client(), &key)
+                    .await
+                    .expect("Parameter should be defined.");
+
+            let key = param_storage::get_epochs_per_year_key();
+            let epochs_per_year: u64 =
+                query_storage_value(context.client(), &key)
+                    .await
+                    .expect("Parameter should be defined.");
+
+            let eff_supply = get_effective_native_supply(context.client())
+                .await
+                .expect("Failed to get effective native supply");
+
+            let last_apy = Dec::try_from(last_inflation)
+                .expect("Failed to convert last inflation to Dec")
+                .checked_mul(Dec::from(epochs_per_year / masp_epoch_multiplier))
+                .unwrap()
+                .checked_div(
+                    Dec::try_from(eff_supply).expect(
+                        "Failed to convert effective native supply to Dec",
+                    ),
+                )
+                .unwrap();
+            display_line!(
+                context.io(),
+                "  ** Last annual reward rate: {}",
+                last_apy
+            );
+        }
     }
 }
 

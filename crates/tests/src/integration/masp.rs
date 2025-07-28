@@ -19,7 +19,7 @@ use namada_core::dec::Dec;
 use namada_core::masp::{MaspTxId, Precision, TokenMap, encode_asset_type};
 use namada_node::shell::ResultCode;
 use namada_node::shell::testing::client::{
-    dummy_args, run, run, sign_tx, submit_custom,
+    dummy_args, run, sign_tx, submit_custom,
 };
 use namada_node::shell::testing::node::NodeResults;
 use namada_node::shell::testing::utils::{Bin, CapturedOutput};

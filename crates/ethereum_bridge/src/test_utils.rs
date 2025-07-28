@@ -20,7 +20,7 @@ use namada_proof_of_stake::{
     BecomeValidator, become_validator, bond_tokens,
     compute_and_store_total_consensus_stake, staking_token_address,
 };
-use namada_state::testing::TestState;
+use namada_state::testing::{TestFullAccessState, TestState};
 use namada_storage::{StorageRead, StorageWrite};
 use namada_trans_token as token;
 use namada_trans_token::credit_tokens;
@@ -71,17 +71,17 @@ impl TestValidatorKeys {
 /// The validator's address is [`address::testing::established_address_1`].
 #[inline]
 pub fn setup_default_storage()
--> (TestState, HashMap<Address, TestValidatorKeys>) {
-    let mut state = TestState::default();
+-> (TestFullAccessState, HashMap<Address, TestValidatorKeys>) {
+    let mut state = TestFullAccessState::default();
     let all_keys = init_default_storage(&mut state);
     (state, all_keys)
 }
 
-/// Set up a [`TestState`] initialized at genesis with
+/// Set up a [`TestFullAccessState`] initialized at genesis with
 /// [`default_validator`].
 #[inline]
 pub fn init_default_storage(
-    state: &mut TestState,
+    state: &mut TestFullAccessState,
 ) -> HashMap<Address, TestValidatorKeys> {
     init_storage_with_validators(
         state,
@@ -100,10 +100,10 @@ pub fn default_validator() -> (Address, token::Amount) {
     (addr, voting_power)
 }
 
-/// Writes a dummy [`EthereumBridgeParams`] to the given [`TestState`], and
-/// returns it.
+/// Writes a dummy [`EthereumBridgeParams`] to the given
+/// [`TestFullAccessState`], and returns it.
 pub fn bootstrap_ethereum_bridge(
-    state: &mut TestState,
+    state: &mut TestFullAccessState,
 ) -> EthereumBridgeParams {
     let config = EthereumBridgeParams {
         // start with empty erc20 whitelist
@@ -123,7 +123,7 @@ pub fn bootstrap_ethereum_bridge(
             },
         },
     };
-    config.init_storage(state);
+    config.init_storage(&mut state.restrict_writes_to_write_log());
     config
 }
 
@@ -174,8 +174,8 @@ pub fn stored_keys_count(state: &TestState) -> usize {
 /// validators.
 pub fn setup_storage_with_validators(
     consensus_validators: HashMap<Address, token::Amount>,
-) -> (TestState, HashMap<Address, TestValidatorKeys>) {
-    let mut state = TestState::default();
+) -> (TestFullAccessState, HashMap<Address, TestValidatorKeys>) {
+    let mut state = TestFullAccessState::default();
     let all_keys =
         init_storage_with_validators(&mut state, consensus_validators);
     (state, all_keys)
@@ -184,7 +184,7 @@ pub fn setup_storage_with_validators(
 /// Set up a [`TestState`] initialized at genesis with the given
 /// validators.
 pub fn init_storage_with_validators(
-    state: &mut TestState,
+    state: &mut TestFullAccessState,
     consensus_validators: HashMap<Address, token::Amount>,
 ) -> HashMap<Address, TestValidatorKeys> {
     // set last height to a reasonable value;
@@ -232,6 +232,7 @@ pub fn init_storage_with_validators(
     for (validator, keys) in all_keys.iter() {
         let protocol_key = keys.protocol.ref_to();
         state
+            .write_log_mut()
             .write(&protocol_pk_key(validator), protocol_key)
             .expect("Test failed");
     }
@@ -249,20 +250,26 @@ pub fn init_storage_with_validators(
 ///
 /// N.B. assumes the bridge pool is empty.
 pub fn commit_bridge_pool_root_at_height(
-    state: &mut TestState,
+    state: &mut TestFullAccessState,
     root: &KeccakHash,
     height: BlockHeight,
 ) {
     state.in_mem_mut().block.height = height;
-    state.write(&get_key_from_hash(root), height).unwrap();
+    state
+        .write_log_mut()
+        .write(&get_key_from_hash(root), height)
+        .unwrap();
     state.commit_block().unwrap();
-    state.delete(&get_key_from_hash(root)).unwrap();
+    state
+        .write_log_mut()
+        .delete(&get_key_from_hash(root))
+        .unwrap();
 }
 
 /// Append validators to storage at the current epoch
 /// offset by pipeline length.
 pub fn append_validators_to_storage(
-    state: &mut TestState,
+    state: &mut TestFullAccessState,
     consensus_validators: HashMap<Address, token::Amount>,
 ) -> HashMap<Address, TestValidatorKeys> {
     let current_epoch = state.in_mem().get_current_epoch().0;
@@ -325,6 +332,7 @@ pub fn append_validators_to_storage(
     for (validator, keys) in all_keys.iter() {
         let protocol_key = keys.protocol.ref_to();
         state
+            .write_log_mut()
             .write(&protocol_pk_key(validator), protocol_key)
             .expect("Test failed");
     }

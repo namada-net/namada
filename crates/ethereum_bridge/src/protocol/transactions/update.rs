@@ -26,7 +26,7 @@ where
 #[cfg(test)]
 mod tests {
     use eyre::eyre;
-    use namada_state::testing::TestState;
+    use namada_state::testing::TestFullAccessState;
     use namada_storage::StorageRead;
 
     use super::*;
@@ -37,12 +37,13 @@ mod tests {
         let key = storage::Key::parse("some arbitrary key")
             .expect("could not set up test");
         let value = 21i32;
-        let mut state = TestState::default();
-        state.write(&key, value).expect("could not set up test");
+        let mut state = TestFullAccessState::default();
+        let mut wl_state = state.restrict_writes_to_write_log();
+        wl_state.write(&key, value).expect("could not set up test");
 
         super::value(&mut state, &key, |v: &mut i32| *v *= 2)?;
 
-        let new_val = state
+        let new_val = wl_state
             .read::<i32>(&key)?
             .ok_or_else(|| eyre!("no value found"))?;
         assert_eq!(new_val, 42);

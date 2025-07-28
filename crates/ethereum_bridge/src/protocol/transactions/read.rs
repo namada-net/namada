@@ -51,14 +51,15 @@ mod tests {
     use assert_matches::assert_matches;
     use namada_core::storage;
     use namada_core::token::Amount;
-    use namada_state::testing::TestState;
+    use namada_state::testing::TestFullAccessState;
     use namada_storage::StorageWrite;
 
     use crate::protocol::transactions::read;
 
     #[test]
     fn test_amount_returns_zero_for_uninitialized_storage() {
-        let fake_storage = TestState::default();
+        let mut state = TestFullAccessState::default();
+        let fake_storage = state.restrict_writes_to_write_log();
         let amt = read::amount_or_default(
             &fake_storage,
             &storage::Key::parse("some arbitrary key with no stored value")
@@ -72,7 +73,8 @@ mod tests {
     fn test_amount_returns_stored_amount() {
         let key = storage::Key::parse("some arbitrary key").unwrap();
         let amount = Amount::from(1_000_000);
-        let mut fake_storage = TestState::default();
+        let mut state = TestFullAccessState::default();
+        let mut fake_storage = state.restrict_writes_to_write_log();
         fake_storage.write(&key, amount).unwrap();
 
         let amt = read::amount_or_default(&fake_storage, &key).unwrap();
@@ -83,7 +85,8 @@ mod tests {
     fn test_amount_errors_if_not_amount() {
         let key = storage::Key::parse("some arbitrary key").unwrap();
         let amount = "not an Amount type";
-        let mut fake_storage = TestState::default();
+        let mut state = TestFullAccessState::default();
+        let mut fake_storage = state.restrict_writes_to_write_log();
         fake_storage.write(&key, amount).unwrap();
 
         assert_matches!(read::amount_or_default(&fake_storage, &key), Err(_));

@@ -362,7 +362,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use namada_state::testing::TestState;
+    use namada_state::testing::TestFullAccessState;
     use namada_storage::ResultExt;
 
     use super::*;
@@ -401,7 +401,8 @@ mod tests {
             return;
         }
 
-        let mut state = TestState::default();
+        let mut state = TestFullAccessState::default();
+        let mut wl_state = state.restrict_writes_to_write_log();
         let config = EthereumBridgeParams {
             erc20_whitelist: vec![],
             eth_start_height: Default::default(),
@@ -414,9 +415,9 @@ mod tests {
                 },
             },
         };
-        config.init_storage(&mut state);
+        config.init_storage(&mut wl_state);
 
-        let read = EthereumOracleConfig::read(&state).unwrap();
+        let read = EthereumOracleConfig::read(&wl_state).unwrap();
         let config = EthereumOracleConfig::from(config);
 
         assert_eq!(config, read);
@@ -424,8 +425,9 @@ mod tests {
 
     #[test]
     fn test_ethereum_bridge_config_uninitialized() {
-        let state = TestState::default();
-        let read = EthereumOracleConfig::read(&state);
+        let mut state = TestFullAccessState::default();
+        let mut wl_state = state.restrict_writes_to_write_log();
+        let read = EthereumOracleConfig::read(&wl_state);
 
         assert!(read.is_none());
     }
@@ -434,7 +436,8 @@ mod tests {
     #[cfg_attr(not(feature = "namada-eth-bridge"), ignore)]
     #[should_panic(expected = "Could not read")]
     fn test_ethereum_bridge_config_storage_corrupt() {
-        let mut state = TestState::default();
+        let mut state = TestFullAccessState::default();
+        let mut wl_state = state.restrict_writes_to_write_log();
         let config = EthereumBridgeParams {
             erc20_whitelist: vec![],
             eth_start_height: Default::default(),
@@ -447,14 +450,14 @@ mod tests {
                 },
             },
         };
-        config.init_storage(&mut state);
+        config.init_storage(&mut wl_state);
         let min_confirmations_key = bridge_storage::min_confirmations_key();
-        state
+        wl_state
             .write(&min_confirmations_key, vec![42, 1, 2, 3, 4])
             .unwrap();
 
         // This should panic because the min_confirmations value is not valid
-        EthereumOracleConfig::read(&state);
+        EthereumOracleConfig::read(&wl_state);
     }
 
     #[test]
@@ -463,15 +466,16 @@ mod tests {
         expected = "Ethereum bridge appears to be only partially configured!"
     )]
     fn test_ethereum_bridge_config_storage_partially_configured() {
-        let mut state = TestState::default();
-        state
+        let mut state = TestFullAccessState::default();
+        let mut wl_state = state.restrict_writes_to_write_log();
+        wl_state
             .write(
                 &bridge_storage::active_key(),
                 EthBridgeStatus::Enabled(EthBridgeEnabled::AtGenesis),
             )
             .unwrap();
         // Write a valid min_confirmations value
-        state
+        wl_state
             .write(
                 &bridge_storage::min_confirmations_key(),
                 MinimumConfirmations::default(),
@@ -479,6 +483,6 @@ mod tests {
             .unwrap();
 
         // This should panic as the other config values are not written
-        EthereumOracleConfig::read(&state);
+        EthereumOracleConfig::read(&wl_state);
     }
 }

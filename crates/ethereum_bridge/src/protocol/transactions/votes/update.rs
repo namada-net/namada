@@ -218,7 +218,7 @@ mod tests {
     use namada_core::address;
     use namada_core::ethereum_events::EthereumEvent;
     use namada_core::voting_power::FractionalVotingPower;
-    use namada_state::testing::TestState;
+    use namada_state::testing::{TestFullAccessState, TestState};
 
     use self::helpers::{TallyParams, default_event, default_total_stake};
     use super::*;
@@ -383,8 +383,8 @@ mod tests {
 
     #[test]
     fn test_apply_duplicate_votes() -> Result<()> {
-        let mut state = TestState::default();
-        test_utils::init_default_storage(&mut state);
+        let (mut state, _) = test_utils::setup_default_storage();
+        let wl_state = state.restrict_writes_to_write_log();
 
         let validator = address::testing::established_address_1();
         let already_voted_height = BlockHeight(100);
@@ -392,7 +392,7 @@ mod tests {
         let event = default_event();
         let tally_pre = TallyParams {
             total_stake: default_total_stake(),
-            state: &mut state,
+            state: &mut wl_state,
             event: &event,
             votes: HashSet::from([(
                 validator.clone(),
@@ -409,7 +409,8 @@ mod tests {
         )]);
         let vote_info = NewVotes::new(votes, &voting_powers)?;
 
-        let result = apply::<_, _, GovStore<_>>(&state, &tally_pre, vote_info);
+        let result =
+            apply::<_, _, GovStore<_>>(&wl_state, &tally_pre, vote_info);
 
         assert!(result.is_err());
         Ok(())
@@ -419,13 +420,14 @@ mod tests {
     /// already recorded as having been seen.
     #[test]
     fn test_calculate_already_seen() -> Result<()> {
-        let mut state = TestState::default();
-        test_utils::init_default_storage(&mut state);
+        let (mut state, _) = test_utils::setup_default_storage();
+        let wl_state = state.restrict_writes_to_write_log();
+
         let event = default_event();
         let keys = vote_tallies::Keys::from(&event);
         let tally_pre = TallyParams {
             total_stake: default_total_stake(),
-            state: &mut state,
+            state: &mut wl_state,
             event: &event,
             votes: HashSet::from([(
                 address::testing::established_address_1(),
@@ -446,7 +448,7 @@ mod tests {
         let vote_info = NewVotes::new(votes, &voting_powers)?;
 
         let (tally_post, changed_keys) =
-            calculate::<_, _, GovStore<_>, _>(&mut state, &keys, vote_info)?;
+            calculate::<_, _, GovStore<_>, _>(&mut wl_state, &keys, vote_info)?;
 
         assert_eq!(tally_post, tally_pre);
         assert!(changed_keys.is_empty());
@@ -457,11 +459,13 @@ mod tests {
     #[test]
     fn test_calculate_empty() -> Result<()> {
         let (mut state, _) = test_utils::setup_default_storage();
+        let wl_state = state.restrict_writes_to_write_log();
+
         let event = default_event();
         let keys = vote_tallies::Keys::from(&event);
         let tally_pre = TallyParams {
             total_stake: default_total_stake(),
-            state: &mut state,
+            state: &mut wl_state,
             event: &event,
             votes: HashSet::from([(
                 address::testing::established_address_1(),
@@ -473,7 +477,7 @@ mod tests {
         let vote_info = NewVotes::new(Votes::default(), &HashMap::default())?;
 
         let (tally_post, changed_keys) =
-            calculate::<_, _, GovStore<_>, _>(&mut state, &keys, vote_info)?;
+            calculate::<_, _, GovStore<_>, _>(&mut wl_state, &keys, vote_info)?;
 
         assert_eq!(tally_post, tally_pre);
         assert!(changed_keys.is_empty());
@@ -485,12 +489,13 @@ mod tests {
     #[test]
     fn test_calculate_one_vote_not_seen() -> Result<()> {
         let (mut state, _) = test_utils::setup_default_storage();
+        let wl_state = state.restrict_writes_to_write_log();
 
         let event = default_event();
         let keys = vote_tallies::Keys::from(&event);
         let _tally_pre = TallyParams {
             total_stake: default_total_stake(),
-            state: &mut state,
+            state: &mut wl_state,
             event: &event,
             votes: HashSet::from([(
                 address::testing::established_address_1(),
@@ -510,7 +515,7 @@ mod tests {
         let vote_info = NewVotes::new(votes, &voting_powers)?;
 
         let (tally_post, changed_keys) =
-            calculate::<_, _, GovStore<_>, _>(&mut state, &keys, vote_info)?;
+            calculate::<_, _, GovStore<_>, _>(&mut wl_state, &keys, vote_info)?;
 
         assert_eq!(
             tally_post,
@@ -537,6 +542,7 @@ mod tests {
     #[test]
     fn test_calculate_one_vote_seen() -> Result<()> {
         let (mut state, _) = test_utils::setup_default_storage();
+        let wl_state = state.restrict_writes_to_write_log();
 
         let first_vote_stake =
             FractionalVotingPower::ONE_THIRD * default_total_stake();
@@ -548,7 +554,7 @@ mod tests {
         let keys = vote_tallies::Keys::from(&event);
         let _tally_pre = TallyParams {
             total_stake,
-            state: &mut state,
+            state: &mut wl_state,
             event: &event,
             votes: HashSet::from([(
                 address::testing::established_address_1(),
@@ -566,7 +572,7 @@ mod tests {
         let vote_info = NewVotes::new(votes, &voting_powers)?;
 
         let (tally_post, changed_keys) =
-            calculate::<_, _, GovStore<_>, _>(&mut state, &keys, vote_info)?;
+            calculate::<_, _, GovStore<_>, _>(&mut wl_state, &keys, vote_info)?;
 
         assert_eq!(
             tally_post,

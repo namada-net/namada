@@ -96,7 +96,7 @@ pub fn require_no_data(request: &RequestQuery) -> namada_storage::Result<()> {
 pub(crate) mod testing {
     use namada_core::chain::BlockHeight;
     use namada_io::client::Client;
-    use namada_state::testing::TestState;
+    use namada_state::testing::TestFullAccessState;
     use tendermint_rpc::Response;
 
     use super::*;
@@ -112,7 +112,7 @@ pub(crate) mod testing {
         /// RPC router
         pub rpc: RPC,
         /// state
-        pub state: TestState,
+        pub state: TestFullAccessState,
         /// event log
         pub event_log: EventLog,
     }
@@ -124,8 +124,8 @@ pub(crate) mod testing {
         #[allow(dead_code)]
         /// Initialize a test client for the given root RPC router
         pub fn new(rpc: RPC) -> Self {
-            // Initialize the `TestClient`
-            let mut state = TestState::default();
+            // Initialize the `TestFullAccessClient`
+            let mut state = TestFullAccessState::default();
 
             // Initialize mock gas limit
             let max_block_gas_key =
@@ -174,7 +174,7 @@ pub(crate) mod testing {
                 prove,
             };
             let ctx = RequestCtx {
-                state: self.state.read_only(),
+                state: self.state.with_temp_write_log(),
                 event_log: &self.event_log,
                 vp_wasm_cache: (),
                 tx_wasm_cache: (),

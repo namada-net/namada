@@ -535,7 +535,7 @@ mod tests {
     use namada_core::token::Amount;
     use namada_core::{address, eth_bridge_pool};
     use namada_parameters::{EpochDuration, update_epoch_parameter};
-    use namada_state::testing::TestState;
+    use namada_state::testing::{TestFullAccessState, TestState};
     use token::increment_balance;
 
     use super::*;
@@ -543,7 +543,7 @@ mod tests {
     use crate::storage::wrapped_erc20s;
     use crate::test_utils::{self, stored_keys_count};
 
-    fn init_storage(state: &mut TestState) {
+    fn init_storage(state: &mut TestFullAccessState) {
         // set the timeout height offset
         let timeout_offset = 10;
         let epoch_duration = EpochDuration {
@@ -553,6 +553,7 @@ mod tests {
         update_epoch_parameter(state, &epoch_duration).expect("Test failed");
         // set native ERC20 token
         state
+            .write_log_mut()
             .write(&bridge_storage::native_erc20_key(), wnam())
             .expect("Test failed");
     }
@@ -627,7 +628,7 @@ mod tests {
     }
 
     fn init_bridge_pool_transfers<A>(
-        state: &mut TestState,
+        state: &mut TestFullAccessState,
         assets_transferred: A,
     ) -> Vec<PendingTransfer>
     where
@@ -656,7 +657,10 @@ mod tests {
                 },
             };
             let key = get_pending_key(&transfer);
-            state.write(&key, &transfer).expect("Test failed");
+            state
+                .write_log_mut()
+                .write(&key, &transfer)
+                .expect("Test failed");
 
             pending_transfers.push(transfer);
         }
@@ -664,7 +668,9 @@ mod tests {
     }
 
     #[inline]
-    fn init_bridge_pool(state: &mut TestState) -> Vec<PendingTransfer> {
+    fn init_bridge_pool(
+        state: &mut TestFullAccessState,
+    ) -> Vec<PendingTransfer> {
         init_bridge_pool_transfers(
             state,
             (0..2)
@@ -685,7 +691,7 @@ mod tests {
     }
 
     fn init_balance(
-        state: &mut TestState,
+        state: &mut TestFullAccessState,
         pending_transfers: &Vec<PendingTransfer>,
     ) {
         for transfer in pending_transfers {
@@ -693,7 +699,10 @@ mod tests {
             let payer = address::testing::established_address_2();
             let payer_key = balance_key(&transfer.gas_fee.token, &payer);
             let payer_balance = Amount::from(0);
-            state.write(&payer_key, payer_balance).expect("Test failed");
+            state
+                .write_log_mut()
+                .write(&payer_key, payer_balance)
+                .expect("Test failed");
             increment_balance(
                 state,
                 &transfer.gas_fee.token,
@@ -707,11 +716,13 @@ mod tests {
                 let sender_key = balance_key(&nam(), &transfer.transfer.sender);
                 let sender_balance = Amount::from(0);
                 state
+                    .write_log_mut()
                     .write(&sender_key, sender_balance)
                     .expect("Test failed");
                 let escrow_key = balance_key(&nam(), &BRIDGE_ADDRESS);
                 let escrow_balance = Amount::from(10);
                 state
+                    .write_log_mut()
                     .write(&escrow_key, escrow_balance)
                     .expect("Test failed");
             } else {
@@ -719,11 +730,13 @@ mod tests {
                 let sender_key = balance_key(&token, &transfer.transfer.sender);
                 let sender_balance = Amount::from(0);
                 state
+                    .write_log_mut()
                     .write(&sender_key, sender_balance)
                     .expect("Test failed");
                 let escrow_key = balance_key(&token, &BRIDGE_POOL_ADDRESS);
                 let escrow_balance = Amount::from(10);
                 state
+                    .write_log_mut()
                     .write(&escrow_key, escrow_balance)
                     .expect("Test failed");
                 increment_total_supply(state, &token, transfer.transfer.amount)
@@ -736,7 +749,7 @@ mod tests {
     /// Test that we do not make any changes to state when acting on most
     /// events
     fn test_act_on_does_nothing_for_other_events() {
-        let mut state = TestState::default();
+        let mut state = TestFullAccessState::default();
         test_utils::bootstrap_ethereum_bridge(&mut state);
         let initial_stored_keys_count = stored_keys_count(&state);
         let events = vec![EthereumEvent::ValidatorSetUpdate {
@@ -760,7 +773,7 @@ mod tests {
     /// Test that state is indeed changed when we act on a non-empty
     /// TransfersToNamada batch
     fn test_act_on_changes_storage_for_transfers_to_namada() {
-        let mut state = TestState::default();
+        let mut state = TestFullAccessState::default();
         test_utils::bootstrap_ethereum_bridge(&mut state);
         state.commit_block().expect("Test failed");
         let initial_stored_keys_count = stored_keys_count(&state);
@@ -805,7 +818,7 @@ mod tests {
                 };
             assert_eq!(self.transferred_amount, nut_amount + erc20_amount);
 
-            let mut state = TestState::default();
+            let mut state = TestFullAccessState::default();
             test_utils::bootstrap_ethereum_bridge(&mut state);
             if !dai_token_cap.is_zero() {
                 test_utils::whitelist_tokens(
@@ -896,7 +909,7 @@ mod tests {
     /// that pending transfers are deleted from the Bridge pool, the
     /// Bridge pool nonce is updated and escrowed assets are burned.
     fn test_act_on_changes_storage_for_transfers_to_eth() {
-        let mut state = TestState::default();
+        let mut state = TestFullAccessState::default();
         test_utils::bootstrap_ethereum_bridge(&mut state);
         state.commit_block().expect("Test failed");
         init_storage(&mut state);
@@ -960,15 +973,16 @@ mod tests {
             &wrapped_erc20s::token(&erc20_gas_addr),
             &BRIDGE_POOL_ADDRESS,
         );
-        let mut bp_nam_balance_pre: Amount = state
+        let wl_state = state.restrict_writes_to_write_log();
+        let mut bp_nam_balance_pre: Amount = wl_state
             .read(&pool_nam_balance_key)
             .expect("Test failed")
             .expect("Test failed");
-        let mut bp_erc_balance_pre: Amount = state
+        let mut bp_erc_balance_pre: Amount = wl_state
             .read(&pool_erc_balance_key)
             .expect("Test failed")
             .expect("Test failed");
-        let (mut changed_keys, _) = act_on(&mut state, event).unwrap();
+        let (mut changed_keys, _) = act_on(&mut wl_state, event).unwrap();
 
         for erc20 in [
             random_erc20_token,
@@ -998,26 +1012,26 @@ mod tests {
 
         let prefix = BRIDGE_POOL_ADDRESS.to_db_key().into();
         assert_eq!(
-            state.iter_prefix(&prefix).expect("Test failed").count(),
+            wl_state.iter_prefix(&prefix).expect("Test failed").count(),
             // NOTE: we should have one write -- the bridge pool nonce update
             1
         );
-        let relayer_nam_balance: Amount = state
+        let relayer_nam_balance: Amount = wl_state
             .read(&payer_nam_balance_key)
             .expect("Test failed: read error")
             .expect("Test failed: no value in storage");
         assert_eq!(relayer_nam_balance, Amount::from(3));
-        let relayer_erc_balance: Amount = state
+        let relayer_erc_balance: Amount = wl_state
             .read(&payer_erc_balance_key)
             .expect("Test failed: read error")
             .expect("Test failed: no value in storage");
         assert_eq!(relayer_erc_balance, Amount::from(2));
 
-        let bp_nam_balance_post = state
+        let bp_nam_balance_post = wl_state
             .read(&pool_nam_balance_key)
             .expect("Test failed: read error")
             .expect("Test failed: no value in storage");
-        let bp_erc_balance_post = state
+        let bp_erc_balance_post = wl_state
             .read(&pool_erc_balance_key)
             .expect("Test failed: read error")
             .expect("Test failed: no value in storage");
@@ -1035,7 +1049,7 @@ mod tests {
     /// Test that the transfers time out in the bridge pool then the refund when
     /// we act on a TransfersToEthereum
     fn test_act_on_timeout_for_transfers_to_eth() {
-        let mut state = TestState::default();
+        let mut state = TestFullAccessState::default();
         test_utils::bootstrap_ethereum_bridge(&mut state);
         state.commit_block().expect("Test failed");
         init_storage(&mut state);
@@ -1061,9 +1075,13 @@ mod tests {
             },
         };
         let key = get_pending_key(&transfer);
-        state.write(&key, transfer).expect("Test failed");
+        state
+            .write_log_mut()
+            .write(&key, transfer)
+            .expect("Test failed");
         state.commit_block().expect("Test failed");
         state.in_mem_mut().block.height += 1;
+        let wl_state = state.restrict_writes_to_write_log();
 
         // This should only refund
         let event = EthereumEvent::TransfersToEthereum {
@@ -1071,12 +1089,12 @@ mod tests {
             transfers: vec![],
             relayer: gen_implicit_address(),
         };
-        let _ = act_on(&mut state, event).unwrap();
+        let _ = act_on(&mut wl_state, event).unwrap();
 
         // The latest transfer is still pending
         let prefix = BRIDGE_POOL_ADDRESS.to_db_key().into();
         assert_eq!(
-            state.iter_prefix(&prefix).expect("Test failed").count(),
+            wl_state.iter_prefix(&prefix).expect("Test failed").count(),
             // NOTE: we should have two writes -- one of them being
             // the bridge pool nonce update
             2
@@ -1088,13 +1106,13 @@ mod tests {
             .fold(Amount::from(0), |acc, t| acc + t.gas_fee.amount);
         let payer = address::testing::established_address_2();
         let payer_key = balance_key(&nam(), &payer);
-        let payer_balance: Amount = state
+        let payer_balance: Amount = wl_state
             .read(&payer_key)
             .expect("Test failed")
             .expect("Test failed");
         assert_eq!(payer_balance, expected);
         let pool_key = balance_key(&nam(), &BRIDGE_POOL_ADDRESS);
-        let pool_balance: Amount = state
+        let pool_balance: Amount = wl_state
             .read(&pool_key)
             .expect("Test failed")
             .expect("Test failed");
@@ -1104,13 +1122,13 @@ mod tests {
         for transfer in pending_transfers {
             if transfer.transfer.asset == wnam() {
                 let sender_key = balance_key(&nam(), &transfer.transfer.sender);
-                let sender_balance: Amount = state
+                let sender_balance: Amount = wl_state
                     .read(&sender_key)
                     .expect("Test failed")
                     .expect("Test failed");
                 assert_eq!(sender_balance, transfer.transfer.amount);
                 let escrow_key = balance_key(&nam(), &BRIDGE_ADDRESS);
-                let escrow_balance: Amount = state
+                let escrow_balance: Amount = wl_state
                     .read(&escrow_key)
                     .expect("Test failed")
                     .expect("Test failed");
@@ -1118,13 +1136,13 @@ mod tests {
             } else {
                 let token = transfer.token_address();
                 let sender_key = balance_key(&token, &transfer.transfer.sender);
-                let sender_balance: Amount = state
+                let sender_balance: Amount = wl_state
                     .read(&sender_key)
                     .expect("Test failed")
                     .expect("Test failed");
                 assert_eq!(sender_balance, transfer.transfer.amount);
                 let escrow_key = balance_key(&token, &BRIDGE_POOL_ADDRESS);
-                let escrow_balance: Amount = state
+                let escrow_balance: Amount = wl_state
                     .read(&escrow_key)
                     .expect("Test failed")
                     .expect("Test failed");
@@ -1135,8 +1153,9 @@ mod tests {
 
     #[test]
     fn test_redeem_native_token() -> Result<()> {
-        let mut state = TestState::default();
+        let mut state = TestFullAccessState::default();
         test_utils::bootstrap_ethereum_bridge(&mut state);
+        let wl_state = state.restrict_writes_to_write_log();
         let receiver = address::testing::established_address_1();
         let amount = Amount::from(100);
 
@@ -1146,7 +1165,7 @@ mod tests {
             &receiver,
         );
         assert!(
-            state
+            wl_state
                 .read::<Amount>(&receiver_wnam_balance_key)
                 .unwrap()
                 .is_none()
@@ -1155,28 +1174,28 @@ mod tests {
         let bridge_pool_initial_balance = Amount::from(100_000_000);
         let bridge_pool_native_token_balance_key =
             token::storage_key::balance_key(
-                &state.in_mem().native_token,
+                &wl_state.in_mem().native_token,
                 &BRIDGE_ADDRESS,
             );
         let bridge_pool_native_erc20_supply_key =
             minted_balance_key(&wrapped_erc20s::token(&wnam()));
         StorageWrite::write(
-            &mut state,
+            &mut wl_state,
             &bridge_pool_native_token_balance_key,
             bridge_pool_initial_balance,
         )?;
         StorageWrite::write(
-            &mut state,
+            &mut wl_state,
             &bridge_pool_native_erc20_supply_key,
             amount,
         )?;
         let receiver_native_token_balance_key = token::storage_key::balance_key(
-            &state.in_mem().native_token,
+            &wl_state.in_mem().native_token,
             &receiver,
         );
 
         let changed_keys =
-            redeem_native_token(&mut state, &wnam(), &receiver, &amount)?;
+            redeem_native_token(&mut wl_state, &wnam(), &receiver, &amount)?;
 
         assert_eq!(
             changed_keys,
@@ -1187,15 +1206,18 @@ mod tests {
             ])
         );
         assert_eq!(
-            StorageRead::read(&state, &bridge_pool_native_token_balance_key)?,
+            StorageRead::read(
+                &wl_state,
+                &bridge_pool_native_token_balance_key
+            )?,
             Some(bridge_pool_initial_balance - amount)
         );
         assert_eq!(
-            StorageRead::read(&state, &receiver_native_token_balance_key)?,
+            StorageRead::read(&wl_state, &receiver_native_token_balance_key)?,
             Some(amount)
         );
         assert_eq!(
-            StorageRead::read(&state, &bridge_pool_native_erc20_supply_key)?,
+            StorageRead::read(&wl_state, &bridge_pool_native_erc20_supply_key)?,
             Some(Amount::zero())
         );
 
@@ -1203,7 +1225,7 @@ mod tests {
         //
         // wNAM is never minted, it's converted back to NAM
         assert!(
-            state
+            wl_state
                 .read::<Amount>(&receiver_wnam_balance_key)
                 .unwrap()
                 .is_none()
@@ -1217,12 +1239,13 @@ mod tests {
     where
         F: FnMut(&mut TestState, EthereumEvent),
     {
-        let mut state = TestState::default();
+        let mut state = TestFullAccessState::default();
         test_utils::bootstrap_ethereum_bridge(&mut state);
         state.commit_block().expect("Test failed");
         init_storage(&mut state);
+        let wl_state = state.restrict_writes_to_write_log();
         let native_erc20 =
-            read_native_erc20_address(&state).expect("Test failed");
+            read_native_erc20_address(&wl_state).expect("Test failed");
         let pending_transfers = init_bridge_pool_transfers(
             &mut state,
             [
@@ -1267,7 +1290,7 @@ mod tests {
             transfers,
             relayer,
         };
-        f(&mut state, event)
+        f(&mut wl_state, event)
     }
 
     #[test]
@@ -1441,8 +1464,9 @@ mod tests {
     #[test]
     #[should_panic(expected = "Attempted to mint wNAM NUTs!")]
     fn test_wnam_doesnt_mint_nuts() {
-        let mut state = TestState::default();
+        let mut state = TestFullAccessState::default();
         test_utils::bootstrap_ethereum_bridge(&mut state);
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         let transfer = PendingTransfer {
             transfer: eth_bridge_pool::TransferToEthereum {
@@ -1459,6 +1483,6 @@ mod tests {
             },
         };
 
-        _ = update_transferred_asset_balances(&mut state, &transfer);
+        _ = update_transferred_asset_balances(&mut wl_state, &transfer);
     }
 }

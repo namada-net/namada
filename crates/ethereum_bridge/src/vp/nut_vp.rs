@@ -109,7 +109,7 @@ mod test_nuts {
     use namada_core::ethereum_events::testing::DAI_ERC20_ETH_ADDRESS;
     use namada_core::storage::TxIndex;
     use namada_gas::{TxGasMeter, VpGasMeter};
-    use namada_state::testing::TestState;
+    use namada_state::testing::{TestFullAccessState, TestState};
     use namada_state::{StateRead, StorageWrite};
     use namada_trans_token::storage_key::balance_key;
     use namada_tx::Tx;
@@ -137,13 +137,15 @@ mod test_nuts {
         let dst_balance_key = balance_key(&nut, &dst);
 
         let state = {
-            let mut state = TestState::default();
+            let mut state = TestFullAccessState::default();
 
             // write initial balances
             state
+                .write_log_mut()
                 .write(&src_balance_key, Amount::from(200_u64))
                 .expect("Test failed");
             state
+                .write_log_mut()
                 .write(&dst_balance_key, Amount::from(100_u64))
                 .expect("Test failed");
             state.commit_block().expect("Test failed");
@@ -188,7 +190,7 @@ mod test_nuts {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &Address::Internal(InternalAddress::Nut(DAI_ERC20_ETH_ADDRESS)),
-            &state,
+            &state.restrict_writes_to_write_log(),
             batched_tx.tx,
             batched_tx.cmt,
             &TxIndex(0),

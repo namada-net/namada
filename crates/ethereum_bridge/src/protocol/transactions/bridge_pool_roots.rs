@@ -272,7 +272,7 @@ mod test_apply_bp_roots_to_storage {
     use namada_proof_of_stake::storage::{
         read_consensus_validator_set_addresses_with_stake, write_pos_params,
     };
-    use namada_state::testing::TestState;
+    use namada_state::testing::{TestFullAccessState, TestState};
 
     use super::*;
     use crate::protocol::transactions::votes::{
@@ -289,7 +289,7 @@ mod test_apply_bp_roots_to_storage {
         /// The validator keys.
         keys: HashMap<Address, test_utils::TestValidatorKeys>,
         /// Storage.
-        state: TestState,
+        state: TestFullAccessState,
     }
 
     /// Setup storage for tests.
@@ -324,9 +324,11 @@ mod test_apply_bp_roots_to_storage {
             100.into(),
         );
         state
+            .write_log_mut()
             .write(&get_key_from_hash(&KeccakHash([1; 32])), BlockHeight(101))
             .expect("Test failed");
         state
+            .write_log_mut()
             .write(&get_nonce_key(), Uint::from(42))
             .expect("Test failed");
         state.commit_block().unwrap();
@@ -349,6 +351,7 @@ mod test_apply_bp_roots_to_storage {
             keys,
             mut state,
         } = setup();
+        let mut state = state.restrict_writes_to_write_log();
         let root = state.ethbridge_queries().get_bridge_pool_root();
         let nonce = state.ethbridge_queries().get_bridge_pool_nonce();
         let to_sign = keccak_hash([root.0, nonce.to_bytes()].concat());
@@ -399,6 +402,7 @@ mod test_apply_bp_roots_to_storage {
             keys,
             mut state,
         } = setup();
+        let mut state = state.restrict_writes_to_write_log();
         let root = state.ethbridge_queries().get_bridge_pool_root();
         let nonce = state.ethbridge_queries().get_bridge_pool_nonce();
         let to_sign = keccak_hash([root.0, nonce.to_bytes()].concat());
@@ -442,6 +446,7 @@ mod test_apply_bp_roots_to_storage {
             keys,
             mut state,
         } = setup();
+        let mut state = state.restrict_writes_to_write_log();
         let root = state.ethbridge_queries().get_bridge_pool_root();
         let nonce = state.ethbridge_queries().get_bridge_pool_nonce();
         let to_sign = keccak_hash([root.0, nonce.to_bytes()].concat());
@@ -489,6 +494,7 @@ mod test_apply_bp_roots_to_storage {
             keys,
             mut state,
         } = setup();
+        let mut state = state.restrict_writes_to_write_log();
         let root = state.ethbridge_queries().get_bridge_pool_root();
         let nonce = state.ethbridge_queries().get_bridge_pool_nonce();
         let to_sign = keccak_hash([root.0, nonce.to_bytes()].concat());
@@ -542,6 +548,7 @@ mod test_apply_bp_roots_to_storage {
             keys,
             mut state,
         } = setup();
+        let mut state = state.restrict_writes_to_write_log();
         let root = state.ethbridge_queries().get_bridge_pool_root();
         let nonce = state.ethbridge_queries().get_bridge_pool_nonce();
         let to_sign = keccak_hash([root.0, nonce.to_bytes()].concat());
@@ -593,6 +600,7 @@ mod test_apply_bp_roots_to_storage {
             keys,
             mut state,
         } = setup();
+        let mut state = state.restrict_writes_to_write_log();
         let root = state.ethbridge_queries().get_bridge_pool_root();
         let nonce = state.ethbridge_queries().get_bridge_pool_nonce();
         let to_sign = keccak_hash([root.0, nonce.to_bytes()].concat());
@@ -649,6 +657,7 @@ mod test_apply_bp_roots_to_storage {
             keys,
             mut state,
         } = setup();
+        let mut state = state.restrict_writes_to_write_log();
         let root = state.ethbridge_queries().get_bridge_pool_root();
         let nonce = state.ethbridge_queries().get_bridge_pool_nonce();
         let to_sign = keccak_hash([root.0, nonce.to_bytes()].concat());
@@ -693,6 +702,7 @@ mod test_apply_bp_roots_to_storage {
             keys,
             mut state,
         } = setup();
+        let mut state = state.restrict_writes_to_write_log();
         let root = state.ethbridge_queries().get_bridge_pool_root();
         let nonce = state.ethbridge_queries().get_bridge_pool_nonce();
         let to_sign = keccak_hash([root.0, nonce.to_bytes()].concat());

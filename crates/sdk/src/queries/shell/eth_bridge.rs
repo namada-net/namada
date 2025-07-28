@@ -881,6 +881,7 @@ mod test_ethbridge_router {
             .state
             .commit_block_from_batch(MockDBWriteBatch)
             .expect("Test failed");
+        let wl_state = client.state.restrict_writes_to_write_log();
 
         // check the response
         let validator_set = RPC
@@ -891,11 +892,10 @@ mod test_ethbridge_router {
             .unwrap();
         let expected = {
             let total_power =
-                get_total_voting_power::<_, GovStore<_>>(&client.state, epoch)
+                get_total_voting_power::<_, GovStore<_>>(&wl_state, epoch)
                     .into();
 
-            let voting_powers_map: VotingPowersMap = client
-                .state
+            let voting_powers_map: VotingPowersMap = wl_state
                 .ethbridge_queries()
                 .get_consensus_eth_addresses::<governance::Store<_>>(epoch)
                 .map(|(addr_book, _, power)| (addr_book, power))
@@ -990,6 +990,7 @@ mod test_ethbridge_router {
             .state
             .commit_block_from_batch(MockDBWriteBatch)
             .expect("Test failed");
+        let wl_state = client.state.restrict_writes_to_write_log();
 
         // check the response
         let proof = RPC
@@ -1002,8 +1003,7 @@ mod test_ethbridge_router {
             let mut proof =
                 EthereumProof::new((1.into(), vext.0.data.voting_powers));
             proof.attach_signature(
-                client
-                    .state
+                wl_state
                     .ethbridge_queries()
                     .get_eth_addr_book::<governance::Store<_>>(
                         &established_address_1(),
@@ -1075,6 +1075,7 @@ mod test_ethbridge_router {
         client.state.in_mem_mut().block.height = 1.into();
         client
             .state
+            .write_log_mut()
             .write(&get_pending_key(&transfer), &transfer)
             .expect("Test failed");
 
@@ -1115,6 +1116,7 @@ mod test_ethbridge_router {
         // write a transfer into the bridge pool
         client
             .state
+            .write_log_mut()
             .write(&get_pending_key(&transfer), &transfer)
             .expect("Test failed");
 
@@ -1125,12 +1127,14 @@ mod test_ethbridge_router {
         // update the pool
         client
             .state
+            .write_log_mut()
             .delete(&get_pending_key(&transfer))
             .expect("Test failed");
         let mut transfer2 = transfer;
         transfer2.transfer.amount = 1.into();
         client
             .state
+            .write_log_mut()
             .write(&get_pending_key(&transfer2), &transfer2)
             .expect("Test failed");
 
@@ -1174,6 +1178,7 @@ mod test_ethbridge_router {
         // write a transfer into the bridge pool
         client
             .state
+            .write_log_mut()
             .write(&get_pending_key(&transfer), &transfer)
             .expect("Test failed");
 
@@ -1193,12 +1198,14 @@ mod test_ethbridge_router {
         transfer2.transfer.amount = 1.into();
         client
             .state
+            .write_log_mut()
             .write(&get_pending_key(&transfer2), transfer2)
             .expect("Test failed");
 
         // add the signature for the pool at the previous block height
         client
             .state
+            .write_log_mut()
             .write(
                 &get_signed_root_key(),
                 (signed_root.clone(), written_height),
@@ -1208,6 +1215,7 @@ mod test_ethbridge_router {
         // commit the changes and increase block height
         client.state.commit_block().expect("Test failed");
         client.state.in_mem_mut().block.height += 1;
+        let wl_state = client.state.restrict_writes_to_write_log();
 
         let resp = RPC
             .shell()
@@ -1237,8 +1245,7 @@ mod test_ethbridge_router {
             .expect("Test failed");
 
         let (validator_args, voting_powers) =
-            client
-                .state
+            wl_state
                 .ethbridge_queries()
                 .get_bridge_validator_set::<governance::Store<_>>(None);
         let relay_proof = ethereum_structs::RelayProof {
@@ -1285,6 +1292,7 @@ mod test_ethbridge_router {
         // write a transfer into the bridge pool
         client
             .state
+            .write_log_mut()
             .write(&get_pending_key(&transfer), &transfer)
             .expect("Test failed");
 
@@ -1306,12 +1314,14 @@ mod test_ethbridge_router {
         transfer2.transfer.amount = 1.into();
         client
             .state
+            .write_log_mut()
             .write(&get_pending_key(&transfer2), &transfer2)
             .expect("Test failed");
 
         // add the signature for the pool at the previous block height
         client
             .state
+            .write_log_mut()
             .write(&get_signed_root_key(), (signed_root, BlockHeight::from(0)))
             .expect("Test failed");
 
@@ -1369,6 +1379,7 @@ mod test_ethbridge_router {
         // write a transfer into the bridge pool
         client
             .state
+            .write_log_mut()
             .write(&get_pending_key(&transfer), &transfer)
             .expect("Test failed");
 
@@ -1388,12 +1399,14 @@ mod test_ethbridge_router {
         transfer2.transfer.amount = 1.into();
         client
             .state
+            .write_log_mut()
             .write(&get_pending_key(&transfer2), transfer2)
             .expect("Test failed");
 
         // add the signature for the pool at the previous block height
         client
             .state
+            .write_log_mut()
             .write(&get_signed_root_key(), (signed_root, written_height))
             .expect("Test failed");
 
@@ -1449,10 +1462,12 @@ mod test_ethbridge_router {
         let voting_power = FractionalVotingPower::HALF;
         client
             .state
+            .write_log_mut()
             .write(&eth_msg_key.body(), eth_event)
             .expect("Test failed");
         client
             .state
+            .write_log_mut()
             .write(
                 &eth_msg_key.voting_power(),
                 EpochedVotingPower::from([(
@@ -1463,6 +1478,7 @@ mod test_ethbridge_router {
             .expect("Test failed");
         client
             .state
+            .write_log_mut()
             .write(&eth_msg_key.seen(), false)
             .expect("Test failed");
         // commit the changes and increase block height
@@ -1477,6 +1493,7 @@ mod test_ethbridge_router {
         transfer2.transfer.amount = 1.into();
         client
             .state
+            .write_log_mut()
             .write(&get_pending_key(&transfer2), transfer2)
             .expect("Test failed");
 
@@ -1525,6 +1542,7 @@ mod test_ethbridge_router {
         // write a transfer into the bridge pool
         client
             .state
+            .write_log_mut()
             .write(&get_pending_key(&transfer), &transfer)
             .expect("Test failed");
 
@@ -1544,12 +1562,14 @@ mod test_ethbridge_router {
         transfer2.transfer.amount = 1.into();
         client
             .state
+            .write_log_mut()
             .write(&get_pending_key(&transfer2), transfer2)
             .expect("Test failed");
 
         // add the signature for the pool at the previous block height
         client
             .state
+            .write_log_mut()
             .write(&get_signed_root_key(), (signed_root, written_height))
             .expect("Test failed");
 
@@ -1579,6 +1599,7 @@ mod test_ethbridge_router {
         // remove a transfer from the pool.
         client
             .state
+            .write_log_mut()
             .delete(&get_pending_key(&transfer))
             .expect("Test failed");
 
@@ -1636,6 +1657,7 @@ mod test_ethbridge_router {
         .into();
         client
             .state
+            .write_log_mut()
             .write(&key, supply_amount)
             .expect("Test failed");
         let key = whitelist::Key {
@@ -1643,7 +1665,11 @@ mod test_ethbridge_router {
             suffix: whitelist::KeyType::Cap,
         }
         .into();
-        client.state.write(&key, cap_amount).expect("Test failed");
+        client
+            .state
+            .write_log_mut()
+            .write(&key, cap_amount)
+            .expect("Test failed");
 
         // check that the supply was updated
         let result = RPC
@@ -1680,6 +1706,7 @@ mod test_ethbridge_router {
         };
         client
             .state
+            .write_log_mut()
             .write(&get_pending_key(&transfer), transfer.clone())
             .expect("Test failed");
 
@@ -1719,6 +1746,7 @@ mod test_ethbridge_router {
             let written_height = client.state.in_mem().block.height;
             client
                 .state
+                .write_log_mut()
                 .write(&get_signed_root_key(), (signed_root, written_height))
                 .expect("Test failed");
             client

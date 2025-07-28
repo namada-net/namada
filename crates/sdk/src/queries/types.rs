@@ -14,7 +14,7 @@ where
     H: 'static + StorageHasher + Sync,
 {
     /// Reference to the ledger's [`WlState`].
-    pub state: &'shell WlState<D, H>,
+    pub state: &'shell WlState<'_, D, H>,
     /// Log of events emitted by `FinalizeBlock` ABCI calls.
     pub event_log: &'shell EventLog,
     /// Cache of VP wasm compiled artifacts.

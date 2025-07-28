@@ -157,7 +157,7 @@ mod tests {
     use namada_core::ethereum_events;
     use namada_core::ethereum_events::EthAddress;
     use namada_gas::{TxGasMeter, VpGasMeter};
-    use namada_state::testing::TestState;
+    use namada_state::testing::{TestFullAccessState, TestState};
     use namada_state::{StateRead, StorageWrite, TxIndex};
     use namada_trans_token::storage_key::{balance_key, minted_balance_key};
     use namada_tx::data::TxType;
@@ -197,15 +197,16 @@ mod tests {
     }
 
     /// Initialize some dummy storage for testing
-    fn setup_storage() -> TestState {
-        let mut state = TestState::default();
+    fn setup_storage() -> TestFullAccessState {
+        let mut state = TestFullAccessState::default();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // setup a user with a balance
         let balance_key = balance_key(
             &nam(),
             &Address::decode(ARBITRARY_OWNER_A_ADDRESS).expect("Test failed"),
         );
-        state
+        wl_state
             .write(
                 &balance_key,
                 Amount::from(ARBITRARY_OWNER_A_INITIAL_BALANCE),
@@ -225,7 +226,7 @@ mod tests {
                 },
             },
         };
-        config.init_storage(&mut state);
+        config.init_storage(&mut wl_state);
         state.commit_block().expect("Test failed");
         state
     }
@@ -386,7 +387,7 @@ mod tests {
         let ctx = setup_ctx(
             batched_tx.tx,
             batched_tx.cmt,
-            &state,
+            &state.restrict_writes_to_write_log(),
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -443,7 +444,7 @@ mod tests {
         let ctx = setup_ctx(
             batched_tx.tx,
             batched_tx.cmt,
-            &state,
+            &state.restrict_writes_to_write_log(),
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -503,7 +504,7 @@ mod tests {
         let ctx = setup_ctx(
             batched_tx.tx,
             batched_tx.cmt,
-            &state,
+            &state.restrict_writes_to_write_log(),
             &gas_meter,
             &keys_changed,
             &verifiers,

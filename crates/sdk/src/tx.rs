@@ -4683,8 +4683,9 @@ pub async fn convert_masp_tx_to_ibc_memo_data(
         None,
         &shielding_fee_payer,
         &shielding_fee_token,
-        false
-    ).await?;
+        false,
+    )
+    .await?;
     let target = MaspTxId::from(transaction.txid());
     let authorization = Authorization::new(
         vec![target.into()],

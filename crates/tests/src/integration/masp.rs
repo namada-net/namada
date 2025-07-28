@@ -1626,7 +1626,7 @@ fn test_shielding_fee_protocol_checks() -> Result<()> {
         ),
         fee_payer: Either::Left((node.lookup_pk(ALBERT_KEY)?, false)),
         shielded_hash: None,
-        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
+        masp_sus_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
         signatures: vec![],
     };
     let signed = sign_tx(&node, tx, signing_data, &dummy_args(&node))?;
@@ -1701,13 +1701,13 @@ fn test_shielding_fee_protocol_checks() -> Result<()> {
         ),
         fee_payer: Either::Left((node.lookup_pk(ALBERT_KEY)?, false)),
         shielded_hash: None,
-        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
+        masp_sus_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
         signatures: vec![],
     };
     let mut signed = sign_tx(&node, tx, signing_data, &dummy_args(&node))?;
     signed
         .sections
-        .retain(|s| !matches!(s, Section::ShieldingFee { .. }));
+        .retain(|s| !matches!(s, Section::MaspSustainabilityFee { .. }));
     let captured =
         CapturedOutput::of(|| submit_custom(&node, signed, &dummy_args(&node)));
     assert!(captured.result.is_ok());
@@ -1765,11 +1765,11 @@ fn test_shielding_fee_protocol_checks() -> Result<()> {
         ),
         fee_payer: Either::Left((node.lookup_pk(ALBERT_KEY)?, false)),
         shielded_hash: None,
-        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
+        masp_sus_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
         signatures: vec![],
     };
     for sec in tx.sections.iter_mut() {
-        if let Section::ShieldingFee { cmt, .. } = sec {
+        if let Section::MaspSustainabilityFee { cmt, .. } = sec {
             *cmt = MaspTxId::from(
                 masp_primitives::transaction::TxId::from_bytes([0u8; 32]),
             );
@@ -1835,7 +1835,7 @@ fn test_shielding_fee_protocol_checks() -> Result<()> {
         fee_payer: Either::Left((node.lookup_pk(ALBERT_KEY)?, false)),
         shielded_hash: None,
         // this should be Bertha's key
-        shielding_fee_payer: Some(node.lookup_pk(ALBERT_KEY)?),
+        masp_sus_fee_payer: Some(node.lookup_pk(ALBERT_KEY)?),
         signatures: vec![],
     };
     let signed = sign_tx(&node, tx, signing_data, &dummy_args(&node))?;
@@ -1886,7 +1886,7 @@ fn test_shielding_fee_protocol_checks() -> Result<()> {
     let shielding_fee_section = tx
         .sections
         .iter()
-        .find(|s| matches!(s, Section::ShieldingFee { .. }))
+        .find(|s| matches!(s, Section::MaspSustainabilityFee { .. }))
         .expect("Test failed")
         .clone();
     tx.add_section(shielding_fee_section);
@@ -1900,7 +1900,7 @@ fn test_shielding_fee_protocol_checks() -> Result<()> {
         fee_payer: Either::Left((node.lookup_pk(ALBERT_KEY)?, false)),
         shielded_hash: None,
         // this should be Bertha's key
-        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
+        masp_sus_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
         signatures: vec![],
     };
     let signed = sign_tx(&node, tx, signing_data, &dummy_args(&node))?;
@@ -5716,6 +5716,10 @@ fn masp_tx_expiration_last_valid_block_height() -> Result<()> {
             NAM,
             "--amount",
             "100",
+            "--shielding-fee-payer",
+            BERTHA_KEY,
+            "--shielding-fee-token",
+            NAM,
             "--ledger-address",
             validator_one_rpc,
         ]),
@@ -7742,7 +7746,7 @@ fn identical_output_descriptions() -> Result<()> {
         account_public_keys_map: None,
         fee_payer: Either::Left((adam_key.to_public(), false)),
         shielded_hash: None,
-        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
+        masp_sus_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
         signatures: vec![],
     };
 
@@ -8058,7 +8062,7 @@ fn masp_batch() -> Result<()> {
         account_public_keys_map: None,
         fee_payer: Either::Left((adam_key.to_public(), false)),
         shielded_hash: None,
-        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
+        masp_sus_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
         signatures: vec![],
     };
 
@@ -8324,7 +8328,7 @@ fn masp_atomic_batch() -> Result<()> {
         account_public_keys_map: None,
         fee_payer: Either::Left((adam_key.to_public(), false)),
         shielded_hash: None,
-        shielding_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
+        masp_sus_fee_payer: Some(node.lookup_pk(BERTHA_KEY)?),
         signatures: vec![],
     };
 
@@ -8679,7 +8683,7 @@ fn masp_failing_atomic_batch() -> Result<()> {
         account_public_keys_map: None,
         fee_payer: Either::Left((adam_key.to_public(), false)),
         shielded_hash: None,
-        shielding_fee_payer: None,
+        masp_sus_fee_payer: None,
         signatures: vec![],
     };
 
@@ -9620,7 +9624,7 @@ fn masp_events() -> Result<()> {
         account_public_keys_map: None,
         fee_payer: Either::Left((cooper_pk.clone(), false)),
         shielded_hash: None,
-        shielding_fee_payer: None,
+        masp_sus_fee_payer: None,
         signatures: vec![],
     };
 

@@ -80,8 +80,8 @@ pub struct SigningTxData {
     pub fee_payer: either::Either<(common::PublicKey, bool), Vec<u8>>,
     /// ID of the Transaction needing signing
     pub shielded_hash: Option<MaspTxId>,
-    /// The key of the account paying for shielding fees
-    pub shielding_fee_payer: Option<common::PublicKey>,
+    /// The key of the account paying for MASP sustainability fees
+    pub masp_sus_fee_payer: Option<common::PublicKey>,
     /// List of serialized signatures to attach to the transaction
     pub signatures: Vec<Vec<u8>>,
 }
@@ -290,15 +290,14 @@ where
         }
     }
 
-    if let Some(shielding_fee_payer) = signing_data.shielding_fee_payer.as_ref()
-    {
+    if let Some(masp_sus_fee_payer) = signing_data.masp_sus_fee_payer.as_ref() {
         let mut wallet = wallet.write().await;
         // If the secret key is not found, continue because the
         // hardware wallet may still be able to sign this
         if let Ok(secret_key) =
-            find_key_by_pk(&mut wallet, args, shielding_fee_payer)
+            find_key_by_pk(&mut wallet, args, masp_sus_fee_payer)
         {
-            used_pubkeys.insert(shielding_fee_payer.clone());
+            used_pubkeys.insert(masp_sus_fee_payer.clone());
             tx.add_section(Section::Authorization(Authorization::new(
                 vec![tx.raw_header_hash()],
                 (0..).zip(vec![secret_key]).collect(),
@@ -329,8 +328,9 @@ where
             }
         }
     }
-    // try to sign the shielding fee with the hardware wallet if necessary
-    if let Some(payer) = signing_data.shielding_fee_payer {
+    // try to sign the MASP sustainability fee with the hardware wallet if
+    // necessary
+    if let Some(payer) = signing_data.masp_sus_fee_payer {
         if !used_pubkeys.contains(&payer) {
             if let Ok(ntx) = sign(
                 tx.clone(),
@@ -416,7 +416,7 @@ pub async fn aux_signing_data(
     owner: Option<Address>,
     default_signer: Option<Address>,
     extra_public_keys: Vec<common::PublicKey>,
-    shielding_fee_payer: Option<common::PublicKey>,
+    masp_sus_fee_payer: Option<common::PublicKey>,
     is_shielded_source: bool,
     signatures: Vec<Vec<u8>>,
     wrapper_signature: Option<Vec<u8>>,
@@ -480,7 +480,7 @@ pub async fn aux_signing_data(
         threshold,
         account_public_keys_map,
         fee_payer,
-        shielding_fee_payer,
+        masp_sus_fee_payer,
         shielded_hash: None,
         signatures,
     })
@@ -2622,7 +2622,7 @@ mod test_signing {
             account_public_keys_map: Some(Default::default()),
             fee_payer: either::Either::Left((public_key_fee.clone(), false)),
             shielded_hash: None,
-            shielding_fee_payer: None,
+            masp_sus_fee_payer: None,
             signatures: vec![],
         };
 
@@ -2660,7 +2660,7 @@ mod test_signing {
             account_public_keys_map: Some(Default::default()),
             fee_payer: either::Left((public_key.clone(), false)),
             shielded_hash: None,
-            shielding_fee_payer: None,
+            masp_sus_fee_payer: None,
             signatures: vec![],
         };
         sign_tx(

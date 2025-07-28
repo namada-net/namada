@@ -42,9 +42,9 @@ use crate::storage_key::{
 };
 use crate::validation::verify_shielded_tx;
 
-/// Determines how to validate the MASP shielding fee
+/// Determines how to validate the MASP sustainability fee
 pub enum MaspFeeType {
-    /// MASP shielding from Namada transparent address
+    /// MASP tx from Namada transparent address
     Normal(Transaction),
     /// MASP shielding over IBC
     IBC(IbcShieldingData),
@@ -62,14 +62,15 @@ impl MaspFeeType {
         self.masp_tx().txid().into()
     }
 
-    fn get_masp_fee_data<'a>(
+    /// Get the payer and token for the MASP sustainability fee if possible
+    fn get_masp_sus_fee_data<'a>(
         &'a self,
         batched_tx: &'a BatchedTxRef<'_>,
     ) -> Option<(&'a common::PublicKey, &'a Address)> {
         let masp_tx_id = self.tx_id();
         match self {
             MaspFeeType::Normal(_) => {
-                batched_tx.tx.get_shielding_fee_section(&masp_tx_id)
+                batched_tx.tx.get_masp_sus_fee_section(&masp_tx_id)
             }
             MaspFeeType::IBC(data) => {
                 // Check the authorization is for the given MASP tx
@@ -472,10 +473,10 @@ where
         })
     }
 
-    /// Check that the tx has a shielding fee section. The signer in that
-    /// section is checked to be in the `actions_authorizers` set and
+    /// Check that the tx has a MASP sustainability fee section. The signer in
+    /// that section is checked to be in the `actions_authorizers` set and
     /// `verifiers` set.
-    fn check_masp_fees(
+    fn check_masp_sus_fees(
         ctx: &'ctx CTX,
         shielded_tx: &MaspFeeType,
         batched_tx: &BatchedTxRef<'_>,
@@ -486,7 +487,7 @@ where
             .transparent_bundle()
             .is_some_and(|b| !b.vin.is_empty());
         let (fee_authorizer, fee_token) =
-            shielded_tx.get_masp_fee_data(batched_tx).unzip();
+            shielded_tx.get_masp_sus_fee_data(batched_tx).unzip();
         if has_trans_inputs {
             match fee_authorizer {
                 None => {
@@ -707,7 +708,7 @@ where
             })
             .collect();
 
-        Self::check_masp_fees(
+        Self::check_masp_sus_fees(
             ctx,
             &shielded_tx,
             batched_tx,

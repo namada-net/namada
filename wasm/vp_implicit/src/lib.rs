@@ -115,7 +115,7 @@ fn validate_tx(
                 )?,
             Action::Masp(MaspAction::MaspSectionRef(_)) => (),
             Action::IbcShielding(ibc_shielding_action) => gadget
-                .verify_masp_fee_signatures_when(
+                .verify_masp_sus_fee_signatures_when(
                     || {
                         if let Some(signer) = ibc_shielding_action.get_signer()
                         {

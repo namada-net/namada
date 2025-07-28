@@ -177,7 +177,7 @@ impl VerifySigGadget {
     /// Verify the shielding fee authorization from an IBC shielding tx
     /// if the predicate returns true.
     #[inline(always)]
-    pub fn verify_masp_fee_signatures_when<F: FnOnce() -> bool>(
+    pub fn verify_masp_sus_fee_signatures_when<F: FnOnce() -> bool>(
         &mut self,
         predicate: F,
         tx_data: &Tx,

@@ -1331,7 +1331,7 @@ impl BenchShieldedCtx {
                     )
                     .unwrap(),
                 Some(shielded),
-                Some(vec![Section::ShieldingFee {
+                Some(vec![Section::MaspSustainabilityFee {
                     payer: shielding_fee_key,
                     token: native_token,
                     cmt: shielded_section_hash,

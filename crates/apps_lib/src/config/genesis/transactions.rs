@@ -770,7 +770,7 @@ impl<T> Signed<T> {
             public_keys: pks.clone(),
             threshold,
             fee_payer: Either::Left((genesis_fee_payer_pk(), false)),
-            shielding_fee_payer: None,
+            masp_sus_fee_payer: None,
             shielded_hash: None,
             signatures: vec![],
         };

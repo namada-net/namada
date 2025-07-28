@@ -5,7 +5,7 @@ use namada_core::masp_primitives::transaction::Transaction;
 use namada_token::TransparentTransfersRef;
 #[cfg(any(test, feature = "testing"))]
 pub use namada_token::testing;
-pub use namada_token::tx::{apply_masp_fees, apply_shielded_transfer};
+pub use namada_token::tx::{apply_masp_sus_fees, apply_shielded_transfer};
 pub use namada_token::{
     Amount, DenominatedAmount, Denomination, MaspDigitPos, Store, Transfer,
     storage_key, utils, validate_transfer_in_out,

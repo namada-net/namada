@@ -209,11 +209,10 @@ where
         env.push_action(Action::Masp(MaspAction::MaspAuthorizer(authorizer)))?;
     }
     if !vin_addresses.is_empty() {
-        if let Some((fee_payer, fee_token)) = tx_data
-            .tx
-            .get_shielding_fee_section(&shielded.txid().into())
+        if let Some((fee_payer, fee_token)) =
+            tx_data.tx.get_masp_sus_fee_section(&shielded.txid().into())
         {
-            apply_masp_fees(env, fee_payer, fee_token)?;
+            apply_masp_sus_fees(env, fee_payer, fee_token, true)?;
             env.push_action(Action::Masp(MaspAction::MaspAuthorizer(
                 Address::from(fee_payer),
             )))?;
@@ -227,24 +226,31 @@ where
     Ok(())
 }
 
-/// Transfer the fee for MASP shielding to PGF
-pub fn apply_masp_fees<ENV>(
+/// Transfer the MASP sustainability fee to PGF
+pub fn apply_masp_sus_fees<ENV>(
     env: &mut ENV,
     fee_payer: &common::PublicKey,
     fee_token: &Address,
+    shielding: bool,
 ) -> Result<()>
 where
     ENV: TxEnv + EmitEvents + action::Write<Err = Error>,
 {
     // transfer the shielding fee
-    let amount: DenominatedAmount = env
-        .get_masp_shielding_fee_amount(fee_token)
-        .expect("Failed to read storage")
-        .ok_or_else(|| {
-            Error::AllocMessage(format!(
-                "The token {fee_token} cannot be used to pay shielding fees"
-            ))
-        })?;
+    let amount: DenominatedAmount = if shielding {
+        env.get_masp_shielding_fee_amount(fee_token)
+            .expect("Failed to read storage")
+            .ok_or_else(|| {
+                Error::AllocMessage(format!(
+                    "The token {fee_token} cannot be used to pay shielding \
+                     fees"
+                ))
+            })?
+    } else {
+        return Err(Error::AllocMessage(format!(
+            "The token {fee_token} cannot be used to pay unshielding fees"
+        )));
+    };
     let sources = BTreeMap::from([(
         Account {
             owner: Address::from(fee_payer),
@@ -265,7 +271,7 @@ where
             sources: &sources,
             targets: &targets,
         },
-        Cow::Borrowed("shielding-fee-from-wasm"),
+        Cow::Borrowed("masp_sustainability-fee-from-wasm"),
     )?;
     Ok(())
 }

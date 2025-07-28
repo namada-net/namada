@@ -2774,12 +2774,13 @@ pub async fn build_ibc_transfer(
             let shielding_fee_payer = if let Some(data) =
                 &args.ibc_shielding_data
             {
-                validate_shielding_fee(
+                validate_masp_sus_fee(
                     context,
                     Some(&mut updated_balance),
                     data.get_signer()
                         .expect("A MASP fee payer should have been provided"),
                     &data.shielding_fee_token,
+                    true,
                     args.tx.force,
                 )
                 .await?
@@ -2931,7 +2932,7 @@ pub async fn build_ibc_transfer(
         tx.add_memo(memo);
     }
     if let Some(data) = &args.ibc_shielding_data {
-        tx.add_section(Section::ShieldingFee {
+        tx.add_section(Section::MaspSustainabilityFee {
             payer: data
                 .get_signer()
                 .cloned()
@@ -3050,38 +3051,46 @@ pub async fn build_ibc_transfer(
     Ok((tx, signing_data, shielded_tx_epoch))
 }
 
-/// Check if a shielding fee payer is necessary. If so,
+/// Check if a MASP sustainability fee payer is necessary. If so,
 /// guarantee one is provided and has sufficient balance.
 /// If it is the same account as the provided `updated_balance`
 /// arg, fold the change into that struct. Otherwise, return
 /// a new updated balance.
-pub async fn validate_shielding_fee<N: Namada>(
+pub async fn validate_masp_sus_fee<N: Namada>(
     context: &N,
     updated_balance: Option<&mut TxSourcePostBalance>,
-    shielding_fee_payer: &common::PublicKey,
-    shielding_fee_token: &Address,
+    masp_sus_fee_payer: &common::PublicKey,
+    masp_sus_fee_token: &Address,
+    shielding: bool,
     force: bool,
 ) -> Result<Option<TxSourcePostBalance>> {
-    let payer = Address::from(shielding_fee_payer);
+    let payer = Address::from(masp_sus_fee_payer);
 
-    let shielding_fee =
-        rpc::get_shielding_fee_amount(context.client(), shielding_fee_token)
+    let masp_sus_fee = if shielding {
+        rpc::get_shielding_fee_amount(context.client(), masp_sus_fee_token)
             .await
             .map_err(|_| {
                 Error::Other(format!(
                     "The MASP shielding fee cannot be paid with token \
-                     {shielding_fee_token}"
+                     {masp_sus_fee_token}"
                 ))
-            })?;
-    // fee payer is the same as shielded fee payer and paying with the same
-    // token
+            })?
+    } else {
+        // TODO: Implement unshielding fees
+        return Err(Error::Other(format!(
+            "The MASP unshielding fee cannot be paid with token \
+             {masp_sus_fee_token}"
+        )));
+    };
+    // fee payer is the same as MASP sustainability fee payer and paying with
+    // the same token
     let Some(updated_balance) = updated_balance else {
         return Some(
             check_balance_too_low_err(
-                shielding_fee_token,
+                masp_sus_fee_token,
                 &payer,
-                shielding_fee.amount(),
-                CheckBalance::Query(balance_key(shielding_fee_token, &payer)),
+                masp_sus_fee.amount(),
+                CheckBalance::Query(balance_key(masp_sus_fee_token, &payer)),
                 force,
                 context,
             )
@@ -3089,18 +3098,18 @@ pub async fn validate_shielding_fee<N: Namada>(
         )
         .transpose();
     };
-    if updated_balance.token == *shielding_fee_token
+    if updated_balance.token == *masp_sus_fee_token
         && updated_balance.source == payer
     {
         updated_balance.post_balance =
-            checked!(updated_balance.post_balance - shielding_fee.amount())
+            checked!(updated_balance.post_balance - masp_sus_fee.amount())
                 .map_err(|_| {
                     Error::Other(format!(
                         "{} does not have enough balance to pay for fees and \
-                         shielding fees. Short by {} {}",
+                         MASP sustainability fees. Short by {} {}",
                         updated_balance.source,
                         checked!(
-                            shielding_fee.amount()
+                            masp_sus_fee.amount()
                                 - updated_balance.post_balance
                         )
                         .unwrap(),
@@ -3109,13 +3118,13 @@ pub async fn validate_shielding_fee<N: Namada>(
                 })?;
         Ok(None)
     } else {
-        // check if the shielding fee payer has enough balance
+        // check if the MASP sustainability fee payer has enough balance
         Some(
             check_balance_too_low_err(
-                shielding_fee_token,
+                masp_sus_fee_token,
                 &payer,
-                shielding_fee.amount(),
-                CheckBalance::Query(balance_key(shielding_fee_token, &payer)),
+                masp_sus_fee.amount(),
+                CheckBalance::Query(balance_key(masp_sus_fee_token, &payer)),
                 force,
                 context,
             )
@@ -3597,11 +3606,12 @@ pub async fn build_shielding_transfer<N: Namada>(
             .map(|(fee_amount, updated_balance)| {
                 (fee_amount, Some(updated_balance))
             })?;
-    let shielding_fee_balance = validate_shielding_fee(
+    let shielding_fee_balance = validate_masp_sus_fee(
         context,
         updated_balance.as_mut(),
         &args.shielding_fee_payer,
         &args.shielding_fee_token,
+        true,
         args.tx.force,
     )
     .await?;
@@ -3719,7 +3729,7 @@ pub async fn build_shielding_transfer<N: Namada>(
         data.shielded_section_hash = Some(shielded_section_hash);
         signing_data.shielded_hash = Some(shielded_section_hash);
 
-        tx.add_section(Section::ShieldingFee {
+        tx.add_section(Section::MaspSustainabilityFee {
             payer: args.shielding_fee_payer.clone(),
             token: args.shielding_fee_token.clone(),
             cmt: shielded_section_hash,
@@ -4678,11 +4688,12 @@ pub async fn convert_masp_tx_to_ibc_memo_data(
                 shielding_fee_payer, err
             ))
         })?;
-    let _ = validate_shielding_fee(
+    let _ = validate_masp_sus_fee(
         context,
         None,
         &shielding_fee_payer,
         &shielding_fee_token,
+        true,
         false,
     )
     .await?;

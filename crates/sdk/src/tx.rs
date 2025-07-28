@@ -4678,7 +4678,13 @@ pub async fn convert_masp_tx_to_ibc_memo_data(
                 shielding_fee_payer, err
             ))
         })?;
-
+    let _ = validate_shielding_fee(
+        context,
+        None,
+        &shielding_fee_payer,
+        &shielding_fee_token,
+        false
+    )?;
     let target = MaspTxId::from(transaction.txid());
     let authorization = Authorization::new(
         vec![target.into()],

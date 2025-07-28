@@ -352,7 +352,7 @@ mod native_vp_host_env {
         signer_len: u64,
         threshold: u8,
     ));
-    native_host_fn!(namada_vp_verify_signature(
+    native_host_fn!(vp_verify_signature(
         public_key_ptr: u64,
         public_key_len: u64,
         auth_ptr: u64,

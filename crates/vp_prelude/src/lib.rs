@@ -26,6 +26,7 @@ use std::marker::PhantomData;
 use std::str::FromStr;
 
 use chain::ChainId;
+use namada_account::AccountPublicKeysMap;
 pub use namada_core::address::Address;
 pub use namada_core::borsh::{
     BorshDeserialize, BorshSerialize, BorshSerializeExt,
@@ -47,6 +48,8 @@ pub use namada_macros::validity_predicate;
 pub use namada_storage::{
     Error, OptionExt, ResultExt, StorageRead, iter_prefix, iter_prefix_bytes,
 };
+use namada_tx::Signer;
+use namada_tx::action::IbcShieldingAction;
 pub use namada_tx::{BatchedTx, Section, Tx};
 use namada_vm_env::vp::*;
 use namada_vm_env::{read_from_buffer, read_key_val_bytes_from_buffer};
@@ -168,6 +171,58 @@ impl VerifySigGadget {
         if predicate() {
             self.verify_signatures(ctx, tx_data, cmt, owner)?;
         }
+        Ok(())
+    }
+
+    /// Verify the shielding fee authorization from an IBC shielding tx
+    /// if the predicate returns true.
+    #[inline(always)]
+    pub fn verify_masp_sus_fee_signatures_when<F: FnOnce() -> bool>(
+        &mut self,
+        predicate: F,
+        tx_data: &Tx,
+        cmt: &TxCommitments,
+        ibc_shielding_action: &IbcShieldingAction,
+    ) -> VpResult {
+        if predicate() && !self.has_validated_sig {
+            // First check that the memo section of this inner tx has not
+            // been tampered with
+            if cmt.memo_hash != namada_core::hash::Hash::zero() {
+                tx_data.get_section(&cmt.memo_hash).ok_or_else(|| {
+                    VpError::Erased(format!(
+                        "Memo section with hash {} is missing",
+                        cmt.memo_hash
+                    ))
+                })?;
+            }
+            let auth = ibc_shielding_action
+                .shielding_fee_authorization
+                .serialize_to_vec();
+            let public_keys_index_map: AccountPublicKeysMap =
+                match &ibc_shielding_action.shielding_fee_authorization.signer {
+                    Signer::Address(_) => {
+                        return Err(VpError::Erased(
+                            "Expected IBC shielding fee authorization to be \
+                             signed with public keys"
+                                .to_string(),
+                        ));
+                    }
+                    Signer::PubKeys(pks) => pks.iter().cloned().collect(),
+                };
+            let public_keys_map = public_keys_index_map.serialize_to_vec();
+
+            // Then check the signature
+            unsafe {
+                namada_vp_verify_signature(
+                    public_keys_map.as_ptr() as _,
+                    public_keys_map.len() as _,
+                    auth.as_ptr() as _,
+                    auth.len() as _,
+                );
+            }
+            self.has_validated_sig = true;
+        }
+
         Ok(())
     }
 }

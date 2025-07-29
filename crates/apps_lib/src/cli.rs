@@ -318,7 +318,9 @@ pub mod cmds {
                 Self::parse_with_ctx(matches, TxShieldingTransfer);
             let tx_unshielding_transfer =
                 Self::parse_with_ctx(matches, TxUnshieldingTransfer);
-            let tx_ibc_transfer = Self::parse_with_ctx(matches, TxIbcTransfer);
+            let tx_ibc_transfer = Self::parse_with_ctx(matches, |cmd| {
+                TxIbcTransfer(Box::new(cmd))
+            });
             let tx_osmosis_swap = Self::parse_with_ctx(matches, |cmd| {
                 TxOsmosisSwap(Box::new(cmd))
             });
@@ -507,7 +509,7 @@ pub mod cmds {
         TxShieldedTransfer(TxShieldedTransfer),
         TxShieldingTransfer(TxShieldingTransfer),
         TxUnshieldingTransfer(TxUnshieldingTransfer),
-        TxIbcTransfer(TxIbcTransfer),
+        TxIbcTransfer(Box<TxIbcTransfer>),
         TxOsmosisSwap(Box<TxOsmosisSwap>),
         QueryResult(QueryResult),
         TxUpdateAccount(TxUpdateAccount),
@@ -4953,6 +4955,7 @@ pub mod args {
                 sources: data,
                 targets,
                 tx_code_path: self.tx_code_path.to_path_buf(),
+                frontend_sus_fee: None,
             })
         }
     }
@@ -4981,6 +4984,7 @@ pub mod args {
                 sources: data,
                 targets,
                 tx_code_path,
+                frontend_sus_fee: None,
             }
         }
 
@@ -5128,6 +5132,7 @@ pub mod args {
                 ibc_memo: self.ibc_memo,
                 gas_spending_key,
                 tx_code_path: self.tx_code_path.to_path_buf(),
+                frontend_sus_fee: None,
             })
         }
     }
@@ -5169,6 +5174,8 @@ pub mod args {
                 ibc_memo,
                 gas_spending_key,
                 tx_code_path,
+                // FIXME: is it ok to skip the frontend fee from the cli?
+                frontend_sus_fee: None,
             }
         }
 
@@ -7231,6 +7238,7 @@ pub mod args {
                         IbcShieldingTransferAsset::Address(chain_ctx.get(&addr))
                     }
                 },
+                frontend_sus_fee: None,
             })
         }
     }
@@ -7266,6 +7274,7 @@ pub mod args {
                     channel_id,
                     token,
                 },
+                frontend_sus_fee: None,
             }
         }
 

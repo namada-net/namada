@@ -494,13 +494,14 @@ mod tests {
     use namada_core::storage::TxIndex;
     use namada_core::tendermint::time::Time as TmTime;
     use namada_core::time::DurationSecs;
+    use namada_events::EmitEvents;
     use namada_gas::{TxGasMeter, VpGasMeter};
     use namada_governance::parameters::GovernanceParameters;
     use namada_parameters::EpochDuration;
     use namada_parameters::storage::get_epoch_duration_storage_key;
     use namada_proof_of_stake::test_utils::get_dummy_genesis_validator;
-    use namada_state::StorageRead;
-    use namada_state::testing::TestState;
+    use namada_state::testing::{TestFullAccessState, TestState};
+    use namada_state::{StorageRead, StorageWrite};
     use namada_token::Transfer;
     use namada_token::storage_key::balance_key;
     use namada_tx::data::TxType;
@@ -637,27 +638,28 @@ mod tests {
         ClientId::from_str(&id).expect("Creating a client ID failed")
     }
 
-    fn init_storage() -> TestState {
-        let mut state = TestState::default();
+    fn init_storage() -> TestFullAccessState {
+        let mut state = TestFullAccessState::default();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // initialize the storage
-        init_genesis_storage(&mut state);
+        init_genesis_storage(&mut wl_state);
         let gov_params = GovernanceParameters::default();
-        gov_params.init_storage(&mut state).unwrap();
+        gov_params.init_storage(&mut wl_state).unwrap();
         let ibc_params = IbcParameters {
             default_rate_limits: IbcTokenRateLimits {
                 mint_limit: Amount::native_whole(100),
                 throughput_per_epoch_limit: Amount::native_whole(100),
             },
         };
-        ibc_params.init_storage(&mut state).unwrap();
+        ibc_params.init_storage(&mut wl_state).unwrap();
         namada_proof_of_stake::test_utils::test_init_genesis::<
             _,
             namada_parameters::Store<_>,
             namada_governance::Store<_>,
             namada_token::Store<_>,
         >(
-            &mut state,
+            &mut wl_state,
             namada_proof_of_stake::OwnedPosParams::default(),
             vec![get_dummy_genesis_validator()].into_iter(),
             Epoch(1),
@@ -683,7 +685,7 @@ mod tests {
         state
     }
 
-    fn insert_init_client(state: &mut TestState) {
+    fn insert_init_client(state: &mut TestFullAccessState) {
         // insert a mock client type
         let client_id = get_client_id();
         // insert a mock client state
@@ -956,6 +958,7 @@ mod tests {
     #[test]
     fn test_create_client() {
         let mut state = init_storage();
+        let mut wl_state = state.restrict_writes_to_write_log();
         let mut keys_changed = BTreeSet::new();
 
         let height = Height::new(0, 1).unwrap();
@@ -975,43 +978,37 @@ mod tests {
         // client state
         let client_state_key = client_state_key(&get_client_id());
         let bytes = Protobuf::<Any>::encode_vec(client_state);
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(&client_state_key, bytes)
             .expect("write failed");
         keys_changed.insert(client_state_key);
         // client consensus
         let consensus_key = consensus_state_key(&client_id, height);
         let bytes = Protobuf::<Any>::encode_vec(consensus_state);
-        let _ = state
-            .write_log_mut()
-            .write(&consensus_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&consensus_key, bytes).expect("write failed");
         keys_changed.insert(consensus_key);
         // client counter
         let client_counter_key = client_counter_key();
-        increment_counter(&mut state, &client_counter_key);
+        increment_counter(&mut wl_state, &client_counter_key);
         keys_changed.insert(client_counter_key);
         // client update time
         let client_update_time_key = client_update_timestamp_key(&client_id);
-        let time = StateRead::get_block_header(&state, None)
+        let time = StateRead::get_block_header(&wl_state, None)
             .unwrap()
             .0
             .unwrap()
             .time;
         let bytes = TmTime::try_from(time).unwrap().encode_vec();
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(&client_update_time_key, bytes)
             .expect("write failed");
         keys_changed.insert(client_update_time_key);
         // client update height
         let client_update_height_key = client_update_height_key(&client_id);
-        let host_height = state.in_mem().get_block_height().0;
+        let host_height = wl_state.get_block_height().unwrap();
         let host_height =
             Height::new(0, host_height.0).expect("invalid height");
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(&client_update_height_key, host_height.encode_vec())
             .expect("write failed");
         keys_changed.insert(client_update_height_key);
@@ -1022,12 +1019,8 @@ mod tests {
             client_state.latest_height(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Client);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
@@ -1041,7 +1034,7 @@ mod tests {
 
         let verifiers = BTreeSet::new();
         let mut outer_tx = Tx::from_type(TxType::Raw);
-        outer_tx.header.chain_id = state.in_mem().chain_id.clone();
+        outer_tx.header.chain_id = wl_state.in_mem().chain_id.clone();
         outer_tx.set_code(Code::new(tx_code, None));
         outer_tx.set_data(Data::new(tx_data));
         outer_tx.add_section(Section::Authorization(Authorization::new(
@@ -1052,7 +1045,7 @@ mod tests {
         let batched_tx = outer_tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -1072,12 +1065,13 @@ mod tests {
 
     #[test]
     fn test_create_client_fail() {
-        let mut state = TestState::default();
+        let mut state = TestFullAccessState::default();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         let mut keys_changed = BTreeSet::new();
 
         // initialize the storage
-        init_genesis_storage(&mut state);
+        init_genesis_storage(&mut wl_state);
         // set a dummy header
         state
             .in_mem_mut()
@@ -1094,8 +1088,7 @@ mod tests {
         let client_state = MockClientState::new(header);
         let client_state_key = client_state_key(&get_client_id());
         let bytes = Protobuf::<Any>::encode_vec(client_state);
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(&client_state_key, bytes)
             .expect("write failed");
         keys_changed.insert(client_state_key);
@@ -1113,7 +1106,7 @@ mod tests {
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
 
-        let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
+        let mut tx = Tx::new(wl_state.in_mem().chain_id.clone(), None);
         tx.add_code(tx_code, None)
             .add_serialized_data(tx_data)
             .sign_wrapper(keypair_1());
@@ -1128,7 +1121,7 @@ mod tests {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -1161,6 +1154,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // update the client
         let client_id = get_client_id();
@@ -1180,8 +1174,7 @@ mod tests {
         // client state
         let client_state = MockClientState::new(header);
         let bytes = Protobuf::<Any>::encode_vec(client_state);
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(&client_state_key, bytes)
             .expect("write failed");
         keys_changed.insert(client_state_key);
@@ -1189,21 +1182,17 @@ mod tests {
         let consensus_key = consensus_state_key(&client_id, height);
         let consensus_state = MockConsensusState::new(header);
         let bytes = Protobuf::<Any>::encode_vec(consensus_state);
-        let _ = state
-            .write_log_mut()
-            .write(&consensus_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&consensus_key, bytes).expect("write failed");
         keys_changed.insert(consensus_key);
         // client update time
         let client_update_time_key = client_update_timestamp_key(&client_id);
-        let time = StateRead::get_block_header(&state, None)
+        let time = StateRead::get_block_header(&wl_state, None)
             .unwrap()
             .0
             .unwrap()
             .time;
         let bytes = TmTime::try_from(time).unwrap().encode_vec();
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(&client_update_time_key, bytes)
             .expect("write failed");
         keys_changed.insert(client_update_time_key);
@@ -1212,8 +1201,7 @@ mod tests {
         let host_height = state.in_mem().get_block_height().0;
         let host_height =
             Height::new(0, host_height.0).expect("invalid height");
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(&client_update_height_key, host_height.encode_vec())
             .expect("write failed");
         keys_changed.insert(client_update_height_key);
@@ -1227,19 +1215,15 @@ mod tests {
             Protobuf::<Any>::encode_vec(header),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Client);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
 
-        let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
+        let mut tx = Tx::new(wl_state.in_mem().chain_id.clone(), None);
         tx.add_code(tx_code, None)
             .add_serialized_data(tx_data)
             .sign_wrapper(keypair_1());
@@ -1254,7 +1238,7 @@ mod tests {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -1284,6 +1268,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare a message
         let mut counterparty = get_conn_counterparty();
@@ -1317,14 +1302,13 @@ mod tests {
         let client_conn_key = client_connections_key(&msg.client_id_on_a);
         let conn_list = conn_id.to_string();
         let bytes = conn_list.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(&client_conn_key, bytes)
             .expect("write failed");
         keys_changed.insert(client_conn_key);
         // connection counter
         let conn_counter_key = connection_counter_key();
-        increment_counter(&mut state, &conn_counter_key);
+        increment_counter(&mut wl_state, &conn_counter_key);
         keys_changed.insert(conn_counter_key);
         // event
         let event = RawIbcEvent::OpenInitConnection(ConnOpenInit::new(
@@ -1333,19 +1317,15 @@ mod tests {
             msg.counterparty.client_id().clone(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Connection);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
         let mut outer_tx = Tx::from_type(TxType::Raw);
-        outer_tx.header.chain_id = state.in_mem().chain_id.clone();
+        outer_tx.header.chain_id = wl_state.in_mem().chain_id.clone();
         outer_tx.set_code(Code::new(tx_code, None));
         outer_tx.set_data(Data::new(tx_data));
         outer_tx.add_section(Section::Authorization(Authorization::new(
@@ -1363,7 +1343,7 @@ mod tests {
         let batched_tx = outer_tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -1382,7 +1362,7 @@ mod tests {
 
     #[test]
     fn test_init_connection_fail() {
-        let mut state = TestState::default();
+        let mut state = TestFullAccessState::default();
         let mut keys_changed = BTreeSet::new();
 
         // initialize the storage
@@ -1393,6 +1373,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(1)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare data
         let mut counterparty = get_conn_counterparty();
@@ -1417,23 +1398,19 @@ mod tests {
         )
         .expect("invalid connection");
         let bytes = conn.encode_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&conn_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&conn_key, bytes).expect("write failed");
         keys_changed.insert(conn_key);
         // client connection list
         let client_conn_key = client_connections_key(&msg.client_id_on_a);
         let conn_list = conn_id.to_string();
         let bytes = conn_list.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(&client_conn_key, bytes)
             .expect("write failed");
         keys_changed.insert(client_conn_key);
         // connection counter
         let conn_counter_key = connection_counter_key();
-        increment_counter(&mut state, &conn_counter_key);
+        increment_counter(&mut wl_state, &conn_counter_key);
         keys_changed.insert(conn_counter_key);
         // No event
 
@@ -1442,7 +1419,7 @@ mod tests {
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
 
-        let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
+        let mut tx = Tx::new(wl_state.in_mem().chain_id.clone(), None);
         tx.add_code(tx_code, None)
             .add_serialized_data(tx_data)
             .sign_wrapper(keypair_1());
@@ -1457,7 +1434,7 @@ mod tests {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -1488,6 +1465,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare data
         let height = Height::new(0, 1).unwrap();
@@ -1535,14 +1513,13 @@ mod tests {
         let client_conn_key = client_connections_key(&msg.client_id_on_b);
         let conn_list = conn_id.to_string();
         let bytes = conn_list.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(&client_conn_key, bytes)
             .expect("write failed");
         keys_changed.insert(client_conn_key);
         // connection counter
         let conn_counter_key = connection_counter_key();
-        increment_counter(&mut state, &conn_counter_key);
+        increment_counter(&mut wl_state, &conn_counter_key);
         keys_changed.insert(conn_counter_key);
         // event
         let event = RawIbcEvent::OpenTryConnection(ConnOpenTry::new(
@@ -1552,18 +1529,14 @@ mod tests {
             msg.counterparty.client_id().clone(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Connection);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
-        let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
+        let mut tx = Tx::new(wl_state.in_mem().chain_id.clone(), None);
         tx.add_code(tx_code, None)
             .add_serialized_data(tx_data)
             .sign_wrapper(keypair_1());
@@ -1578,7 +1551,7 @@ mod tests {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -1617,14 +1590,12 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // update the connection to Open
         let conn = get_connection(ConnState::Open);
         let bytes = conn.encode_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&conn_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&conn_key, bytes).expect("write failed");
         keys_changed.insert(conn_key);
 
         // prepare data
@@ -1658,12 +1629,8 @@ mod tests {
             counterparty.client_id().clone(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Connection);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_code = vec![];
         let tx_index = TxIndex::default();
@@ -1688,7 +1655,7 @@ mod tests {
         let batched_tx = outer_tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -1726,14 +1693,12 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // update the connection to Open
         let conn = get_connection(ConnState::Open);
         let bytes = conn.encode_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&conn_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&conn_key, bytes).expect("write failed");
         keys_changed.insert(conn_key);
 
         // prepare data
@@ -1753,19 +1718,15 @@ mod tests {
             counterparty.client_id().clone(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Connection);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_code = vec![];
         let tx_index = TxIndex::default();
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
         let mut outer_tx = Tx::from_type(TxType::Raw);
-        outer_tx.header.chain_id = state.in_mem().chain_id.clone();
+        outer_tx.header.chain_id = wl_state.in_mem().chain_id.clone();
         outer_tx.set_code(Code::new(tx_code, None));
         outer_tx.set_data(Data::new(tx_data));
         outer_tx.add_section(Section::Authorization(Authorization::new(
@@ -1783,7 +1744,7 @@ mod tests {
         let batched_tx = outer_tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -1822,6 +1783,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare data
         let msg = MsgChannelOpenInit {
@@ -1846,23 +1808,20 @@ mod tests {
         )
         .unwrap();
         let bytes = channel.encode_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&channel_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&channel_key, bytes).expect("write failed");
         keys_changed.insert(channel_key);
         // channel counter
         let chan_counter_key = channel_counter_key();
-        increment_counter(&mut state, &chan_counter_key);
+        increment_counter(&mut wl_state, &chan_counter_key);
         keys_changed.insert(chan_counter_key);
         // sequences
         let channel_id = get_channel_id();
         let port_id = msg.port_id_on_a.clone();
         let send_key = next_sequence_send_key(&port_id, &channel_id);
-        increment_sequence(&mut state, &send_key);
+        increment_sequence(&mut wl_state, &send_key);
         keys_changed.insert(send_key);
         let recv_key = next_sequence_recv_key(&port_id, &channel_id);
-        increment_sequence(&mut state, &recv_key);
+        increment_sequence(&mut wl_state, &recv_key);
         keys_changed.insert(recv_key);
         let ack_key = next_sequence_ack_key(&port_id, &channel_id);
         increment_sequence(&mut state, &ack_key);
@@ -1876,19 +1835,15 @@ mod tests {
             msg.version_proposal.clone(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Channel);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
         let mut outer_tx = Tx::from_type(TxType::Raw);
-        outer_tx.header.chain_id = state.in_mem().chain_id.clone();
+        outer_tx.header.chain_id = wl_state.in_mem().chain_id.clone();
         outer_tx.set_code(Code::new(tx_code, None));
         outer_tx.set_data(Data::new(tx_data));
         outer_tx.add_section(Section::Authorization(Authorization::new(
@@ -1906,7 +1861,7 @@ mod tests {
         let batched_tx = outer_tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -1944,6 +1899,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare data
         let proof_height = Height::new(0, 1).unwrap();
@@ -1967,26 +1923,23 @@ mod tests {
         let channel_key = channel_key(&get_port_id(), &get_channel_id());
         let channel = get_channel(ChanState::TryOpen, Order::Unordered);
         let bytes = channel.encode_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&channel_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&channel_key, bytes).expect("write failed");
         keys_changed.insert(channel_key);
         // channel counter
         let chan_counter_key = channel_counter_key();
-        increment_counter(&mut state, &chan_counter_key);
+        increment_counter(&mut wl_state, &chan_counter_key);
         keys_changed.insert(chan_counter_key);
         // sequences
         let channel_id = get_channel_id();
         let port_id = msg.port_id_on_a.clone();
         let send_key = next_sequence_send_key(&port_id, &channel_id);
-        increment_sequence(&mut state, &send_key);
+        increment_sequence(&mut wl_state, &send_key);
         keys_changed.insert(send_key);
         let recv_key = next_sequence_recv_key(&port_id, &channel_id);
-        increment_sequence(&mut state, &recv_key);
+        increment_sequence(&mut wl_state, &recv_key);
         keys_changed.insert(recv_key);
         let ack_key = next_sequence_ack_key(&port_id, &channel_id);
-        increment_sequence(&mut state, &ack_key);
+        increment_sequence(&mut wl_state, &ack_key);
         keys_changed.insert(ack_key);
         // event
         let event = RawIbcEvent::OpenTryChannel(ChanOpenTry::new(
@@ -1998,19 +1951,15 @@ mod tests {
             msg.version_supported_on_a.clone(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Channel);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
         let mut outer_tx = Tx::from_type(TxType::Raw);
-        outer_tx.header.chain_id = state.in_mem().chain_id.clone();
+        outer_tx.header.chain_id = wl_state.in_mem().chain_id.clone();
         outer_tx.set_code(Code::new(tx_code, None));
         outer_tx.set_data(Data::new(tx_data));
         outer_tx.add_section(Section::Authorization(Authorization::new(
@@ -2028,7 +1977,7 @@ mod tests {
         let batched_tx = outer_tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -2074,6 +2023,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare data
         let proof_height = Height::new(0, 1).unwrap();
@@ -2091,10 +2041,7 @@ mod tests {
         // update the channel to Open
         let channel = get_channel(ChanState::Open, Order::Unordered);
         let bytes = channel.encode_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&channel_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&channel_key, bytes).expect("write failed");
         keys_changed.insert(channel_key);
         // event
         let event = RawIbcEvent::OpenAckChannel(ChanOpenAck::new(
@@ -2105,19 +2052,15 @@ mod tests {
             get_connection_id(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Channel);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
         let mut outer_tx = Tx::from_type(TxType::Raw);
-        outer_tx.header.chain_id = state.in_mem().chain_id.clone();
+        outer_tx.header.chain_id = wl_state.in_mem().chain_id.clone();
         outer_tx.set_code(Code::new(tx_code, None));
         outer_tx.set_data(Data::new(tx_data));
         outer_tx.add_section(Section::Authorization(Authorization::new(
@@ -2135,7 +2078,7 @@ mod tests {
         let batched_tx = outer_tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -2181,6 +2124,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare data
         let proof_height = Height::new(0, 1).unwrap();
@@ -2195,10 +2139,7 @@ mod tests {
         // update the channel to Open
         let channel = get_channel(ChanState::Open, Order::Ordered);
         let bytes = channel.encode_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&channel_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&channel_key, bytes).expect("write failed");
         keys_changed.insert(channel_key);
         // event
         let counterparty = get_channel_counterparty();
@@ -2210,19 +2151,15 @@ mod tests {
             get_connection_id(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Channel);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
 
-        let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
+        let mut tx = Tx::new(wl_state.in_mem().chain_id.clone(), None);
         tx.add_code(tx_code, None)
             .add_serialized_data(tx_data)
             .sign_wrapper(keypair_1());
@@ -2237,7 +2174,7 @@ mod tests {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -2294,6 +2231,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare data
         let msg = IbcMsgTransfer {
@@ -2314,9 +2252,8 @@ mod tests {
 
         // the sequence send
         let seq_key = next_sequence_send_key(&get_port_id(), &get_channel_id());
-        let sequence = get_next_seq(&state, &seq_key);
-        let _ = state
-            .write_log_mut()
+        let sequence = get_next_seq(&wl_state, &seq_key);
+        let _ = wl_state
             .write(&seq_key, (u64::from(sequence) + 1).to_be_bytes().to_vec())
             .expect("write failed");
         keys_changed.insert(seq_key);
@@ -2327,18 +2264,14 @@ mod tests {
             commitment_key(&msg.port_id_on_a, &msg.chan_id_on_a, sequence);
         let commitment = commitment(&packet);
         let bytes = commitment.into_vec();
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(&commitment_key, bytes)
             .expect("write failed");
         keys_changed.insert(commitment_key);
         // withdraw
         let withdraw_key = withdraw_key(&nam());
         let bytes = amount.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&withdraw_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&withdraw_key, bytes).expect("write failed");
         keys_changed.insert(withdraw_key);
         // event
         let transfer_event = TransferEvent {
@@ -2349,26 +2282,18 @@ mod tests {
             memo: msg.packet_data.memo.clone(),
         };
         let event = RawIbcEvent::Module(ModuleEvent::from(transfer_event));
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
         let event = RawIbcEvent::SendPacket(SendPacket::new(
             packet,
             Order::Unordered,
             get_connection_id(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Channel);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
         let message_event =
             RawIbcEvent::Message(MessageEvent::Module("transfer".to_owned()));
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
@@ -2378,7 +2303,7 @@ mod tests {
         }
         .serialize_to_vec();
 
-        let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
+        let mut tx = Tx::new(wl_state.in_mem().chain_id.clone(), None);
         tx.add_code(tx_code, None)
             .add_serialized_data(tx_data)
             .sign_wrapper(keypair_1());
@@ -2393,7 +2318,7 @@ mod tests {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -2439,6 +2364,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare data
         let sender = established_address_1();
@@ -2475,10 +2401,7 @@ mod tests {
             msg.packet.seq_on_a,
         );
         let bytes = [1_u8].to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&receipt_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&receipt_key, bytes).expect("write failed");
         keys_changed.insert(receipt_key);
         // packet commitment
         let ack_key = ack_key(
@@ -2489,10 +2412,7 @@ mod tests {
         let transfer_ack = AcknowledgementStatus::success(ack_success_b64());
         let acknowledgement: Acknowledgement = transfer_ack.into();
         let bytes = sha2::Sha256::digest(acknowledgement.as_bytes()).to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&ack_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&ack_key, bytes).expect("write failed");
         keys_changed.insert(ack_key);
 
         let mut coin = transfer_msg.packet_data.token;
@@ -2506,36 +2426,24 @@ mod tests {
         let bytes = Amount::from_str(coin.amount.to_string(), 0)
             .unwrap()
             .serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&mint_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&mint_key, bytes).expect("write failed");
         keys_changed.insert(mint_key);
         // deposit
         let deposit_key = deposit_key(&ibc_token);
         let bytes = Amount::from_str(coin.amount.to_string(), 0)
             .unwrap()
             .serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&deposit_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&deposit_key, bytes).expect("write failed");
         keys_changed.insert(deposit_key);
         // denom
         let trace_hash = calc_hash(coin.denom.to_string());
         let trace_key = ibc_trace_key(receiver.to_string(), &trace_hash);
         let bytes = coin.denom.to_string().serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&trace_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&trace_key, bytes).expect("write failed");
         keys_changed.insert(trace_key);
         let trace_key = ibc_trace_key(nam().to_string(), &trace_hash);
         let bytes = coin.denom.to_string().serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&trace_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&trace_key, bytes).expect("write failed");
         keys_changed.insert(trace_key);
         // event
         let recv_event = RecvEvent {
@@ -2547,29 +2455,21 @@ mod tests {
             success: true,
         };
         let event = RawIbcEvent::Module(ModuleEvent::from(recv_event));
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
         let denom_trace_event = DenomTraceEvent {
             trace_hash: Some(trace_hash),
             denom: coin.denom,
         };
         let event = RawIbcEvent::Module(ModuleEvent::from(denom_trace_event));
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
         let event = RawIbcEvent::ReceivePacket(ReceivePacket::new(
             msg.packet.clone(),
             Order::Unordered,
             get_connection_id(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Channel);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
         let event =
             RawIbcEvent::WriteAcknowledgement(WriteAcknowledgement::new(
                 packet,
@@ -2577,19 +2477,15 @@ mod tests {
                 get_connection_id(),
             ));
         let message_event = RawIbcEvent::Message(MessageEvent::Channel);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
 
-        let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
+        let mut tx = Tx::new(wl_state.in_mem().chain_id.clone(), None);
         tx.add_code(tx_code, None)
             .add_serialized_data(tx_data)
             .sign_wrapper(keypair_1());
@@ -2604,7 +2500,7 @@ mod tests {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -2684,6 +2580,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare data
         let transfer_ack = AcknowledgementStatus::success(ack_success_b64());
@@ -2696,10 +2593,7 @@ mod tests {
         };
 
         // delete the commitment
-        let _ = state
-            .write_log_mut()
-            .delete(&commitment_key)
-            .expect("delete failed");
+        let _ = wl_state.delete(&commitment_key).expect("delete failed");
         keys_changed.insert(commitment_key);
         // event
         let data = serde_json::from_slice::<PacketData>(&packet.data)
@@ -2713,22 +2607,16 @@ mod tests {
             acknowledgement: transfer_ack,
         };
         let event = RawIbcEvent::Module(ModuleEvent::from(ack_event));
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
         let event = RawIbcEvent::AcknowledgePacket(AcknowledgePacket::new(
             packet,
             Order::Unordered,
             get_connection_id(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Channel);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
-        state.write_log_mut().emit_event(IbcEvent {
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit(IbcEvent {
             event_type: IbcEventType("fungible_token_packet".to_owned()),
             attributes: {
                 let mut attrs = namada_core::collections::HashMap::new();
@@ -2744,7 +2632,7 @@ mod tests {
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
 
-        let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
+        let mut tx = Tx::new(wl_state.in_mem().chain_id.clone(), None);
         tx.add_code(tx_code, None)
             .add_serialized_data(tx_data)
             .sign_wrapper(keypair_1());
@@ -2759,7 +2647,7 @@ mod tests {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -2848,6 +2736,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare data
         let msg = MsgTimeout {
@@ -2859,20 +2748,14 @@ mod tests {
         };
 
         // delete the commitment
-        let _ = state
-            .write_log_mut()
-            .delete(&commitment_key)
-            .expect("delete failed");
+        let _ = wl_state.delete(&commitment_key).expect("delete failed");
         keys_changed.insert(commitment_key);
         // deposit
         let data = serde_json::from_slice::<PacketData>(&packet.data)
             .expect("decoding packet data failed");
         let deposit_key = deposit_key(&nam());
         let bytes = amount.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&deposit_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&deposit_key, bytes).expect("write failed");
         keys_changed.insert(deposit_key);
         // event
         let timeout_event = TimeoutEvent {
@@ -2882,27 +2765,21 @@ mod tests {
             memo: data.memo,
         };
         let event = RawIbcEvent::Module(ModuleEvent::from(timeout_event));
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
         let event = RawIbcEvent::TimeoutPacket(TimeoutPacket::new(
             packet,
             Order::Unordered,
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Channel);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
 
-        let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
+        let mut tx = Tx::new(wl_state.in_mem().chain_id.clone(), None);
         tx.add_code(tx_code, None)
             .add_serialized_data(tx_data)
             .sign_wrapper(keypair_1());
@@ -2917,7 +2794,7 @@ mod tests {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -3005,6 +2882,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare data
         let msg = MsgTimeoutOnClose {
@@ -3017,20 +2895,14 @@ mod tests {
         };
 
         // delete the commitment
-        let _ = state
-            .write_log_mut()
-            .delete(&commitment_key)
-            .expect("delete failed");
+        let _ = wl_state.delete(&commitment_key).expect("delete failed");
         keys_changed.insert(commitment_key);
         // deposit
         let data = serde_json::from_slice::<PacketData>(&packet.data)
             .expect("decoding packet data failed");
         let deposit_key = deposit_key(&nam());
         let bytes = amount.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&deposit_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&deposit_key, bytes).expect("write failed");
         keys_changed.insert(deposit_key);
         // event
         let timeout_event = TimeoutEvent {
@@ -3040,27 +2912,21 @@ mod tests {
             memo: data.memo,
         };
         let event = RawIbcEvent::Module(ModuleEvent::from(timeout_event));
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
         let event = RawIbcEvent::TimeoutPacket(TimeoutPacket::new(
             packet,
             Order::Unordered,
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Channel);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
 
-        let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
+        let mut tx = Tx::new(wl_state.in_mem().chain_id.clone(), None);
         tx.add_code(tx_code, None)
             .add_serialized_data(tx_data)
             .sign_wrapper(keypair_1());
@@ -3075,7 +2941,7 @@ mod tests {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -3147,6 +3013,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare data
         let msg = IbcMsgNftTransfer {
@@ -3170,9 +3037,8 @@ mod tests {
         // the sequence send
         let seq_key =
             next_sequence_send_key(&get_nft_port_id(), &get_channel_id());
-        let sequence = get_next_seq(&state, &seq_key);
-        let _ = state
-            .write_log_mut()
+        let sequence = get_next_seq(&wl_state, &seq_key);
+        let _ = wl_state
             .write(&seq_key, (u64::from(sequence) + 1).to_be_bytes().to_vec())
             .expect("write failed");
         keys_changed.insert(seq_key);
@@ -3186,18 +3052,14 @@ mod tests {
             commitment_key(&msg.port_id_on_a, &msg.chan_id_on_a, sequence);
         let commitment = commitment(&packet);
         let bytes = commitment.into_vec();
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(&commitment_key, bytes)
             .expect("write failed");
         keys_changed.insert(commitment_key);
         // withdraw
         let withdraw_key = withdraw_key(&ibc_token);
         let bytes = Amount::from_u64(1).serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&withdraw_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&withdraw_key, bytes).expect("write failed");
         keys_changed.insert(withdraw_key);
         // event
         let transfer_event = NftTransferEvent {
@@ -3208,27 +3070,19 @@ mod tests {
             memo: msg.packet_data.memo.clone().unwrap_or("".into()),
         };
         let event = RawIbcEvent::Module(ModuleEvent::from(transfer_event));
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
         let event = RawIbcEvent::SendPacket(SendPacket::new(
             packet,
             Order::Unordered,
             get_connection_id(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Channel);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
         let message_event = RawIbcEvent::Message(MessageEvent::Module(
             "nft_transfer".to_owned(),
         ));
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
@@ -3238,7 +3092,7 @@ mod tests {
         }
         .serialize_to_vec();
 
-        let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
+        let mut tx = Tx::new(wl_state.in_mem().chain_id.clone(), None);
         tx.add_code(tx_code, None)
             .add_serialized_data(tx_data)
             .sign_wrapper(keypair_1());
@@ -3253,7 +3107,7 @@ mod tests {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,
@@ -3299,6 +3153,7 @@ mod tests {
             .set_header(get_dummy_header())
             .expect("Setting a dummy header shouldn't fail");
         state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         // prepare data
         let sender = established_address_1();
@@ -3339,10 +3194,7 @@ mod tests {
             msg.packet.seq_on_a,
         );
         let bytes = [1_u8].to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&receipt_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&receipt_key, bytes).expect("write failed");
         keys_changed.insert(receipt_key);
         // packet commitment
         let ack_key = ack_key(
@@ -3354,10 +3206,7 @@ mod tests {
             AcknowledgementStatus::success(nft_types::ack_success_b64());
         let acknowledgement: Acknowledgement = transfer_ack.into();
         let bytes = sha2::Sha256::digest(acknowledgement.as_bytes()).to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&ack_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&ack_key, bytes).expect("write failed");
         keys_changed.insert(ack_key);
         // trace
         let mut class_id = transfer_msg.packet_data.class_id.clone();
@@ -3370,54 +3219,36 @@ mod tests {
         let trace_hash = calc_hash(&ibc_trace);
         let trace_key = ibc_trace_key(receiver.to_string(), &trace_hash);
         let bytes = ibc_trace.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&trace_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&trace_key, bytes).expect("write failed");
         keys_changed.insert(trace_key);
         let trace_key = ibc_trace_key(token_id, &trace_hash);
         let bytes = ibc_trace.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&trace_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&trace_key, bytes).expect("write failed");
         keys_changed.insert(trace_key);
         // NFT class
         let class_key = nft_class_key(&class_id);
         let mut class = dummy_nft_class();
         class.class_id = class_id.clone();
         let bytes = class.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&class_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&class_key, bytes).expect("write failed");
         keys_changed.insert(class_key);
         // NFT metadata
         let metadata_key = nft_metadata_key(&class_id, token_id);
         let mut metadata = dummy_nft_metadata();
         metadata.class_id = class_id.clone();
         let bytes = metadata.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&metadata_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&metadata_key, bytes).expect("write failed");
         keys_changed.insert(metadata_key);
         // mint
         let ibc_token = ibc_token(&ibc_trace);
         let mint_key = mint_amount_key(&ibc_token);
         let bytes = Amount::from_u64(1).serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&mint_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&mint_key, bytes).expect("write failed");
         keys_changed.insert(mint_key);
         // deposit
         let deposit_key = deposit_key(&ibc_token);
         let bytes = Amount::from_u64(1).serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&deposit_key, bytes)
-            .expect("write failed");
+        let _ = wl_state.write(&deposit_key, bytes).expect("write failed");
         keys_changed.insert(deposit_key);
         // event
         let recv_event = NftRecvEvent {
@@ -3429,30 +3260,22 @@ mod tests {
             success: true,
         };
         let event = RawIbcEvent::Module(ModuleEvent::from(recv_event));
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
         let trace_event = TokenTraceEvent {
             trace_hash: Some(trace_hash),
             class: class_id,
             token: token_id.clone(),
         };
         let event = RawIbcEvent::Module(ModuleEvent::from(trace_event));
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
         let event = RawIbcEvent::ReceivePacket(ReceivePacket::new(
             msg.packet.clone(),
             Order::Unordered,
             get_connection_id(),
         ));
         let message_event = RawIbcEvent::Message(MessageEvent::Channel);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
         let event =
             RawIbcEvent::WriteAcknowledgement(WriteAcknowledgement::new(
                 packet,
@@ -3460,19 +3283,15 @@ mod tests {
                 get_connection_id(),
             ));
         let message_event = RawIbcEvent::Message(MessageEvent::Channel);
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
-        state
-            .write_log_mut()
-            .emit_event::<IbcEvent>(event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(message_event.try_into().unwrap());
+        wl_state.emit::<IbcEvent>(event.try_into().unwrap());
 
         let tx_index = TxIndex::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
 
-        let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
+        let mut tx = Tx::new(wl_state.in_mem().chain_id.clone(), None);
         tx.add_code(tx_code, None)
             .add_serialized_data(tx_data)
             .sign_wrapper(keypair_1());
@@ -3487,7 +3306,7 @@ mod tests {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &ADDRESS,
-            &state,
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &tx_index,

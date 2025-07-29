@@ -283,7 +283,7 @@ mod test {
     use namada_core::token;
     use namada_gas::{TxGasMeter, VpGasMeter};
     use namada_proof_of_stake::test_utils::get_dummy_genesis_validator;
-    use namada_state::testing::TestState;
+    use namada_state::testing::TestFullAccessState;
     use namada_state::{BlockHeight, Epoch, State, StateRead, TxIndex};
     use namada_token::storage_key::balance_key;
     use namada_tx::data::TxType;
@@ -301,8 +301,8 @@ mod test {
     type PgfVp<'ctx, S> =
         super::PgfVp<'ctx, Ctx<'ctx, S>, namada_token::Store<()>>;
 
-    fn init_storage() -> TestState {
-        let mut state = TestState::default();
+    fn init_storage() -> TestFullAccessState {
+        let mut state = TestFullAccessState::default();
 
         namada_proof_of_stake::test_utils::test_init_genesis::<
             _,
@@ -310,7 +310,7 @@ mod test {
             crate::Store<_>,
             namada_token::Store<_>,
         >(
-            &mut state,
+            &mut state.restrict_writes_to_write_log(),
             namada_proof_of_stake::OwnedPosParams::default(),
             vec![get_dummy_genesis_validator()].into_iter(),
             Epoch(1),

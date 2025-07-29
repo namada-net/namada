@@ -1182,7 +1182,7 @@ mod test {
     use namada_proof_of_stake::bond_tokens;
     use namada_proof_of_stake::test_utils::get_dummy_genesis_validator;
     use namada_state::mockdb::MockDB;
-    use namada_state::testing::TestState;
+    use namada_state::testing::TestFullAccessState;
     use namada_state::{
         BlockHeight, Epoch, FullAccessState, Key, Sha256Hasher, State,
         StateRead, StorageRead, TxIndex,
@@ -1217,8 +1217,8 @@ mod test {
         namada_token::Store<()>,
     >;
 
-    fn init_storage() -> TestState {
-        let mut state = TestState::default();
+    fn init_storage() -> TestFullAccessState {
+        let mut state = TestFullAccessState::default();
 
         namada_proof_of_stake::test_utils::test_init_genesis::<
             _,
@@ -1226,7 +1226,7 @@ mod test {
             crate::Store<_>,
             namada_token::Store<_>,
         >(
-            &mut state,
+            &mut state.restrict_writes_to_write_log(),
             namada_proof_of_stake::OwnedPosParams::default(),
             vec![get_dummy_genesis_validator()].into_iter(),
             Epoch(1),
@@ -1245,6 +1245,7 @@ mod test {
     #[test]
     fn test_noop() {
         let state = init_storage();
+        let wl_state = state.restrict_writes_to_write_log();
         let keys_changed = BTreeSet::new();
 
         let gas_meter =

@@ -2021,7 +2021,7 @@ fn test_shielding_fee_client_balance_checks() -> Result<()> {
     });
     assert!(captured.result.is_err());
     assert!(captured.contains(
-        "does not have enough balance to pay for fees and shielding fees."
+        "does not have enough balance to pay for fees and MASP sustainability fees."
     ));
     let captured = CapturedOutput::of(|| {
         run(

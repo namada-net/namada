@@ -383,10 +383,13 @@ pub struct TxTransparentSource<C: NamadaTypes = SdkTypes> {
 pub struct TxShieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// Common tx arguments
     pub tx: Tx<C>,
-    /// Transfer target address
+    /// Transfer target data
     pub targets: Vec<TxShieldedTarget<C>>,
-    /// Transfer-specific data
+    /// Transfer source data
     pub sources: Vec<TxTransparentSource<C>>,
+    // FIXME: update the build function to use this
+    /// The optional data for the frontend sustainability fee
+    pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }
@@ -430,11 +433,14 @@ pub struct TxTransparentTarget<C: NamadaTypes = SdkTypes> {
 pub struct TxUnshieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// Common tx arguments
     pub tx: Tx<C>,
-    /// Transfer source spending key
+    /// Transfer source data
     pub sources: Vec<TxShieldedSource<C>>,
-    /// Transfer-specific data
+    // FIXME: check if we need to do anything when building this tx to handle
+    // the new fee
+    /// Transfer target data (potentially also carries data for the frontend
+    /// sustainability fee)
     pub targets: Vec<TxTransparentTarget<C>>,
-    /// Optional additional keys for gas payment
+    /// Optional additional key for gas payment
     pub gas_spending_key: Option<C::SpendingKey>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
@@ -512,11 +518,17 @@ pub enum Slippage {
 /// An token swap on Osmosis
 #[derive(Debug, Clone)]
 pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
+    // FIXME: this field contains the frontend fee, make sure to use it in the
+    // building function
     /// The IBC transfer data
     pub transfer: TxIbcTransfer<C>,
     /// The token we wish to receive (on Namada)
     pub output_denom: String,
     /// Address of the recipient on Namada
+    // FIXME: actually, in the case of an unshield and reshield we might not
+    // take the fee at all. If either side is shielded we take the fees. If
+    // both are shielded we should either take the fees only once or not take
+    // them at all
     pub recipient: Either<C::Address, C::PaymentAddress>,
     /// Address to receive funds exceeding the minimum amount,
     /// in case of IBC shieldings
@@ -711,6 +723,8 @@ impl TxOsmosisSwap<SdkTypes> {
                             ),
                         ),
                         expiration: transfer.tx.expiration.clone(),
+                        // The frontend fee should be set in the transfer object
+                        frontend_sus_fee: None,
                     },
                 )
                 .await?
@@ -810,6 +824,11 @@ pub struct TxIbcTransfer<C: NamadaTypes = SdkTypes> {
     pub ibc_memo: Option<String>,
     /// Optional additional keys for gas payment
     pub gas_spending_key: Option<C::SpendingKey>,
+    // FIXME: can join this with other arguments? I don't think so
+    // FIXME: update the build function to use this field
+    // FIXME: can we join this with refund_target?
+    /// The optional data for the frontend sustainability fee
+    pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }
@@ -3217,6 +3236,9 @@ pub struct GenIbcShieldingTransfer<C: NamadaTypes = SdkTypes> {
     pub expiration: TxExpiration,
     /// Asset to shield over IBC to Namada
     pub asset: IbcShieldingTransferAsset<C>,
+    // FIXME: update the build function to use this
+    /// The optional data for the frontend sustainability fee
+    pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
 }
 
 /// IBC shielding transfer asset, to be used by [`GenIbcShieldingTransfer`]

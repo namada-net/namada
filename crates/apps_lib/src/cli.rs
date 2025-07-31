@@ -5174,7 +5174,6 @@ pub mod args {
                 ibc_memo,
                 gas_spending_key,
                 tx_code_path,
-                // FIXME: is it ok to skip the frontend fee from the cli?
                 frontend_sus_fee: None,
             }
         }
@@ -5251,6 +5250,7 @@ pub mod args {
                 route: self.route,
                 osmosis_lcd_rpc: self.osmosis_lcd_rpc,
                 osmosis_sqs_rpc: self.osmosis_sqs_rpc,
+                frontend_sus_fee: None,
             })
         }
     }
@@ -5303,6 +5303,7 @@ pub mod args {
                 route,
                 osmosis_lcd_rpc,
                 osmosis_sqs_rpc,
+                frontend_sus_fee: None,
             }
         }
 

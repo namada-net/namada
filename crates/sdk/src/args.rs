@@ -387,7 +387,6 @@ pub struct TxShieldingTransfer<C: NamadaTypes = SdkTypes> {
     pub targets: Vec<TxShieldedTarget<C>>,
     /// Transfer source data
     pub sources: Vec<TxTransparentSource<C>>,
-    // FIXME: update the build function to use this
     /// The optional data for the frontend sustainability fee
     pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
     /// Path to the TX WASM code file
@@ -435,8 +434,6 @@ pub struct TxUnshieldingTransfer<C: NamadaTypes = SdkTypes> {
     pub tx: Tx<C>,
     /// Transfer source data
     pub sources: Vec<TxShieldedSource<C>>,
-    // FIXME: check if we need to do anything when building this tx to handle
-    // the new fee
     /// Transfer target data (potentially also carries data for the frontend
     /// sustainability fee)
     pub targets: Vec<TxTransparentTarget<C>>,
@@ -515,20 +512,20 @@ pub enum Slippage {
     },
 }
 
+// FIXME: do we need a new event for the frontend fee?
+// FIXME: should the fee be taken shielded? It might avoid us to update the ibc
+// methods actually. Yes but it would produce a substantial amount of notes with
+// very little amounts FIXME: what happens to the sus fee if we wanto to
+// shield/unshield more than one asset? It should probably be a vector of
+// targets, one for every asset
 /// An token swap on Osmosis
 #[derive(Debug, Clone)]
 pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
-    // FIXME: this field contains the frontend fee, make sure to use it in the
-    // building function
     /// The IBC transfer data
     pub transfer: TxIbcTransfer<C>,
     /// The token we wish to receive (on Namada)
     pub output_denom: String,
     /// Address of the recipient on Namada
-    // FIXME: actually, in the case of an unshield and reshield we might not
-    // take the fee at all. If either side is shielded we take the fees. If
-    // both are shielded we should either take the fees only once or not take
-    // them at all
     pub recipient: Either<C::Address, C::PaymentAddress>,
     /// Address to receive funds exceeding the minimum amount,
     /// in case of IBC shieldings
@@ -546,6 +543,11 @@ pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
     pub osmosis_lcd_rpc: Option<String>,
     /// REST rpc endpoint to Osmosis SQS
     pub osmosis_sqs_rpc: Option<String>,
+    /// The optional data for the frontend sustainability fee
+    /// NOTE: if the swap is shielded (from MASP to MASP), no sustainability
+    /// fee should be taken
+    // FIXME: try to join this with recipient
+    pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
 }
 
 impl TxOsmosisSwap<SdkTypes> {
@@ -613,6 +615,7 @@ impl TxOsmosisSwap<SdkTypes> {
             osmosis_lcd_rpc,
             osmosis_sqs_rpc,
             output_denom: namada_output_denom,
+            frontend_sus_fee,
         } = self;
 
         let osmosis_lcd_rpc = osmosis_lcd_rpc
@@ -723,8 +726,7 @@ impl TxOsmosisSwap<SdkTypes> {
                             ),
                         ),
                         expiration: transfer.tx.expiration.clone(),
-                        // The frontend fee should be set in the transfer object
-                        frontend_sus_fee: None,
+                        frontend_sus_fee,
                     },
                 )
                 .await?
@@ -819,15 +821,17 @@ pub struct TxIbcTransfer<C: NamadaTypes = SdkTypes> {
     /// Refund target address when the shielded transfer failure
     pub refund_target: Option<C::TransferTarget>,
     /// IBC shielding transfer data for the destination chain
+    // FIXME: here the shielding transaction to reapply to namada, it should
+    // carry the sus fee
     pub ibc_shielding_data: Option<IbcShieldingData>,
     /// Memo for IBC transfer packet
     pub ibc_memo: Option<String>,
     /// Optional additional keys for gas payment
     pub gas_spending_key: Option<C::SpendingKey>,
-    // FIXME: can join this with other arguments? I don't think so
-    // FIXME: update the build function to use this field
-    // FIXME: can we join this with refund_target?
     /// The optional data for the frontend sustainability fee
+    // FIXME: this should probably be an either with ibc_shielding_data. Yes
+    // but there would still be the room for errors, maybe need marker traits?
+    // Not sure...
     pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
@@ -3236,8 +3240,9 @@ pub struct GenIbcShieldingTransfer<C: NamadaTypes = SdkTypes> {
     pub expiration: TxExpiration,
     /// Asset to shield over IBC to Namada
     pub asset: IbcShieldingTransferAsset<C>,
-    // FIXME: update the build function to use this
     /// The optional data for the frontend sustainability fee
+    /// NOTE: if the shielding operation is part of a swap, and this is
+    /// shielded (from MASP to MASP), no sustainability fee should be taken
     pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
 }
 

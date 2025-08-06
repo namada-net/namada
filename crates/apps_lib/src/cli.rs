@@ -3548,6 +3548,9 @@ pub mod args {
     pub const FEE_PAYER_OPT: ArgOpt<WalletPublicKey> = arg_opt("gas-payer");
     pub const FILE_PATH: Arg<String> = arg("file");
     pub const FORCE: ArgFlag = flag("force");
+    #[cfg(any(test, feature = "testing"))]
+    pub const FRONTEND_SUS_FEE: ArgOpt<WalletAddress> =
+        arg_opt("frontend-sus-fee");
     pub const FULL_RESET: ArgFlag = flag("full-reset");
     pub const GAS_LIMIT: ArgDefault<GasLimit> = arg_default(
         "gas-limit",
@@ -4930,11 +4933,11 @@ pub mod args {
             ctx: &mut Context,
         ) -> Result<TxShieldingTransfer<SdkTypes>, Self::Error> {
             let tx = self.tx.to_sdk(ctx)?;
-            let mut data = vec![];
+            let mut sources = vec![];
             let chain_ctx = ctx.borrow_mut_chain_or_exit();
 
             for transfer_data in self.sources {
-                data.push(TxTransparentSource {
+                sources.push(TxTransparentSource {
                     source: chain_ctx.get(&transfer_data.source),
                     token: chain_ctx.get(&transfer_data.token),
                     amount: transfer_data.amount,
@@ -4949,13 +4952,19 @@ pub mod args {
                     amount: transfer_data.amount,
                 });
             }
+            let frontend_sus_fee =
+                self.frontend_sus_fee.map(|fee| TxTransparentTarget {
+                    target: chain_ctx.get(&fee.target),
+                    token: chain_ctx.get(&fee.token),
+                    amount: fee.amount,
+                });
 
             Ok(TxShieldingTransfer::<SdkTypes> {
                 tx,
-                sources: data,
+                sources,
                 targets,
                 tx_code_path: self.tx_code_path.to_path_buf(),
-                frontend_sus_fee: None,
+                frontend_sus_fee,
             })
         }
     }
@@ -4966,13 +4975,49 @@ pub mod args {
             let source = SOURCE.parse(matches);
             let target = PAYMENT_ADDRESS_TARGET.parse(matches);
             let token = TOKEN.parse(matches);
-            let amount = InputAmount::Unvalidated(AMOUNT.parse(matches));
+            let raw_amount = AMOUNT.parse(matches);
+            let amount = InputAmount::Unvalidated(raw_amount);
             let tx_code_path = PathBuf::from(TX_TRANSFER_WASM);
-            let data = vec![TxTransparentSource {
+
+            #[cfg(any(test, feature = "testing"))]
+            let frontend_sus_fee = FRONTEND_SUS_FEE.parse(matches).map(
+                |target|                        // Take a constant fee of 1 on top of the input amount
+                        TxTransparentTarget {
+                            target,
+                            token: token.clone(),
+                            amount: InputAmount::Unvalidated(
+                                token::DenominatedAmount::new(
+                                    1.into(),
+                                    raw_amount.denom(),
+                                ),
+                            ),
+                        },
+            );
+
+            #[cfg(not(any(test, feature = "testing")))]
+            let frontend_sus_fee = None;
+
+            let mut sources = if frontend_sus_fee.is_some() {
+                // Adjust the inputs to account for the extra token
+                vec![TxTransparentSource {
+                    source: source.clone(),
+                    token: token.clone(),
+                    amount: InputAmount::Unvalidated(
+                        token::DenominatedAmount::new(
+                            1.into(),
+                            raw_amount.denom(),
+                        ),
+                    ),
+                }]
+            } else {
+                vec![]
+            };
+
+            sources.push(TxTransparentSource {
                 source,
                 token: token.clone(),
                 amount,
-            }];
+            });
             let targets = vec![TxShieldedTarget {
                 target,
                 token,
@@ -4981,15 +5026,16 @@ pub mod args {
 
             Self {
                 tx,
-                sources: data,
+                sources,
                 targets,
                 tx_code_path,
-                frontend_sus_fee: None,
+                frontend_sus_fee,
             }
         }
 
         fn def(app: App) -> App {
-            app.add_args::<Tx<CliTypes>>()
+            let app = app
+                .add_args::<Tx<CliTypes>>()
                 .arg(SOURCE.def().help(wrap!(
                     "The transparent source account address. The source's key \
                      will be used to produce the signature."
@@ -5004,7 +5050,15 @@ pub mod args {
                     AMOUNT
                         .def()
                         .help(wrap!("The amount to transfer in decimal.")),
-                )
+                );
+
+            #[cfg(any(test, feature = "testing"))]
+            let app = app.arg(FRONTEND_SUS_FEE.def().help(wrap!(
+                "The optional address of the frontend provider that will take \
+                 the masp sustainability fee."
+            )));
+
+            app
         }
     }
 
@@ -5056,31 +5110,63 @@ pub mod args {
             let source = SPENDING_KEY_SOURCE.parse(matches);
             let target = TARGET.parse(matches);
             let token = TOKEN.parse(matches);
-            let amount = InputAmount::Unvalidated(AMOUNT.parse(matches));
+            let raw_amount = AMOUNT.parse(matches);
+            let amount = InputAmount::Unvalidated(raw_amount);
             let tx_code_path = PathBuf::from(TX_TRANSFER_WASM);
-            let data = vec![TxTransparentTarget {
-                target,
+            let targets = vec![TxTransparentTarget {
+                target: target.clone(),
                 token: token.clone(),
                 amount,
             }];
             let sources = vec![TxShieldedSource {
-                source,
-                token,
+                source: source.clone(),
+                token: token.clone(),
                 amount,
             }];
             let gas_spending_key = GAS_SPENDING_KEY.parse(matches);
 
+            #[cfg(any(test, feature = "testing"))]
+            let mut sources = sources;
+            #[cfg(any(test, feature = "testing"))]
+            let mut targets = targets;
+            #[cfg(any(test, feature = "testing"))]
+            if let Some(fee_target) = FRONTEND_SUS_FEE.parse(matches) {
+                // Take a constant fee of 1 on top of the input amount
+                targets.push(TxTransparentTarget {
+                    target: fee_target,
+                    token: token.clone(),
+                    amount: InputAmount::Unvalidated(
+                        token::DenominatedAmount::new(
+                            1.into(),
+                            raw_amount.denom(),
+                        ),
+                    ),
+                });
+
+                sources.push(TxShieldedSource {
+                    source,
+                    token,
+                    amount: InputAmount::Unvalidated(
+                        token::DenominatedAmount::new(
+                            1.into(),
+                            raw_amount.denom(),
+                        ),
+                    ),
+                })
+            };
+
             Self {
                 tx,
                 sources,
-                targets: data,
+                targets,
                 gas_spending_key,
                 tx_code_path,
             }
         }
 
         fn def(app: App) -> App {
-            app.add_args::<Tx<CliTypes>>()
+            let app = app
+                .add_args::<Tx<CliTypes>>()
                 .arg(
                     SPENDING_KEY_SOURCE
                         .def()
@@ -5101,7 +5187,15 @@ pub mod args {
                     "The optional spending key that will be used for gas \
                      payment. When not provided the source spending key will \
                      be used."
-                )))
+                )));
+
+            #[cfg(any(test, feature = "testing"))]
+            let app = app.arg(FRONTEND_SUS_FEE.def().help(wrap!(
+                "The optional address of the frontend provider that will take \
+                 the masp sustainability fee."
+            )));
+
+            app
         }
     }
 

@@ -434,6 +434,8 @@ where
             });
         }
 
+        self.ctx.tree.as_mut().garbage_collect_ommers();
+
         Ok(())
     }
 

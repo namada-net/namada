@@ -107,7 +107,6 @@ ethers.workspace = true
 eyre.workspace = true
 fd-lock = { workspace = true, optional = true }
 futures.workspace = true
-init-once.workspace = true
 itertools.workspace = true
 jubjub = { workspace = true, optional = true }
 lazy_static.workspace = true

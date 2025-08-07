@@ -229,10 +229,10 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
             let node = Node::new(so.cmu.to_repr());
 
             // Append the node to the tree
-            eyre::ensure!(
-                self.tree.as_mut().append(node.into()),
-                "note commitment tree is full"
-            );
+            self.tree
+                .as_mut()
+                .append(node)
+                .wrap_err("failed to append to note commitment tree")?;
 
             if trial_decrypted.decrypted_by_any_vk(&masp_indexed_tx) {
                 // Finally, make it easier to construct merkle paths to this new
@@ -369,11 +369,14 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
             // note is rendered unusable
             if let Some(note_pos) = self.nf_map.get(&ss.nullifier).copied() {
                 self.spents.insert(note_pos);
-                self.tree.as_mut().remove_mark(
-                    note_pos
-                        .try_into()
-                        .expect("note position conversion shouldn't fail"),
-                );
+                self.tree
+                    .as_mut()
+                    .remove_mark(
+                        note_pos
+                            .try_into()
+                            .expect("note position conversion shouldn't fail"),
+                    )
+                    .expect("marked leaf should have been in tree");
 
                 #[cfg(feature = "historic")]
                 {

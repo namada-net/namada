@@ -173,7 +173,6 @@ ics23 = "0.12"
 usize-set = { version = "0.10", features = ["serialize-borsh", "serialize-serde"] }
 impl-num-traits = "0.2"
 indexmap = { package = "nam-indexmap", version = "2.7.1-nam.0", features = ["borsh-schema", "serde"] }
-init-once = "0.6"
 itertools = "0.14"
 jubjub = { package = "nam-jubjub", version = "1.10.1-nam.1" }
 k256 = { version = "0.13", default-features = false, features = ["ecdsa", "pkcs8", "precomputed-tables", "serde", "std"]}

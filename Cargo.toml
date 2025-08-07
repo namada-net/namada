@@ -120,7 +120,7 @@ bimap = {version = "0.6", features = ["serde"]}
 bit-set = "0.8"
 bitflags = { version = "2.5", features = ["serde"] }
 blake2b-rs = "0.2"
-bridgetree = "0.7.0"
+bridgetree = { package = "leanbridgetree", version = "0.3.0", features = ["borsh"] }
 byte-unit = "5.1"
 byteorder = "1.4"
 bytes = "1.1"

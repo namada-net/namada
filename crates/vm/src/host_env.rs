@@ -915,7 +915,7 @@ where
         .map_err(|e| TxRuntimeError::MemoryError(Box::new(e)))?;
     consume_tx_gas::<MEM, D, H, CA>(env, gas)?;
 
-    tracing::debug!("tx_update {}, {:?}", key, value);
+    tracing::debug!("tx_update {}", key);
 
     let key = Key::parse(key)?;
     if key.is_validity_predicate().is_some() {
@@ -955,7 +955,7 @@ where
         .map_err(|e| TxRuntimeError::MemoryError(Box::new(e)))?;
     consume_tx_gas::<MEM, D, H, CA>(env, gas)?;
 
-    tracing::debug!("tx_write_temp {}, {:?}", key, value);
+    tracing::debug!("tx_write_temp {}", key);
 
     let key = Key::parse(key)?;
 
@@ -1144,10 +1144,9 @@ where
     let state = env.state();
     let value = vp_host_fns::read_pre(gas_meter, &state, &key)?;
     tracing::debug!(
-        "vp_read_pre addr {}, key {}, value {:?}",
+        "vp_read_pre addr {}, key {}",
         unsafe { env.ctx.address.get() },
         key,
-        value,
     );
     Ok(match value {
         Some(value) => {

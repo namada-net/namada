@@ -727,19 +727,12 @@ fn inject_alloc(module: elements::Module) -> Result<elements::Module> {
 
     // Alloc fn in WAT:
     //
-    // (func (;0;) (type 0) (param i32)
-    // (local i32)
+    // (func (;0;) (type 0) (param i32) (result i32)
     // block  ;; label = @1
     //   local.get 0
-    //   memory.size
-    //   i32.const 16
-    //   i32.shl
-    //   i32.gt_u
-    //   if (result i32)  ;; label = @2
-    //     local.get 0
-    //     i32.const -65536
-    //     i32.gt_u
-    //     br_if 1 (;@1;)
+    //   i32.const -65536
+    //   i32.le_u
+    //   if  ;; label = @2
     //     local.get 0
     //     i32.const 65535
     //     i32.add
@@ -748,17 +741,14 @@ fn inject_alloc(module: elements::Module) -> Result<elements::Module> {
     //     memory.grow
     //     local.tee 0
     //     i32.const -1
-    //     i32.eq
+    //     i32.ne
     //     br_if 1 (;@1;)
-    //     local.get 0
-    //     i32.const 16
-    //     i32.shl
-    //   else
-    //     i32.const 0
     //   end
-    //   return
+    //   unreachable
     // end
-    // unreachable)
+    // local.get 0
+    // i32.const 16
+    // i32.shl)
 
     const MEMORY_IX: u8 = 0;
     const WASM_PAGE_SIZE_LOG2: i32 = 16;
@@ -767,16 +757,10 @@ fn inject_alloc(module: elements::Module) -> Result<elements::Module> {
         use Instruction::*;
         vec![
             Block(BlockType::NoResult),
-            GetLocal(0),
-            CurrentMemory(MEMORY_IX),
-            I32Const(WASM_PAGE_SIZE_LOG2),
-            I32Shl,
-            I32GtU,
-            If(BlockType::Value(ValueType::I32)),
-            GetLocal(0),
+            GetLocal(1),
             I32Const(-WASM_PAGE_SIZE),
-            I32GtU,
-            BrIf(1),
+            I32LeU,
+            If(BlockType::NoResult),
             GetLocal(0),
             I32Const(WASM_PAGE_SIZE - 1),
             I32Add,
@@ -785,17 +769,14 @@ fn inject_alloc(module: elements::Module) -> Result<elements::Module> {
             GrowMemory(MEMORY_IX),
             TeeLocal(0),
             I32Const(-1),
-            I32Eq,
+            I32Ne,
             BrIf(1),
+            End,
+            Unreachable,
+            End,
             GetLocal(0),
             I32Const(WASM_PAGE_SIZE_LOG2),
             I32Shl,
-            Else,
-            I32Const(0),
-            End,
-            Return,
-            End,
-            Unreachable,
             End,
         ]
     };

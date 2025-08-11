@@ -1096,7 +1096,7 @@ mod test {
     use namada_core::address::testing::established_address_1;
     use namada_core::dec::Dec;
     use namada_core::{key, token};
-    use namada_state::testing::TestState;
+    use namada_state::testing::TestFullAccessState;
     use test_log::test;
 
     use super::*;
@@ -1400,13 +1400,14 @@ mod test {
         Ok(())
     }
 
-    fn init_storage() -> Result<TestState> {
-        let mut s = TestState::default();
+    fn init_storage() -> Result<TestFullAccessState> {
+        let mut state = TestFullAccessState::default();
+        let mut wl_state = state.restrict_writes_to_write_log();
         let gov_params =
             namada_governance::parameters::GovernanceParameters::default();
-        gov_params.init_storage(&mut s)?;
+        gov_params.init_storage(&mut wl_state)?;
         crate::tests::init_genesis_helper(
-            &mut s,
+            &mut state,
             &PosParams::default(),
             [GenesisValidator {
                 address: established_address_1(),
@@ -1423,6 +1424,6 @@ mod test {
             .into_iter(),
             Epoch::default(),
         )?;
-        Ok(s)
+        Ok(state)
     }
 }

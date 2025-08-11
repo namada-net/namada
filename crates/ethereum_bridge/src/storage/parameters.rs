@@ -426,7 +426,7 @@ mod tests {
     #[test]
     fn test_ethereum_bridge_config_uninitialized() {
         let mut state = TestFullAccessState::default();
-        let mut wl_state = state.restrict_writes_to_write_log();
+        let wl_state = state.restrict_writes_to_write_log();
         let read = EthereumOracleConfig::read(&wl_state);
 
         assert!(read.is_none());

@@ -597,7 +597,7 @@ pub mod testing {
     /// A full-access state with a `MockDB` nd sha256 hasher.
     pub type TestFullAccessState = FullAccessState<MockDB, Sha256Hasher>;
     /// Write-log state with the MockDB
-    pub type TestState = WlState<'static, MockDB, Sha256Hasher>;
+    pub type TestState<'a, D, H> = WlState<'a, D, H>;
 
     impl Default for TestFullAccessState {
         fn default() -> Self {

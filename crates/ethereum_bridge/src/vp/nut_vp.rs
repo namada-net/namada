@@ -136,38 +136,32 @@ mod test_nuts {
         let src_balance_key = balance_key(&nut, &src);
         let dst_balance_key = balance_key(&nut, &dst);
 
-        let state = {
             let mut state = TestFullAccessState::default();
+            let mut wl_state = state.restrict_writes_to_write_log();
 
             // write initial balances
-            state
-                .write_log_mut()
+            wl_state
                 .write(&src_balance_key, Amount::from(200_u64))
                 .expect("Test failed");
-            state
-                .write_log_mut()
+            wl_state
                 .write(&dst_balance_key, Amount::from(100_u64))
                 .expect("Test failed");
             state.commit_block().expect("Test failed");
+            let mut wl_state = state.restrict_writes_to_write_log();
 
             // write the updated balances
-            let _ = state
-                .write_log_mut()
+            let _ = wl_state
                 .write(
                     &src_balance_key,
                     Amount::from(100_u64).serialize_to_vec(),
                 )
                 .expect("Test failed");
-            let _ = state
-                .write_log_mut()
+            let _ = wl_state
                 .write(
                     &dst_balance_key,
                     Amount::from(200_u64).serialize_to_vec(),
                 )
                 .expect("Test failed");
-
-            state
-        };
 
         let keys_changed = {
             let mut keys = BTreeSet::new();
@@ -190,7 +184,7 @@ mod test_nuts {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         let ctx = Ctx::new(
             &Address::Internal(InternalAddress::Nut(DAI_ERC20_ETH_ADDRESS)),
-            &state.restrict_writes_to_write_log(),
+            &wl_state,
             batched_tx.tx,
             batched_tx.cmt,
             &TxIndex(0),

@@ -16,7 +16,7 @@ use namada_core::key;
 use namada_core::key::common::PublicKey;
 use namada_core::token::Change;
 use namada_governance::parameters::GovernanceParameters;
-use namada_state::testing::TestState;
+use namada_state::testing::TestFullAccessState;
 use namada_trans_token::{self as token, read_balance};
 use proptest::prelude::*;
 use proptest::test_runner::Config;
@@ -172,7 +172,7 @@ struct AbstractPosState {
 #[derive(Debug)]
 struct ConcretePosState {
     /// Storage - contains all the PoS state
-    s: TestState,
+    s: TestFullAccessState,
 }
 
 /// State machine transitions
@@ -240,10 +240,14 @@ impl StateMachineTest for ConcretePosState {
                 .map(|val| &val.address)
                 .collect::<Vec<_>>()
         );
-        let mut s = TestState::default();
-        initial_state.gov_params.init_storage(&mut s).unwrap();
+        let mut s = TestFullAccessState::default();
+        let mut wl_state = s.restrict_writes_to_write_log();
+        initial_state
+            .gov_params
+            .init_storage(&mut wl_state)
+            .unwrap();
         crate::tests::test_init_genesis(
-            &mut s,
+            &mut wl_state,
             initial_state.params.owned.clone(),
             initial_state.genesis_validators.clone().into_iter(),
             initial_state.epoch,

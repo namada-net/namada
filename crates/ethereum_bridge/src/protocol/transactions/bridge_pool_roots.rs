@@ -59,7 +59,7 @@ where
 /// validators, the signature is made available for bridge
 /// pool proofs.
 pub fn apply_derived_tx<'db, D, H, Gov>(
-    state: &mut WlState<'db, D, H>,
+    state: &'db mut WlState<'db, D, H>,
     vext: MultiSignedVext,
 ) -> Result<BatchedTxResult>
 where
@@ -77,7 +77,7 @@ where
     );
     let voting_powers = utils::get_voting_powers(state, &vext)?;
     let root_height = vext.iter().next().unwrap().data.block_height;
-    let (partial_proof, seen_by) = parse_vexts::<D, H, Gov>(state, vext);
+    let (partial_proof, seen_by) = parse_vexts::<'_, _, _, Gov>(state, vext);
 
     // return immediately if a complete proof has already been acquired
     let bp_key = vote_tallies::Keys::from((&partial_proof, root_height));
@@ -93,7 +93,7 @@ where
     }
 
     // apply updates to the bridge pool root.
-    let (mut changed, confirmed_update) = apply_update::<D, H, Gov>(
+    let (mut changed, confirmed_update) = apply_update::<'_, D, H, Gov>(
         state,
         bp_key,
         partial_proof,
@@ -157,7 +157,7 @@ impl GetVoters for &MultiSignedVext {
 /// Convert a set of signatures over bridge pool roots and nonces (at a certain
 /// height) into a partial proof and a new set of votes.
 fn parse_vexts<'db, D, H, Gov>(
-    state: &WlState<'db, D, H>,
+    state: &'db WlState<'db, D, H>,
     multisigned: MultiSignedVext,
 ) -> (BridgePoolRoot, Votes)
 where
@@ -206,11 +206,11 @@ where
 ///
 /// In all instances, the changed storage keys are returned.
 fn apply_update<'db, D, H, Gov>(
-    state: &mut WlState<'db, D, H>,
+    state: &'db mut WlState<'db, D, H>,
     bp_key: vote_tallies::Keys<BridgePoolRoot>,
     mut update: BridgePoolRoot,
     seen_by: Votes,
-    voting_powers: &HashMap<(Address, BlockHeight), Amount>,
+    voting_powers: &'db HashMap<(Address, BlockHeight), Amount>,
 ) -> Result<(ChangedKeys, Option<BridgePoolRoot>)>
 where
     D: 'static + DBRead + for<'iter> DBIter<'iter> + Sync,

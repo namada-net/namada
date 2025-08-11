@@ -1155,7 +1155,7 @@ mod tests {
     fn test_redeem_native_token() -> Result<()> {
         let mut state = TestFullAccessState::default();
         test_utils::bootstrap_ethereum_bridge(&mut state);
-        let wl_state = state.restrict_writes_to_write_log();
+        let mut wl_state = state.restrict_writes_to_write_log();
         let receiver = address::testing::established_address_1();
         let amount = Amount::from(100);
 

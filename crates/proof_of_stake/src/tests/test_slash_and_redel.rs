@@ -14,7 +14,7 @@ use namada_core::dec::Dec;
 use namada_core::key::RefTo;
 use namada_core::key::testing::{keypair_1, keypair_2, keypair_3};
 use namada_core::token::NATIVE_MAX_DECIMAL_PLACES;
-use namada_state::testing::TestState;
+use namada_state::testing::{TestFullAccessState, TestState};
 use namada_trans_token::{self as token, credit_tokens, read_balance};
 use proptest::prelude::*;
 use proptest::test_runner::Config;
@@ -75,7 +75,8 @@ fn test_simple_redelegation_aux(
     let src_validator = validators[0].address.clone();
     let dest_validator = validators[1].address.clone();
 
-    let mut storage = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut storage = state.restrict_writes_to_write_log();
     let params = OwnedPosParams {
         unbonding_len: 4,
         ..Default::default()
@@ -90,7 +91,8 @@ fn test_simple_redelegation_aux(
         current_epoch,
     )
     .unwrap();
-    storage.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut storage = state.restrict_writes_to_write_log();
 
     // Get a delegator with some tokens
     let staking_token = staking_token_address(&storage);
@@ -342,7 +344,8 @@ fn test_slashes_with_unbonding_aux(
     params.unbonding_len = 4;
     // println!("\nTest inputs: {params:?}, genesis validators:
     // {validators:#?}");
-    let mut s = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut s = state.restrict_writes_to_write_log();
 
     // Find the validator with the least stake to avoid the cubic slash rate
     // going to 100%
@@ -363,7 +366,8 @@ fn test_slashes_with_unbonding_aux(
         current_epoch,
     )
     .unwrap();
-    s.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut s = state.restrict_writes_to_write_log();
 
     current_epoch = advance_epoch(&mut s, &params);
     process_slashes(
@@ -530,7 +534,8 @@ fn test_redelegation_with_slashing_aux(
     let src_validator = validators[0].address.clone();
     let dest_validator = validators[1].address.clone();
 
-    let mut storage = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut storage = state.restrict_writes_to_write_log();
     let params = OwnedPosParams {
         unbonding_len: 4,
         // Avoid empty consensus set by removing the threshold
@@ -547,7 +552,8 @@ fn test_redelegation_with_slashing_aux(
         current_epoch,
     )
     .unwrap();
-    storage.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut storage = state.restrict_writes_to_write_log();
 
     // Get a delegator with some tokens
     let staking_token = staking_token_address(&storage);
@@ -796,7 +802,8 @@ fn test_chain_redelegations_aux(mut validators: Vec<GenesisValidator>) {
     let dest_validator_2 = validators[2].address.clone();
     let _init_stake_dest_2 = validators[2].tokens;
 
-    let mut storage = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut storage = state.restrict_writes_to_write_log();
     let params = OwnedPosParams {
         unbonding_len: 4,
         ..Default::default()
@@ -811,7 +818,8 @@ fn test_chain_redelegations_aux(mut validators: Vec<GenesisValidator>) {
         current_epoch,
     )
     .unwrap();
-    storage.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut storage = state.restrict_writes_to_write_log();
 
     // Get a delegator with some tokens
     let staking_token = staking_token_address(&storage);
@@ -1212,7 +1220,8 @@ fn test_overslashing_aux(mut validators: Vec<GenesisValidator>) {
 
     // println!("\nTest inputs: {params:?}, genesis validators:
     // {validators:#?}");
-    let mut storage = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut storage = state.restrict_writes_to_write_log();
 
     // Genesis
     let mut current_epoch = storage.in_mem().block.epoch;
@@ -1223,7 +1232,8 @@ fn test_overslashing_aux(mut validators: Vec<GenesisValidator>) {
         current_epoch,
     )
     .unwrap();
-    storage.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut storage = state.restrict_writes_to_write_log();
 
     // Get a delegator with some tokens
     let staking_token = storage.in_mem().native_token.clone();
@@ -1392,7 +1402,8 @@ proptest! {
 }
 
 fn test_slashed_bond_amount_aux(validators: Vec<GenesisValidator>) {
-    let mut storage = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut storage = state.restrict_writes_to_write_log();
     let params = OwnedPosParams {
         unbonding_len: 4,
         validator_stake_threshold: token::Amount::zero(),
@@ -1417,7 +1428,8 @@ fn test_slashed_bond_amount_aux(validators: Vec<GenesisValidator>) {
         current_epoch,
     )
     .unwrap();
-    storage.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut storage = state.restrict_writes_to_write_log();
 
     let validator1 = validators[0].address.clone();
     let validator2 = validators[1].address.clone();
@@ -1670,7 +1682,8 @@ fn test_slashed_bond_amount_aux(validators: Vec<GenesisValidator>) {
 
 #[test]
 fn test_one_slash_per_block_height() {
-    let mut storage = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut storage = state.restrict_writes_to_write_log();
     let params = OwnedPosParams {
         unbonding_len: 4,
         validator_stake_threshold: token::Amount::zero(),
@@ -1714,7 +1727,8 @@ fn test_one_slash_per_block_height() {
         current_epoch,
     )
     .unwrap();
-    storage.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut storage = state.restrict_writes_to_write_log();
 
     let enqueued_slashes = enqueued_slashes_handle();
 

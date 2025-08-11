@@ -137,7 +137,7 @@ mod test {
         EncodedResponseQuery, RPC, RequestCtx, RequestQuery, Router,
     };
     use namada_sdk::state::StorageWrite;
-    use namada_sdk::state::testing::TestState;
+    use namada_sdk::state::testing::TestFullAccessState;
     use namada_sdk::storage::Key;
     use namada_sdk::tendermint_rpc::{Error as RpcError, Response};
     use namada_sdk::tx::data::TxType;
@@ -158,7 +158,7 @@ mod test {
         /// RPC router
         pub rpc: RPC,
         /// state
-        pub state: TestState,
+        pub state: TestFullAccessState,
         /// event log
         pub event_log: EventLog,
         /// VP wasm compilation cache
@@ -181,7 +181,7 @@ mod test {
         /// Initialize a test client for the given root RPC router
         pub fn new(rpc: RPC) -> Self {
             // Initialize the `TestClient`
-            let mut state = TestState::default();
+            let mut state = TestFullAccessState::default();
 
             // Initialize mock gas limit
             let max_block_gas_key =

@@ -720,7 +720,7 @@ mod tests {
     use std::str::FromStr;
 
     use namada_parameters::storage::get_epochs_per_year_key;
-    use namada_state::testing::TestState;
+    use namada_state::testing::TestFullAccessState;
     use namada_trans_token::storage_key::minted_balance_key;
     use storage::write_pos_params;
 
@@ -907,15 +907,16 @@ mod tests {
 
     #[test]
     fn test_pos_inflation_playground() {
-        let mut storage = TestState::default();
+        let mut state = TestFullAccessState::default();
+        let mut wl_state = state.restrict_writes_to_write_log();
         let gov_params =
             namada_governance::parameters::GovernanceParameters::default();
-        gov_params.init_storage(&mut storage).unwrap();
-        write_pos_params(&mut storage, &OwnedPosParams::default()).unwrap();
+        gov_params.init_storage(&mut wl_state).unwrap();
+        write_pos_params(&mut wl_state, &OwnedPosParams::default()).unwrap();
 
         let epochs_per_year = 365_u64;
         let epy_key = get_epochs_per_year_key();
-        storage.write(&epy_key, epochs_per_year).unwrap();
+        wl_state.write(&epy_key, epochs_per_year).unwrap();
 
         let init_locked_ratio = Dec::from_str("0.1").unwrap();
         let mut last_locked_ratio = init_locked_ratio;
@@ -931,7 +932,7 @@ mod tests {
             token::Amount::native_whole(total_native_tokens);
 
         update_state_for_pos_playground(
-            &mut storage,
+            &mut wl_state,
             last_locked_ratio,
             last_inflation_amount,
             total_native_tokens,
@@ -977,7 +978,7 @@ mod tests {
             total_native_tokens += inflation;
             last_locked_ratio = locked_ratio;
             update_state_for_pos_playground(
-                &mut storage,
+                &mut wl_state,
                 last_locked_ratio,
                 last_inflation_amount,
                 total_native_tokens,
@@ -990,7 +991,7 @@ mod tests {
                 _,
                 namada_trans_token::Store<_>,
                 namada_parameters::Store<_>,
-            >(&storage)
+            >(&wl_state)
             .unwrap();
             // println!("  ----> Query staking rate: {query_staking_rate}");
             if !staking_rate.is_zero() && !query_staking_rate.is_zero() {
@@ -1069,7 +1070,7 @@ mod claim_optimizations {
     use namada_core::key;
     use namada_state::OptionExt;
     use namada_state::collections::lazy_map::Collectable;
-    use namada_state::testing::TestState;
+    use namada_state::testing::TestFullAccessState;
     use prop::collection;
     use proptest::prelude::*;
     use storage::{
@@ -1259,7 +1260,8 @@ mod claim_optimizations {
         // `current_epoch`
         // `validator_rewards_products`
 
-        let mut state = TestState::default();
+        let mut state = TestFullAccessState::default();
+        let mut wl_state = state.restrict_writes_to_write_log();
 
         let params = OwnedPosParams {
             unbonding_len: 3,
@@ -1279,7 +1281,7 @@ mod claim_optimizations {
             namada_governance::Store<_>,
             namada_trans_token::Store<_>,
         >(
-            &mut state,
+            &mut wl_state,
             params.clone(),
             [GenesisValidator {
                 address: validator.clone(),
@@ -1303,7 +1305,7 @@ mod claim_optimizations {
         // Populate validator rewards products up to claim end epoch
         for ep in Epoch::iter_bounds_inclusive(claim_start, claim_end) {
             validator_rewards_products_handle(&validator)
-                .insert(&mut state, ep, Dec::from_str("0.5").unwrap())
+                .insert(&mut wl_state, ep, Dec::from_str("0.5").unwrap())
                 .unwrap();
         }
 
@@ -1346,7 +1348,10 @@ mod claim_optimizations {
                 let epoch = Epoch(ix as u64 + 1);
                 bond_handle
                     .add::<_, namada_governance::Store<_>>(
-                        &mut state, *amount, epoch, 0,
+                        &mut wl_state,
+                        *amount,
+                        epoch,
+                        0,
                     )
                     .unwrap();
             }
@@ -1361,7 +1366,7 @@ mod claim_optimizations {
                     .at(&epoch)
                     .at(&src_val)
                     .insert(
-                        &mut state,
+                        &mut wl_state,
                         // Start epoch of the src bond
                         Epoch(0),
                         amount,
@@ -1376,7 +1381,7 @@ mod claim_optimizations {
             for rate in slashes {
                 validator_slashes_handle(&validator)
                     .push(
-                        &mut state,
+                        &mut wl_state,
                         Slash {
                             epoch,
                             block_height: 0, // doesn't matter for the test
@@ -1403,7 +1408,7 @@ mod claim_optimizations {
                 for rate in slashes {
                     validator_slashes_handle(validator)
                         .push(
-                            &mut state,
+                            &mut wl_state,
                             Slash {
                                 epoch,
                                 block_height: 0, // doesn't matter for the test
@@ -1420,14 +1425,16 @@ mod claim_optimizations {
         let original_res = compute_current_rewards_from_bonds::<
             _,
             namada_governance::Store<_>,
-        >(&state, &source, &validator, current_epoch)
+        >(
+            &wl_state, &source, &validator, current_epoch
+        )
         .unwrap();
 
         let optimized_res =
             super::compute_current_rewards_from_bonds::<
                 _,
                 namada_governance::Store<_>,
-            >(&state, &source, &validator, current_epoch)
+            >(&wl_state, &source, &validator, current_epoch)
             .unwrap();
 
         assert_eq!(optimized_res, original_res);

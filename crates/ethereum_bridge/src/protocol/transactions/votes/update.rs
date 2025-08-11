@@ -91,8 +91,8 @@ impl IntoIterator for NewVotes {
 /// votes from `vote_info` should be applied, and the returned changed keys will
 /// be empty.
 pub(in super::super) fn calculate<'db, D, H, Gov, T>(
-    state: &mut WlState<'db, D, H>,
-    keys: &vote_tallies::Keys<T>,
+    state: &'db mut WlState<'db, D, H>,
+    keys: &'db vote_tallies::Keys<T>,
     vote_info: NewVotes,
 ) -> Result<(Tally, ChangedKeys)>
 where
@@ -149,7 +149,7 @@ where
 /// voters from `vote_info`. An error is returned if any validator which
 /// previously voted is present in `vote_info`.
 fn apply<'db, D, H, Gov>(
-    state: &WlState<'db, D, H>,
+    state: &'db WlState<'db, D, H>,
     tally: &Tally,
     vote_info: NewVotes,
 ) -> Result<Tally>

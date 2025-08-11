@@ -11,7 +11,7 @@ use namada_core::key::testing::{
 };
 use namada_core::key::{self, RefTo, common};
 use namada_core::token;
-use namada_state::testing::TestState;
+use namada_state::testing::{TestFullAccessState, TestState};
 use namada_trans_token::credit_tokens;
 use proptest::prelude::*;
 use proptest::test_runner::Config;
@@ -81,7 +81,8 @@ fn test_become_validator_aux(
     //      validators: {validators:#?}"
     // );
 
-    let mut s = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut s = state.restrict_writes_to_write_log();
 
     // Genesis
     let mut current_epoch = s.in_mem().block.epoch;
@@ -92,7 +93,8 @@ fn test_become_validator_aux(
         current_epoch,
     )
     .unwrap();
-    s.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut s = state.restrict_writes_to_write_log();
 
     // Advance to epoch 1
     current_epoch = advance_epoch(&mut s, &params);
@@ -276,7 +278,8 @@ fn test_become_validator_aux(
 
 #[test]
 fn test_validator_raw_hash() {
-    let mut storage = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut storage = state.restrict_writes_to_write_log();
     let address = address::testing::established_address_1();
     let consensus_sk = key::testing::keypair_1();
     let consensus_pk = consensus_sk.to_public();
@@ -296,7 +299,8 @@ fn test_validator_raw_hash() {
 
 #[test]
 fn test_validator_sets() {
-    let mut s = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut s = state.restrict_writes_to_write_log();
     // Only 3 consensus validator slots
     let params = OwnedPosParams {
         max_validator_slots: 3,
@@ -993,7 +997,8 @@ fn test_validator_sets() {
 /// with 0 voting power, because it wasn't it its set before
 #[test]
 fn test_validator_sets_swap() {
-    let mut s = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut s = state.restrict_writes_to_write_log();
     // Only 2 consensus validator slots
     let params = OwnedPosParams {
         max_validator_slots: 2,
@@ -1333,7 +1338,8 @@ fn test_purge_validator_information_aux(validators: Vec<GenesisValidator>) {
         ..Default::default()
     };
 
-    let mut s = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut s = state.restrict_writes_to_write_log();
     let mut current_epoch = s.in_mem().block.epoch;
 
     // Genesis
@@ -1348,7 +1354,8 @@ fn test_purge_validator_information_aux(validators: Vec<GenesisValidator>) {
     init_genesis_helper(&mut s, &params, validators.into_iter(), current_epoch)
         .unwrap();
 
-    s.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut s = state.restrict_writes_to_write_log();
 
     let default_past_epochs = 2;
     let consensus_val_set_len =
@@ -1359,7 +1366,7 @@ fn test_purge_validator_information_aux(validators: Vec<GenesisValidator>) {
     let validator_positions = validator_set_positions_handle();
     let all_validator_addresses = validator_addresses_handle();
 
-    let check_is_data = |storage: &TestState, start: Epoch, end: Epoch| {
+    let check_is_data = |storage: &TestState<'_, _, _>, start: Epoch, end: Epoch| {
         for ep in Epoch::iter_bounds_inclusive(start, end) {
             assert!(!consensus_val_set.at(&ep).is_empty(storage).unwrap());
             // assert!(!below_cap_val_set.at(&ep).is_empty(storage).

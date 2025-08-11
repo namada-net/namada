@@ -115,7 +115,7 @@ where
     }
 
     /// Borrow in-memory state
-    pub fn in_mem(&mut self) -> &InMemory<H> {
+    pub fn in_mem(&self) -> &InMemory<H> {
         &self.in_mem
     }
 

@@ -35,7 +35,7 @@ impl utils::GetVoters for (&validator_set_update::VextDigest, BlockHeight) {
 /// Sign the next set of validators, and return the associated
 /// vote extension protocol transaction.
 pub fn sign_validator_set_update<'db, D, H, Gov>(
-    state: &WlState<'db, D, H>,
+    state: &'db WlState<'db, D, H>,
     validator_addr: &Address,
     eth_hot_key: &common::SecretKey,
 ) -> Option<validator_set_update::SignedVext>
@@ -103,7 +103,7 @@ where
         .next_height();
     let voting_powers =
         utils::get_voting_powers(state, (&ext, epoch_2nd_height))?;
-    let changed_keys = apply_update::<'db, D, H, Gov>(
+    let changed_keys = apply_update::<'_, D, H, Gov>(
         state,
         ext,
         signing_epoch,
@@ -118,7 +118,7 @@ where
 }
 
 fn apply_update<'db, D, H, Gov>(
-    state: &mut WlState<'db, D, H>,
+    state: &'db mut WlState<'db, D, H>,
     ext: validator_set_update::VextDigest,
     signing_epoch: Epoch,
     epoch_2nd_height: BlockHeight,
@@ -168,7 +168,7 @@ where
             "Validator set update votes already in storage",
         );
         let new_votes = NewVotes::new(seen_by, &voting_powers)?;
-        let (tally, changed) = votes::update::calculate::<'db, _, _, Gov, _>(
+        let (tally, changed) = votes::update::calculate::<'_, _, _, Gov, _>(
             state,
             &valset_upd_keys,
             new_votes,

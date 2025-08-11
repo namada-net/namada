@@ -1618,19 +1618,20 @@ mod test_bridge_pool_vp {
     fn test_mint_wnam_separate_gas_payer() {
         // setup
         let mut state = setup_storage();
+        let mut wl_state = state.restrict_writes_to_write_log();
         // initialize the eth bridge balance to 0
         let eb_account_key =
             balance_key(&nam(), &Address::Internal(InternalAddress::EthBridge));
-        state
+        wl_state
             .write(&eb_account_key, Amount::default())
             .expect("Test failed");
         // initialize the gas payers account
         let gas_payer_balance_key =
             balance_key(&nam(), &established_address_1());
-        state
+        wl_state
             .write(&gas_payer_balance_key, Amount::from(BERTHA_WEALTH))
             .expect("Test failed");
-        state.write_log_mut().commit_tx_to_batch();
+        wl_state.write_log_mut().commit_tx_to_batch();
         let mut tx = Tx::from_type(TxType::Raw);
         tx.push_default_inner_tx();
 
@@ -1652,8 +1653,7 @@ mod test_bridge_pool_vp {
 
         // add transfer to pool
         let keys_changed = {
-            let _ = state
-                .write_log_mut()
+            let _ = wl_state
                 .write(&get_pending_key(&transfer), transfer.serialize_to_vec())
                 .unwrap();
             BTreeSet::from([get_pending_key(&transfer)])
@@ -1661,30 +1661,26 @@ mod test_bridge_pool_vp {
         // We escrow 100 Nam into the bridge pool VP
         // and 100 Nam in the Eth bridge VP
         let account_key = balance_key(&nam(), &bertha_address());
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(
                 &account_key,
                 Amount::from(BERTHA_WEALTH - 100).serialize_to_vec(),
             )
             .expect("Test failed");
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(
                 &gas_payer_balance_key,
                 Amount::from(BERTHA_WEALTH - 100).serialize_to_vec(),
             )
             .expect("Test failed");
         let bp_account_key = balance_key(&nam(), &BRIDGE_POOL_ADDRESS);
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(
                 &bp_account_key,
                 Amount::from(ESCROWED_AMOUNT + 100).serialize_to_vec(),
             )
             .expect("Test failed");
-        let _ = state
-            .write_log_mut()
+        let _ = wl_state
             .write(&eb_account_key, Amount::from(10).serialize_to_vec())
             .expect("Test failed");
         let verifiers = BTreeSet::default();
@@ -1694,7 +1690,7 @@ mod test_bridge_pool_vp {
         ));
         let ctx = setup_ctx(
             &tx,
-            &state.restrict_writes_to_write_log(),
+            &wl_state,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1712,6 +1708,7 @@ mod test_bridge_pool_vp {
     fn test_nut_aux(kind: TransferToEthereumKind, expect: Expect) {
         // setup
         let mut state = setup_storage();
+        let mut wl_state = state.restrict_writes_to_write_log();
         let mut tx = Tx::from_type(TxType::Raw);
         tx.push_default_inner_tx();
 
@@ -1733,8 +1730,7 @@ mod test_bridge_pool_vp {
 
         // add transfer to pool
         let mut keys_changed = {
-            let _ = state
-                .write_log_mut()
+            let _ = wl_state
                 .write(&get_pending_key(&transfer), transfer.serialize_to_vec())
                 .unwrap();
             BTreeSet::from([get_pending_key(&transfer)])
@@ -1742,7 +1738,7 @@ mod test_bridge_pool_vp {
 
         // update Daewon's balances
         let mut new_keys_changed = update_balances(
-            state.write_log_mut(),
+            wl_state.write_log_mut(),
             Balance {
                 kind,
                 asset: ASSET,
@@ -1757,7 +1753,7 @@ mod test_bridge_pool_vp {
 
         // change the bridge pool balances
         let mut new_keys_changed = update_balances(
-            state.write_log_mut(),
+            wl_state.write_log_mut(),
             Balance {
                 kind,
                 asset: ASSET,
@@ -1777,7 +1773,7 @@ mod test_bridge_pool_vp {
         ));
         let ctx = setup_ctx(
             &tx,
-            &state.restrict_writes_to_write_log(),
+            &wl_state,
             &gas_meter,
             &keys_changed,
             &verifiers,

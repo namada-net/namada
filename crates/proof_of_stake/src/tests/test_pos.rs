@@ -12,7 +12,7 @@ use namada_core::dec::Dec;
 use namada_core::key::RefTo;
 use namada_core::key::testing::{common_sk_from_simple_seed, gen_keypair};
 use namada_core::{address, key};
-use namada_state::testing::TestState;
+use namada_state::testing::TestFullAccessState;
 use namada_trans_token::{
     self as token, credit_tokens, get_effective_total_native_supply,
     read_balance,
@@ -213,8 +213,9 @@ fn test_test_init_genesis_aux(
     //     "Test inputs: {params:?}, {start_epoch}, genesis validators: \
     //      {validators:#?}"
     // );
-    let mut s = TestState::default();
-    s.in_mem_mut().block.epoch = start_epoch;
+    let mut state = TestFullAccessState::default();
+    state.in_mem_mut().block.epoch = start_epoch;
+    let mut s = state.restrict_writes_to_write_log();
 
     validators.sort_by(|a, b| b.tokens.cmp(&a.tokens));
     let params = test_init_genesis(
@@ -297,7 +298,8 @@ fn test_bonds_aux(params: OwnedPosParams, validators: Vec<GenesisValidator>) {
     // params.unbonding_len = 4;
     // println!("\nTest inputs: {params:?}, genesis validators:
     // {validators:#?}");
-    let mut s = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut s = state.restrict_writes_to_write_log();
 
     // Genesis
     let start_epoch = s.in_mem().block.epoch;
@@ -309,7 +311,8 @@ fn test_bonds_aux(params: OwnedPosParams, validators: Vec<GenesisValidator>) {
         current_epoch,
     )
     .unwrap();
-    s.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut s = state.restrict_writes_to_write_log();
 
     // Advance to epoch 1
     current_epoch = advance_epoch(&mut s, &params);
@@ -833,7 +836,8 @@ fn test_unjail_validator_aux(
 ) {
     // println!("\nTest inputs: {params:?}, genesis validators:
     // {validators:#?}");
-    let mut s = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut s = state.restrict_writes_to_write_log();
 
     // Find the validator with the most stake and 100x his stake to keep the
     // cubic slash rate small
@@ -854,7 +858,8 @@ fn test_unjail_validator_aux(
         current_epoch,
     )
     .unwrap();
-    s.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut s = state.restrict_writes_to_write_log();
 
     current_epoch = advance_epoch(&mut s, &params);
     process_slashes(
@@ -985,7 +990,8 @@ fn test_unjail_validator_aux(
 }
 
 fn test_unslashed_bond_amount_aux(validators: Vec<GenesisValidator>) {
-    let mut storage = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut storage = state.restrict_writes_to_write_log();
     let params = OwnedPosParams {
         unbonding_len: 4,
         ..Default::default()
@@ -1000,7 +1006,8 @@ fn test_unslashed_bond_amount_aux(validators: Vec<GenesisValidator>) {
         current_epoch,
     )
     .unwrap();
-    storage.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut storage = state.restrict_writes_to_write_log();
 
     let validator1 = validators[0].address.clone();
     let validator2 = validators[1].address.clone();
@@ -1189,7 +1196,8 @@ fn test_log_block_rewards_aux_aux(
             .map(|v| (&v.address, v.tokens.to_string_native()))
             .collect::<Vec<_>>()
     );
-    let mut s = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut s = state.restrict_writes_to_write_log();
     // Init genesis
     let current_epoch = s.in_mem().block.epoch;
     let params = test_init_genesis(
@@ -1199,7 +1207,9 @@ fn test_log_block_rewards_aux_aux(
         current_epoch,
     )
     .unwrap();
-    s.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut s = state.restrict_writes_to_write_log();
+
     let total_stake =
         crate::get_total_consensus_stake(&s, current_epoch, &params).unwrap();
     let consensus_set =
@@ -1386,7 +1396,8 @@ fn test_log_block_rewards_aux_aux(
                 );
             }
         }
-        s.commit_block().unwrap();
+        state.commit_block().unwrap();
+        s = state.restrict_writes_to_write_log();
 
         last_rewards = rewards_accumulator_handle().collect_map(&s).unwrap();
 
@@ -1412,7 +1423,8 @@ fn test_update_rewards_products_aux(validators: Vec<GenesisValidator>) {
             .map(|v| (&v.address, v.tokens.to_string_native()))
             .collect::<Vec<_>>()
     );
-    let mut s = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut s = state.restrict_writes_to_write_log();
     // Init genesis
     let current_epoch = s.in_mem().block.epoch;
     let params = OwnedPosParams::default();
@@ -1423,7 +1435,8 @@ fn test_update_rewards_products_aux(validators: Vec<GenesisValidator>) {
         current_epoch,
     )
     .unwrap();
-    s.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut s = state.restrict_writes_to_write_log();
 
     let staking_token = staking_token_address(&s);
     let consensus_set =
@@ -1507,7 +1520,8 @@ fn test_consensus_key_change_aux(validators: Vec<GenesisValidator>) {
 
     // println!("\nTest inputs: {params:?}, genesis validators:
     // {validators:#?}");
-    let mut storage = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut storage = state.restrict_writes_to_write_log();
 
     // Genesis
     let mut current_epoch = storage.in_mem().block.epoch;
@@ -1518,7 +1532,8 @@ fn test_consensus_key_change_aux(validators: Vec<GenesisValidator>) {
         current_epoch,
     )
     .unwrap();
-    storage.commit_block().unwrap();
+    state.commit_block().unwrap();
+    let mut storage = state.restrict_writes_to_write_log();
 
     // Check that there is one consensus key in the network
     let consensus_keys = get_consensus_key_set(&storage).unwrap();
@@ -1634,7 +1649,8 @@ fn test_is_delegator_aux(mut validators: Vec<GenesisValidator>) {
     let validator1 = validators[0].address.clone();
     let validator2 = validators[1].address.clone();
 
-    let mut storage = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut storage = state.restrict_writes_to_write_log();
     let params = OwnedPosParams {
         unbonding_len: 4,
         ..Default::default()
@@ -1751,23 +1767,25 @@ fn test_jail_for_liveness_aux(validators: Vec<GenesisValidator>) {
     // 1 missed vote with the above params should get validators jailed
     let missed_votes = 1_u64;
 
-    // Open 2 storages
-    let mut storage = TestState::default();
-    let mut storage_clone = TestState::default();
+    // Open 2 states
+    let mut state = TestFullAccessState::default();
+    let mut state_clone = TestFullAccessState::default();
 
     // Apply the same changes to each storage
-    for s in [&mut storage, &mut storage_clone] {
+    for s in [&mut state, &mut state_clone] {
+        let mut wl_state = s.restrict_writes_to_write_log();
         // Genesis
         let current_epoch = s.in_mem().block.epoch;
         let jail_epoch = current_epoch.next();
         let params = test_init_genesis(
-            s,
+            &mut wl_state,
             params.clone(),
             validators.clone().into_iter(),
             current_epoch,
         )
         .unwrap();
         s.commit_block().unwrap();
+        let mut wl_state = s.restrict_writes_to_write_log();
 
         // Add missed votes to about half of the validators
         let half_len = validators.len() / 2;
@@ -1776,12 +1794,12 @@ fn test_jail_for_liveness_aux(validators: Vec<GenesisValidator>) {
 
         for GenesisValidator { address, .. } in &validators_who_missed_votes {
             liveness_sum_missed_votes_handle()
-                .insert(s, address.clone(), missed_votes)
+                .insert(&mut wl_state, address.clone(), missed_votes)
                 .unwrap();
         }
 
         jail_for_liveness::<_, GovStore<_>>(
-            s,
+            &mut wl_state,
             &params,
             current_epoch,
             jail_epoch,
@@ -1790,7 +1808,7 @@ fn test_jail_for_liveness_aux(validators: Vec<GenesisValidator>) {
 
         for GenesisValidator { address, .. } in &validators_who_missed_votes {
             let state_jail_epoch = validator_state_handle(address)
-                .get(s, jail_epoch, &params)
+                .get(&mut wl_state, jail_epoch, &params)
                 .unwrap()
                 .expect("Validator should have a state for the jail epoch");
             assert_eq!(state_jail_epoch, ValidatorState::Jailed);
@@ -1798,10 +1816,7 @@ fn test_jail_for_liveness_aux(validators: Vec<GenesisValidator>) {
     }
 
     // Assert that the changes from `jail_for_liveness` are the same
-    pretty_assertions::assert_eq!(
-        &storage.write_log(),
-        &storage_clone.write_log()
-    );
+    pretty_assertions::assert_eq!(&state.write_log(), &state_clone.write_log());
 }
 
 #[test]
@@ -1810,7 +1825,8 @@ fn test_delegation_targets() {
         token::Amount::native_whole(1),
         token::Amount::native_whole(2),
     ];
-    let mut storage = TestState::default();
+    let mut state = TestFullAccessState::default();
+    let mut storage = state.restrict_writes_to_write_log();
     let mut current_epoch = storage.in_mem().block.epoch;
     let params = OwnedPosParams::default();
 

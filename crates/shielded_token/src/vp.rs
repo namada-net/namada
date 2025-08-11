@@ -958,7 +958,9 @@ mod shielded_token_tests {
     use namada_core::address::testing::nam;
     use namada_core::borsh::BorshSerializeExt;
     use namada_gas::{TxGasMeter, VpGasMeter};
-    use namada_state::testing::{TestState, arb_account_storage_key, arb_key};
+    use namada_state::testing::{
+        TestFullAccessState, TestState, arb_account_storage_key, arb_key,
+    };
     use namada_state::{StateRead, TxIndex};
     use namada_trans_token::Amount;
     use namada_trans_token::storage_key::balance_key;
@@ -1000,8 +1002,9 @@ mod shielded_token_tests {
     // Changing only the balance key of the MASP is invalid
     #[test]
     fn test_balance_change() {
-        let mut state = TestState::default();
-        namada_parameters::init_test_storage(&mut state).unwrap();
+        let mut state = TestFullAccessState::default();
+        let mut wl_state = state.restrict_writes_to_write_log();
+        namada_parameters::init_test_storage(&mut wl_state).unwrap();
         let src_key = balance_key(&nam(), &MASP);
         let amount = Amount::native_whole(100);
         let keys_changed = BTreeSet::from([src_key.clone()]);
@@ -1036,7 +1039,7 @@ mod shielded_token_tests {
             let (vp_vp_cache, _vp_cache_dir) = vp_cache();
             let ctx = Ctx::new(
                 &MASP,
-                &state,
+                &wl_state,
                 &tx,
                 &cmt,
                 &tx_index,
@@ -1063,8 +1066,9 @@ mod shielded_token_tests {
         // Changing no MASP keys at all is allowed
         #[test]
         fn test_no_masp_op_accepted(src_key in arb_key().prop_filter("MASP key", |key| !is_masp_key(key))) {
-            let mut state = TestState::default();
-            namada_parameters::init_test_storage(&mut state).unwrap();
+            let mut state = TestFullAccessState::default();
+            let mut wl_state = state.restrict_writes_to_write_log();
+            namada_parameters::init_test_storage(&mut wl_state).unwrap();
             let keys_changed = BTreeSet::from([src_key.clone()]);
             let verifiers = Default::default();
 
@@ -1112,8 +1116,9 @@ mod shielded_token_tests {
                 |key| !(is_masp_transfer_key(key) || is_masp_token_map_key(key)
             ))
         ) {
-            let mut state = TestState::default();
-            namada_parameters::init_test_storage(&mut state).unwrap();
+            let mut state = TestFullAccessState::default();
+            let mut wl_state = state.restrict_writes_to_write_log();
+            namada_parameters::init_test_storage(&mut wl_state).unwrap();
             let verifiers = Default::default();
 
             let tx_index = TxIndex::default();

@@ -269,7 +269,7 @@ pub fn commit_bridge_pool_root_at_height(
 /// Append validators to storage at the current epoch
 /// offset by pipeline length.
 pub fn append_validators_to_storage(
-    state: &mut TestFullAccessState,
+    state: &mut TestState<'_, _, _>,
     consensus_validators: HashMap<Address, token::Amount>,
 ) -> HashMap<Address, TestValidatorKeys> {
     let current_epoch = state.in_mem().get_current_epoch().0;

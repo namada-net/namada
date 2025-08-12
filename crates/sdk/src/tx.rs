@@ -4432,32 +4432,32 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
         .precompute_asset_types(context.client(), tokens)
         .await;
 
-    // FIXME: need to adjust this
-    let extra_target = match &args.frontend_sus_fee {
-        Some(TxTransparentTarget {
-            target,
-            token,
-            amount,
-        }) => {
+    let (extra_target, source_amount) = match &args.frontend_sus_fee {
+        Some((target, amount)) => {
             // Validate the amount given
-            let validated_amount =
-                validate_amount(context, amount.to_owned(), token, false)
+            let validated_fee_amount =
+                validate_amount(context, amount.to_owned(), &token, false)
                     .await?;
+            let source_amount =
+                checked!(validated_amount + validated_fee_amount)?;
 
-            vec![(
-                TransferTarget::Address(target.to_owned()),
-                token.to_owned(),
-                validated_amount,
-            )]
+            (
+                vec![(
+                    target.to_owned(),
+                    token.to_owned(),
+                    validated_fee_amount,
+                )],
+                source_amount,
+            )
         }
-        None => vec![],
+        None => (vec![], validated_amount),
     };
 
     let masp_transfer_data = MaspTransferData {
         sources: vec![(
             TransferSource::Address(source.clone()),
             token.clone(),
-            validated_amount,
+            source_amount,
         )],
         targets: [
             extra_target,
@@ -4465,6 +4465,9 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
         ]
         .concat(),
     };
+
+    // eprintln!("MASP TRANSFER DATA: {:#?}", masp_transfer_data); //FIXME:
+    // remove
 
     let shielded_transfer = {
         let mut shielded = context.shielded_mut().await;
@@ -4480,6 +4483,9 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
             .await
             .map_err(|err| TxSubmitError::MaspError(err.to_string()))?
     };
+
+    // eprintln!("GENERATED MASP BUNDLE: {:#?}", shielded_transfer); //FIXME:
+    // remove
 
     Ok(shielded_transfer.map(|st| st.masp_tx))
 }

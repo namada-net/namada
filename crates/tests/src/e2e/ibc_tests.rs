@@ -146,6 +146,7 @@ fn ibc_transfers() -> Result<()> {
         None,
         None,
         false,
+        None,
     )?;
     wait_for_packet_relay(
         &hermes_dir,
@@ -224,6 +225,7 @@ fn ibc_transfers() -> Result<()> {
         None,
         None,
         false,
+        None,
     )?;
     wait_for_packet_relay(
         &hermes_dir,
@@ -254,6 +256,7 @@ fn ibc_transfers() -> Result<()> {
         100,
         &port_id_namada,
         &channel_id_namada,
+        None,
     )?;
     transfer_from_cosmos(
         &test_gaia,
@@ -305,6 +308,7 @@ fn ibc_transfers() -> Result<()> {
         None,
         None,
         true,
+        None,
     )?;
     wait_for_packet_relay(
         &hermes_dir,
@@ -324,6 +328,7 @@ fn ibc_transfers() -> Result<()> {
         1,
         &port_id_namada,
         &channel_id_namada,
+        None,
     )?;
     transfer_from_cosmos(
         &test_gaia,
@@ -358,6 +363,7 @@ fn ibc_transfers() -> Result<()> {
         None,
         None,
         false,
+        None,
     )?;
     wait_for_packet_relay(
         &hermes_dir,
@@ -387,6 +393,7 @@ fn ibc_transfers() -> Result<()> {
         None,
         None,
         false,
+        None,
     )?;
     // wait for the timeout
     sleep(10);
@@ -420,6 +427,7 @@ fn ibc_transfers() -> Result<()> {
         None,
         None,
         true,
+        None,
     )?;
     wait_for_packet_relay(
         &hermes_dir,
@@ -451,6 +459,7 @@ fn ibc_transfers() -> Result<()> {
         None,
         None,
         true,
+        None,
     )?;
     // wait for the timeout
     sleep(10);
@@ -506,6 +515,7 @@ fn ibc_transfers() -> Result<()> {
         100,
         &port_id_namada,
         &channel_id_namada,
+        None,
     )?;
     transfer_from_cosmos(
         &test_gaia,
@@ -610,6 +620,7 @@ fn ibc_nft_transfers() -> Result<()> {
         None,
         None,
         false,
+        None,
     )?;
     clear_packet(&hermes_dir, &port_id_namada, &channel_id_namada, &test)?;
     check_balance(&test, &namada_receiver, &ibc_trace_on_namada, 0)?;
@@ -623,6 +634,7 @@ fn ibc_nft_transfers() -> Result<()> {
         1,
         &port_id_namada,
         &channel_id_namada,
+        None,
     )?;
     nft_transfer_from_cosmos(
         &test_cosmwasm,
@@ -672,6 +684,7 @@ fn ibc_nft_transfers() -> Result<()> {
         None,
         None,
         true,
+        None,
     )?;
     clear_packet(&hermes_dir, &port_id_namada, &channel_id_namada, &test)?;
     check_shielded_balance(&test, AB_VIEWING_KEY, &ibc_trace_on_namada, 0)?;
@@ -959,6 +972,7 @@ fn ibc_token_inflation() -> Result<()> {
         1,
         &port_id_namada,
         &channel_id_namada,
+        None,
     )?;
     transfer_from_cosmos(
         &test_gaia,
@@ -1150,6 +1164,7 @@ fn ibc_rate_limit() -> Result<()> {
         None,
         None,
         false,
+        None,
     )?;
 
     // Transfer 1 NAM from Namada to Gaia again will fail
@@ -1170,6 +1185,7 @@ fn ibc_rate_limit() -> Result<()> {
         ),
         None,
         false,
+        None,
     )?;
 
     // wait for the next epoch
@@ -1194,6 +1210,7 @@ fn ibc_rate_limit() -> Result<()> {
         None,
         None,
         false,
+        None,
     )?;
 
     // wait for the next epoch
@@ -1304,6 +1321,7 @@ fn ibc_unlimited_channel() -> Result<()> {
         ),
         None,
         false,
+        None,
     )?;
 
     // Proposal on Namada
@@ -1362,6 +1380,7 @@ fn ibc_unlimited_channel() -> Result<()> {
         None,
         None,
         false,
+        None,
     )?;
     wait_for_packet_relay(
         &hermes_dir,
@@ -1693,6 +1712,7 @@ fn ibc_pfm_happy_flows() -> Result<()> {
         None,
         None,
         false,
+        None,
     )?;
 
     wait_for_packet_relay(
@@ -1990,6 +2010,7 @@ fn ibc_pfm_unhappy_flows() -> Result<()> {
         None,
         None,
         false,
+        None,
     )?;
 
     wait_for_packet_relay(
@@ -2314,6 +2335,7 @@ fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
             8,
             &port_id_namada,
             &channel_id_namada,
+            None,
         )?;
         let masp_receiver = match iter {
             // Test addresses encoded using `bech32m`...
@@ -2353,6 +2375,7 @@ fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
             None,
             Some(&memo),
             true,
+            None,
         )?;
         wait_for_packet_relay(
             &hermes_dir,
@@ -2419,6 +2442,7 @@ fn ibc_shielded_recv_middleware_unhappy_flow() -> Result<()> {
         8,
         &port_id_namada,
         &channel_id_namada,
+        None,
     )?;
     let memo = packet_forward_memo(
         MASP.to_string().into(),
@@ -2445,6 +2469,7 @@ fn ibc_shielded_recv_middleware_unhappy_flow() -> Result<()> {
         None,
         Some(&memo),
         false,
+        None,
     )?;
     wait_for_packet_relay(&hermes_dir, &port_id_gaia, &channel_id_gaia, &test)?;
 
@@ -2703,6 +2728,7 @@ fn try_invalid_transfers(
         Some(&format!("Invalid IBC denom: {nam_addr}")),
         None,
         false,
+        None,
     )?;
 
     // invalid channel
@@ -2720,6 +2746,7 @@ fn try_invalid_transfers(
         Some("No channel end: port transfer, channel channel-42"),
         None,
         false,
+        None,
     )?;
 
     Ok(())
@@ -2776,6 +2803,7 @@ fn transfer(
     expected_err: Option<&str>,
     ibc_memo: Option<&str>,
     gen_refund_target: bool,
+    frontend_sus_fee: Option<&str>,
 ) -> Result<u32> {
     let rpc = get_actor_rpc(test, Who::Validator(0));
 
@@ -2797,7 +2825,7 @@ fn transfer(
         "--port-id",
         &port_id,
         "--gas-limit",
-        "60000",
+        "70000",
         "--node",
         &rpc,
     ]);
@@ -2841,6 +2869,11 @@ fn transfer(
         cmd.assert_success();
         tx_args.push("--refund-target");
         tx_args.push(IBC_REFUND_TARGET_ALIAS);
+    }
+
+    if let Some(target) = frontend_sus_fee {
+        tx_args.push("--frontend-sus-fee");
+        tx_args.push(target.as_ref());
     }
 
     let mut client = run!(test, Bin::Client, tx_args, Some(300))?;
@@ -3464,12 +3497,13 @@ fn gen_ibc_shielding_data(
     amount: u64,
     port_id: &PortId,
     channel_id: &ChannelId,
+    frontend_sus_fee: Option<&str>,
 ) -> Result<PathBuf> {
     let rpc = get_actor_rpc(dst_test, Who::Validator(0));
     let output_folder = dst_test.test_dir.path().to_string_lossy();
 
     let amount = amount.to_string();
-    let args = vec![
+    let mut args = vec![
         "ibc-gen-shielding",
         "--output-folder-path",
         &output_folder,
@@ -3486,6 +3520,10 @@ fn gen_ibc_shielding_data(
         "--node",
         &rpc,
     ];
+    if let Some(target) = frontend_sus_fee {
+        args.push("--frontend-sus-fee-ibc");
+        args.push(target.as_ref());
+    }
 
     let mut client = run!(dst_test, Bin::Client, args, Some(120))?;
     let (_unread, matched) =
@@ -3807,6 +3845,111 @@ fn nft_transfer_from_cosmos(
     Ok(())
 }
 
+// Verify that MASP frontend fees can be paid also when doing IBC transactions,
+// specifically an unshielding originating from Namada and a shielding tx
+// originating from a foreign chain
+#[test]
+fn frontend_sus_fee() -> Result<()> {
+    let update_genesis =
+        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
+            genesis.parameters.parameters.epochs_per_year =
+                epochs_per_year_from_min_duration(1800);
+            genesis.parameters.ibc_params.default_mint_limit =
+                Amount::max_signed();
+            genesis
+                .parameters
+                .ibc_params
+                .default_per_epoch_throughput_limit = Amount::max_signed();
+            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+        };
+    let (ledger, gaia, test, test_gaia) =
+        run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
+    let _bg_ledger = ledger.background();
+    let _bg_gaia = gaia.background();
+
+    let hermes_dir = setup_hermes(&test, &test_gaia)?;
+    let port_id_namada = FT_PORT_ID.parse().unwrap();
+    let port_id_gaia = FT_PORT_ID.parse().unwrap();
+    let (channel_id_namada, channel_id_gaia) = create_channel_with_hermes(
+        &hermes_dir,
+        &test,
+        &test_gaia,
+        &port_id_namada,
+        &port_id_gaia,
+    )?;
+
+    // Start relaying
+    let hermes = run_hermes(&hermes_dir)?;
+    let _bg_hermes = hermes.background();
+
+    // Shielding transfer 100 samoleans from Gaia to Namada (this command will
+    // actually add another extra token in the output as the frontend sus fee)
+    let shielding_data_path = gen_ibc_shielding_data(
+        &test,
+        AA_PAYMENT_ADDRESS,
+        COSMOS_COIN,
+        100,
+        &port_id_namada,
+        &channel_id_namada,
+        Some(ESTER),
+    )?;
+    transfer_from_cosmos(
+        &test_gaia,
+        COSMOS_USER,
+        MASP.to_string(),
+        COSMOS_COIN,
+        // 1 extra token for the frontend sus fee
+        101,
+        &port_id_gaia,
+        &channel_id_gaia,
+        Some(Either::Left(shielding_data_path)),
+        None,
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_gaia,
+        &channel_id_gaia,
+        &test_gaia,
+    )?;
+    // Check the token on Namada
+    let ibc_denom_on_namada =
+        format!("{port_id_namada}/{channel_id_namada}/{COSMOS_COIN}");
+    check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 100)?;
+    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 899)?;
+    check_balance(&test, ESTER, &ibc_denom_on_namada, 1)?;
+
+    // Unshielding transfer 10 samoleans from Namada to Gaia
+    let gaia_receiver = find_cosmos_address(&test_gaia, COSMOS_USER)?;
+    transfer(
+        &test,
+        A_SPENDING_KEY,
+        &gaia_receiver,
+        &ibc_denom_on_namada,
+        // An extra token will be added to this amount as a frontend masp fee
+        10,
+        Some(BERTHA_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        None,
+        None,
+        None,
+        None,
+        true,
+        Some(ESTER),
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+    check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 89)?;
+    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 909)?;
+    check_balance(&test, ESTER, &ibc_denom_on_namada, 2)?;
+
+    Ok(())
+}
+
 /// Basic Osmosis test that checks if the chain has been set up correctly.
 #[test]
 fn osmosis_basic() -> Result<()> {
@@ -3930,6 +4073,7 @@ fn osmosis_xcs() -> Result<()> {
         None,
         None,
         false,
+        None,
     )?;
     // Transfer Samoleans from Gaia
     transfer_from_cosmos(

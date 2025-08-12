@@ -29,7 +29,7 @@ jobs:
         run: exit 1
       - uses: cargo-bins/cargo-binstall@main
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 50
       - name: Find branch point of the PR
@@ -41,7 +41,7 @@ jobs:
           [[ -z BRANCH_POINT ]] && echo "No branch point" && exit 1
           echo "REF=$BRANCH_POINT" >> $GITHUB_OUTPUT
       - name: Checkout libs maintenance branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ env.MAINT_LIBS_BRANCH }}
       - name: Copy the current folder to be the baseline for semver-checks
@@ -104,7 +104,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: checkout_repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: install_rust
         uses: dtolnay/rust-toolchain@stable
       - name: install_cargo_msrv

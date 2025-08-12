@@ -83,7 +83,6 @@ use ibc::core::router::types::error::RouterError;
 use ibc::primitives::proto::Any;
 pub use ibc::*;
 use ibc_middleware_packet_forward::PacketMetadata;
-use masp_primitives::transaction::Transaction as MaspTransaction;
 pub use msg::*;
 use namada_core::address::{self, Address};
 use namada_core::arith::{CheckedAdd, CheckedSub, checked};
@@ -101,6 +100,7 @@ use namada_state::{
     State, StorageHasher, StorageRead, StorageWrite, WlState,
 };
 use namada_systems::ibc::ChangedBalances;
+pub use namada_systems::ibc::IbcShieldingData;
 use namada_systems::trans_token;
 pub use nft::*;
 use prost::Message;
@@ -239,7 +239,7 @@ where
 {
     fn try_extract_masp_tx_from_envelope<Transfer: BorshDeserialize>(
         tx_data: &[u8],
-    ) -> StorageResult<Option<masp_primitives::transaction::Transaction>> {
+    ) -> StorageResult<Option<IbcShieldingData>> {
         let msg = decode_message::<Transfer>(tx_data)
             .into_storage_result()
             .ok();
@@ -578,7 +578,7 @@ pub struct InternalData<Transfer> {
     /// The transparent transfer that happens in parallel to IBC processes
     pub transparent: Option<Transfer>,
     /// The shielded transaction that happens in parallel to IBC processes
-    pub shielded: Option<MaspTransaction>,
+    pub shielded: Option<IbcShieldingData>,
     /// IBC tokens that are credited/debited to internal accounts
     pub ibc_tokens: BTreeSet<Address>,
 }

@@ -1,10 +1,7 @@
 use std::collections::BTreeMap;
-use std::fmt;
-use std::str::FromStr;
 
 use borsh::schema::{Declaration, Definition, Fields};
 use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
-use data_encoding::HEXUPPER;
 use ibc::apps::nft_transfer::types::PORT_ID_STR as NFT_PORT_ID_STR;
 use ibc::apps::nft_transfer::types::msgs::transfer::MsgTransfer as IbcMsgNftTransfer;
 use ibc::apps::nft_transfer::types::packet::PacketData as NftPacketData;
@@ -18,9 +15,8 @@ use ibc::core::channel::types::packet::Packet;
 use ibc::core::handler::types::msgs::MsgEnvelope;
 use ibc::core::host::types::identifiers::PortId;
 use ibc::primitives::proto::Protobuf;
-use masp_primitives::transaction::Transaction as MaspTransaction;
-use namada_core::borsh::BorshSerializeExt;
 use namada_core::string_encoding::StringEncoded;
+use namada_systems::ibc::IbcShieldingData;
 use serde::{Deserialize, Serialize};
 
 use crate::trace;
@@ -236,43 +232,10 @@ impl<Transfer: BorshSchema> BorshSchema for MsgNftTransfer<Transfer> {
     }
 }
 
-/// Shielding data in IBC packet memo
-#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
-pub struct IbcShieldingData(pub MaspTransaction);
-
-impl From<&IbcShieldingData> for String {
-    fn from(data: &IbcShieldingData) -> Self {
-        HEXUPPER.encode(&data.serialize_to_vec())
-    }
-}
-
-impl From<IbcShieldingData> for String {
-    fn from(data: IbcShieldingData) -> Self {
-        (&data).into()
-    }
-}
-
-impl fmt::Display for IbcShieldingData {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", String::from(self))
-    }
-}
-
-impl FromStr for IbcShieldingData {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let bytes = HEXUPPER
-            .decode(s.as_bytes())
-            .map_err(|err| err.to_string())?;
-        IbcShieldingData::try_from_slice(&bytes).map_err(|err| err.to_string())
-    }
-}
-
 /// Extract MASP transaction from IBC envelope
 pub fn extract_masp_tx_from_envelope(
     envelope: &MsgEnvelope,
-) -> Option<MaspTransaction> {
+) -> Option<IbcShieldingData> {
     match envelope {
         MsgEnvelope::Packet(PacketMsg::Recv(msg)) => {
             extract_masp_tx_from_packet(&msg.packet)
@@ -299,9 +262,11 @@ pub fn decode_ibc_shielding_data(
 }
 
 /// Extract MASP transaction from IBC packet memo
-pub fn extract_masp_tx_from_packet(packet: &Packet) -> Option<MaspTransaction> {
+pub fn extract_masp_tx_from_packet(
+    packet: &Packet,
+) -> Option<IbcShieldingData> {
     let memo = extract_memo_from_packet(packet, &packet.port_id_on_b)?;
-    decode_ibc_shielding_data(memo).map(|data| data.0)
+    decode_ibc_shielding_data(memo)
 }
 
 fn extract_memo_from_packet(
@@ -363,9 +328,4 @@ pub fn extract_traces_from_recv_msg(
         }
         _ => Ok(vec![]),
     }
-}
-
-/// Get IBC memo string from MASP transaction for receiving
-pub fn convert_masp_tx_to_ibc_memo(transaction: &MaspTransaction) -> String {
-    IbcShieldingData(transaction.clone()).into()
 }

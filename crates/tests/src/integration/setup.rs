@@ -18,6 +18,7 @@ use namada_apps_lib::wallet::defaults::derive_template_dir;
 use namada_apps_lib::wallet::pre_genesis;
 use namada_core::chain::ChainIdPrefix;
 use namada_core::collections::HashMap;
+use namada_core::token::{Amount, DenominatedAmount};
 use namada_node::shell::Shell;
 use namada_node::shell::testing::node::{
     InnerMockNode, MockNode, MockServicesCfg, MockServicesController,
@@ -29,6 +30,8 @@ use namada_sdk::token;
 use namada_sdk::wallet::alias::Alias;
 
 use crate::e2e::setup::copy_wasm_to_chain_dir;
+use crate::parameters::storage::masp_shielding_fee_amount;
+use crate::proof_of_stake::StorageWrite;
 
 /// Env. var for keeping temporary files created by the integration tests
 const ENV_VAR_KEEP_TEMP: &str = "NAMADA_INT_KEEP_TEMP";
@@ -271,6 +274,17 @@ fn create_node(
         locked.state.in_mem_mut().block.height = 1.into();
         locked.commit();
     }
+    // enable shielding fees
+    let native_token = node.native_token();
+    node.shell
+        .lock()
+        .unwrap()
+        .state
+        .write(
+            &masp_shielding_fee_amount(&native_token),
+            DenominatedAmount::native(Amount::native_whole(1)),
+        )
+        .expect("Test failed");
 
     Ok((node, controller))
 }

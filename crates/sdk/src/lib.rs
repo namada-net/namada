@@ -191,12 +191,16 @@ pub trait Namada: NamadaIo {
         &self,
         targets: Vec<args::TxShieldedTarget>,
         sources: Vec<args::TxTransparentSource>,
+        shielding_fee_payer: common::PublicKey,
+        shielding_fee_token: Address,
     ) -> args::TxShieldingTransfer {
         args::TxShieldingTransfer {
             sources,
             targets,
             tx_code_path: PathBuf::from(TX_TRANSFER_WASM),
             tx: self.tx_builder(),
+            shielding_fee_payer,
+            shielding_fee_token,
         }
     }
 

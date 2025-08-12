@@ -556,7 +556,7 @@ pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
     /// NOTE: if the swap is shielded (from MASP to MASP), no sustainability
     /// fee should be taken
     // FIXME: try to join this with recipient
-    pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
+    pub frontend_sus_fee: Option<(C::TransferTarget, InputAmount)>,
 }
 
 impl TxOsmosisSwap<SdkTypes> {
@@ -841,6 +841,7 @@ pub struct TxIbcTransfer<C: NamadaTypes = SdkTypes> {
     // FIXME: this should probably be an either with ibc_shielding_data. Yes
     // but there would still be the room for errors, maybe need marker traits?
     // Not sure...
+    // FIXME: support this in the client for testing only
     pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
@@ -3263,10 +3264,12 @@ pub struct GenIbcShieldingTransfer<C: NamadaTypes = SdkTypes> {
     pub expiration: TxExpiration,
     /// Asset to shield over IBC to Namada
     pub asset: IbcShieldingTransferAsset<C>,
-    /// The optional data for the frontend sustainability fee
+    /// The optional data for the frontend sustainability fee (the target and
+    /// the amount, the token must be the same as the one involved in the
+    /// shielding transaction since ics-20 only supports a single asset)
     /// NOTE: if the shielding operation is part of a swap, and this is
     /// shielded (from MASP to MASP), no sustainability fee should be taken
-    pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
+    pub frontend_sus_fee: Option<(C::TransferTarget, InputAmount)>,
 }
 
 /// IBC shielding transfer asset, to be used by [`GenIbcShieldingTransfer`]

@@ -3551,6 +3551,9 @@ pub mod args {
     #[cfg(any(test, feature = "testing"))]
     pub const FRONTEND_SUS_FEE: ArgOpt<WalletAddress> =
         arg_opt("frontend-sus-fee");
+    #[cfg(any(test, feature = "testing"))]
+    pub const FRONTEND_SUS_FEE_IBC: ArgOpt<WalletTransferTarget> =
+        arg_opt("frontend-sus-fee-ibc");
     pub const FULL_RESET: ArgFlag = flag("full-reset");
     pub const GAS_LIMIT: ArgDefault<GasLimit> = arg_default(
         "gas-limit",
@@ -5237,7 +5240,9 @@ pub mod args {
             let source = TRANSFER_SOURCE.parse(matches);
             let receiver = RECEIVER.parse(matches);
             let token = TOKEN.parse(matches);
-            let amount = InputAmount::Unvalidated(AMOUNT.parse(matches));
+
+            let raw_amount = AMOUNT.parse(matches);
+            let amount = InputAmount::Unvalidated(raw_amount);
             let port_id = PORT_ID.parse(matches);
             let channel_id = CHANNEL_ID.parse(matches);
             let timeout_height = TIMEOUT_HEIGHT.parse(matches);
@@ -5253,6 +5258,28 @@ pub mod args {
             let ibc_memo = IBC_MEMO.parse(matches);
             let gas_spending_key = GAS_SPENDING_KEY.parse(matches);
             let tx_code_path = PathBuf::from(TX_IBC_WASM);
+            // FIXME: this api is to confusing, split the amount into two,
+            // source amount and target amount
+            #[cfg(any(test, feature = "testing"))]
+            let frontend_sus_fee =
+                FRONTEND_SUS_FEE.parse(matches).map(|target|
+                // Take a constant fee of 1 on top of the input amount
+                TxTransparentTarget {
+                            target,
+                            token: token.clone(),
+                            amount: InputAmount::Unvalidated(
+                                token::DenominatedAmount::new(
+                                    1.into(),
+                                    raw_amount.denom(),
+                                ),
+                            ),
+                        });
+
+            #[cfg(not(any(test, feature = "testing")))]
+            let frontend_sus_fee = None;
+
+            eprintln!("AMOUNT IN CLI: {:#?}", amount); //FIXME: remove
+
             Self {
                 tx,
                 source,
@@ -5263,12 +5290,13 @@ pub mod args {
                 channel_id,
                 timeout_height,
                 timeout_sec_offset,
+                // FIXME: check this refund, we should not refund the fee
                 refund_target,
                 ibc_shielding_data,
                 ibc_memo,
                 gas_spending_key,
                 tx_code_path,
-                frontend_sus_fee: None,
+                frontend_sus_fee,
             }
         }
 
@@ -7312,6 +7340,9 @@ pub mod args {
         ) -> Result<GenIbcShieldingTransfer<SdkTypes>, Self::Error> {
             let query = self.query.to_sdk(ctx)?;
             let chain_ctx = ctx.borrow_chain_or_exit();
+            let frontend_sus_fee = self
+                .frontend_sus_fee
+                .map(|(target, amount)| (chain_ctx.get(&target), amount));
 
             Ok(GenIbcShieldingTransfer::<SdkTypes> {
                 query,
@@ -7333,7 +7364,7 @@ pub mod args {
                         IbcShieldingTransferAsset::Address(chain_ctx.get(&addr))
                     }
                 },
-                frontend_sus_fee: None,
+                frontend_sus_fee,
             })
         }
     }
@@ -7344,7 +7375,8 @@ pub mod args {
             let output_folder = OUTPUT_FOLDER_PATH.parse(matches);
             let target = TRANSFER_TARGET.parse(matches);
             let token = TOKEN_STR.parse(matches);
-            let amount = InputAmount::Unvalidated(AMOUNT.parse(matches));
+            let raw_amount = AMOUNT.parse(matches);
+            let amount = InputAmount::Unvalidated(raw_amount);
             let expiration = EXPIRATION_OPT.parse(matches);
             let port_id = PORT_ID.parse(matches);
             let channel_id = CHANNEL_ID.parse(matches);
@@ -7357,6 +7389,27 @@ pub mod args {
                     None => TxExpiration::Default,
                 }
             };
+            // FIXME: this api is to confusing, split the amount into two,
+            // source amount and target amount
+            #[cfg(any(test, feature = "testing"))]
+            let frontend_sus_fee = FRONTEND_SUS_FEE_IBC.parse(matches).map(
+                |target|                        // Take a constant fee of 1 on top of the input amount
+                (
+                    target,
+                    //FIXME: this means we can't do anything when it comes to nfts for this frontend fee
+                             InputAmount::Unvalidated(
+                                token::DenominatedAmount::new(
+                                    1.into(),
+                                    raw_amount.denom(),
+                                ),
+                            ),
+                ),
+            );
+
+            #[cfg(not(any(test, feature = "testing")))]
+            let frontend_sus_fee = None;
+
+            eprintln!("AMOUNT IN CLI: {:#?}", amount); //FIXME: remove
 
             Self {
                 query,
@@ -7369,12 +7422,13 @@ pub mod args {
                     channel_id,
                     token,
                 },
-                frontend_sus_fee: None,
+                frontend_sus_fee,
             }
         }
 
         fn def(app: App) -> App {
-            app.add_args::<Query<CliTypes>>()
+            let app = app
+                .add_args::<Query<CliTypes>>()
                 .arg(OUTPUT_FOLDER_PATH.def().help(wrap!(
                     "The output folder path where the artifact will be stored."
                 )))
@@ -7410,7 +7464,15 @@ pub mod args {
                 )))
                 .arg(CHANNEL_ID.def().help(wrap!(
                     "The channel ID via which the token is received."
-                )))
+                )));
+
+            #[cfg(any(test, feature = "testing"))]
+            let app = app.arg(FRONTEND_SUS_FEE_IBC.def().help(wrap!(
+                "The optional address of the frontend provider that will take \
+                 the masp sustainability fee."
+            )));
+
+            app
         }
     }
 

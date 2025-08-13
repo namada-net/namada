@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v201.0.2
+
+Namada apps v201.0.2.
+
+### BUG FIXES
+
+- Always allocate for the initial data to allow to execute larger WASMs
+  ([\#4786](https://github.com/anoma/namada/pull/4786))
+
 ## v201.0.1
 
 Namada apps v201.0.1 patch release

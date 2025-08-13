@@ -5606,6 +5606,7 @@ dependencies = [
  "nam-wasm-instrument",
  "namada_apps_lib",
  "namada_node",
+ "namada_test_utils",
  "namada_vm",
  "namada_vp",
  "prost 0.13.5",

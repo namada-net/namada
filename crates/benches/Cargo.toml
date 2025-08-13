@@ -37,6 +37,11 @@ name = "mempool_validate"
 harness = false
 path = "mempool_validate.rs"
 
+[[bench]]
+name = "wasm_run"
+harness = false
+path = "wasm_run.rs"
+
 [features]
 namada-eth-bridge = ["namada_apps_lib/namada-eth-bridge"]
 
@@ -46,6 +51,7 @@ namada-eth-bridge = ["namada_apps_lib/namada-eth-bridge"]
 [dev-dependencies]
 namada_apps_lib = { workspace = true, features = ["benches"] }
 namada_node = { workspace = true, features = ["benches"] }
+namada_test_utils.workspace = true
 namada_vm = { workspace = true, default-features = true }
 namada_vp.workspace = true
 

@@ -2782,7 +2782,7 @@ pub async fn build_ibc_transfer(
         query_wasm_code_hash(context, args.tx_code_path.to_str().unwrap())
             .await
             .map_err(|e| Error::from(QueryError::Wasm(e.to_string())))?;
-    let masp_transfer_data = MaspTransferData {
+    let mut masp_transfer_data = MaspTransferData {
         sources: vec![(
             args.source.clone(),
             args.token.clone(),
@@ -2826,6 +2826,58 @@ pub async fn build_ibc_transfer(
 
         masp_fee_data
     };
+
+    // FIXME: adjust this
+    if let Some(TxTransparentTarget {
+        target,
+        token,
+        amount,
+    }) = &args.frontend_sus_fee
+    {
+        match (&source, &args.ibc_shielding_data) {
+            (&MASP, None) => {
+                // Validate the amount given
+                let validated_amount = validate_amount(
+                    context,
+                    amount.to_owned(),
+                    token,
+                    args.tx.force,
+                )
+                .await?;
+                masp_transfer_data.targets.push((
+                    TransferTarget::Address(target.to_owned()),
+                    token.to_owned(),
+                    validated_amount,
+                ));
+
+                transfer = transfer
+                    .credit(
+                        target.to_owned(),
+                        token.to_owned(),
+                        validated_amount,
+                    )
+                    .ok_or(Error::Other(
+                        "Combined transfer overflows".to_string(),
+                    ))?;
+            }
+            (&MASP, Some(_)) => {
+                return Err(Error::Other(
+                    "A frontend sustainability fee was requested but the ibc \
+                     roundtrip is shielded"
+                        .to_string(),
+                ));
+            }
+            (_, _) => {
+                return Err(Error::Other(
+                    "A frontend sustainability fee was requested but the ibc \
+                     source is transparent. If the transaction is a roundtrip \
+                     (e.g. swap), and the return target is shielded, the fee \
+                     should be taken from the shielding transaction instead."
+                        .to_string(),
+                ));
+            }
+        }
+    }
 
     // For transfer from a spending key
     let shielded_parts = construct_shielded_parts(
@@ -3460,11 +3512,14 @@ pub async fn build_shielding_transfer<N: Namada>(
 
     let mut transfer_data = MaspTransferData::default();
     let mut data = token::Transfer::default();
-    for TxTransparentSource {
-        source,
-        token,
-        amount,
-    } in &args.sources
+    for (
+        id,
+        TxTransparentSource {
+            source,
+            token,
+            amount,
+        },
+    ) in args.sources.iter().enumerate()
     {
         // Validate the amount given
         let validated_amount =
@@ -3492,10 +3547,53 @@ pub async fn build_shielding_transfer<N: Namada>(
             .await?;
         }
 
+        // The frontend sustainability fee (when provided) must be paid by the
+        // first source
+        let masp_shield_amount = match (id, &args.frontend_sus_fee) {
+            (
+                0,
+                Some(TxTransparentTarget {
+                    target: sus_fee_target,
+                    token: sus_fee_token,
+                    amount: sus_fee_amt,
+                }),
+            ) => {
+                if sus_fee_token != token {
+                    return Err(Error::Other(
+                        "The sustainability fee token does not match the \
+                         token of the first transaction's source"
+                            .to_string(),
+                    ));
+                }
+
+                // Validate the amount given
+                let validated_fee_amount = validate_amount(
+                    context,
+                    sus_fee_amt.to_owned(),
+                    sus_fee_token,
+                    args.tx.force,
+                )
+                .await?;
+
+                data = data
+                    .credit(
+                        sus_fee_target.to_owned(),
+                        sus_fee_token.to_owned(),
+                        validated_fee_amount,
+                    )
+                    .ok_or(Error::Other(
+                        "Combined transfer overflows".to_string(),
+                    ))?;
+
+                checked!(validated_amount - validated_fee_amount)?
+            }
+            _ => validated_amount,
+        };
+
         transfer_data.sources.push((
             TransferSource::Address(source.to_owned()),
             token.to_owned(),
-            validated_amount,
+            masp_shield_amount,
         ));
 
         data = data
@@ -4149,14 +4247,43 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
         .precompute_asset_types(context.client(), tokens)
         .await;
 
+    let (extra_target, source_amount) = match &args.frontend_sus_fee {
+        Some((target, amount)) => {
+            // Validate the amount given
+            let validated_fee_amount =
+                validate_amount(context, amount.to_owned(), &token, false)
+                    .await?;
+            let source_amount =
+                checked!(validated_amount + validated_fee_amount)?;
+
+            (
+                vec![(
+                    target.to_owned(),
+                    token.to_owned(),
+                    validated_fee_amount,
+                )],
+                source_amount,
+            )
+        }
+        None => (vec![], validated_amount),
+    };
+
     let masp_transfer_data = MaspTransferData {
         sources: vec![(
             TransferSource::Address(source.clone()),
             token.clone(),
-            validated_amount,
+            source_amount,
         )],
-        targets: vec![(args.target, token.clone(), validated_amount)],
+        targets: [
+            extra_target,
+            vec![(args.target, token.clone(), validated_amount)],
+        ]
+        .concat(),
     };
+
+    // eprintln!("MASP TRANSFER DATA: {:#?}", masp_transfer_data); //FIXME:
+    // remove
+
     let shielded_transfer = {
         let mut shielded = context.shielded_mut().await;
         shielded
@@ -4171,6 +4298,9 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
             .await
             .map_err(|err| TxSubmitError::MaspError(err.to_string()))?
     };
+
+    // eprintln!("GENERATED MASP BUNDLE: {:#?}", shielded_transfer); //FIXME:
+    // remove
 
     Ok(shielded_transfer.map(|st| st.masp_tx))
 }

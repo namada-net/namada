@@ -2457,15 +2457,18 @@ mod test_finalize_block {
             .unwrap();
 
         // Claim the rewards from the initial epoch
-        let reward_1 =
-            proof_of_stake::claim_reward_tokens::<
-                _,
-                governance::Store<_>,
-                token::Store<_>,
-            >(
-                &mut shell.state, None, &validator.address, current_epoch
-            )
-            .unwrap();
+        let reward_1 = proof_of_stake::claim_reward_tokens::<
+            _,
+            governance::Store<_>,
+            token::Store<_>,
+        >(
+            &mut shell.state,
+            None,
+            &validator.address,
+            None,
+            current_epoch,
+        )
+        .unwrap();
         total_claimed += reward_1;
         assert_eq!(reward_1, query_rewards);
         assert!(is_reward_equal_enough(total_rewards, total_claimed, 1));
@@ -2494,7 +2497,11 @@ mod test_finalize_block {
             governance::Store<_>,
             token::Store<_>,
         >(
-            &mut shell.state, None, &validator.address, current_epoch
+            &mut shell.state,
+            None,
+            &validator.address,
+            None,
+            current_epoch,
         )
         .unwrap();
         assert_eq!(att, token::Amount::zero());
@@ -2533,7 +2540,11 @@ mod test_finalize_block {
             governance::Store<_>,
             token::Store<_>,
         >(
-            &mut shell.state, None, &validator.address, current_epoch
+            &mut shell.state,
+            None,
+            &validator.address,
+            None,
+            current_epoch,
         )
         .unwrap();
         total_claimed += rew;
@@ -2614,15 +2625,18 @@ mod test_finalize_block {
             .unwrap();
 
         // Claim tokens
-        let reward_2 =
-            proof_of_stake::claim_reward_tokens::<
-                _,
-                governance::Store<_>,
-                token::Store<_>,
-            >(
-                &mut shell.state, None, &validator.address, current_epoch
-            )
-            .unwrap();
+        let reward_2 = proof_of_stake::claim_reward_tokens::<
+            _,
+            governance::Store<_>,
+            token::Store<_>,
+        >(
+            &mut shell.state,
+            None,
+            &validator.address,
+            None,
+            current_epoch,
+        )
+        .unwrap();
         total_claimed += reward_2;
         assert_eq!(query_rewards, reward_2);
 
@@ -2743,15 +2757,18 @@ mod test_finalize_block {
         }
 
         // Claim the rewards for the validator for the first two epochs
-        let val_reward_1 =
-            proof_of_stake::claim_reward_tokens::<
-                _,
-                governance::Store<_>,
-                token::Store<_>,
-            >(
-                &mut shell.state, None, &validator.address, current_epoch
-            )
-            .unwrap();
+        let val_reward_1 = proof_of_stake::claim_reward_tokens::<
+            _,
+            governance::Store<_>,
+            token::Store<_>,
+        >(
+            &mut shell.state,
+            None,
+            &validator.address,
+            None,
+            current_epoch,
+        )
+        .unwrap();
         total_claimed += val_reward_1;
         assert!(is_reward_equal_enough(
             total_rewards,
@@ -2771,15 +2788,18 @@ mod test_finalize_block {
         total_rewards += inflation_3;
 
         // Claim again for the validator
-        let val_reward_2 =
-            proof_of_stake::claim_reward_tokens::<
-                _,
-                governance::Store<_>,
-                token::Store<_>,
-            >(
-                &mut shell.state, None, &validator.address, current_epoch
-            )
-            .unwrap();
+        let val_reward_2 = proof_of_stake::claim_reward_tokens::<
+            _,
+            governance::Store<_>,
+            token::Store<_>,
+        >(
+            &mut shell.state,
+            None,
+            &validator.address,
+            None,
+            current_epoch,
+        )
+        .unwrap();
 
         // Claim for the delegator
         let del_reward_1 = proof_of_stake::claim_reward_tokens::<
@@ -2790,6 +2810,7 @@ mod test_finalize_block {
             &mut shell.state,
             Some(&delegator),
             &validator.address,
+            None,
             current_epoch,
         )
         .unwrap();

@@ -128,6 +128,23 @@ pub struct ClaimRewards {
     /// Source address for claiming rewards from a bond. For self-bonds, the
     /// validator is also the source
     pub source: Option<Address>,
+    /// Optional rewards receiver address
+    pub receiver: Option<Address>,
+}
+
+/// Compatibility data definition from previous version (before addition of a
+/// receiver field).
+///
+/// TODO: Temporarily replaces `crate::data::pos::ClaimRewards` that now
+/// contains an additional `receiver` field to maintain consensus compatibility.
+/// PoS VP reads this action and will need to be updated to use the new field.
+#[derive(Clone, Debug, BorshSerialize, BorshDeserialize, PartialEq)]
+pub struct ClaimRewardsCompat {
+    /// Validator address
+    pub validator: Address,
+    /// Source address for claiming rewards from a bond. For self-bonds, the
+    /// validator is also the source
+    pub source: Option<Address>,
 }
 
 /// A redelegation of bonded tokens from one validator to another.

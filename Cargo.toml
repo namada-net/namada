@@ -109,7 +109,7 @@ arbitrary = {version = "1.4", features = ["derive"]}
 ark-bls12-381 = {version = "0.5"}
 ark-serialize = {version = "0.5"}
 ark-std = "0.5"
-arse-merkle-tree = {package = "nam-sparse-merkle-tree", version = "0.3.2-nam.0", default-features = false, features = ["std", "borsh"]}
+arse-merkle-tree = {package = "nam-sparse-merkle-tree", version = "0.3.3-nam.0", default-features = false, features = ["std", "borsh"]}
 assert_cmd = "2.0"
 assert_matches = "1.5"
 async-trait = {version = "0.1"}

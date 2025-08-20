@@ -239,11 +239,13 @@ where
 {
     fn try_extract_masp_tx_from_envelope<Transfer: BorshDeserialize>(
         tx_data: &[u8],
-    ) -> StorageResult<Option<masp_primitives::transaction::Transaction>> {
+    ) -> StorageResult<
+        Option<(masp_primitives::transaction::Transaction, Option<Address>)>,
+    > {
         let msg = decode_message::<Transfer>(tx_data)
             .into_storage_result()
             .ok();
-        let tx = if let Some(IbcMessage::Envelope(envelope)) = msg {
+        let data = if let Some(IbcMessage::Envelope(envelope)) = msg {
             Some(extract_masp_tx_from_envelope(&envelope).ok_or_else(|| {
                 StorageError::new_const(
                     "Missing MASP transaction in IBC message",
@@ -252,7 +254,7 @@ where
         } else {
             None
         };
-        Ok(tx)
+        Ok(data.map(|shielding_data| (shielding_data.0, shielding_data.1)))
     }
 
     fn apply_ibc_packet<Transfer: BorshDeserialize>(
@@ -576,9 +578,10 @@ where
 #[derive(Debug)]
 pub struct InternalData<Transfer> {
     /// The transparent transfer that happens in parallel to IBC processes
+    // FIXME: can't we use this to encode the masp fee payment?
     pub transparent: Option<Transfer>,
     /// The shielded transaction that happens in parallel to IBC processes
-    pub shielded: Option<MaspTransaction>,
+    pub shielded: Option<(MaspTransaction, Option<Address>)>,
     /// IBC tokens that are credited/debited to internal accounts
     pub ibc_tokens: BTreeSet<Address>,
 }
@@ -737,7 +740,7 @@ where
                     .map_err(|e| Error::Handler(Box::new(e)))?;
 
                 // Extract MASP tx from the memo in the packet if needed
-                let (masp_tx, tokens) = match &*envelope {
+                let (shielding_data, tokens) = match &*envelope {
                     MsgEnvelope::Packet(PacketMsg::Recv(msg))
                         if self
                             .is_receiving_success(msg)?
@@ -773,7 +776,7 @@ where
                 };
                 Ok(InternalData {
                     transparent: None,
-                    shielded: masp_tx,
+                    shielded: shielding_data.map(|data| (data.0, data.1)),
                     ibc_tokens: tokens,
                 })
             }

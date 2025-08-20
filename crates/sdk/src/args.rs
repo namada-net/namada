@@ -521,12 +521,10 @@ pub enum Slippage {
     },
 }
 
-// FIXME: do we need a new event for the frontend fee?
-// FIXME: should the fee be taken shielded? It might avoid us to update the ibc
-// methods actually. Yes but it would produce a substantial amount of notes with
-// very little amounts FIXME: what happens to the sus fee if we wanto to
+// FIXME: what happens to the sus fee if we wanto to
 // shield/unshield more than one asset? It should probably be a vector of
-// targets, one for every asset
+// targets, one for every asset, yes but only for non-ibc txs, for ibc we only
+// support a single asset
 /// An token swap on Osmosis
 #[derive(Debug, Clone)]
 pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
@@ -748,9 +746,7 @@ impl TxOsmosisSwap<SdkTypes> {
                 let memo = assert_json_obj(
                     serde_json::to_value(&NamadaMemo {
                         namada: NamadaMemoData::OsmosisSwap {
-                            shielding_data: StringEncoded::new(
-                                IbcShieldingData(shielding_tx),
-                            ),
+                            shielding_data: StringEncoded::new(shielding_tx),
                             shielded_amount: amount_to_shield,
                             overflow_receiver,
                         },
@@ -830,8 +826,6 @@ pub struct TxIbcTransfer<C: NamadaTypes = SdkTypes> {
     /// Refund target address when the shielded transfer failure
     pub refund_target: Option<C::TransferTarget>,
     /// IBC shielding transfer data for the destination chain
-    // FIXME: here the shielding transaction to reapply to namada, it should
-    // carry the sus fee
     pub ibc_shielding_data: Option<IbcShieldingData>,
     /// Memo for IBC transfer packet
     pub ibc_memo: Option<String>,
@@ -841,7 +835,6 @@ pub struct TxIbcTransfer<C: NamadaTypes = SdkTypes> {
     // FIXME: this should probably be an either with ibc_shielding_data. Yes
     // but there would still be the room for errors, maybe need marker traits?
     // Not sure...
-    // FIXME: support this in the client for testing only
     pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,

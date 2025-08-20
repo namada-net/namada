@@ -2011,9 +2011,10 @@ pub async fn gen_ibc_shielding_transfer(
 ) -> Result<(), error::Error> {
     let output_folder = args.output_folder.clone();
 
-    if let Some(masp_tx) = tx::gen_ibc_shielding_transfer(context, args).await?
+    if let Some(shielding_data) =
+        tx::gen_ibc_shielding_transfer(context, args).await?
     {
-        let tx_id = masp_tx.txid().to_string();
+        let tx_id = shielding_data.0.txid().to_string();
         let filename = format!("ibc_masp_tx_{}.memo", tx_id);
         let output_path = match output_folder {
             Some(path) => path.join(filename),
@@ -2021,7 +2022,7 @@ pub async fn gen_ibc_shielding_transfer(
         };
         let mut out = File::create(&output_path)
             .expect("Creating a new file for IBC MASP transaction failed.");
-        let bytes = convert_masp_tx_to_ibc_memo(&masp_tx);
+        let bytes = convert_masp_tx_to_ibc_memo(shielding_data);
         out.write_all(bytes.as_bytes())
             .expect("Writing IBC MASP transaction file failed.");
         println!(

@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use borsh::BorshSerialize;
 use masp_primitives::asset_type::AssetType;
-use masp_primitives::transaction::Transaction as MaspTransaction;
 use masp_primitives::transaction::builder::Builder;
 use masp_primitives::transaction::components::I128Sum;
 use masp_primitives::transaction::components::sapling::builder::{
@@ -55,7 +54,7 @@ use namada_governance::storage::proposal::{
 use namada_governance::storage::vote::ProposalVote;
 use namada_ibc::storage::channel_key;
 use namada_ibc::trace::is_nft_trace;
-use namada_ibc::{MsgNftTransfer, MsgTransfer};
+use namada_ibc::{IbcShieldingData, MsgNftTransfer, MsgTransfer};
 use namada_io::{Client, Io, display_line, edisplay_line};
 use namada_proof_of_stake::parameters::{
     MAX_VALIDATOR_METADATA_LEN, PosParams,
@@ -2827,7 +2826,6 @@ pub async fn build_ibc_transfer(
         masp_fee_data
     };
 
-    // FIXME: adjust this
     if let Some(TxTransparentTarget {
         target,
         token,
@@ -2844,6 +2842,11 @@ pub async fn build_ibc_transfer(
                     args.tx.force,
                 )
                 .await?;
+                masp_transfer_data.sources.push((
+                    args.source.clone(),
+                    args.token.clone(),
+                    validated_amount,
+                ));
                 masp_transfer_data.targets.push((
                     TransferTarget::Address(target.to_owned()),
                     token.to_owned(),
@@ -2851,7 +2854,8 @@ pub async fn build_ibc_transfer(
                 ));
 
                 transfer = transfer
-                    .credit(
+                    .transfer(
+                        source.to_owned(),
                         target.to_owned(),
                         token.to_owned(),
                         validated_amount,
@@ -4206,7 +4210,7 @@ pub async fn build_custom(
 pub async fn gen_ibc_shielding_transfer<N: Namada>(
     context: &N,
     args: args::GenIbcShieldingTransfer,
-) -> Result<Option<MaspTransaction>> {
+) -> Result<Option<IbcShieldingData>> {
     let source = IBC;
 
     let token = match args.asset {
@@ -4247,26 +4251,28 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
         .precompute_asset_types(context.client(), tokens)
         .await;
 
-    let (extra_target, source_amount) = match &args.frontend_sus_fee {
-        Some((target, amount)) => {
-            // Validate the amount given
-            let validated_fee_amount =
-                validate_amount(context, amount.to_owned(), &token, false)
-                    .await?;
-            let source_amount =
-                checked!(validated_amount + validated_fee_amount)?;
+    let (extra_recipient, extra_target, source_amount) =
+        match &args.frontend_sus_fee {
+            Some((target, amount)) => {
+                // Validate the amount given
+                let validated_fee_amount =
+                    validate_amount(context, amount.to_owned(), &token, false)
+                        .await?;
+                let source_amount =
+                    checked!(validated_amount + validated_fee_amount)?;
 
-            (
-                vec![(
-                    target.to_owned(),
-                    token.to_owned(),
-                    validated_fee_amount,
-                )],
-                source_amount,
-            )
-        }
-        None => (vec![], validated_amount),
-    };
+                (
+                    target.address(),
+                    vec![(
+                        target.to_owned(),
+                        token.to_owned(),
+                        validated_fee_amount,
+                    )],
+                    source_amount,
+                )
+            }
+            None => (None, vec![], validated_amount),
+        };
 
     let masp_transfer_data = MaspTransferData {
         sources: vec![(
@@ -4280,9 +4286,6 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
         ]
         .concat(),
     };
-
-    // eprintln!("MASP TRANSFER DATA: {:#?}", masp_transfer_data); //FIXME:
-    // remove
 
     let shielded_transfer = {
         let mut shielded = context.shielded_mut().await;
@@ -4299,10 +4302,8 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
             .map_err(|err| TxSubmitError::MaspError(err.to_string()))?
     };
 
-    // eprintln!("GENERATED MASP BUNDLE: {:#?}", shielded_transfer); //FIXME:
-    // remove
-
-    Ok(shielded_transfer.map(|st| st.masp_tx))
+    Ok(shielded_transfer
+        .map(|st| IbcShieldingData(st.masp_tx, extra_recipient)))
 }
 
 pub(crate) async fn get_ibc_src_port_channel(

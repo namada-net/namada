@@ -5229,7 +5229,13 @@ pub mod args {
                 ibc_memo: self.ibc_memo,
                 gas_spending_key,
                 tx_code_path: self.tx_code_path.to_path_buf(),
-                frontend_sus_fee: None,
+                frontend_sus_fee: self.frontend_sus_fee.map(|fee| {
+                    TxTransparentTarget {
+                        target: chain_ctx.get(&fee.target),
+                        token: chain_ctx.get(&fee.token),
+                        amount: fee.amount,
+                    }
+                }),
             })
         }
     }
@@ -5258,8 +5264,6 @@ pub mod args {
             let ibc_memo = IBC_MEMO.parse(matches);
             let gas_spending_key = GAS_SPENDING_KEY.parse(matches);
             let tx_code_path = PathBuf::from(TX_IBC_WASM);
-            // FIXME: this api is to confusing, split the amount into two,
-            // source amount and target amount
             #[cfg(any(test, feature = "testing"))]
             let frontend_sus_fee =
                 FRONTEND_SUS_FEE.parse(matches).map(|target|
@@ -5278,8 +5282,6 @@ pub mod args {
             #[cfg(not(any(test, feature = "testing")))]
             let frontend_sus_fee = None;
 
-            eprintln!("AMOUNT IN CLI: {:#?}", amount); //FIXME: remove
-
             Self {
                 tx,
                 source,
@@ -5290,7 +5292,6 @@ pub mod args {
                 channel_id,
                 timeout_height,
                 timeout_sec_offset,
-                // FIXME: check this refund, we should not refund the fee
                 refund_target,
                 ibc_shielding_data,
                 ibc_memo,
@@ -5301,7 +5302,8 @@ pub mod args {
         }
 
         fn def(app: App) -> App {
-            app.add_args::<Tx<CliTypes>>()
+            let app = app
+                .add_args::<Tx<CliTypes>>()
                 .arg(SOURCE.def().help(wrap!(
                     "The source account address. The source's key is used to \
                      produce the signature."
@@ -5345,7 +5347,15 @@ pub mod args {
                     "The optional spending key that will be used for gas \
                      payment (if this is a shielded action).  When not \
                      provided the source spending key will be used."
-                )))
+                )));
+
+            #[cfg(any(test, feature = "testing"))]
+            let app = app.arg(FRONTEND_SUS_FEE.def().help(wrap!(
+                "The optional address of the frontend provider that will take \
+                 the masp sustainability fee."
+            )));
+
+            app
         }
     }
 
@@ -7389,14 +7399,11 @@ pub mod args {
                     None => TxExpiration::Default,
                 }
             };
-            // FIXME: this api is to confusing, split the amount into two,
-            // source amount and target amount
             #[cfg(any(test, feature = "testing"))]
             let frontend_sus_fee = FRONTEND_SUS_FEE_IBC.parse(matches).map(
                 |target|                        // Take a constant fee of 1 on top of the input amount
                 (
                     target,
-                    //FIXME: this means we can't do anything when it comes to nfts for this frontend fee
                              InputAmount::Unvalidated(
                                 token::DenominatedAmount::new(
                                     1.into(),
@@ -7408,8 +7415,6 @@ pub mod args {
 
             #[cfg(not(any(test, feature = "testing")))]
             let frontend_sus_fee = None;
-
-            eprintln!("AMOUNT IN CLI: {:#?}", amount); //FIXME: remove
 
             Self {
                 query,

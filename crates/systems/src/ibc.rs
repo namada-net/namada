@@ -15,7 +15,9 @@ pub trait Read<S> {
     /// Extract MASP transaction from IBC envelope
     fn try_extract_masp_tx_from_envelope<Transfer: BorshDeserialize>(
         tx_data: &[u8],
-    ) -> Result<Option<masp_primitives::transaction::Transaction>>;
+    ) -> Result<
+        Option<(masp_primitives::transaction::Transaction, Option<Address>)>,
+    >;
 
     /// Apply relevant IBC packets to the changed balances structure
     fn apply_ibc_packet<Transfer: BorshDeserialize>(

@@ -14,8 +14,9 @@ use namada_migrations::*;
 use serde::{Deserialize, Serialize};
 
 use super::address::HASH_LEN;
+use crate::address::Address;
 use crate::hash::Hash;
-use crate::token;
+use crate::token::{self, DenominatedAmount};
 
 /// IBC token hash derived from a denomination.
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -145,6 +146,18 @@ impl borsh::BorshSchema for PGFIbcTarget {
     fn declaration() -> borsh::schema::Declaration {
         std::any::type_name::<Self>().into()
     }
+}
+
+/// The data needed to perform the transparent transfer of the frontend provider
+/// MASP sustainability fee when shielding via IBC
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+pub struct MaspFrontendSusFee {
+    /// The address of the frontend provider
+    pub target: Address,
+    /// The token of the fee (must match the token being shielded)
+    pub token: Address,
+    /// The amount of the fee
+    pub amt: DenominatedAmount,
 }
 
 #[cfg(test)]

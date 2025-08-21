@@ -385,10 +385,12 @@ pub struct TxTransparentSource<C: NamadaTypes = SdkTypes> {
 pub struct TxShieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// Common tx arguments
     pub tx: Tx<C>,
-    /// Transfer target address
+    /// Transfer target data
     pub targets: Vec<TxShieldedTarget<C>>,
-    /// Transfer-specific data
+    /// Transfer source data
     pub sources: Vec<TxTransparentSource<C>>,
+    /// The optional data for the frontend sustainability fee
+    pub frontend_sus_fee: Vec<TxTransparentTarget<C>>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }
@@ -432,11 +434,12 @@ pub struct TxTransparentTarget<C: NamadaTypes = SdkTypes> {
 pub struct TxUnshieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// Common tx arguments
     pub tx: Tx<C>,
-    /// Transfer source spending key
+    /// Transfer source data
     pub sources: Vec<TxShieldedSource<C>>,
-    /// Transfer-specific data
+    /// Transfer target data (potentially also carries data for the frontend
+    /// sustainability fee)
     pub targets: Vec<TxTransparentTarget<C>>,
-    /// Optional additional keys for gas payment
+    /// Optional additional key for gas payment
     pub gas_spending_key: Option<C::SpendingKey>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
@@ -543,6 +546,10 @@ pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
     pub osmosis_lcd_rpc: Option<String>,
     /// REST rpc endpoint to Osmosis SQS
     pub osmosis_sqs_rpc: Option<String>,
+    /// The optional data for the frontend sustainability fee
+    /// NOTE: if the swap is shielded (from MASP to MASP), no sustainability
+    /// fee should be taken
+    pub frontend_sus_fee: Option<(C::Address, InputAmount)>,
 }
 
 impl TxOsmosisSwap<SdkTypes> {
@@ -610,6 +617,7 @@ impl TxOsmosisSwap<SdkTypes> {
             osmosis_lcd_rpc,
             osmosis_sqs_rpc,
             output_denom: namada_output_denom,
+            frontend_sus_fee,
         } = self;
 
         let osmosis_lcd_rpc = osmosis_lcd_rpc
@@ -720,6 +728,7 @@ impl TxOsmosisSwap<SdkTypes> {
                             ),
                         ),
                         expiration: transfer.tx.expiration.clone(),
+                        frontend_sus_fee,
                     },
                 )
                 .await?
@@ -732,9 +741,7 @@ impl TxOsmosisSwap<SdkTypes> {
                 let memo = assert_json_obj(
                     serde_json::to_value(&NamadaMemo {
                         namada: NamadaMemoData::OsmosisSwap {
-                            shielding_data: StringEncoded::new(
-                                IbcShieldingData(shielding_tx),
-                            ),
+                            shielding_data: StringEncoded::new(shielding_tx),
                             shielded_amount: amount_to_shield,
                             overflow_receiver,
                         },
@@ -819,6 +826,8 @@ pub struct TxIbcTransfer<C: NamadaTypes = SdkTypes> {
     pub ibc_memo: Option<String>,
     /// Optional additional keys for gas payment
     pub gas_spending_key: Option<C::SpendingKey>,
+    /// The optional data for the frontend sustainability fee
+    pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }
@@ -3240,6 +3249,12 @@ pub struct GenIbcShieldingTransfer<C: NamadaTypes = SdkTypes> {
     pub expiration: TxExpiration,
     /// Asset to shield over IBC to Namada
     pub asset: IbcShieldingTransferAsset<C>,
+    /// The optional data for the frontend sustainability fee (the target and
+    /// the amount, the token must be the same as the one involved in the
+    /// shielding transaction since ics-20 only supports a single asset)
+    /// NOTE: if the shielding operation is part of a swap, and this is
+    /// shielded (from MASP to MASP), no sustainability fee should be taken
+    pub frontend_sus_fee: Option<(C::Address, InputAmount)>,
 }
 
 /// IBC shielding transfer asset, to be used by [`GenIbcShieldingTransfer`]

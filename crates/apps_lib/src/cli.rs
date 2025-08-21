@@ -318,7 +318,9 @@ pub mod cmds {
                 Self::parse_with_ctx(matches, TxShieldingTransfer);
             let tx_unshielding_transfer =
                 Self::parse_with_ctx(matches, TxUnshieldingTransfer);
-            let tx_ibc_transfer = Self::parse_with_ctx(matches, TxIbcTransfer);
+            let tx_ibc_transfer = Self::parse_with_ctx(matches, |cmd| {
+                TxIbcTransfer(Box::new(cmd))
+            });
             let tx_osmosis_swap = Self::parse_with_ctx(matches, |cmd| {
                 TxOsmosisSwap(Box::new(cmd))
             });
@@ -507,7 +509,7 @@ pub mod cmds {
         TxShieldedTransfer(TxShieldedTransfer),
         TxShieldingTransfer(TxShieldingTransfer),
         TxUnshieldingTransfer(TxUnshieldingTransfer),
-        TxIbcTransfer(TxIbcTransfer),
+        TxIbcTransfer(Box<TxIbcTransfer>),
         TxOsmosisSwap(Box<TxOsmosisSwap>),
         QueryResult(QueryResult),
         TxUpdateAccount(TxUpdateAccount),
@@ -3691,6 +3693,14 @@ pub mod args {
     pub const TARGET: Arg<WalletAddress> = arg("target");
     pub const TARGET_OPT: ArgOpt<WalletAddress> = arg_opt("target");
     pub const TEMPLATES_PATH: Arg<PathBuf> = arg("templates-path");
+    // WARNING: use only for testing purposes, MASP frontend fees don't make
+    // sense when operating from the CLI
+    pub const __TEST_FRONTEND_SUS_FEE: ArgOpt<WalletAddress> =
+        arg_opt("frontend-sus-fee");
+    // WARNING: use only for testing purposes, MASP frontend fees don't make
+    // sense when operating from the CLI
+    pub const __TEST_FRONTEND_SUS_FEE_IBC: ArgOpt<WalletAddress> =
+        arg_opt("frontend-sus-fee-ibc");
     pub const TIMEOUT_HEIGHT: ArgOpt<u64> = arg_opt("timeout-height");
     pub const TIMEOUT_SEC_OFFSET: ArgOpt<u64> = arg_opt("timeout-sec-offset");
     pub const TM_ADDRESS_OPT: ArgOpt<String> = arg_opt("tm-address");
@@ -4928,11 +4938,11 @@ pub mod args {
             ctx: &mut Context,
         ) -> Result<TxShieldingTransfer<SdkTypes>, Self::Error> {
             let tx = self.tx.to_sdk(ctx)?;
-            let mut data = vec![];
+            let mut sources = vec![];
             let chain_ctx = ctx.borrow_mut_chain_or_exit();
 
             for transfer_data in self.sources {
-                data.push(TxTransparentSource {
+                sources.push(TxTransparentSource {
                     source: chain_ctx.get(&transfer_data.source),
                     token: chain_ctx.get(&transfer_data.token),
                     amount: transfer_data.amount,
@@ -4947,12 +4957,21 @@ pub mod args {
                     amount: transfer_data.amount,
                 });
             }
+            let mut frontend_sus_fee = vec![];
+            for fee in self.frontend_sus_fee {
+                frontend_sus_fee.push(TxTransparentTarget {
+                    target: chain_ctx.get(&fee.target),
+                    token: chain_ctx.get(&fee.token),
+                    amount: fee.amount,
+                });
+            }
 
             Ok(TxShieldingTransfer::<SdkTypes> {
                 tx,
-                sources: data,
+                sources,
                 targets,
                 tx_code_path: self.tx_code_path.to_path_buf(),
+                frontend_sus_fee,
             })
         }
     }
@@ -4963,13 +4982,47 @@ pub mod args {
             let source = SOURCE.parse(matches);
             let target = PAYMENT_ADDRESS_TARGET.parse(matches);
             let token = TOKEN.parse(matches);
-            let amount = InputAmount::Unvalidated(AMOUNT.parse(matches));
+            let raw_amount = AMOUNT.parse(matches);
+            let amount = InputAmount::Unvalidated(raw_amount);
             let tx_code_path = PathBuf::from(TX_TRANSFER_WASM);
-            let data = vec![TxTransparentSource {
+            let frontend_sus_fee = __TEST_FRONTEND_SUS_FEE
+                .parse(matches)
+                .map_or(vec![], |target| {
+                    vec![TxTransparentTarget {
+                        target,
+                        token: token.clone(),
+                        amount: InputAmount::Unvalidated(
+                            token::DenominatedAmount::new(
+                                // Take a constant fee of 1 on top of the input
+                                // amount
+                                1.into(),
+                                raw_amount.denom(),
+                            ),
+                        ),
+                    }]
+                });
+
+            let mut sources = if frontend_sus_fee.is_empty() {
+                vec![]
+            } else {
+                // Adjust the inputs to account for the extra token
+                vec![TxTransparentSource {
+                    source: source.clone(),
+                    token: token.clone(),
+                    amount: InputAmount::Unvalidated(
+                        token::DenominatedAmount::new(
+                            1.into(),
+                            raw_amount.denom(),
+                        ),
+                    ),
+                }]
+            };
+
+            sources.push(TxTransparentSource {
                 source,
                 token: token.clone(),
                 amount,
-            }];
+            });
             let targets = vec![TxShieldedTarget {
                 target,
                 token,
@@ -4978,9 +5031,10 @@ pub mod args {
 
             Self {
                 tx,
-                sources: data,
+                sources,
                 targets,
                 tx_code_path,
+                frontend_sus_fee,
             }
         }
 
@@ -5001,6 +5055,10 @@ pub mod args {
                         .def()
                         .help(wrap!("The amount to transfer in decimal.")),
                 )
+                .arg(__TEST_FRONTEND_SUS_FEE.def().help(wrap!(
+                    "The optional address of the frontend provider that will \
+                     take the masp sustainability fee."
+                )))
         }
     }
 
@@ -5052,24 +5110,50 @@ pub mod args {
             let source = SPENDING_KEY_SOURCE.parse(matches);
             let target = TARGET.parse(matches);
             let token = TOKEN.parse(matches);
-            let amount = InputAmount::Unvalidated(AMOUNT.parse(matches));
+            let raw_amount = AMOUNT.parse(matches);
+            let amount = InputAmount::Unvalidated(raw_amount);
             let tx_code_path = PathBuf::from(TX_TRANSFER_WASM);
-            let data = vec![TxTransparentTarget {
-                target,
+            let mut targets = vec![TxTransparentTarget {
+                target: target.clone(),
                 token: token.clone(),
                 amount,
             }];
-            let sources = vec![TxShieldedSource {
-                source,
-                token,
+            let mut sources = vec![TxShieldedSource {
+                source: source.clone(),
+                token: token.clone(),
                 amount,
             }];
             let gas_spending_key = GAS_SPENDING_KEY.parse(matches);
 
+            if let Some(fee_target) = __TEST_FRONTEND_SUS_FEE.parse(matches) {
+                // Take a constant fee of 1 on top of the input amount
+                targets.push(TxTransparentTarget {
+                    target: fee_target,
+                    token: token.clone(),
+                    amount: InputAmount::Unvalidated(
+                        token::DenominatedAmount::new(
+                            1.into(),
+                            raw_amount.denom(),
+                        ),
+                    ),
+                });
+
+                sources.push(TxShieldedSource {
+                    source,
+                    token,
+                    amount: InputAmount::Unvalidated(
+                        token::DenominatedAmount::new(
+                            1.into(),
+                            raw_amount.denom(),
+                        ),
+                    ),
+                })
+            }
+
             Self {
                 tx,
                 sources,
-                targets: data,
+                targets,
                 gas_spending_key,
                 tx_code_path,
             }
@@ -5097,6 +5181,10 @@ pub mod args {
                     "The optional spending key that will be used for gas \
                      payment. When not provided the source spending key will \
                      be used."
+                )))
+                .arg(__TEST_FRONTEND_SUS_FEE.def().help(wrap!(
+                    "The optional address of the frontend provider that will \
+                     take the masp sustainability fee."
                 )))
         }
     }
@@ -5128,6 +5216,13 @@ pub mod args {
                 ibc_memo: self.ibc_memo,
                 gas_spending_key,
                 tx_code_path: self.tx_code_path.to_path_buf(),
+                frontend_sus_fee: self.frontend_sus_fee.map(|fee| {
+                    TxTransparentTarget {
+                        target: chain_ctx.get(&fee.target),
+                        token: chain_ctx.get(&fee.token),
+                        amount: fee.amount,
+                    }
+                }),
             })
         }
     }
@@ -5138,7 +5233,9 @@ pub mod args {
             let source = TRANSFER_SOURCE.parse(matches);
             let receiver = RECEIVER.parse(matches);
             let token = TOKEN.parse(matches);
-            let amount = InputAmount::Unvalidated(AMOUNT.parse(matches));
+
+            let raw_amount = AMOUNT.parse(matches);
+            let amount = InputAmount::Unvalidated(raw_amount);
             let port_id = PORT_ID.parse(matches);
             let channel_id = CHANNEL_ID.parse(matches);
             let timeout_height = TIMEOUT_HEIGHT.parse(matches);
@@ -5154,6 +5251,20 @@ pub mod args {
             let ibc_memo = IBC_MEMO.parse(matches);
             let gas_spending_key = GAS_SPENDING_KEY.parse(matches);
             let tx_code_path = PathBuf::from(TX_IBC_WASM);
+            let frontend_sus_fee =
+                __TEST_FRONTEND_SUS_FEE.parse(matches).map(|target|
+                // Take a constant fee of 1 on top of the input amount
+                TxTransparentTarget {
+                            target,
+                            token: token.clone(),
+                            amount: InputAmount::Unvalidated(
+                                token::DenominatedAmount::new(
+                                    1.into(),
+                                    raw_amount.denom(),
+                                ),
+                            ),
+                        });
+
             Self {
                 tx,
                 source,
@@ -5169,6 +5280,7 @@ pub mod args {
                 ibc_memo,
                 gas_spending_key,
                 tx_code_path,
+                frontend_sus_fee,
             }
         }
 
@@ -5218,6 +5330,15 @@ pub mod args {
                      payment (if this is a shielded action).  When not \
                      provided the source spending key will be used."
                 )))
+                .arg(
+                    __TEST_FRONTEND_SUS_FEE
+                        .def()
+                        .conflicts_with(IBC_SHIELDING_DATA_PATH.name)
+                        .help(wrap!(
+                            "The optional address of the frontend provider \
+                             that will take the masp sustainability fee."
+                        )),
+                )
         }
     }
 
@@ -5244,6 +5365,7 @@ pub mod args {
                 route: self.route,
                 osmosis_lcd_rpc: self.osmosis_lcd_rpc,
                 osmosis_sqs_rpc: self.osmosis_sqs_rpc,
+                frontend_sus_fee: None,
             })
         }
     }
@@ -5296,6 +5418,7 @@ pub mod args {
                 route,
                 osmosis_lcd_rpc,
                 osmosis_sqs_rpc,
+                frontend_sus_fee: None,
             }
         }
 
@@ -7210,6 +7333,9 @@ pub mod args {
         ) -> Result<GenIbcShieldingTransfer<SdkTypes>, Self::Error> {
             let query = self.query.to_sdk(ctx)?;
             let chain_ctx = ctx.borrow_chain_or_exit();
+            let frontend_sus_fee = self
+                .frontend_sus_fee
+                .map(|(target, amount)| (chain_ctx.get(&target), amount));
 
             Ok(GenIbcShieldingTransfer::<SdkTypes> {
                 query,
@@ -7231,6 +7357,7 @@ pub mod args {
                         IbcShieldingTransferAsset::Address(chain_ctx.get(&addr))
                     }
                 },
+                frontend_sus_fee,
             })
         }
     }
@@ -7241,7 +7368,8 @@ pub mod args {
             let output_folder = OUTPUT_FOLDER_PATH.parse(matches);
             let target = TRANSFER_TARGET.parse(matches);
             let token = TOKEN_STR.parse(matches);
-            let amount = InputAmount::Unvalidated(AMOUNT.parse(matches));
+            let raw_amount = AMOUNT.parse(matches);
+            let amount = InputAmount::Unvalidated(raw_amount);
             let expiration = EXPIRATION_OPT.parse(matches);
             let port_id = PORT_ID.parse(matches);
             let channel_id = CHANNEL_ID.parse(matches);
@@ -7254,6 +7382,20 @@ pub mod args {
                     None => TxExpiration::Default,
                 }
             };
+            let frontend_sus_fee =
+                __TEST_FRONTEND_SUS_FEE_IBC.parse(matches).map(|target| {
+                    (
+                        target,
+                        InputAmount::Unvalidated(
+                            token::DenominatedAmount::new(
+                                // Take a constant fee of 1 on top of the input
+                                // amount
+                                1.into(),
+                                raw_amount.denom(),
+                            ),
+                        ),
+                    )
+                });
 
             Self {
                 query,
@@ -7266,6 +7408,7 @@ pub mod args {
                     channel_id,
                     token,
                 },
+                frontend_sus_fee,
             }
         }
 
@@ -7306,6 +7449,10 @@ pub mod args {
                 )))
                 .arg(CHANNEL_ID.def().help(wrap!(
                     "The channel ID via which the token is received."
+                )))
+                .arg(__TEST_FRONTEND_SUS_FEE_IBC.def().help(wrap!(
+                    "The optional address of the frontend provider that will \
+                     take the masp sustainability fee."
                 )))
         }
     }

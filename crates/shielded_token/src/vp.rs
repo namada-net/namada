@@ -437,7 +437,7 @@ where
         let actions = ctx.read_actions()?;
         // Try to get the Transaction object from the tx first (IBC) and from
         // the actions afterwards
-        let shielded_tx = if let Some(tx) =
+        let shielded_tx = if let Some((tx, _)) =
             Ibc::try_extract_masp_tx_from_envelope::<Transfer>(&tx_data)?
         {
             tx

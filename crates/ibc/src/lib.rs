@@ -239,11 +239,16 @@ where
 {
     fn try_extract_masp_tx_from_envelope<Transfer: BorshDeserialize>(
         tx_data: &[u8],
-    ) -> StorageResult<Option<masp_primitives::transaction::Transaction>> {
+    ) -> StorageResult<
+        Option<(
+            masp_primitives::transaction::Transaction,
+            Option<MaspFrontendSusFee>,
+        )>,
+    > {
         let msg = decode_message::<Transfer>(tx_data)
             .into_storage_result()
             .ok();
-        let tx = if let Some(IbcMessage::Envelope(envelope)) = msg {
+        let data = if let Some(IbcMessage::Envelope(envelope)) = msg {
             Some(extract_masp_tx_from_envelope(&envelope).ok_or_else(|| {
                 StorageError::new_const(
                     "Missing MASP transaction in IBC message",
@@ -252,7 +257,7 @@ where
         } else {
             None
         };
-        Ok(tx)
+        Ok(data.map(|IbcShieldingData(transaction, data)| (transaction, data)))
     }
 
     fn apply_ibc_packet<Transfer: BorshDeserialize>(
@@ -625,7 +630,7 @@ where
     }
 
     /// Execute according to the message in an IBC transaction or VP
-    pub fn execute<Transfer: BorshDeserialize>(
+    pub fn execute<Transfer: BorshDeserialize + From<MaspFrontendSusFee>>(
         &mut self,
         tx_data: &[u8],
     ) -> Result<InternalData<Transfer>, Error> {
@@ -737,7 +742,7 @@ where
                     .map_err(|e| Error::Handler(Box::new(e)))?;
 
                 // Extract MASP tx from the memo in the packet if needed
-                let (masp_tx, tokens) = match &*envelope {
+                let (shielding_data, tokens) = match &*envelope {
                     MsgEnvelope::Packet(PacketMsg::Recv(msg))
                         if self
                             .is_receiving_success(msg)?
@@ -771,9 +776,15 @@ where
                     }
                     _ => (None, BTreeSet::new()),
                 };
+                let (transparent, shielded) = shielding_data.map_or(
+                    (None, None),
+                    |IbcShieldingData(transaction, data)| {
+                        (data.map(|data| data.into()), Some(transaction))
+                    },
+                );
                 Ok(InternalData {
-                    transparent: None,
-                    shielded: masp_tx,
+                    transparent,
+                    shielded,
                     ibc_tokens: tokens,
                 })
             }

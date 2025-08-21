@@ -27,8 +27,8 @@ use namada_systems::{parameters, trans_token};
 
 use crate::event::IbcEvent;
 use crate::{
-    IbcActions, IbcCommonContext, IbcStorageContext, MsgTransfer,
-    storage as ibc_storage,
+    IbcActions, IbcCommonContext, IbcStorageContext, MaspFrontendSusFee,
+    MsgTransfer, storage as ibc_storage,
 };
 
 /// IBC protocol context
@@ -207,7 +207,7 @@ where
         + trans_token::Write<S>
         + trans_token::Events<S>
         + Debug,
-    Transfer: BorshSerialize + BorshDeserialize,
+    Transfer: BorshSerialize + BorshDeserialize + From<MaspFrontendSusFee>,
 {
     let token = PrefixedCoin {
         denom: token.to_string().parse().expect("invalid token"),

@@ -44,7 +44,7 @@ use crate::storage::{
 use crate::trace::calc_hash;
 use crate::{
     COMMITMENT_PREFIX, Error as ActionError, IbcActions, IbcMessage,
-    NftTransferModule, ValidationParams,
+    MaspFrontendSusFee, NftTransferModule, ValidationParams,
 };
 
 #[allow(missing_docs)]
@@ -144,7 +144,7 @@ where
         + token::Write<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
         + Debug,
     PoS: proof_of_stake::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>,
-    Transfer: BorshDeserialize,
+    Transfer: BorshDeserialize + From<MaspFrontendSusFee>,
 {
     fn validate_tx(
         &'view self,
@@ -225,7 +225,7 @@ where
         + token::Write<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
         + Debug,
     PoS: proof_of_stake::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>,
-    Transfer: BorshDeserialize,
+    Transfer: BorshDeserialize + From<MaspFrontendSusFee>,
 {
     /// Instantiate IBC VP
     pub fn new(ctx: Ctx<'ctx, S, CA, EVAL>) -> Self {

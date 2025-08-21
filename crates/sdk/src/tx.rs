@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use borsh::BorshSerialize;
 use masp_primitives::asset_type::AssetType;
-use masp_primitives::transaction::Transaction as MaspTransaction;
 use masp_primitives::transaction::builder::Builder;
 use masp_primitives::transaction::components::I128Sum;
 use masp_primitives::transaction::components::sapling::builder::{
@@ -55,7 +54,9 @@ use namada_governance::storage::proposal::{
 use namada_governance::storage::vote::ProposalVote;
 use namada_ibc::storage::channel_key;
 use namada_ibc::trace::is_nft_trace;
-use namada_ibc::{MsgNftTransfer, MsgTransfer};
+use namada_ibc::{
+    IbcShieldingData, MaspFrontendSusFee, MsgNftTransfer, MsgTransfer,
+};
 use namada_io::{Client, Io, display_line, edisplay_line};
 use namada_proof_of_stake::parameters::{
     MAX_VALIDATOR_METADATA_LEN, PosParams,
@@ -2782,7 +2783,7 @@ pub async fn build_ibc_transfer(
         query_wasm_code_hash(context, args.tx_code_path.to_str().unwrap())
             .await
             .map_err(|e| Error::from(QueryError::Wasm(e.to_string())))?;
-    let masp_transfer_data = MaspTransferData {
+    let mut masp_transfer_data = MaspTransferData {
         sources: vec![(
             args.source.clone(),
             args.token.clone(),
@@ -2826,6 +2827,63 @@ pub async fn build_ibc_transfer(
 
         masp_fee_data
     };
+
+    if let Some(TxTransparentTarget {
+        target,
+        token,
+        amount,
+    }) = &args.frontend_sus_fee
+    {
+        match (&source, &args.ibc_shielding_data) {
+            (&MASP, None) => {
+                // Validate the amount given
+                let validated_amount = validate_amount(
+                    context,
+                    amount.to_owned(),
+                    token,
+                    args.tx.force,
+                )
+                .await?;
+                masp_transfer_data.sources.push((
+                    args.source.clone(),
+                    args.token.clone(),
+                    validated_amount,
+                ));
+                masp_transfer_data.targets.push((
+                    TransferTarget::Address(target.to_owned()),
+                    token.to_owned(),
+                    validated_amount,
+                ));
+
+                transfer = transfer
+                    .transfer(
+                        source.to_owned(),
+                        target.to_owned(),
+                        token.to_owned(),
+                        validated_amount,
+                    )
+                    .ok_or(Error::Other(
+                        "Combined transfer overflows".to_string(),
+                    ))?;
+            }
+            (&MASP, Some(_)) => {
+                return Err(Error::Other(
+                    "A frontend sustainability fee was requested but the ibc \
+                     roundtrip is shielded"
+                        .to_string(),
+                ));
+            }
+            (_, _) => {
+                return Err(Error::Other(
+                    "A frontend sustainability fee was requested but the ibc \
+                     source is transparent. If the transaction is a roundtrip \
+                     (e.g. swap), and the return target is shielded, the fee \
+                     should be taken from the shielding transaction instead."
+                        .to_string(),
+                ));
+            }
+        }
+    }
 
     // For transfer from a spending key
     let shielded_parts = construct_shielded_parts(
@@ -3524,6 +3582,38 @@ pub async fn build_shielding_transfer<N: Namada>(
             .ok_or(Error::Other("Combined transfer overflows".to_string()))?;
     }
 
+    for args::TxTransparentTarget {
+        target: sus_fee_target,
+        token: sus_fee_token,
+        amount: sus_fee_amt,
+    } in &args.frontend_sus_fee
+    {
+        // Validate the amount given
+        let validated_fee_amount = validate_amount(
+            context,
+            sus_fee_amt.to_owned(),
+            sus_fee_token,
+            args.tx.force,
+        )
+        .await?;
+
+        // Decrease the amount to shield to account for this frontend fee, take
+        // it from the first shielding input that matches the fee token
+        for (_, token, amount) in &mut transfer_data.sources {
+            if token == sus_fee_token {
+                *amount = checked!(amount - validated_fee_amount)?;
+                break;
+            }
+        }
+        data = data
+            .credit(
+                sus_fee_target.to_owned(),
+                sus_fee_token.to_owned(),
+                validated_fee_amount,
+            )
+            .ok_or(Error::Other("Combined transfer overflows".to_string()))?;
+    }
+
     let shielded_parts = construct_shielded_parts(
         context,
         transfer_data,
@@ -4108,7 +4198,7 @@ pub async fn build_custom(
 pub async fn gen_ibc_shielding_transfer<N: Namada>(
     context: &N,
     args: args::GenIbcShieldingTransfer,
-) -> Result<Option<MaspTransaction>> {
+) -> Result<Option<IbcShieldingData>> {
     let source = IBC;
 
     let token = match args.asset {
@@ -4149,6 +4239,22 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
         .precompute_asset_types(context.client(), tokens)
         .await;
 
+    let extra_recipient = match &args.frontend_sus_fee {
+        Some((target, amount)) => {
+            // Validate the amount given
+            let validated_fee_amount =
+                validate_amount(context, amount.to_owned(), &token, false)
+                    .await?;
+
+            Some(MaspFrontendSusFee {
+                target: target.to_owned(),
+                token: token.to_owned(),
+                amt: validated_fee_amount,
+            })
+        }
+        None => None,
+    };
+
     let masp_transfer_data = MaspTransferData {
         sources: vec![(
             TransferSource::Address(source.clone()),
@@ -4157,6 +4263,7 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
         )],
         targets: vec![(args.target, token.clone(), validated_amount)],
     };
+
     let shielded_transfer = {
         let mut shielded = context.shielded_mut().await;
         shielded
@@ -4172,7 +4279,8 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
             .map_err(|err| TxSubmitError::MaspError(err.to_string()))?
     };
 
-    Ok(shielded_transfer.map(|st| st.masp_tx))
+    Ok(shielded_transfer
+        .map(|st| IbcShieldingData(st.masp_tx, extra_recipient)))
 }
 
 pub(crate) async fn get_ibc_src_port_channel(

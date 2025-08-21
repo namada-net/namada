@@ -1,7 +1,7 @@
 //! The shielded wallet implementation
 use std::collections::{BTreeMap, BTreeSet, btree_map};
 
-use eyre::{Context, eyre};
+use eyre::{ContextCompat, WrapErr, eyre};
 use masp_primitives::asset_type::AssetType;
 #[cfg(feature = "mainnet")]
 use masp_primitives::consensus::MainNetwork as Network;
@@ -10,9 +10,7 @@ use masp_primitives::consensus::TestNetwork as Network;
 use masp_primitives::convert::AllowedConversion;
 use masp_primitives::ff::PrimeField;
 use masp_primitives::memo::MemoBytes;
-use masp_primitives::merkle_tree::{
-    CommitmentTree, IncrementalWitness, MerklePath,
-};
+use masp_primitives::merkle_tree::MerklePath;
 use masp_primitives::sapling::{
     Diversifier, Node, Note, Nullifier, ViewingKey,
 };
@@ -49,13 +47,14 @@ use rand::prelude::StdRng;
 use rand_core::{OsRng, SeedableRng};
 
 use super::utils::{MaspIndexedTx, TrialDecrypted};
+use crate::masp::bridge_tree::BridgeTree;
 use crate::masp::utils::MaspClient;
 use crate::masp::wallet_migrations::VersionedWalletRef;
 use crate::masp::{
     ContextSyncStatus, Conversions, MaspAmount, MaspDataLogEntry, MaspFeeData,
     MaspTransferData, MaspTxCombinedData, NETWORK, NoteIndex,
     ShieldedSyncConfig, ShieldedTransfer, ShieldedUtils, SpentNotesTracker,
-    TransferErr, WalletMap, WitnessMap,
+    TransferErr, WalletMap,
 };
 #[cfg(any(test, feature = "testing"))]
 use crate::masp::{ENV_VAR_MASP_TEST_SEED, testing};
@@ -114,13 +113,13 @@ pub struct EpochedConversions {
 
 /// Represents the current state of the shielded pool from the perspective of
 /// the chosen viewing keys.
-#[derive(BorshSerialize, BorshDeserialize, Debug)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, Default)]
 pub struct ShieldedWallet<U: ShieldedUtils> {
     /// Location where this shielded context is saved
     #[borsh(skip)]
     pub utils: U,
-    /// The commitment tree produced by scanning all transactions up to tx_pos
-    pub tree: CommitmentTree<Node>,
+    /// The commitment tree produced by scanning all transactions in the MASP
+    pub tree: BridgeTree,
     /// Maps viewing keys to the block height to which they are synced.
     /// In particular, the height given by the value *has been scanned*.
     pub vk_heights: BTreeMap<ViewingKey, Option<MaspIndexedTx>>,
@@ -134,8 +133,6 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     pub memo_map: HashMap<usize, MemoBytes>,
     /// Maps note positions to the diversifier of their payment address
     pub div_map: HashMap<usize, Diversifier>,
-    /// Maps note positions to their witness (used to make merkle paths)
-    pub witness_map: WitnessMap,
     /// The set of note positions that have been spent
     pub spents: HashSet<usize>,
     /// Maps asset types to their decodings
@@ -148,30 +145,6 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     pub note_index: NoteIndex,
     /// The sync state of the context
     pub sync_status: ContextSyncStatus,
-}
-
-/// Default implementation to ease construction of TxContexts. Derive cannot be
-/// used here due to CommitmentTree not implementing Default.
-impl<U: ShieldedUtils + Default> Default for ShieldedWallet<U> {
-    fn default() -> ShieldedWallet<U> {
-        ShieldedWallet::<U> {
-            utils: U::default(),
-            vk_heights: BTreeMap::new(),
-            note_index: BTreeMap::default(),
-            tree: CommitmentTree::empty(),
-            pos_map: HashMap::default(),
-            nf_map: HashMap::default(),
-            note_map: HashMap::default(),
-            memo_map: HashMap::default(),
-            div_map: HashMap::default(),
-            witness_map: HashMap::default(),
-            spents: HashSet::default(),
-            conversions: Default::default(),
-            asset_types: HashMap::default(),
-            vk_map: HashMap::default(),
-            sync_status: ContextSyncStatus::Confirmed,
-        }
-    }
 }
 
 impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
@@ -209,19 +182,24 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
     /// available)
     pub async fn save(&self) -> std::io::Result<()> {
         self.utils
-            .save(VersionedWalletRef::V1(self), self.sync_status)
+            .save(VersionedWalletRef::V2(self), self.sync_status)
             .await
     }
 
     /// Update the merkle tree of witnesses the first time we
     /// scan new MASP transactions.
-    pub(crate) fn update_witness_map(
+    pub(crate) fn update_witnesses(
         &mut self,
         masp_indexed_tx: MaspIndexedTx,
         shielded: &Transaction,
         trial_decrypted: &TrialDecrypted,
     ) -> Result<(), eyre::Error> {
-        let mut note_pos = self.tree.size();
+        let mut note_pos = self
+            .tree
+            .as_ref()
+            .current_position()
+            .map_or(0u64, |p| u64::from(p) + 1) as _;
+
         self.note_index.insert(masp_indexed_tx, note_pos);
 
         for so in shielded
@@ -230,25 +208,25 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         {
             // Create merkle tree leaf node from note commitment
             let node = Node::new(so.cmu.to_repr());
-            // Update each merkle tree in the witness map with the latest
-            // addition
-            for (_, witness) in self.witness_map.iter_mut() {
-                witness.append(node).map_err(|()| {
-                    eyre!("note commitment tree is full".to_string())
-                })?;
-            }
-            self.tree.append(node).map_err(|()| {
-                eyre!("note commitment tree is full".to_string())
-            })?;
 
-            if trial_decrypted.has_indexed_tx(&masp_indexed_tx) {
+            // Append the node to the tree
+            self.tree
+                .as_mut()
+                .append(node)
+                .wrap_err("failed to append to note commitment tree")?;
+
+            if trial_decrypted.decrypted_by_any_vk(&masp_indexed_tx) {
                 // Finally, make it easier to construct merkle paths to this new
-                // notes that we own
-                let witness = IncrementalWitness::<Node>::from_tree(&self.tree);
-                self.witness_map.insert(note_pos, witness);
+                // note that we own
+                eyre::ensure!(
+                    self.tree.as_mut().mark().is_some(),
+                    "could not mark node as a witness"
+                );
             }
-            note_pos = checked!(note_pos + 1).unwrap();
+
+            checked!(note_pos += 1).unwrap();
         }
+
         Ok(())
     }
 
@@ -328,22 +306,23 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
     }
 
     #[allow(missing_docs)]
-    pub fn save_shielded_spends(
-        &mut self,
-        transaction: &Transaction,
-        update_witness_map: bool,
-    ) {
+    pub fn save_shielded_spends(&mut self, transaction: &Transaction) {
         for ss in transaction
             .sapling_bundle()
             .map_or(&vec![], |x| &x.shielded_spends)
         {
             // If the shielded spend's nullifier is in our map, then target
             // note is rendered unusable
-            if let Some(note_pos) = self.nf_map.get(&ss.nullifier) {
-                self.spents.insert(*note_pos);
-                if update_witness_map {
-                    self.witness_map.swap_remove(note_pos);
-                }
+            if let Some(note_pos) = self.nf_map.get(&ss.nullifier).copied() {
+                self.spents.insert(note_pos);
+                self.tree
+                    .as_mut()
+                    .remove_mark(
+                        note_pos
+                            .try_into()
+                            .expect("note position conversion shouldn't fail"),
+                    )
+                    .expect("marked leaf should have been in tree");
             }
         }
     }
@@ -454,7 +433,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         &mut self,
         masp_tx: &Transaction,
     ) -> Result<(), eyre::Error> {
-        self.save_shielded_spends(masp_tx, false);
+        self.save_shielded_spends(masp_tx);
 
         // Save the speculative state for future usage
         self.sync_status = ContextSyncStatus::Speculative;
@@ -1206,12 +1185,10 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
 
             // Commit the conversions that were used to exchange
             *usages += proposed_usages;
-            let merkle_path = self
-                .witness_map
-                .get(&note_idx)
-                .ok_or_else(|| eyre!("Unable to get note {note_idx}"))?
-                .path()
-                .ok_or_else(|| eyre!("Unable to get path: {}", line!()))?;
+            let merkle_path =
+                self.tree.witness(note_idx).wrap_err_with(|| {
+                    format!("Unable to get merkle path to note {note_idx}")
+                })?;
             let diversifier = self
                 .div_map
                 .get(&note_idx)

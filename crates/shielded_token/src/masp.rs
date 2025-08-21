@@ -2,6 +2,7 @@
 #![allow(clippy::arithmetic_side_effects)]
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
+pub mod bridge_tree;
 mod shielded_sync;
 pub mod shielded_wallet;
 #[cfg(test)]
@@ -304,10 +305,11 @@ pub type NoteIndex = BTreeMap<MaspIndexedTx, usize>;
 /// Maps the note index (in the commitment tree) to a witness
 pub type WitnessMap = HashMap<usize, IncrementalWitness<Node>>;
 
-#[derive(Copy, Clone, BorshSerialize, BorshDeserialize, Debug)]
+#[derive(Copy, Clone, BorshSerialize, BorshDeserialize, Debug, Default)]
 /// The possible sync states of the shielded context
 pub enum ContextSyncStatus {
     /// The context contains data that has been confirmed by the protocol
+    #[default]
     Confirmed,
     /// The context possibly contains data that has not yet been confirmed by
     /// the protocol and could be incomplete or invalid
@@ -1285,7 +1287,7 @@ pub mod fs {
                     ..Default::default()
                 };
                 BorshSerialize::serialize(
-                    &VersionedWalletRef::V1(&shielded),
+                    &VersionedWalletRef::V2(&shielded),
                     &mut bytes,
                 )
                 .expect("Test failed");

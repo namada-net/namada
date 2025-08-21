@@ -540,8 +540,7 @@ pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
     /// The optional data for the frontend sustainability fee
     /// NOTE: if the swap is shielded (from MASP to MASP), no sustainability
     /// fee should be taken
-    // FIXME: try to join this with recipient
-    pub frontend_sus_fee: Option<(C::TransferTarget, InputAmount)>,
+    pub frontend_sus_fee: Option<(C::Address, InputAmount)>,
 }
 
 impl TxOsmosisSwap<SdkTypes> {
@@ -815,20 +814,12 @@ pub struct TxIbcTransfer<C: NamadaTypes = SdkTypes> {
     /// Refund target address when the shielded transfer failure
     pub refund_target: Option<C::TransferTarget>,
     /// IBC shielding transfer data for the destination chain
-    // FIXME: here the shielding transaction to reapply to namada, it should
-    // carry the sus fee
     pub ibc_shielding_data: Option<IbcShieldingData>,
     /// Memo for IBC transfer packet
     pub ibc_memo: Option<String>,
     /// Optional additional keys for gas payment
     pub gas_spending_key: Option<C::SpendingKey>,
     /// The optional data for the frontend sustainability fee
-    // FIXME: this should probably be an either with ibc_shielding_data. Yes
-    // but there would still be the room for errors, maybe need marker traits?
-    // Not sure...
-    // FIXME: should this be a tuple (receiver, amount) to force the token to
-    // be the same as that of the transfer? FIXME: should the frontend fees
-    // always be specified just as a percentage and a target address?
     pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
@@ -3242,8 +3233,7 @@ pub struct GenIbcShieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// shielding transaction since ics-20 only supports a single asset)
     /// NOTE: if the shielding operation is part of a swap, and this is
     /// shielded (from MASP to MASP), no sustainability fee should be taken
-    // FIXME: transparent target only
-    pub frontend_sus_fee: Option<(C::TransferTarget, InputAmount)>,
+    pub frontend_sus_fee: Option<(C::Address, InputAmount)>,
 }
 
 /// IBC shielding transfer asset, to be used by [`GenIbcShieldingTransfer`]

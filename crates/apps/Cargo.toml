@@ -54,8 +54,6 @@ mainnet = ["namada_apps_lib/mainnet"]
 jemalloc = ["namada_node/jemalloc"]
 migrations = ["namada_apps_lib/migrations"]
 namada-eth-bridge = ["namada_apps_lib/namada-eth-bridge"]
-# FIXME: how to enforce this in ci?
-testing = ["namada_apps_lib/testing"]
 
 [dependencies]
 namada_apps_lib.workspace = true

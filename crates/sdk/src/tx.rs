@@ -2900,7 +2900,6 @@ pub async fn build_ibc_transfer(
         None
     };
 
-    // FIXME: adjust this
     if let Some(TxTransparentTarget {
         target,
         token,
@@ -4429,7 +4428,7 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
 
             (
                 vec![(
-                    target.to_owned(),
+                    TransferTarget::Address(target.to_owned()),
                     token.to_owned(),
                     validated_fee_amount,
                 )],
@@ -4452,9 +4451,6 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
         .concat(),
     };
 
-    // eprintln!("MASP TRANSFER DATA: {:#?}", masp_transfer_data); //FIXME:
-    // remove
-
     let shielded_transfer = {
         let mut shielded = context.shielded_mut().await;
         shielded
@@ -4469,9 +4465,6 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
             .await
             .map_err(|err| TxSubmitError::MaspError(err.to_string()))?
     };
-
-    // eprintln!("GENERATED MASP BUNDLE: {:#?}", shielded_transfer); //FIXME:
-    // remove
 
     Ok(shielded_transfer.map(|st| st.masp_tx))
 }

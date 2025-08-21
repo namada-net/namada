@@ -273,7 +273,6 @@ impl Transfer {
         owner: Address,
         token: Address,
         amount: DenominatedAmount,
-        // FIXME: these functions return Options but I don't think we need them
     ) -> Option<Self> {
         let account = Account { owner, token };
         let zero = DenominatedAmount::new(Amount::zero(), amount.denom());

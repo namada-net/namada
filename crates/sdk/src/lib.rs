@@ -183,7 +183,7 @@ pub trait Namada: NamadaIo {
         &self,
         targets: Vec<args::TxShieldedTarget>,
         sources: Vec<args::TxTransparentSource>,
-        frontend_sus_fee: Option<args::TxTransparentTarget>,
+        frontend_sus_fee: Vec<args::TxTransparentTarget>,
     ) -> args::TxShieldingTransfer {
         args::TxShieldingTransfer {
             sources,

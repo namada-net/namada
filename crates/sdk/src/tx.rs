@@ -4247,12 +4247,7 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
                     .await?;
 
             Some(MaspFrontendSusFee {
-                target: target.address().ok_or_else(|| {
-                    Error::Other(
-                        "Failed to extract MASP frontend provider address"
-                            .to_string(),
-                    )
-                })?,
+                target: target.to_owned(),
                 token: token.to_owned(),
                 amt: validated_fee_amount,
             })

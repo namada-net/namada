@@ -4955,12 +4955,14 @@ pub mod args {
                     amount: transfer_data.amount,
                 });
             }
-            let frontend_sus_fee =
-                self.frontend_sus_fee.map(|fee| TxTransparentTarget {
+            let mut frontend_sus_fee = vec![];
+            for fee in self.frontend_sus_fee {
+                frontend_sus_fee.push(TxTransparentTarget {
                     target: chain_ctx.get(&fee.target),
                     token: chain_ctx.get(&fee.token),
                     amount: fee.amount,
                 });
+            }
 
             Ok(TxShieldingTransfer::<SdkTypes> {
                 tx,
@@ -4983,24 +4985,28 @@ pub mod args {
             let tx_code_path = PathBuf::from(TX_TRANSFER_WASM);
 
             #[cfg(any(test, feature = "testing"))]
-            let frontend_sus_fee = FRONTEND_SUS_FEE.parse(matches).map(
-                |target|                        // Take a constant fee of 1 on top of the input amount
-                        TxTransparentTarget {
-                            target,
-                            token: token.clone(),
-                            amount: InputAmount::Unvalidated(
-                                token::DenominatedAmount::new(
-                                    1.into(),
-                                    raw_amount.denom(),
-                                ),
+            let frontend_sus_fee =
+                FRONTEND_SUS_FEE.parse(matches).map_or(vec![], |target| {
+                    vec![TxTransparentTarget {
+                        target,
+                        token: token.clone(),
+                        amount: InputAmount::Unvalidated(
+                            token::DenominatedAmount::new(
+                                // Take a constant fee of 1 on top of the input
+                                // amount
+                                1.into(),
+                                raw_amount.denom(),
                             ),
-                        },
-            );
+                        ),
+                    }]
+                });
 
             #[cfg(not(any(test, feature = "testing")))]
-            let frontend_sus_fee = None;
+            let frontend_sus_fee = vec![];
 
-            let mut sources = if frontend_sus_fee.is_some() {
+            let mut sources = if frontend_sus_fee.is_empty() {
+                vec![]
+            } else {
                 // Adjust the inputs to account for the extra token
                 vec![TxTransparentSource {
                     source: source.clone(),
@@ -5012,8 +5018,6 @@ pub mod args {
                         ),
                     ),
                 }]
-            } else {
-                vec![]
             };
 
             sources.push(TxTransparentSource {
@@ -5128,6 +5132,7 @@ pub mod args {
             }];
             let gas_spending_key = GAS_SPENDING_KEY.parse(matches);
 
+            // FIXME: single cfg here
             #[cfg(any(test, feature = "testing"))]
             let mut sources = sources;
             #[cfg(any(test, feature = "testing"))]

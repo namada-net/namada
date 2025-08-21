@@ -3548,12 +3548,6 @@ pub mod args {
     pub const FEE_PAYER_OPT: ArgOpt<WalletPublicKey> = arg_opt("gas-payer");
     pub const FILE_PATH: Arg<String> = arg("file");
     pub const FORCE: ArgFlag = flag("force");
-    #[cfg(any(test, feature = "testing"))]
-    pub const FRONTEND_SUS_FEE: ArgOpt<WalletAddress> =
-        arg_opt("frontend-sus-fee");
-    #[cfg(any(test, feature = "testing"))]
-    pub const FRONTEND_SUS_FEE_IBC: ArgOpt<WalletTransferTarget> =
-        arg_opt("frontend-sus-fee-ibc");
     pub const FULL_RESET: ArgFlag = flag("full-reset");
     pub const GAS_LIMIT: ArgDefault<GasLimit> = arg_default(
         "gas-limit",
@@ -3699,6 +3693,14 @@ pub mod args {
     pub const TARGET: Arg<WalletAddress> = arg("target");
     pub const TARGET_OPT: ArgOpt<WalletAddress> = arg_opt("target");
     pub const TEMPLATES_PATH: Arg<PathBuf> = arg("templates-path");
+    // WARNING: use only for testing purposes, MASP frontend fees don't make
+    // sense when operating from the CLI
+    pub const __TEST_FRONTEND_SUS_FEE: ArgOpt<WalletAddress> =
+        arg_opt("frontend-sus-fee");
+    // WARNING: use only for testing purposes, MASP frontend fees don't make
+    // sense when operating from the CLI
+    pub const __TEST_FRONTEND_SUS_FEE_IBC: ArgOpt<WalletAddress> =
+        arg_opt("frontend-sus-fee-ibc");
     pub const TIMEOUT_HEIGHT: ArgOpt<u64> = arg_opt("timeout-height");
     pub const TIMEOUT_SEC_OFFSET: ArgOpt<u64> = arg_opt("timeout-sec-offset");
     pub const TM_ADDRESS_OPT: ArgOpt<String> = arg_opt("tm-address");
@@ -4983,10 +4985,9 @@ pub mod args {
             let raw_amount = AMOUNT.parse(matches);
             let amount = InputAmount::Unvalidated(raw_amount);
             let tx_code_path = PathBuf::from(TX_TRANSFER_WASM);
-
-            #[cfg(any(test, feature = "testing"))]
-            let frontend_sus_fee =
-                FRONTEND_SUS_FEE.parse(matches).map_or(vec![], |target| {
+            let frontend_sus_fee = __TEST_FRONTEND_SUS_FEE
+                .parse(matches)
+                .map_or(vec![], |target| {
                     vec![TxTransparentTarget {
                         target,
                         token: token.clone(),
@@ -5000,9 +5001,6 @@ pub mod args {
                         ),
                     }]
                 });
-
-            #[cfg(not(any(test, feature = "testing")))]
-            let frontend_sus_fee = vec![];
 
             let mut sources = if frontend_sus_fee.is_empty() {
                 vec![]
@@ -5041,8 +5039,7 @@ pub mod args {
         }
 
         fn def(app: App) -> App {
-            let app = app
-                .add_args::<Tx<CliTypes>>()
+            app.add_args::<Tx<CliTypes>>()
                 .arg(SOURCE.def().help(wrap!(
                     "The transparent source account address. The source's key \
                      will be used to produce the signature."
@@ -5057,15 +5054,11 @@ pub mod args {
                     AMOUNT
                         .def()
                         .help(wrap!("The amount to transfer in decimal.")),
-                );
-
-            #[cfg(any(test, feature = "testing"))]
-            let app = app.arg(FRONTEND_SUS_FEE.def().help(wrap!(
-                "The optional address of the frontend provider that will take \
-                 the masp sustainability fee."
-            )));
-
-            app
+                )
+                .arg(__TEST_FRONTEND_SUS_FEE.def().help(wrap!(
+                    "The optional address of the frontend provider that will \
+                     take the masp sustainability fee."
+                )))
         }
     }
 
@@ -5120,25 +5113,19 @@ pub mod args {
             let raw_amount = AMOUNT.parse(matches);
             let amount = InputAmount::Unvalidated(raw_amount);
             let tx_code_path = PathBuf::from(TX_TRANSFER_WASM);
-            let targets = vec![TxTransparentTarget {
+            let mut targets = vec![TxTransparentTarget {
                 target: target.clone(),
                 token: token.clone(),
                 amount,
             }];
-            let sources = vec![TxShieldedSource {
+            let mut sources = vec![TxShieldedSource {
                 source: source.clone(),
                 token: token.clone(),
                 amount,
             }];
             let gas_spending_key = GAS_SPENDING_KEY.parse(matches);
 
-            // FIXME: single cfg here
-            #[cfg(any(test, feature = "testing"))]
-            let mut sources = sources;
-            #[cfg(any(test, feature = "testing"))]
-            let mut targets = targets;
-            #[cfg(any(test, feature = "testing"))]
-            if let Some(fee_target) = FRONTEND_SUS_FEE.parse(matches) {
+            if let Some(fee_target) = __TEST_FRONTEND_SUS_FEE.parse(matches) {
                 // Take a constant fee of 1 on top of the input amount
                 targets.push(TxTransparentTarget {
                     target: fee_target,
@@ -5161,7 +5148,7 @@ pub mod args {
                         ),
                     ),
                 })
-            };
+            }
 
             Self {
                 tx,
@@ -5173,8 +5160,7 @@ pub mod args {
         }
 
         fn def(app: App) -> App {
-            let app = app
-                .add_args::<Tx<CliTypes>>()
+            app.add_args::<Tx<CliTypes>>()
                 .arg(
                     SPENDING_KEY_SOURCE
                         .def()
@@ -5195,15 +5181,11 @@ pub mod args {
                     "The optional spending key that will be used for gas \
                      payment. When not provided the source spending key will \
                      be used."
-                )));
-
-            #[cfg(any(test, feature = "testing"))]
-            let app = app.arg(FRONTEND_SUS_FEE.def().help(wrap!(
-                "The optional address of the frontend provider that will take \
-                 the masp sustainability fee."
-            )));
-
-            app
+                )))
+                .arg(__TEST_FRONTEND_SUS_FEE.def().help(wrap!(
+                    "The optional address of the frontend provider that will \
+                     take the masp sustainability fee."
+                )))
         }
     }
 
@@ -5263,11 +5245,8 @@ pub mod args {
             let ibc_memo = IBC_MEMO.parse(matches);
             let gas_spending_key = GAS_SPENDING_KEY.parse(matches);
             let tx_code_path = PathBuf::from(TX_IBC_WASM);
-            // FIXME: this api is to confusing, split the amount into two,
-            // source amount and target amount
-            #[cfg(any(test, feature = "testing"))]
             let frontend_sus_fee =
-                FRONTEND_SUS_FEE.parse(matches).map(|target|
+                __TEST_FRONTEND_SUS_FEE.parse(matches).map(|target|
                 // Take a constant fee of 1 on top of the input amount
                 TxTransparentTarget {
                             target,
@@ -5280,11 +5259,6 @@ pub mod args {
                             ),
                         });
 
-            #[cfg(not(any(test, feature = "testing")))]
-            let frontend_sus_fee = None;
-
-            eprintln!("AMOUNT IN CLI: {:#?}", amount); //FIXME: remove
-
             Self {
                 tx,
                 source,
@@ -5295,7 +5269,6 @@ pub mod args {
                 channel_id,
                 timeout_height,
                 timeout_sec_offset,
-                // FIXME: check this refund, we should not refund the fee
                 refund_target,
                 ibc_shielding_data,
                 ibc_memo,
@@ -5351,6 +5324,15 @@ pub mod args {
                      payment (if this is a shielded action).  When not \
                      provided the source spending key will be used."
                 )))
+                .arg(
+                    __TEST_FRONTEND_SUS_FEE
+                        .def()
+                        .conflicts_with(IBC_SHIELDING_DATA_PATH.name)
+                        .help(wrap!(
+                            "The optional address of the frontend provider \
+                             that will take the masp sustainability fee."
+                        )),
+                )
         }
     }
 
@@ -7394,27 +7376,20 @@ pub mod args {
                     None => TxExpiration::Default,
                 }
             };
-            // FIXME: this api is to confusing, split the amount into two,
-            // source amount and target amount
-            #[cfg(any(test, feature = "testing"))]
-            let frontend_sus_fee = FRONTEND_SUS_FEE_IBC.parse(matches).map(
-                |target|                        // Take a constant fee of 1 on top of the input amount
-                (
-                    target,
-                    //FIXME: this means we can't do anything when it comes to nfts for this frontend fee
-                             InputAmount::Unvalidated(
-                                token::DenominatedAmount::new(
-                                    1.into(),
-                                    raw_amount.denom(),
-                                ),
+            let frontend_sus_fee =
+                __TEST_FRONTEND_SUS_FEE_IBC.parse(matches).map(|target| {
+                    (
+                        target,
+                        InputAmount::Unvalidated(
+                            token::DenominatedAmount::new(
+                                // Take a constant fee of 1 on top of the input
+                                // amount
+                                1.into(),
+                                raw_amount.denom(),
                             ),
-                ),
-            );
-
-            #[cfg(not(any(test, feature = "testing")))]
-            let frontend_sus_fee = None;
-
-            eprintln!("AMOUNT IN CLI: {:#?}", amount); //FIXME: remove
+                        ),
+                    )
+                });
 
             Self {
                 query,
@@ -7432,8 +7407,7 @@ pub mod args {
         }
 
         fn def(app: App) -> App {
-            let app = app
-                .add_args::<Query<CliTypes>>()
+            app.add_args::<Query<CliTypes>>()
                 .arg(OUTPUT_FOLDER_PATH.def().help(wrap!(
                     "The output folder path where the artifact will be stored."
                 )))
@@ -7469,15 +7443,11 @@ pub mod args {
                 )))
                 .arg(CHANNEL_ID.def().help(wrap!(
                     "The channel ID via which the token is received."
-                )));
-
-            #[cfg(any(test, feature = "testing"))]
-            let app = app.arg(FRONTEND_SUS_FEE_IBC.def().help(wrap!(
-                "The optional address of the frontend provider that will take \
-                 the masp sustainability fee."
-            )));
-
-            app
+                )))
+                .arg(__TEST_FRONTEND_SUS_FEE_IBC.def().help(wrap!(
+                    "The optional address of the frontend provider that will \
+                     take the masp sustainability fee."
+                )))
         }
     }
 

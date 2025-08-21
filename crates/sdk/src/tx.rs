@@ -3643,14 +3643,11 @@ pub async fn build_shielding_transfer<N: Namada>(
 
     let mut transfer_data = MaspTransferData::default();
     let mut data = token::Transfer::default();
-    for (
-        id,
-        TxTransparentSource {
-            source,
-            token,
-            amount,
-        },
-    ) in args.sources.iter().enumerate()
+    for TxTransparentSource {
+        source,
+        token,
+        amount,
+    } in &args.sources
     {
         // Validate the amount given
         let validated_amount =
@@ -3678,53 +3675,10 @@ pub async fn build_shielding_transfer<N: Namada>(
             .await?;
         }
 
-        // The frontend sustainability fee (when provided) must be paid by the
-        // first source
-        let masp_shield_amount = match (id, &args.frontend_sus_fee) {
-            (
-                0,
-                Some(TxTransparentTarget {
-                    target: sus_fee_target,
-                    token: sus_fee_token,
-                    amount: sus_fee_amt,
-                }),
-            ) => {
-                if sus_fee_token != token {
-                    return Err(Error::Other(
-                        "The sustainability fee token does not match the \
-                         token of the first transaction's source"
-                            .to_string(),
-                    ));
-                }
-
-                // Validate the amount given
-                let validated_fee_amount = validate_amount(
-                    context,
-                    sus_fee_amt.to_owned(),
-                    sus_fee_token,
-                    args.tx.force,
-                )
-                .await?;
-
-                data = data
-                    .credit(
-                        sus_fee_target.to_owned(),
-                        sus_fee_token.to_owned(),
-                        validated_fee_amount,
-                    )
-                    .ok_or(Error::Other(
-                        "Combined transfer overflows".to_string(),
-                    ))?;
-
-                checked!(validated_amount - validated_fee_amount)?
-            }
-            _ => validated_amount,
-        };
-
         transfer_data.sources.push((
             TransferSource::Address(source.to_owned()),
             token.to_owned(),
-            masp_shield_amount,
+            validated_amount,
         ));
 
         data = data
@@ -3750,6 +3704,38 @@ pub async fn build_shielding_transfer<N: Namada>(
 
         data = data
             .credit(MASP, token.to_owned(), validated_amount)
+            .ok_or(Error::Other("Combined transfer overflows".to_string()))?;
+    }
+
+    for args::TxTransparentTarget {
+        target: sus_fee_target,
+        token: sus_fee_token,
+        amount: sus_fee_amt,
+    } in &args.frontend_sus_fee
+    {
+        // Validate the amount given
+        let validated_fee_amount = validate_amount(
+            context,
+            sus_fee_amt.to_owned(),
+            sus_fee_token,
+            args.tx.force,
+        )
+        .await?;
+
+        // Decrease the amount to shield to account for this frontend fee, take
+        // it from the first shielding input that matches the fee token
+        for (_, token, amount) in &mut transfer_data.sources {
+            if token == sus_fee_token {
+                *amount = checked!(amount - validated_fee_amount)?;
+                break;
+            }
+        }
+        data = data
+            .credit(
+                sus_fee_target.to_owned(),
+                sus_fee_token.to_owned(),
+                validated_fee_amount,
+            )
             .ok_or(Error::Other("Combined transfer overflows".to_string()))?;
     }
 

@@ -23,6 +23,7 @@ use std::collections::BTreeMap;
 
 use namada_core::address::Address;
 use namada_core::borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
+use namada_core::ibc::MaspFrontendSusFee;
 use namada_events::EmitEvents;
 use namada_macros::BorshDeserializer;
 #[cfg(feature = "migrations")]
@@ -186,6 +187,25 @@ pub struct Transfer {
     pub shielded_section_hash: Option<MaspTxId>,
 }
 
+impl From<MaspFrontendSusFee> for Transfer {
+    fn from(value: MaspFrontendSusFee) -> Self {
+        let source = Account {
+            owner: namada_core::address::MASP,
+            token: value.token.clone(),
+        };
+        let target = Account {
+            owner: value.target,
+            token: value.token,
+        };
+
+        Self {
+            sources: [(source, value.amt)].into_iter().collect(),
+            targets: [(target, value.amt)].into_iter().collect(),
+            shielded_section_hash: None,
+        }
+    }
+}
+
 /// References to the transparent sections of a [`Transfer`].
 #[derive(Debug, Clone)]
 pub struct TransparentTransfersRef<'a> {
@@ -253,6 +273,7 @@ impl Transfer {
         owner: Address,
         token: Address,
         amount: DenominatedAmount,
+        // FIXME: these functions return Options but I don't think we need them
     ) -> Option<Self> {
         let account = Account { owner, token };
         let zero = DenominatedAmount::new(Amount::zero(), amount.denom());

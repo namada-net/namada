@@ -20,6 +20,7 @@ use ibc::core::host::types::identifiers::PortId;
 use ibc::primitives::proto::Protobuf;
 use masp_primitives::transaction::Transaction as MaspTransaction;
 use namada_core::borsh::BorshSerializeExt;
+use namada_core::ibc::MaspFrontendSusFee;
 use namada_core::string_encoding::StringEncoded;
 use serde::{Deserialize, Serialize};
 
@@ -240,7 +241,7 @@ impl<Transfer: BorshSchema> BorshSchema for MsgNftTransfer<Transfer> {
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
 pub struct IbcShieldingData(
     pub MaspTransaction,
-    pub Option<namada_vp::Address>,
+    pub Option<MaspFrontendSusFee>,
 );
 
 impl From<&IbcShieldingData> for String {

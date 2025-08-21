@@ -240,7 +240,10 @@ where
     fn try_extract_masp_tx_from_envelope<Transfer: BorshDeserialize>(
         tx_data: &[u8],
     ) -> StorageResult<
-        Option<(masp_primitives::transaction::Transaction, Option<Address>)>,
+        Option<(
+            masp_primitives::transaction::Transaction,
+            Option<MaspFrontendSusFee>,
+        )>,
     > {
         let msg = decode_message::<Transfer>(tx_data)
             .into_storage_result()
@@ -254,7 +257,7 @@ where
         } else {
             None
         };
-        Ok(data.map(|shielding_data| (shielding_data.0, shielding_data.1)))
+        Ok(data.map(|IbcShieldingData(transaction, data)| (transaction, data)))
     }
 
     fn apply_ibc_packet<Transfer: BorshDeserialize>(
@@ -578,10 +581,9 @@ where
 #[derive(Debug)]
 pub struct InternalData<Transfer> {
     /// The transparent transfer that happens in parallel to IBC processes
-    // FIXME: can't we use this to encode the masp fee payment?
     pub transparent: Option<Transfer>,
     /// The shielded transaction that happens in parallel to IBC processes
-    pub shielded: Option<(MaspTransaction, Option<Address>)>,
+    pub shielded: Option<MaspTransaction>,
     /// IBC tokens that are credited/debited to internal accounts
     pub ibc_tokens: BTreeSet<Address>,
 }
@@ -628,7 +630,7 @@ where
     }
 
     /// Execute according to the message in an IBC transaction or VP
-    pub fn execute<Transfer: BorshDeserialize>(
+    pub fn execute<Transfer: BorshDeserialize + From<MaspFrontendSusFee>>(
         &mut self,
         tx_data: &[u8],
     ) -> Result<InternalData<Transfer>, Error> {
@@ -774,9 +776,15 @@ where
                     }
                     _ => (None, BTreeSet::new()),
                 };
+                let (transparent, shielded) = shielding_data.map_or(
+                    (None, None),
+                    |IbcShieldingData(transaction, data)| {
+                        (data.map(|data| data.into()), Some(transaction))
+                    },
+                );
                 Ok(InternalData {
-                    transparent: None,
-                    shielded: shielding_data.map(|data| (data.0, data.1)),
+                    transparent,
+                    shielded,
                     ibc_tokens: tokens,
                 })
             }

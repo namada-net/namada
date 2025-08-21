@@ -54,7 +54,9 @@ use namada_governance::storage::proposal::{
 use namada_governance::storage::vote::ProposalVote;
 use namada_ibc::storage::channel_key;
 use namada_ibc::trace::is_nft_trace;
-use namada_ibc::{IbcShieldingData, MsgNftTransfer, MsgTransfer};
+use namada_ibc::{
+    IbcShieldingData, MaspFrontendSusFee, MsgNftTransfer, MsgTransfer,
+};
 use namada_io::{Client, Io, display_line, edisplay_line};
 use namada_proof_of_stake::parameters::{
     MAX_VALIDATOR_METADATA_LEN, PosParams,
@@ -4251,40 +4253,35 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
         .precompute_asset_types(context.client(), tokens)
         .await;
 
-    let (extra_recipient, extra_target, source_amount) =
-        match &args.frontend_sus_fee {
-            Some((target, amount)) => {
-                // Validate the amount given
-                let validated_fee_amount =
-                    validate_amount(context, amount.to_owned(), &token, false)
-                        .await?;
-                let source_amount =
-                    checked!(validated_amount + validated_fee_amount)?;
+    // FIXME: this should probably be an Address and not a TransferTarget
+    let extra_recipient = match &args.frontend_sus_fee {
+        Some((target, amount)) => {
+            // Validate the amount given
+            let validated_fee_amount =
+                validate_amount(context, amount.to_owned(), &token, false)
+                    .await?;
 
-                (
-                    target.address(),
-                    vec![(
-                        target.to_owned(),
-                        token.to_owned(),
-                        validated_fee_amount,
-                    )],
-                    source_amount,
-                )
-            }
-            None => (None, vec![], validated_amount),
-        };
+            Some(MaspFrontendSusFee {
+                target: target.address().ok_or_else(|| {
+                    Error::Other(
+                        "Failed to extract MASP frontend provider address"
+                            .to_string(),
+                    )
+                })?,
+                token: token.to_owned(),
+                amt: validated_fee_amount,
+            })
+        }
+        None => None,
+    };
 
     let masp_transfer_data = MaspTransferData {
         sources: vec![(
             TransferSource::Address(source.clone()),
             token.clone(),
-            source_amount,
+            validated_amount,
         )],
-        targets: [
-            extra_target,
-            vec![(args.target, token.clone(), validated_amount)],
-        ]
-        .concat(),
+        targets: vec![(args.target, token.clone(), validated_amount)],
     };
 
     let shielded_transfer = {

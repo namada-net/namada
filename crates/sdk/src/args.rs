@@ -390,7 +390,7 @@ pub struct TxShieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// Transfer source data
     pub sources: Vec<TxTransparentSource<C>>,
     /// The optional data for the frontend sustainability fee
-    pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
+    pub frontend_sus_fee: Vec<TxTransparentTarget<C>>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }
@@ -521,12 +521,6 @@ pub enum Slippage {
     },
 }
 
-// FIXME: do we need a new event for the frontend fee?
-// FIXME: should the fee be taken shielded? It might avoid us to update the ibc
-// methods actually. Yes but it would produce a substantial amount of notes with
-// very little amounts FIXME: what happens to the sus fee if we wanto to
-// shield/unshield more than one asset? It should probably be a vector of
-// targets, one for every asset
 /// An token swap on Osmosis
 #[derive(Debug, Clone)]
 pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
@@ -841,7 +835,9 @@ pub struct TxIbcTransfer<C: NamadaTypes = SdkTypes> {
     // FIXME: this should probably be an either with ibc_shielding_data. Yes
     // but there would still be the room for errors, maybe need marker traits?
     // Not sure...
-    // FIXME: support this in the client for testing only
+    // FIXME: should this be a tuple (receiver, amount) to force the token to
+    // be the same as that of the transfer? FIXME: should the frontend fees
+    // always be specified just as a percentage and a target address?
     pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
@@ -3269,6 +3265,7 @@ pub struct GenIbcShieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// shielding transaction since ics-20 only supports a single asset)
     /// NOTE: if the shielding operation is part of a swap, and this is
     /// shielded (from MASP to MASP), no sustainability fee should be taken
+    // FIXME: transparent target only
     pub frontend_sus_fee: Option<(C::TransferTarget, InputAmount)>,
 }
 

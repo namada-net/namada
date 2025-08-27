@@ -82,7 +82,7 @@ impl TryFrom<String> for ProposalVote {
 }
 
 #[cfg(any(test, feature = "testing"))]
-/// Testing helpers and and strategies for governance proposals
+/// Testing helpers and strategies for governance proposals
 pub mod testing {
     use proptest::prelude::*;
 

@@ -471,7 +471,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> TestingContext<U> {
             .note_map
             .keys()
             .max()
-            .map(|ix| ix + 1)
+            .map(|ix| ix.checked_add(1).unwrap())
             .unwrap_or_default();
         self.wallet.note_map.insert(next_note_idx, note);
         let avail_notes = self.wallet.pos_map.entry(vk).or_default();

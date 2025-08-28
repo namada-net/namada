@@ -142,6 +142,7 @@ pub mod v0 {
 =======
             #[cfg(not(feature = "historic"))]
             {
+                use crate::masp::NotePosition;
                 use crate::masp::bridge_tree::BridgeTree;
 
                 Self {
@@ -149,12 +150,54 @@ pub mod v0 {
                     // TODO: write proper migrations here
                     tree: BridgeTree::empty(),
                     vk_heights: wallet.vk_heights,
-                    pos_map: wallet.pos_map,
-                    nf_map: wallet.nf_map,
-                    note_map: wallet.note_map,
-                    memo_map: wallet.memo_map,
-                    div_map: wallet.div_map,
-                    spents: wallet.spents,
+                    pos_map: wallet
+                        .pos_map
+                        .into_iter()
+                        .map(|(vk, positions)| {
+                            (
+                                vk,
+                                positions
+                                    .into_iter()
+                                    .map(|pos| {
+                                        NotePosition(pos.try_into().unwrap())
+                                    })
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
+                    nf_map: wallet
+                        .nf_map
+                        .into_iter()
+                        .map(|(nf, pos)| {
+                            (nf, NotePosition(pos.try_into().unwrap()))
+                        })
+                        .collect(),
+                    note_map: wallet
+                        .note_map
+                        .into_iter()
+                        .map(|(pos, note)| {
+                            (NotePosition(pos.try_into().unwrap()), note)
+                        })
+                        .collect(),
+                    memo_map: wallet
+                        .memo_map
+                        .into_iter()
+                        .map(|(pos, memo)| {
+                            (NotePosition(pos.try_into().unwrap()), memo)
+                        })
+                        .collect(),
+                    div_map: wallet
+                        .div_map
+                        .into_iter()
+                        .map(|(pos, div)| {
+                            (NotePosition(pos.try_into().unwrap()), div)
+                        })
+                        .collect(),
+                    spents: wallet
+                        .spents
+                        .into_iter()
+                        .map(|pos| NotePosition(pos.try_into().unwrap()))
+                        .collect(),
                     asset_types: wallet.asset_types,
                     conversions: Default::default(),
                     note_index: wallet.note_index,
@@ -242,6 +285,7 @@ pub mod v1 {
         fn from(wallet: ShieldedWallet<U>) -> Self {
             #[cfg(not(feature = "historic"))]
             {
+                use crate::masp::NotePosition;
                 use crate::masp::bridge_tree::BridgeTree;
 
                 Self {
@@ -249,12 +293,54 @@ pub mod v1 {
                     // TODO: write proper migrations here
                     tree: BridgeTree::empty(),
                     vk_heights: wallet.vk_heights,
-                    pos_map: wallet.pos_map,
-                    nf_map: wallet.nf_map,
-                    note_map: wallet.note_map,
-                    memo_map: wallet.memo_map,
-                    div_map: wallet.div_map,
-                    spents: wallet.spents,
+                    pos_map: wallet
+                        .pos_map
+                        .into_iter()
+                        .map(|(vk, positions)| {
+                            (
+                                vk,
+                                positions
+                                    .into_iter()
+                                    .map(|pos| {
+                                        NotePosition(pos.try_into().unwrap())
+                                    })
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
+                    nf_map: wallet
+                        .nf_map
+                        .into_iter()
+                        .map(|(nf, pos)| {
+                            (nf, NotePosition(pos.try_into().unwrap()))
+                        })
+                        .collect(),
+                    note_map: wallet
+                        .note_map
+                        .into_iter()
+                        .map(|(pos, note)| {
+                            (NotePosition(pos.try_into().unwrap()), note)
+                        })
+                        .collect(),
+                    memo_map: wallet
+                        .memo_map
+                        .into_iter()
+                        .map(|(pos, memo)| {
+                            (NotePosition(pos.try_into().unwrap()), memo)
+                        })
+                        .collect(),
+                    div_map: wallet
+                        .div_map
+                        .into_iter()
+                        .map(|(pos, div)| {
+                            (NotePosition(pos.try_into().unwrap()), div)
+                        })
+                        .collect(),
+                    spents: wallet
+                        .spents
+                        .into_iter()
+                        .map(|pos| NotePosition(pos.try_into().unwrap()))
+                        .collect(),
                     asset_types: wallet.asset_types,
                     conversions: wallet.conversions,
                     note_index: wallet.note_index,

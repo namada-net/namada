@@ -369,7 +369,9 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         // Compute the nullifier now to quickly recognize when spent
         let nf = note.nf(&vk.nk, note_pos.into());
         self.note_map.insert(note_pos, note);
-        self.memo_map.insert(note_pos, memo);
+        if !is_empty_memo(&memo) {
+            self.memo_map.insert(note_pos, memo);
+        }
         // The payment address' diversifier is required to spend
         // note
         self.div_map.insert(note_pos, *pa.diversifier());
@@ -2196,6 +2198,14 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
 impl<U: ShieldedUtils + MaybeSend + MaybeSync, T: ShieldedQueries<U>>
     ShieldedApi<U> for T
 {
+}
+
+/// Check whether the given utxo memo is empty (i.e. equal to
+/// [`MemoBytes::empty`]).
+#[inline]
+pub fn is_empty_memo(memo: &MemoBytes) -> bool {
+    let memo_bytes = memo.as_array();
+    memo_bytes[0] == 0xf6 && memo_bytes[1..].iter().all(|&byte| byte == 0)
 }
 
 #[cfg(test)]

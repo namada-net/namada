@@ -136,7 +136,6 @@ pub mod v0 {
                 spents: wallet.spents,
                 asset_types: wallet.asset_types,
                 conversions: Default::default(),
-                vk_map: wallet.vk_map,
                 note_index: wallet.note_index,
                 sync_status: wallet.sync_status,
             }
@@ -225,7 +224,6 @@ pub mod v1 {
                 spents: wallet.spents,
                 asset_types: wallet.asset_types,
                 conversions: wallet.conversions,
-                vk_map: wallet.vk_map,
                 note_index: wallet.note_index,
                 sync_status: wallet.sync_status,
             }

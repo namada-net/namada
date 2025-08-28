@@ -139,8 +139,6 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     pub asset_types: HashMap<AssetType, AssetData>,
     /// A conversions cache
     pub conversions: EpochedConversions,
-    /// Maps note positions to their corresponding viewing keys
-    pub vk_map: HashMap<usize, ViewingKey>,
     /// Maps a shielded tx to the index of its first output note.
     pub note_index: NoteIndex,
     /// The sync state of the context
@@ -301,7 +299,6 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         // note
         self.div_map.insert(note_pos, *pa.diversifier());
         self.nf_map.insert(nf, note_pos);
-        self.vk_map.insert(note_pos, *vk);
         Ok(())
     }
 

@@ -139,12 +139,22 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     pub asset_types: HashMap<AssetType, AssetData>,
     /// A conversions cache
     pub conversions: EpochedConversions,
-    /// Maps note positions to their corresponding viewing keys
-    pub vk_map: HashMap<usize, ViewingKey>,
     /// Maps a shielded tx to the index of its first output note.
     pub note_index: NoteIndex,
     /// The sync state of the context
     pub sync_status: ContextSyncStatus,
+<<<<<<< HEAD
+=======
+    /// Maps note positions to their corresponding viewing keys
+    #[cfg(feature = "historic")]
+    pub vk_map: HashMap<usize, ViewingKey>,
+    /// The history of the applied shielded transactions (the failed ones won't
+    /// show up in here). Only the sapling bundle data is cached here, for the
+    /// transparent bundle data one should rely on querying a node or an
+    /// indexer
+    #[cfg(feature = "historic")]
+    pub history: HashMap<ViewingKey, HashMap<IndexedTx, TxHistoryEntry>>,
+>>>>>>> 7c7c74501 (Drop unused vk_map field in shielded wallet)
 }
 
 <<<<<<< HEAD
@@ -336,7 +346,38 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         // note
         self.div_map.insert(note_pos, *pa.diversifier());
         self.nf_map.insert(nf, note_pos);
+<<<<<<< HEAD
         self.vk_map.insert(note_pos, *vk);
+=======
+        #[cfg(feature = "historic")]
+        {
+            self.vk_map.insert(note_pos, *vk);
+
+            // Update the history
+            let asset_data = self
+                .asset_types
+                .get(&note.asset_type)
+                .ok_or_else(|| eyre!("Can not get the asset data"))?
+                .to_owned();
+            let output_entry = self
+                .history
+                .entry(vk.to_owned())
+                .or_default()
+                .entry(indexed_tx)
+                .or_default()
+                .outputs
+                .entry(asset_data.token)
+                .or_insert(Amount::zero());
+            // No need to take care of the denomination as that should already
+            // be the default one for the given token
+            let note_amount =
+                Amount::from_masp_denominated(note.value, asset_data.position);
+
+            *output_entry = checked!(output_entry + note_amount)
+                .wrap_err("Overflow in shielded history outputs")?;
+        }
+
+>>>>>>> 7c7c74501 (Drop unused vk_map field in shielded wallet)
         Ok(())
     }
 

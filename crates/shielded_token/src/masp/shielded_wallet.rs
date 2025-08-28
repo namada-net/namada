@@ -347,7 +347,9 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         // spent
         let nf = note.nf(&vk.nk, note_pos.into());
         self.note_map.insert(note_pos, note);
-        self.memo_map.insert(note_pos, memo);
+        if !memo.as_array().iter().all(|&byte| byte == 0) {
+            self.memo_map.insert(note_pos, memo);
+        }
         // The payment address' diversifier is required to spend
         // note
         self.div_map.insert(note_pos, *pa.diversifier());

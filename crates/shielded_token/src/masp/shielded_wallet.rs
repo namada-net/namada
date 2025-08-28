@@ -377,7 +377,9 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
                             .try_into()
                             .expect("note position conversion shouldn't fail"),
                     )
-                    .expect("marked leaf should have been in tree");
+                    .unwrap_or_else(|err| {
+                        panic!("Failed to remove marked leaf: {err}")
+                    });
 
                 #[cfg(feature = "historic")]
                 {

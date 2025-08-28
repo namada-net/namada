@@ -469,12 +469,18 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
             // If the shielded spend's nullifier is in our map, then target
             // note is rendered unusable
 <<<<<<< HEAD
+<<<<<<< HEAD
             if let Some(note_pos) = self.nf_map.get(&ss.nullifier) {
                 self.spents.insert(*note_pos);
                 if update_witness_map {
                     self.witness_map.swap_remove(note_pos);
 =======
             if let Some(note_pos) = self.nf_map.get(&ss.nullifier).copied() {
+=======
+            if let Some(note_pos) = self.nf_map.swap_remove(&ss.nullifier) {
+                self.div_map.swap_remove(&note_pos);
+                self.note_map.swap_remove(&note_pos);
+>>>>>>> 8348a34d2 (Remove unnecessary data from shielded wallet)
                 self.spents.insert(note_pos);
                 self.tree
                     .as_mut()

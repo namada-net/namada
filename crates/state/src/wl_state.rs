@@ -703,6 +703,21 @@ where
         if let Some(height) = self.in_mem.block.height.prev_height() {
             self.db.prune_non_persisted_diffs(&mut batch, height)?;
         }
+
+        println!("{}", self.in_mem().block.tree.sub_root(&StoreType::Base));
+        println!("{}", self.in_mem().block.tree.sub_root(&StoreType::Account));
+        println!(
+            "{}",
+            self.in_mem().block.tree.sub_root(&StoreType::BridgePool)
+        );
+        println!(
+            "{}",
+            self.in_mem().block.tree.sub_root(&StoreType::CommitData)
+        );
+        println!("{}", self.in_mem().block.tree.sub_root(&StoreType::Ibc));
+        println!("{}", self.in_mem().block.tree.sub_root(&StoreType::NoDiff));
+        println!("{}", self.in_mem().block.tree.sub_root(&StoreType::PoS));
+
         self.db.exec_batch(batch)?;
         Ok(())
     }

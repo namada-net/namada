@@ -185,7 +185,11 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     /// Maps viewing keys to the block height to which they are synced.
     /// In particular, the height given by the value *has been scanned*.
     pub vk_heights: BTreeMap<ViewingKey, Option<MaspIndexedTx>>,
+    /// The set of note positions that have been spent
+    pub spents: HashSet<NotePosition>,
     /// Maps viewing keys to applicable note positions
+    ///
+    /// The inner set includes notes that have already been spent
     pub pos_map: HashMap<ViewingKey, BTreeSet<NotePosition>>,
     /// Maps a nullifier to the note position to which it applies
     pub nf_map: HashMap<Nullifier, NotePosition>,
@@ -195,8 +199,6 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     pub memo_map: HashMap<NotePosition, MemoBytes>,
     /// Maps note positions to the diversifier of their payment address
     pub div_map: HashMap<NotePosition, Diversifier>,
-    /// The set of note positions that have been spent
-    pub spents: HashSet<NotePosition>,
     /// Maps asset types to their decodings
     pub asset_types: HashMap<AssetType, AssetData>,
     /// A conversions cache

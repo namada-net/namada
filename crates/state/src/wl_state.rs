@@ -627,6 +627,12 @@ where
 
     /// Commit the data from in-memory state into the block's merkle tree.
     pub fn commit_only_data(&mut self) -> Result<()> {
+        println!("Committing commit-only data: len {}", self.in_mem().commit_only_data.tx_gas.len());
+
+        for (tx_hash, gas) in &self.in_mem().commit_only_data.tx_gas {
+            println!("tx/gas: {} / {}", tx_hash, gas);
+        }
+
         let data = self.in_mem().commit_only_data.serialize();
         self.in_mem_mut()
             .block
@@ -703,6 +709,21 @@ where
         if let Some(height) = self.in_mem.block.height.prev_height() {
             self.db.prune_non_persisted_diffs(&mut batch, height)?;
         }
+
+        println!("{}", self.in_mem().block.tree.sub_root(&StoreType::Base));
+        println!("{}", self.in_mem().block.tree.sub_root(&StoreType::Account));
+        println!(
+            "{}",
+            self.in_mem().block.tree.sub_root(&StoreType::BridgePool)
+        );
+        println!(
+            "{}",
+            self.in_mem().block.tree.sub_root(&StoreType::CommitData)
+        );
+        println!("{}", self.in_mem().block.tree.sub_root(&StoreType::Ibc));
+        println!("{}", self.in_mem().block.tree.sub_root(&StoreType::NoDiff));
+        println!("{}", self.in_mem().block.tree.sub_root(&StoreType::PoS));
+
         self.db.exec_batch(batch)?;
         Ok(())
     }

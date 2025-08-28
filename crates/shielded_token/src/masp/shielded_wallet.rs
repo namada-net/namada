@@ -424,7 +424,9 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         {
             // If the shielded spend's nullifier is in our map, then target
             // note is rendered unusable
-            if let Some(note_pos) = self.nf_map.get(&ss.nullifier).copied() {
+            if let Some(note_pos) = self.nf_map.swap_remove(&ss.nullifier) {
+                self.div_map.swap_remove(&note_pos);
+                self.note_map.swap_remove(&note_pos);
                 self.spents.insert(note_pos);
                 self.tree
                     .as_mut()

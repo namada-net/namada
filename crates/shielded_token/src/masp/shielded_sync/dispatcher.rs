@@ -382,16 +382,16 @@ where
         }
 
         for (masp_indexed_tx, stx_batch) in self.cache.fetched.take() {
-            self.ctx.save_shielded_spends(
-                &stx_batch,
-                #[cfg(feature = "historic")]
-                Some(masp_indexed_tx.indexed_tx),
-            )?;
             if Some(&masp_indexed_tx) > last_witnessed_tx.as_ref() {
                 self.ctx.update_witnesses(
                     masp_indexed_tx,
                     &stx_batch,
                     &self.cache.trial_decrypted,
+                )?;
+                self.ctx.save_shielded_spends(
+                    &stx_batch,
+                    #[cfg(feature = "historic")]
+                    Some(masp_indexed_tx.indexed_tx),
                 )?;
             }
             let first_note_pos = self.ctx.note_index[&masp_indexed_tx];

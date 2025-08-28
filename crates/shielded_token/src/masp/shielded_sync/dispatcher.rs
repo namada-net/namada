@@ -412,7 +412,7 @@ where
                         #[cfg(feature = "historic")]
                         masp_indexed_tx.indexed_tx,
                         vk,
-                        first_note_pos + note_pos_offset,
+                        first_note_pos.checked_add(note_pos_offset).unwrap(),
                         note,
                         pa,
                         memo,
@@ -771,7 +771,7 @@ mod dispatcher_tests {
         dated_arbitrary_vk,
     };
     use crate::masp::utils::MaspIndexedTx;
-    use crate::masp::{MaspLocalTaskEnv, ShieldedSyncConfig};
+    use crate::masp::{MaspLocalTaskEnv, NotePosition, ShieldedSyncConfig};
 
     #[tokio::test]
     async fn test_applying_cache_drains_decrypted_data() {
@@ -805,7 +805,7 @@ mod dispatcher_tests {
                         kind: MaspTxKind::Transfer,
                     };
                     dispatcher.cache.fetched.insert((itx, arbitrary_masp_tx()));
-                    dispatcher.ctx.note_index.insert(itx, h as usize);
+                    dispatcher.ctx.note_index.insert(itx, NotePosition(h));
                     dispatcher.cache.trial_decrypted.insert(
                         itx,
                         arbitrary_vk(),

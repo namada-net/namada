@@ -141,18 +141,19 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     pub asset_types: HashMap<AssetType, AssetData>,
     /// A conversions cache
     pub conversions: EpochedConversions,
-    /// Maps note positions to their corresponding viewing keys
-    pub vk_map: HashMap<usize, ViewingKey>,
     /// Maps a shielded tx to the index of its first output note.
     pub note_index: NoteIndex,
+    /// The sync state of the context
+    pub sync_status: ContextSyncStatus,
+    /// Maps note positions to their corresponding viewing keys
+    #[cfg(feature = "historic")]
+    pub vk_map: HashMap<usize, ViewingKey>,
     /// The history of the applied shielded transactions (the failed ones won't
     /// show up in here). Only the sapling bundle data is cached here, for the
     /// transparent bundle data one should rely on querying a node or an
     /// indexer
     #[cfg(feature = "historic")]
     pub history: HashMap<ViewingKey, HashMap<IndexedTx, TxHistoryEntry>>,
-    /// The sync state of the context
-    pub sync_status: ContextSyncStatus,
 }
 
 /// The data for an indexed masp transaction
@@ -320,9 +321,10 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         // note
         self.div_map.insert(note_pos, *pa.diversifier());
         self.nf_map.insert(nf, note_pos);
-        self.vk_map.insert(note_pos, *vk);
         #[cfg(feature = "historic")]
         {
+            self.vk_map.insert(note_pos, *vk);
+
             // Update the history
             let asset_data = self
                 .asset_types

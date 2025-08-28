@@ -383,6 +383,7 @@ where
 
         for (masp_indexed_tx, stx_batch) in self.cache.fetched.take() {
 <<<<<<< HEAD
+<<<<<<< HEAD
             let needs_witness_map_update =
                 self.client.capabilities().needs_witness_map_update();
             self.ctx
@@ -397,12 +398,19 @@ where
                 #[cfg(feature = "historic")]
                 Some(masp_indexed_tx.indexed_tx),
             )?;
+=======
+>>>>>>> 5adae714b (Defer saving shielded spends until after we update wits)
             if Some(&masp_indexed_tx) > last_witnessed_tx.as_ref() {
                 self.ctx.update_witnesses(
 >>>>>>> f7ef28fd4 (Build MASP witnesses locally)
                     masp_indexed_tx,
                     &stx_batch,
                     &self.cache.trial_decrypted,
+                )?;
+                self.ctx.save_shielded_spends(
+                    &stx_batch,
+                    #[cfg(feature = "historic")]
+                    Some(masp_indexed_tx.indexed_tx),
                 )?;
             }
             let first_note_pos = self.ctx.note_index[&masp_indexed_tx];

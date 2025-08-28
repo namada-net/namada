@@ -338,7 +338,7 @@ where
                 Ok(None)
             }
             DispatcherState::Normal => {
-                self.apply_cache_to_shielded_context(&initial_state).await?;
+                self.apply_cache_to_shielded_context(&initial_state)?;
                 self.finish_progress_bars();
                 self.ctx.save().await.map_err(|err| {
                     eyre!("Failed to save the shielded context: {err}")
@@ -369,7 +369,7 @@ where
         }
     }
 
-    async fn apply_cache_to_shielded_context(
+    fn apply_cache_to_shielded_context(
         &mut self,
         InitialState {
             last_witnessed_tx,
@@ -819,7 +819,6 @@ mod dispatcher_tests {
                         start_height: Default::default(),
                         last_query_height: 9.into(),
                     })
-                    .await
                     .expect("Test failed");
                 assert!(dispatcher.cache.fetched.is_empty());
                 assert!(dispatcher.cache.trial_decrypted.is_empty());

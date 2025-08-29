@@ -354,7 +354,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
             let dispatcher = config.dispatcher(spawner, &self.utils).await;
 
             if let Some(updated_ctx) =
-                dispatcher.run(None, last_query_height, sks, fvks).await?
+                dispatcher.run(last_query_height, sks, fvks).await?
             {
                 *self = updated_ctx;
             }

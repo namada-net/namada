@@ -305,18 +305,12 @@ where
     /// Run the dispatcher
     pub async fn run(
         mut self,
-        start_query_height: Option<BlockHeight>,
         last_query_height: Option<BlockHeight>,
         sks: &[DatedSpendingKey],
         fvks: &[DatedKeypair<ViewingKey>],
     ) -> Result<Option<ShieldedWallet<U>>, eyre::Error> {
         let initial_state = self
-            .perform_initial_setup(
-                start_query_height,
-                last_query_height,
-                sks,
-                fvks,
-            )
+            .perform_initial_setup(last_query_height, sks, fvks)
             .await?;
 
         self.check_exit_conditions();
@@ -464,19 +458,10 @@ where
 
     async fn perform_initial_setup(
         &mut self,
-        start_query_height: Option<BlockHeight>,
         last_query_height: Option<BlockHeight>,
         sks: &[DatedSpendingKey],
         fvks: &[DatedKeypair<ViewingKey>],
     ) -> Result<InitialState, eyre::Error> {
-        if start_query_height > last_query_height {
-            return Err(eyre!(
-                "The start height {start_query_height:?} cannot be higher \
-                 than the ending height {last_query_height:?} in the shielded \
-                 sync"
-            ));
-        }
-
         for vk in sks
             .iter()
             .map(|esk| {
@@ -557,8 +542,9 @@ where
             // NB: limit fetching until the last committed height
             .min(last_block_height);
 
-        let start_height = start_query_height
-            .map_or_else(|| self.ctx.min_height_to_sync_from(), Ok)?
+        let start_height = self
+            .ctx
+            .min_height_to_sync_from()?
             // NB: the start height cannot be greater than
             // `last_query_height`
             .min(last_query_height);
@@ -952,12 +938,12 @@ mod dispatcher_tests {
 
                 // run the dispatcher
                 let flag = dispatcher.tasks.panic_flag.clone();
-                let dispatcher_fut = dispatcher.run(
-                    Some(BlockHeight::first()),
-                    Some(BlockHeight(10)),
-                    &[],
-                    &[],
-                );
+                let esks = [DatedSpendingKey::new(
+                    MaspExtendedSpendingKey::master(b"bing bong").into(),
+                    None,
+                )];
+                let dispatcher_fut =
+                    dispatcher.run(Some(BlockHeight(10)), &esks, &[]);
 
                 // we poll the dispatcher future until the panic thread has
                 // panicked.
@@ -983,17 +969,17 @@ mod dispatcher_tests {
 
                 // we assert that the panic thread panicked and retrieve the
                 // dispatcher future
-                let Either::Right((_, fut)) =
-                    select(Box::pin(dispatcher_fut), Box::pin(panicked_fut))
-                        .await
-                else {
-                    panic!("Test failed")
+                let fut = match select(
+                    Box::pin(dispatcher_fut),
+                    Box::pin(panicked_fut),
+                )
+                .await
+                {
+                    Either::Right((_, fut)) => fut,
+                    Either::Left((res, _)) => panic!("Test failed: {res:?}"),
                 };
 
-                let (_, res) = join! {
-                    barrier.wait(),
-                    fut,
-                };
+                let (_, res) = join!(barrier.wait(), fut);
 
                 let Err(msg) = res else { panic!("Test failed") };
 
@@ -1089,7 +1075,7 @@ mod dispatcher_tests {
                 masp_tx_sender.send(None).expect("Test failed");
                 let dispatcher = config.clone().dispatcher(s, &utils).await;
 
-                let result = dispatcher.run(None, None, &[], &[vk]).await;
+                let result = dispatcher.run(None, &[], &[vk]).await;
                 match result {
                     Err(msg) => assert_eq!(
                         msg.to_string(),
@@ -1139,7 +1125,7 @@ mod dispatcher_tests {
                 let dispatcher = config.dispatcher(s, &utils).await;
                 // This should complete successfully
                 let ctx = dispatcher
-                    .run(None, None, &[], &[vk])
+                    .run(None, &[], &[vk])
                     .await
                     .expect("Test failed")
                     .expect("Test failed");
@@ -1231,7 +1217,7 @@ mod dispatcher_tests {
                     )))
                     .expect("Test failed");
                 masp_tx_sender.send(None).expect("Test failed");
-                let result = dispatcher.run(None, None, &[], &[vk]).await;
+                let result = dispatcher.run(None, &[], &[vk]).await;
                 match result {
                     Err(msg) => assert_eq!(
                         msg.to_string(),
@@ -1314,7 +1300,7 @@ mod dispatcher_tests {
 
                 send.send_replace(true);
                 let res = dispatcher
-                    .run(None, None, &[], &[dated_arbitrary_vk()])
+                    .run(None, &[], &[dated_arbitrary_vk()])
                     .await
                     .expect("Test failed");
                 assert!(res.is_none());

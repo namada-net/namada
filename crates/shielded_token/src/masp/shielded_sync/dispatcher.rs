@@ -19,10 +19,9 @@ use namada_core::control_flow::time::{Duration, LinearBackoff, Sleep};
 use namada_core::hints;
 use namada_core::task_env::TaskSpawner;
 use namada_io::{MaybeSend, MaybeSync, ProgressBar};
-use namada_tx::IndexedTx;
 use namada_wallet::{DatedKeypair, DatedSpendingKey};
 
-use super::utils::{IndexedNoteEntry, MaspClient, MaspIndexedTx, MaspTxKind};
+use super::utils::{IndexedNoteEntry, MaspClient, MaspIndexedTx};
 use crate::masp::shielded_sync::trial_decrypt;
 use crate::masp::utils::{
     DecryptedData, Fetched, RetryStrategy, TrialDecrypted, blocks_left_to_fetch,
@@ -394,7 +393,9 @@ where
             for (vk, _) in vk_heights
                 .iter()
                 // NB: skip keys that are synced past the given `indexed_tx`
-                .filter(|(_vk, h)| h.as_ref() < Some(&masp_indexed_tx))
+                .filter(|&(_vk, &vk_synced_height)| {
+                    vk_synced_height < masp_indexed_tx.indexed_tx.block_height
+                })
             {
                 for (note_pos_offset, (note, pa, memo)) in self
                     .cache
@@ -417,21 +418,17 @@ where
             std::mem::swap(&mut vk_heights, &mut self.ctx.vk_heights);
         }
 
-        for (_, h) in self
+        for vk_synced_height in self
             .ctx
             .vk_heights
-            .iter_mut()
+            .values_mut()
             // NB: skip keys that are synced past the last input height
-            .filter(|(_vk, h)| {
-                h.as_ref().map(|itx| &itx.indexed_tx.block_height)
-                    < Some(last_query_height)
+            .filter(|&&mut vk_synced_height| {
+                vk_synced_height < *last_query_height
             })
         {
             // NB: the entire block is synced
-            *h = Some(MaspIndexedTx {
-                indexed_tx: IndexedTx::entire_block(*last_query_height),
-                kind: MaspTxKind::Transfer,
-            });
+            *vk_synced_height = *last_query_height;
         }
 
         self.ctx.tree.as_mut().garbage_collect_ommers();
@@ -454,19 +451,10 @@ where
             })
             .chain(fvks.iter().copied())
         {
-            if let Some(h) = self.ctx.vk_heights.entry(vk.key).or_default() {
-                let birthday = IndexedTx::entire_block(vk.birthday);
-                if birthday > h.indexed_tx {
-                    h.indexed_tx = birthday;
-                }
-            } else if vk.birthday >= BlockHeight::first() {
-                self.ctx.vk_heights.insert(
-                    vk.key,
-                    Some(MaspIndexedTx {
-                        indexed_tx: IndexedTx::entire_block(vk.birthday),
-                        kind: MaspTxKind::Transfer,
-                    }),
-                );
+            let synced_height = self.ctx.vk_heights.entry(vk.key).or_default();
+
+            if vk.birthday > *synced_height {
+                *synced_height = vk.birthday;
             }
         }
 
@@ -673,8 +661,9 @@ where
     }
 
     fn spawn_trial_decryptions(&self, itx: MaspIndexedTx, tx: &Transaction) {
-        for (vk, vk_height) in self.ctx.vk_heights.iter() {
-            let key_is_outdated = vk_height.as_ref() < Some(&itx);
+        for (vk, vk_synced_height) in self.ctx.vk_heights.iter() {
+            let key_is_outdated =
+                *vk_synced_height < itx.indexed_tx.block_height;
             let cached = self.cache.trial_decrypted.get(&itx, vk).is_some();
 
             if key_is_outdated && !cached {
@@ -749,6 +738,7 @@ mod dispatcher_tests {
     use namada_wallet::StoredKeypair;
     use tempfile::tempdir;
 
+    use super::super::utils::MaspTxKind;
     use super::*;
     use crate::masp::fs::FsShieldedUtils;
     use crate::masp::test_utils::{
@@ -779,9 +769,9 @@ mod dispatcher_tests {
             .run(|s| async {
                 let mut dispatcher = config.dispatcher(s, &utils).await;
                 dispatcher.ctx.vk_heights =
-                    BTreeMap::from([(arbitrary_vk(), None)]);
+                    BTreeMap::from([(arbitrary_vk(), BlockHeight(0))]);
                 // fill up the dispatcher's cache
-                for h in 0u64..10 {
+                for h in 1u64..10 {
                     let itx = MaspIndexedTx {
                         indexed_tx: IndexedTx {
                             block_height: h.into(),
@@ -802,19 +792,14 @@ mod dispatcher_tests {
                 dispatcher
                     .apply_cache_to_shielded_context(&InitialState {
                         last_witnessed_tx: None,
-                        start_height: Default::default(),
+                        start_height: BlockHeight::first(),
                         last_query_height: 9.into(),
                     })
                     .expect("Test failed");
                 assert!(dispatcher.cache.fetched.is_empty());
                 assert!(dispatcher.cache.trial_decrypted.is_empty());
-                let expected = BTreeMap::from([(
-                    arbitrary_vk(),
-                    Some(MaspIndexedTx {
-                        indexed_tx: IndexedTx::entire_block(9.into()),
-                        kind: MaspTxKind::Transfer,
-                    }),
-                )]);
+                let expected =
+                    BTreeMap::from([(arbitrary_vk(), BlockHeight(9))]);
                 assert_eq!(expected, dispatcher.ctx.vk_heights);
             })
             .await;
@@ -991,20 +976,13 @@ mod dispatcher_tests {
 
         // the min height here should be 1, since
         // this vk hasn't decrypted any note yet
-        shielded_ctx.vk_heights.insert(vk, None);
+        shielded_ctx.vk_heights.insert(vk, BlockHeight(0));
 
         let height = shielded_ctx.min_height_to_sync_from().unwrap();
         assert_eq!(height, BlockHeight(1));
 
         // let's bump the vk height
-        *shielded_ctx.vk_heights.get_mut(&vk).unwrap() = Some(MaspIndexedTx {
-            indexed_tx: IndexedTx {
-                block_height: 6.into(),
-                block_index: TxIndex(0),
-                batch_index: None,
-            },
-            kind: MaspTxKind::Transfer,
-        });
+        *shielded_ctx.vk_heights.get_mut(&vk).unwrap() = BlockHeight(6);
 
         // the min height should now be 6
         let height = shielded_ctx.min_height_to_sync_from().unwrap();
@@ -1134,13 +1112,7 @@ mod dispatcher_tests {
                 ]);
 
                 assert_eq!(keys, expected);
-                assert_eq!(
-                    *ctx.vk_heights[&vk.key].as_ref().unwrap(),
-                    MaspIndexedTx {
-                        indexed_tx: IndexedTx::entire_block(2.into(),),
-                        kind: MaspTxKind::Transfer
-                    }
-                );
+                assert_eq!(ctx.vk_heights[&vk.key], BlockHeight(2));
                 assert_eq!(ctx.note_map.len(), 2);
             })
             .await;
@@ -1299,6 +1271,7 @@ mod dispatcher_tests {
             })
             .await;
     }
+
     /// Test the the birthdays of keys are properly reflected in the key
     /// sync heights when starting shielded sync.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1350,19 +1323,7 @@ mod dispatcher_tests {
             .values()
             .cloned()
             .collect::<Vec<_>>();
-        assert_eq!(
-            birthdays,
-            vec![
-                Some(MaspIndexedTx {
-                    indexed_tx: IndexedTx::entire_block(BlockHeight(30)),
-                    kind: MaspTxKind::Transfer
-                }),
-                Some(MaspIndexedTx {
-                    indexed_tx: IndexedTx::entire_block(BlockHeight(10)),
-                    kind: MaspTxKind::Transfer
-                })
-            ]
-        );
+        assert_eq!(birthdays, vec![BlockHeight(30), BlockHeight(10),]);
 
         // Test two cases:
         // * A birthday is less than the synced height of key
@@ -1397,18 +1358,6 @@ mod dispatcher_tests {
             .values()
             .cloned()
             .collect::<Vec<_>>();
-        assert_eq!(
-            birthdays,
-            vec![
-                Some(MaspIndexedTx {
-                    indexed_tx: IndexedTx::entire_block(BlockHeight(60)),
-                    kind: MaspTxKind::Transfer
-                }),
-                Some(MaspIndexedTx {
-                    indexed_tx: IndexedTx::entire_block(BlockHeight(10)),
-                    kind: MaspTxKind::Transfer
-                })
-            ]
-        )
+        assert_eq!(birthdays, vec![BlockHeight(60), BlockHeight(10),])
     }
 }

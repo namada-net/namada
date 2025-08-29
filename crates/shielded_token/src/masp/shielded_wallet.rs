@@ -186,7 +186,7 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     pub tree: BridgeTree,
     /// Maps viewing keys to the block height to which they are synced.
     /// In particular, the height given by the value *has been scanned*.
-    pub vk_heights: BTreeMap<ViewingKey, Option<MaspIndexedTx>>,
+    pub vk_heights: BTreeMap<ViewingKey, BlockHeight>,
     /// The set of note positions that have been spent
     pub spents: HashSet<NotePosition>,
     /// Maps viewing keys to applicable note positions
@@ -351,8 +351,14 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
                     .to_string(),
             ));
         };
-        Ok(maybe_least_synced_vk_height
-            .map_or_else(BlockHeight::first, |itx| itx.indexed_tx.block_height))
+
+        Ok(if maybe_least_synced_vk_height == BlockHeight(0) {
+            // NB: Height 0 is a sentinel, we must return height 1 instead
+            // as the first height to sync from
+            BlockHeight::first()
+        } else {
+            maybe_least_synced_vk_height
+        })
     }
 
     #[allow(missing_docs)]

@@ -269,7 +269,18 @@ pub mod v0 {
                         &wallet.tree,
                         &wallet.witness_map,
                     ),
-                    vk_heights: wallet.vk_heights,
+                    vk_heights: wallet
+                        .vk_heights
+                        .into_iter()
+                        .map(|(vk, itx)| {
+                            (
+                                vk,
+                                itx.map_or(0u64.into(), |itx| {
+                                    itx.indexed_tx.block_height
+                                }),
+                            )
+                        })
+                        .collect(),
                     pos_map: wallet
                         .pos_map
                         .into_iter()
@@ -414,7 +425,18 @@ pub mod v1 {
                         &wallet.tree,
                         &wallet.witness_map,
                     ),
-                    vk_heights: wallet.vk_heights,
+                    vk_heights: wallet
+                        .vk_heights
+                        .into_iter()
+                        .map(|(vk, itx)| {
+                            (
+                                vk,
+                                itx.map_or(0u64.into(), |itx| {
+                                    itx.indexed_tx.block_height
+                                }),
+                            )
+                        })
+                        .collect(),
                     pos_map: wallet
                         .pos_map
                         .into_iter()

@@ -188,7 +188,7 @@ pub fn withdraw_tokens<S>(
     current_epoch: Epoch,
 ) -> Result<token::Amount>
 where
-    S: StorageRead + StorageWrite,
+    S: StorageRead + StorageWrite + EmitEvents,
 {
     crate::withdraw_tokens::<S, GovStore<S>, token::Store<_>>(
         storage,

@@ -43,6 +43,142 @@ pub enum VersionedWalletRef<'w, U: ShieldedUtils> {
     V2(&'w ShieldedWallet<U>),
 }
 
+mod bridge_tree_migrations {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use masp_primitives::merkle_tree::CommitmentTree;
+    use masp_primitives::sapling::{Node, SAPLING_COMMITMENT_TREE_DEPTH};
+    use namada_core::collections::HashMap;
+
+    use crate::masp::WitnessMap;
+    use crate::masp::bridge_tree::pkg::{Level, Position, Source};
+    use crate::masp::bridge_tree::{BridgeTree, InnerBridgeTree};
+
+    #[allow(missing_docs)]
+    #[allow(dead_code)]
+    pub fn migrate(
+        tree: &CommitmentTree<Node>,
+        witness_map: &WitnessMap,
+    ) -> BridgeTree {
+        let witness_map = {
+            let mut map: HashMap<Position, _> = witness_map
+                .iter()
+                .map(|(pos, wit)| {
+                    ((*pos).into(), wit.clone().into_incrementalmerkletree())
+                })
+                .collect();
+            map.sort_unstable_keys();
+            map
+        };
+
+        let frontier = tree
+            .clone()
+            .into_incrementalmerkletree()
+            .to_frontier()
+            .take();
+
+        let prior_bridges: Vec<_> = witness_map
+            .values()
+            .map(|wit| wit.tree().to_frontier().take().unwrap())
+            .collect();
+
+        let tracking: BTreeSet<_> = prior_bridges
+            .iter()
+            .flat_map(|prior_bridge_frontier| {
+                prior_bridge_frontier
+                    .position()
+                    .witness_addrs(Level::from(
+                        SAPLING_COMMITMENT_TREE_DEPTH as u8,
+                    ))
+                    .filter_map(|(addr, source)| {
+                        if source == Source::Future {
+                            Some(addr)
+                        } else {
+                            None
+                        }
+                    })
+            })
+            .collect();
+
+        let ommers: BTreeMap<_, _> = prior_bridges
+            .iter()
+            .map(|prior_bridge_frontier| {
+                let position = prior_bridge_frontier.position();
+
+                position
+                    .witness_addrs(Level::from(
+                        SAPLING_COMMITMENT_TREE_DEPTH as u8,
+                    ))
+                    .filter_map(|(addr, source)| {
+                        if source == Source::Future {
+                            Some(addr)
+                        } else {
+                            None
+                        }
+                    })
+                    .zip(witness_map[&position].filled().iter().cloned())
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .reduce(|mut this, mut other| {
+                this.append(&mut other);
+                this
+            })
+            .unwrap_or_default();
+
+        let mut tree: BridgeTree = InnerBridgeTree::from_parts(
+            frontier,
+            prior_bridges,
+            tracking,
+            ommers,
+        )
+        .unwrap()
+        .into();
+
+        tree.as_mut().garbage_collect_ommers();
+        tree
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn test_bridge_tree_migrations() {
+        use masp_primitives::merkle_tree::IncrementalWitness;
+
+        use crate::masp::NotePosition;
+
+        let mut tree: CommitmentTree<Node> = CommitmentTree::empty();
+        let mut witness_map = WitnessMap::new();
+
+        // build commitment tree and witness map incrementally
+        for i in 0u64..10 {
+            let node = Node::from_scalar(i.into());
+
+            tree.append(node).unwrap();
+
+            for wit in witness_map.values_mut() {
+                wit.append(node).unwrap();
+            }
+
+            if i % 2 == 0 {
+                witness_map
+                    .insert(i.into(), IncrementalWitness::from_tree(&tree));
+            }
+        }
+
+        // convert to bridge tree
+        let bridge_tree = migrate(&tree, &witness_map);
+
+        // check if roots and merkle proofs match
+        assert_eq!(tree.root(), bridge_tree.as_ref().root());
+
+        for i in (0u64..10).filter(|&i| i % 2 == 0) {
+            assert_eq!(
+                witness_map[&NotePosition::from(i)].path(),
+                bridge_tree.witness(i)
+            );
+        }
+    }
+}
+
 pub mod v0 {
     //! Version 0 of the shielded wallet, which is used for migration purposes.
 
@@ -142,13 +278,15 @@ pub mod v0 {
 =======
             #[cfg(not(feature = "historic"))]
             {
+                use super::bridge_tree_migrations;
                 use crate::masp::NotePosition;
-                use crate::masp::bridge_tree::BridgeTree;
 
                 Self {
                     utils: wallet.utils,
-                    // TODO: write proper migrations here
-                    tree: BridgeTree::empty(),
+                    tree: bridge_tree_migrations::migrate(
+                        &wallet.tree,
+                        &wallet.witness_map,
+                    ),
                     vk_heights: wallet.vk_heights,
                     pos_map: wallet
                         .pos_map
@@ -285,13 +423,15 @@ pub mod v1 {
         fn from(wallet: ShieldedWallet<U>) -> Self {
             #[cfg(not(feature = "historic"))]
             {
+                use super::bridge_tree_migrations;
                 use crate::masp::NotePosition;
-                use crate::masp::bridge_tree::BridgeTree;
 
                 Self {
                     utils: wallet.utils,
-                    // TODO: write proper migrations here
-                    tree: BridgeTree::empty(),
+                    tree: bridge_tree_migrations::migrate(
+                        &wallet.tree,
+                        &wallet.witness_map,
+                    ),
                     vk_heights: wallet.vk_heights,
                     pos_map: wallet
                         .pos_map

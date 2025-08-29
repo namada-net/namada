@@ -21,7 +21,7 @@ use namada_token::masp::utils::{
 };
 use namada_tx::event::MaspEvent;
 use namada_tx::{IndexedTx, Tx};
-use tokio::sync::Semaphore;
+use tokio::sync::{OnceCell, Semaphore};
 
 use crate::error::{Error, QueryError};
 use crate::masp::{extract_masp_tx, get_indexed_masp_events_at_height};
@@ -313,7 +313,7 @@ struct IndexerMaspClientShared {
     indexer_api: reqwest::Url,
     /// Bloom filter to help avoid fetching block heights
     /// with no MASP notes.
-    block_index: init_once::InitOnce<Option<(BlockHeight, xorf::BinaryFuse16)>>,
+    block_index: OnceCell<Option<(BlockHeight, xorf::BinaryFuse16)>>,
     /// Maximum number of concurrent fetches.
     max_concurrent_fetches: usize,
 }
@@ -352,13 +352,9 @@ impl IndexerMaspClient {
             indexer_api,
             max_concurrent_fetches,
             semaphore: Semaphore::new(max_concurrent_fetches),
-            block_index: {
-                let mut index = init_once::InitOnce::new();
-                if !using_block_index {
-                    index.init(|| None);
-                }
-                index
-            },
+            block_index: OnceCell::new_with(
+                (!using_block_index).then_some(None),
+            ),
         });
         Self { client, shared }
     }
@@ -507,15 +503,11 @@ impl MaspClient for IndexerMaspClient {
             )));
         }
 
-        let maybe_block_index = self
+        let maybe_block_index: &Option<_> = self
             .shared
             .block_index
-            .try_init_async(async {
-                let _permit = self.shared.semaphore.acquire().await.unwrap();
-                self.last_block_index().await.ok()
-            })
-            .await
-            .and_then(Option::as_ref);
+            .get_or_init(|| async { self.last_block_index().await.ok() })
+            .await;
 
         let mut fetches = vec![];
         loop {

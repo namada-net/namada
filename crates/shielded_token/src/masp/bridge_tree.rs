@@ -31,6 +31,12 @@ impl Default for BridgeTree {
     }
 }
 
+impl From<InnerBridgeTree> for BridgeTree {
+    fn from(inner: InnerBridgeTree) -> Self {
+        Self(inner)
+    }
+}
+
 impl BridgeTree {
     /// Create an empty [`BridgeTree`].
     pub const fn empty() -> Self {

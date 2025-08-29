@@ -579,7 +579,7 @@ impl Display for StorageProposal {
 }
 
 #[cfg(any(test, feature = "testing"))]
-/// Testing helpers and and strategies for governance proposals
+/// Testing helpers and strategies for governance proposals
 pub mod testing {
     use namada_core::address::testing::arb_non_internal_address;
     use namada_core::chain::testing::arb_epoch;

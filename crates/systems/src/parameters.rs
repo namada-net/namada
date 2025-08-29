@@ -20,7 +20,7 @@ pub trait Read<S> {
     /// Read MASP epoch multiplier parameter
     fn masp_epoch_multiplier(storage: &S) -> Result<u64>;
 
-    /// Read the the epoch duration parameter
+    /// Read the epoch duration parameter
     fn epoch_duration_parameter(storage: &S) -> Result<EpochDuration>;
 
     /// Read the `is_native_token_transferable` parameter

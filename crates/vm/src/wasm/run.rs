@@ -162,6 +162,7 @@ where
     S: StateRead + State + StorageRead,
     CA: 'static + WasmCacheAccess,
 {
+    println!("Gas meter kind {gas_meter_kind:?}");
     let tx_code = tx
         .get_section(cmt.code_sechash())
         .and_then(|x| Section::code_sec(x.as_ref()))
@@ -210,6 +211,10 @@ where
         gas_meter,
         gas_meter_kind,
     )?;
+    println!(
+        "Gas after fetch_or_compile {}",
+        gas_meter.borrow().transaction_gas.sub
+    );
     let store = Rc::new(RefCell::new(store));
 
     let mut iterators: PrefixIterators<'_, <S as StateRead>::D> =
@@ -288,6 +293,7 @@ where
             Ok(())
         },
     )?;
+    println!("wasm gas meter before call {wasm_gas_meter:?}");
 
     // Fetch guest's main memory
     let guest_memory = instance
@@ -332,9 +338,14 @@ where
     );
 
     let wasm_gas_meter = RefCell::into_inner(wasm_gas_meter);
+    println!("wasm gas meter after call {wasm_gas_meter:?}");
     wasm_gas_meter
         .flush_to_meter(&mut *gas_meter.borrow_mut())
         .map_err(|err| Error::GasError(err.to_string()))?;
+    println!(
+        "gas after call meter flush {}",
+        gas_meter.borrow().transaction_gas.sub
+    );
 
     let ok = result.map_err(|err| {
         tracing::debug!("Tx WASM failed with {}", err);

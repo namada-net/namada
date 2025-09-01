@@ -372,23 +372,23 @@ where
         .collect::<HashSet<_>>()
         .into_iter();
 
-    let res = apply_wasm_tx(
-        wrapper_hash,
-        &tx.batch_ref_tx(cmt),
-        &tx_index,
-        ShellParams {
-            tx_gas_meter,
-            state,
-            vp_wasm_cache,
-            tx_wasm_cache,
-        },
-        gas_meter_kind,
-    );
-    println!(
-        "dispatch_inner_txs gas {}",
-        tx_gas_meter.borrow().transaction_gas.sub
-    );
     for cmt in inner_txs {
+        let res = apply_wasm_tx(
+            wrapper_hash,
+            &tx.batch_ref_tx(cmt),
+            &tx_index,
+            ShellParams {
+                tx_gas_meter,
+                state,
+                vp_wasm_cache,
+                tx_wasm_cache,
+            },
+            gas_meter_kind,
+        );
+        println!(
+            "dispatch_inner_txs gas {}",
+            tx_gas_meter.borrow().transaction_gas.sub
+        );
         match res {
             Err(Error::GasError(msg)) => {
                 // Gas error aborts the execution of the entire batch

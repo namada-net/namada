@@ -108,6 +108,7 @@ impl WasmGasMeter {
 
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
         let value_to_sync = u64::from(gas) as i64;
+        println!("write_wasm_gas {}", value_to_sync);
 
         self.wasm_transaction_gas_global
             .as_ref()
@@ -134,6 +135,7 @@ impl WasmGasMeter {
             .expect("the wasm gas global must be set while running the vm")
             .get(&mut *store.borrow_mut())
         {
+            println!("read_wasm_gas {}", available_gas);
             #[allow(clippy::cast_sign_loss)]
             {
                 namada_gas::Gas::from(

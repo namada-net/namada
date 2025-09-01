@@ -211,9 +211,20 @@ where
         gas_meter,
         gas_meter_kind,
     )?;
+    {
+        let m = gas_meter.borrow();
+        println!(
+            "Gas after fetch_or_compile {}, scale {}, limit {}, available {}",
+            m.transaction_gas.sub,
+            m.get_gas_scale(),
+            m.get_gas_limit().sub,
+            m.get_available_gas().sub
+        );
+    }
     println!(
-        "Gas after fetch_or_compile {}",
-        gas_meter.borrow().transaction_gas.sub
+        "Gas after fetch_or_compile {}, available gas {}",
+        gas_meter.borrow().transaction_gas.sub,
+        gas_meter.borrow().get_available_gas().sub,
     );
     let store = Rc::new(RefCell::new(store));
 
@@ -270,6 +281,7 @@ where
         wasmer::Instance::new(&mut *store, &module, &imports)
             .map_err(|e| Error::InstantiationError(Box::new(e)))?
     };
+    println!("wasm gas after intiantiate {:?}", wasm_gas_meter.borrow());
 
     wasm_gas_meter.borrow_mut().init(
         |meter| {
@@ -284,6 +296,16 @@ where
                 .get_global(MUT_GLOBAL_GAS_NAME)
                 .map_err(Error::MissingGasMutGlobal)?;
 
+            println!("wasm gas initial gas {}", meter.initial_gas().sub);
+            {
+                let m = gas_meter.borrow();
+                println!(
+                    "gas meter scale {}, limit {}, available: {}",
+                    m.get_gas_scale(),
+                    m.get_gas_limit().sub,
+                    m.get_available_gas().sub
+                );
+            }
             meter.init_from(
                 &*gas_meter.borrow(),
                 global.clone(),

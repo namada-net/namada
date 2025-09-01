@@ -244,7 +244,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 )]
 #[must_use = "Gas must be accounted for by the gas meter"]
 pub struct Gas {
-    sub: u64,
+    pub sub: u64,
 }
 
 impl Gas {

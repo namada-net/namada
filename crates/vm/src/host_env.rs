@@ -615,6 +615,7 @@ where
     CA: WasmCacheAccess,
 {
     let gas_meter = env.ctx.gas_meter();
+    println!("vp gas {}", used_gas);
     vp_host_fns::add_gas(gas_meter, used_gas.into())
 }
 
@@ -638,6 +639,7 @@ where
     consume_tx_gas::<MEM, D, H, CA>(env, gas)?;
 
     tracing::debug!("tx_has_key {}, key {}", key, key_ptr,);
+    println!("tx_has_key {}", key);
 
     let key = Key::parse(key)?;
 
@@ -670,6 +672,7 @@ where
     consume_tx_gas::<MEM, D, H, CA>(env, gas)?;
 
     tracing::debug!("tx_read {}, key {}", key, key_ptr,);
+    println!("tx_read {}", key);
 
     let key = Key::parse(key)?;
 
@@ -783,6 +786,7 @@ where
     consume_tx_gas::<MEM, D, H, CA>(env, gas)?;
 
     tracing::debug!("tx_iter_prefix {}", prefix);
+    println!("tx_iter_prefix {}", prefix);
 
     let prefix = Key::parse(prefix)?;
 
@@ -815,6 +819,7 @@ where
     CA: WasmCacheAccess,
 {
     tracing::debug!("tx_iter_next iter_id {}", iter_id,);
+    println!("tx_iter_next");
 
     let iterators = unsafe { env.ctx.iterators.get_mut() };
     let iter_id = PrefixIteratorId::new(iter_id);
@@ -891,6 +896,7 @@ where
     consume_tx_gas::<MEM, D, H, CA>(env, gas)?;
 
     tracing::debug!("tx_update {}", key);
+    println!("tx_write {key}");
 
     let key = Key::parse(key)?;
     if key.is_validity_predicate().is_some() {
@@ -1007,6 +1013,7 @@ where
     consume_tx_gas::<MEM, D, H, CA>(env, gas)?;
 
     tracing::debug!("tx_delete {}", key);
+    println!("tx_delete {key}");
 
     let key = Key::parse(key)?;
     if key.is_validity_predicate().is_some() {
@@ -1034,6 +1041,7 @@ where
         .memory
         .read_bytes(event_ptr, event_len.try_into()?)
         .map_err(|e| TxRuntimeError::MemoryError(Box::new(e)))?;
+    println!("tx_emit_event");
     consume_tx_gas::<MEM, D, H, CA>(env, gas)?;
     let event: Event = BorshDeserialize::try_from_slice(&event)
         .map_err(TxRuntimeError::EncodingError)?;
@@ -1069,6 +1077,7 @@ where
         .memory
         .read_string(event_type_ptr, event_type_len.try_into()?)
         .map_err(|e| TxRuntimeError::MemoryError(Box::new(e)))?;
+    println!("tx_get_events {event_type}");
     consume_tx_gas::<MEM, D, H, CA>(env, gas)?;
     let state = env.state();
     let value = {
@@ -1111,7 +1120,9 @@ where
         .memory
         .read_string(key_ptr, key_len.try_into()?)
         .map_err(Into::into)?;
+    println!("vp_read_pre {key}");
     let gas_meter = env.ctx.gas_meter();
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)?;
 
     // try to read from the storage
@@ -1156,7 +1167,9 @@ where
         .memory
         .read_string(key_ptr, key_len.try_into()?)
         .map_err(Into::into)?;
+    println!("vp_read_post {key}");
     let gas_meter = env.ctx.gas_meter();
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)?;
 
     tracing::debug!("vp_read_post {}, key {}", key, key_ptr,);
@@ -1198,6 +1211,7 @@ where
         .read_string(key_ptr, key_len.try_into()?)
         .map_err(Into::into)?;
     let gas_meter = env.ctx.gas_meter();
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)?;
 
     tracing::debug!("vp_read_temp {}, key {}", key, key_ptr);
@@ -1245,6 +1259,7 @@ where
         .write_bytes(result_ptr, value)
         .map_err(Into::into)?;
     let gas_meter = env.ctx.gas_meter();
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)
 }
 
@@ -1266,7 +1281,9 @@ where
         .memory
         .read_string(key_ptr, key_len.try_into()?)
         .map_err(Into::into)?;
+    println!("vp_has_key_pre {key}");
     let gas_meter = env.ctx.gas_meter();
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)?;
 
     tracing::debug!("vp_has_key_pre {}, key {}", key, key_ptr,);
@@ -1296,7 +1313,9 @@ where
         .memory
         .read_string(key_ptr, key_len.try_into()?)
         .map_err(Into::into)?;
+    println!("vp_has_key_post {key}");
     let gas_meter = env.ctx.gas_meter();
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)?;
 
     tracing::debug!("vp_has_key_post {}, key {}", key, key_ptr,);
@@ -1328,7 +1347,9 @@ where
         .memory
         .read_string(prefix_ptr, prefix_len.try_into()?)
         .map_err(Into::into)?;
+    println!("vp_iter_prefix_pre {prefix}");
     let gas_meter = env.ctx.gas_meter();
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)?;
 
     tracing::debug!("vp_iter_prefix_pre {}", prefix);
@@ -1367,7 +1388,9 @@ where
         .memory
         .read_string(prefix_ptr, prefix_len.try_into()?)
         .map_err(Into::into)?;
+    println!("vp_iter_prefix_post {prefix}");
     let gas_meter = env.ctx.gas_meter();
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)?;
 
     tracing::debug!("vp_iter_prefix_post {}", prefix);
@@ -1403,6 +1426,7 @@ where
     CA: WasmCacheAccess,
 {
     tracing::debug!("vp_iter_next iter_id {}", iter_id);
+    println!("vp_iter_next");
 
     let iterators = unsafe { env.ctx.iterators.get_mut() };
     let iter_id = PrefixIteratorId::new(iter_id);
@@ -1765,6 +1789,7 @@ where
         .memory
         .write_string(result_ptr, chain_id.to_string())
         .map_err(Into::into)?;
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)
 }
 
@@ -1806,6 +1831,7 @@ where
     let state = env.state();
     let (header, gas) =
         StateRead::get_block_header(&state, Some(BlockHeight(height)))?;
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)?;
     Ok(match header {
         Some(h) => {
@@ -1847,6 +1873,7 @@ where
         .memory
         .write_bytes(result_ptr, result_bytes)
         .map_err(Into::into)?;
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)
 }
 
@@ -1907,7 +1934,9 @@ where
         .memory
         .read_string(event_type_ptr, event_type_len.try_into()?)
         .map_err(Into::into)?;
+    println!("vp_get_events {event_type}");
     let gas_meter = env.ctx.gas_meter();
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)?;
 
     let state = env.state();
@@ -1945,6 +1974,7 @@ where
         .map_err(Into::into)?;
 
     let gas_meter = env.ctx.gas_meter();
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)?;
     let hashes: [Hash; 1] = decode(hash_list)?;
 
@@ -1952,6 +1982,7 @@ where
         .memory
         .read_bytes(public_keys_map_ptr, public_keys_map_len.try_into()?)
         .map_err(Into::into)?;
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)?;
     let public_keys_map: AccountPublicKeysMap = decode(public_keys_map)?;
 
@@ -1959,6 +1990,7 @@ where
         .memory
         .read_bytes(signer_ptr, signer_len.try_into()?)
         .map_err(Into::into)?;
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)?;
     let signer: Address = decode(signer)?;
 
@@ -1970,6 +2002,7 @@ where
         &Some(signer),
         threshold,
         || {
+            println!("tx gas {}", gas::VERIFY_TX_SIG_GAS);
             gas_meter
                 .borrow_mut()
                 .consume(gas::VERIFY_TX_SIG_GAS.into())
@@ -2126,6 +2159,7 @@ where
         &None,
         threshold,
         || {
+            println!("tx gas {}", gas::VERIFY_TX_SIG_GAS);
             gas_meter
                 .borrow_mut()
                 .consume(gas::VERIFY_TX_SIG_GAS.into())
@@ -2227,12 +2261,14 @@ where
     // which has to borrow it too.
     let tx = {
         let gas_meter = env.ctx.gas_meter();
+        println!("vp gas {}", gas.sub);
         vp_host_fns::add_gas(gas_meter, gas)?;
 
         let (input_data, gas) = env
             .memory
             .read_bytes(input_data_ptr, input_data_len.try_into()?)
             .map_err(Into::into)?;
+        println!("vp gas {}", gas.sub);
         vp_host_fns::add_gas(gas_meter, gas)?;
         let tx: BatchedTx = decode(input_data)?;
         tx
@@ -2274,6 +2310,7 @@ where
         .memory
         .write_string(result_ptr, native_token_string)
         .map_err(Into::into)?;
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(gas_meter, gas)
 }
 
@@ -2317,6 +2354,7 @@ where
         .memory
         .read_bytes(buf_ptr, buf_len.try_into()?)
         .map_err(Into::into)?;
+    println!("vp gas {}", gas.sub);
     vp_host_fns::add_gas(env.ctx.gas_meter(), gas)?;
     let host_buf = unsafe { env.ctx.yielded_value.get_mut() };
     host_buf.replace(value_to_yield);
@@ -2337,6 +2375,8 @@ where
     CA: WasmCacheAccess,
 {
     let (gas_meter, sentinel) = env.ctx.gas_meter_and_sentinel();
+
+    println!("tx gas {}", used_gas.sub);
 
     // if we run out of gas, we need to stop the execution
     gas_meter

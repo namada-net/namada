@@ -938,6 +938,7 @@ pub fn prepare_wasm_code<T: AsRef<[u8]>>(
     code: T,
     gas_meter_kind: GasMeterKind,
 ) -> Result<Vec<u8>> {
+    println!("wasm before inject {}", Hash::sha256(code.as_ref()));
     let module: elements::Module = elements::deserialize_buffer(code.as_ref())
         .map_err(Error::DeserializationError)?;
     let module = match gas_meter_kind {
@@ -988,7 +989,11 @@ pub fn prepare_wasm_code<T: AsRef<[u8]>>(
 
     let module = inject_alloc(module)?;
 
-    elements::serialize(module).map_err(Error::SerializationError)
+    let res = elements::serialize(module).map_err(Error::SerializationError)?;
+
+    println!("wasm after inject {}", Hash::sha256(&res));
+
+    Ok(res)
 }
 
 /// Inject and export allocation function that can be used to grow the initial

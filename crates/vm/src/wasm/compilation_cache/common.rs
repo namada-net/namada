@@ -415,43 +415,47 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
         tracing::info!("Compiling {} {}.", N::name(), hash.to_string());
 
         match wasm::run::prepare_wasm_code(code, gas_meter_kind) {
-            Ok(code) => match compile(code, &self.store) {
-                Ok(module) => {
-                    // Write the file
-                    file_write_module(
-                        &self.dir,
-                        &module,
-                        &hash,
-                        gas_meter_kind,
-                    );
+            Ok(code) => {
+                file_write_code(&self.dir, &code, &hash);
 
-                    // Update progress
-                    let mut progress = self.progress.write().unwrap();
-                    progress.insert(key, Compilation::Done);
-
-                    // Put into cache, ignore result if it's full
-                    let mut in_memory = self.in_memory.write().unwrap();
-                    let _ = in_memory.put_with_weight(
-                        CacheKey {
-                            code_hash: hash,
+                match compile(code, &self.store) {
+                    Ok(module) => {
+                        // Write the file
+                        file_write_module(
+                            &self.dir,
+                            &module,
+                            &hash,
                             gas_meter_kind,
-                        },
-                        module.clone(),
-                    );
+                        );
 
-                    Ok(Some((module, store())))
+                        // Update progress
+                        let mut progress = self.progress.write().unwrap();
+                        progress.insert(key, Compilation::Done);
+
+                        // Put into cache, ignore result if it's full
+                        let mut in_memory = self.in_memory.write().unwrap();
+                        let _ = in_memory.put_with_weight(
+                            CacheKey {
+                                code_hash: hash,
+                                gas_meter_kind,
+                            },
+                            module.clone(),
+                        );
+
+                        Ok(Some((module, store())))
+                    }
+                    Err(err) => {
+                        tracing::info!(
+                            "Failed to compile WASM {} with {}",
+                            hash.to_string(),
+                            err
+                        );
+                        let mut progress = self.progress.write().unwrap();
+                        progress.swap_remove(&key);
+                        Err(err)
+                    }
                 }
-                Err(err) => {
-                    tracing::info!(
-                        "Failed to compile WASM {} with {}",
-                        hash.to_string(),
-                        err
-                    );
-                    let mut progress = self.progress.write().unwrap();
-                    progress.swap_remove(&key);
-                    Err(err)
-                }
-            },
+            }
             Err(err) => {
                 tracing::info!(
                     "Failed to prepare WASM {} with {}",
@@ -612,6 +616,17 @@ fn file_write_module(
     use wasmer_cache::Cache;
     let mut fs_cache = fs_cache(dir, hash, gas_meter_kind);
     fs_cache.store(CacheHash::new(hash.0), module).unwrap();
+}
+
+fn file_write_code(dir: &Path, code: &[u8], hash: &Hash) {
+    store_code(dir, CacheHash::new(hash.0), code);
+}
+
+fn store_code(dir: &Path, key: CacheHash, code: &[u8]) {
+    let filename = format!("{}.{}", key, ".wasm");
+    let path = dir.join(filename);
+    let mut file = fs::File::create(path).unwrap();
+    std::io::Write::write_all(&mut file, code).unwrap()
 }
 
 fn file_load_module(

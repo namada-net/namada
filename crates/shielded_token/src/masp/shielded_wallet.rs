@@ -357,6 +357,12 @@ pub struct TxHistoryEntry {
 >>>>>>> a3f44a9c0 (Derive default on shielded wallet)
 }
 
+pub(crate) struct SyncedHeights {
+    pub(crate) min_height_to_sync_from: BlockHeight,
+    #[allow(dead_code)]
+    pub(crate) max_synced_height: BlockHeight,
+}
+
 impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
     /// Try to load the last saved shielded wallet from the given context
     /// directory. If the file is missing, an empty wallet is created.
@@ -468,22 +474,42 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
     pub(crate) fn min_height_to_sync_from(
         &self,
     ) -> Result<BlockHeight, eyre::Error> {
-        let Some(maybe_least_synced_vk_height) =
-            self.vk_heights.values().min().cloned()
-        else {
+        self.synced_heights()
+            .map(|synced| synced.min_height_to_sync_from)
+    }
+
+    pub(crate) fn synced_heights(&self) -> Result<SyncedHeights, eyre::Error> {
+        if self.vk_heights.is_empty() {
             return Err(eyre!(
                 "No viewing keys are available in the shielded context to \
                  decrypt notes with"
                     .to_string(),
             ));
-        };
+        }
 
-        Ok(if maybe_least_synced_vk_height == BlockHeight(0) {
-            // NB: Height 0 is a sentinel, we must return height 1 instead
-            // as the first height to sync from
-            BlockHeight::first()
-        } else {
-            maybe_least_synced_vk_height
+        let (mut min_height, max_height) =
+            self.vk_heights.values().copied().fold(
+                (BlockHeight(u64::MAX), BlockHeight(0)),
+                |(mut min, mut max), next| {
+                    if next < min {
+                        min = next;
+                    }
+                    if next > max {
+                        max = next;
+                    }
+                    (min, max)
+                },
+            );
+
+        // NB: Height 0 is a sentinel, we must return height 1 instead
+        // as the first height to sync from
+        if min_height == BlockHeight(0) {
+            min_height = BlockHeight::first();
+        }
+
+        Ok(SyncedHeights {
+            min_height_to_sync_from: min_height,
+            max_synced_height: max_height,
         })
     }
 

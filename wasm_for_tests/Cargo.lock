@@ -2862,6 +2862,7 @@ dependencies = [
  "borsh",
  "eyre",
  "futures",
+ "group",
  "itertools 0.14.0",
  "lazy_static",
  "leanbridgetree",

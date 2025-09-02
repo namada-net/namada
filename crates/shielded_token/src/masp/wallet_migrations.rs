@@ -43,20 +43,57 @@ pub enum VersionedWalletRef<'w, U: ShieldedUtils> {
     V2(&'w ShieldedWallet<U>),
 }
 
-mod bridge_tree_migrations {
+mod migrations {
     use std::collections::{BTreeMap, BTreeSet};
 
     use masp_primitives::merkle_tree::CommitmentTree;
-    use masp_primitives::sapling::{Node, SAPLING_COMMITMENT_TREE_DEPTH};
+    use masp_primitives::sapling::{
+        Diversifier, Node, Note, SAPLING_COMMITMENT_TREE_DEPTH,
+    };
     use namada_core::collections::HashMap;
 
-    use crate::masp::WitnessMap;
     use crate::masp::bridge_tree::pkg::{Level, Position, Source};
     use crate::masp::bridge_tree::{BridgeTree, InnerBridgeTree};
+    use crate::masp::shielded_wallet::CompactNote;
+    use crate::masp::{NotePosition, WitnessMap};
 
-    #[allow(missing_docs)]
-    #[allow(dead_code)]
-    pub fn migrate(
+    #[allow(missing_docs, dead_code)]
+    pub fn migrate_note_map(
+        note_map: HashMap<usize, Note>,
+        mut div_map: HashMap<usize, Diversifier>,
+    ) -> HashMap<NotePosition, CompactNote> {
+        let mut migrated = HashMap::new();
+
+        for (pos, note) in note_map {
+            let diversifier = div_map
+                .swap_remove(&pos)
+                .expect("Missing diversifier in shielded wallet");
+
+            let Note {
+                asset_type,
+                value,
+                pk_d,
+                rseed,
+                ..
+            } = note;
+
+            migrated.insert(
+                NotePosition(pos.try_into().unwrap()),
+                CompactNote {
+                    asset_type,
+                    value,
+                    diversifier,
+                    pk_d,
+                    rseed,
+                },
+            );
+        }
+
+        migrated
+    }
+
+    #[allow(missing_docs, dead_code)]
+    pub fn migrate_bridge_tree(
         tree: &CommitmentTree<Node>,
         witness_map: &WitnessMap,
     ) -> BridgeTree {
@@ -165,7 +202,7 @@ mod bridge_tree_migrations {
         }
 
         // convert to bridge tree
-        let bridge_tree = migrate(&tree, &witness_map);
+        let bridge_tree = migrate_bridge_tree(&tree, &witness_map);
 
         // check if roots and merkle proofs match
         assert_eq!(tree.root(), bridge_tree.as_ref().root());
@@ -278,12 +315,12 @@ pub mod v0 {
 =======
             #[cfg(not(feature = "historic"))]
             {
-                use super::bridge_tree_migrations;
+                use super::migrations;
                 use crate::masp::NotePosition;
 
                 Self {
                     utils: wallet.utils,
-                    tree: bridge_tree_migrations::migrate(
+                    tree: migrations::migrate_bridge_tree(
                         &wallet.tree,
                         &wallet.witness_map,
                     ),
@@ -321,25 +358,15 @@ pub mod v0 {
                             (nf, NotePosition(pos.try_into().unwrap()))
                         })
                         .collect(),
-                    note_map: wallet
-                        .note_map
-                        .into_iter()
-                        .map(|(pos, note)| {
-                            (NotePosition(pos.try_into().unwrap()), note)
-                        })
-                        .collect(),
+                    note_map: migrations::migrate_note_map(
+                        wallet.note_map,
+                        wallet.div_map,
+                    ),
                     memo_map: wallet
                         .memo_map
                         .into_iter()
                         .map(|(pos, memo)| {
                             (NotePosition(pos.try_into().unwrap()), memo)
-                        })
-                        .collect(),
-                    div_map: wallet
-                        .div_map
-                        .into_iter()
-                        .map(|(pos, div)| {
-                            (NotePosition(pos.try_into().unwrap()), div)
                         })
                         .collect(),
                     spents: wallet
@@ -434,12 +461,12 @@ pub mod v1 {
         fn from(wallet: ShieldedWallet<U>) -> Self {
             #[cfg(not(feature = "historic"))]
             {
-                use super::bridge_tree_migrations;
+                use super::migrations;
                 use crate::masp::NotePosition;
 
                 Self {
                     utils: wallet.utils,
-                    tree: bridge_tree_migrations::migrate(
+                    tree: migrations::migrate_bridge_tree(
                         &wallet.tree,
                         &wallet.witness_map,
                     ),
@@ -477,25 +504,15 @@ pub mod v1 {
                             (nf, NotePosition(pos.try_into().unwrap()))
                         })
                         .collect(),
-                    note_map: wallet
-                        .note_map
-                        .into_iter()
-                        .map(|(pos, note)| {
-                            (NotePosition(pos.try_into().unwrap()), note)
-                        })
-                        .collect(),
+                    note_map: migrations::migrate_note_map(
+                        wallet.note_map,
+                        wallet.div_map,
+                    ),
                     memo_map: wallet
                         .memo_map
                         .into_iter()
                         .map(|(pos, memo)| {
                             (NotePosition(pos.try_into().unwrap()), memo)
-                        })
-                        .collect(),
-                    div_map: wallet
-                        .div_map
-                        .into_iter()
-                        .map(|(pos, div)| {
-                            (NotePosition(pos.try_into().unwrap()), div)
                         })
                         .collect(),
                     spents: wallet

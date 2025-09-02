@@ -6282,6 +6282,7 @@ dependencies = [
  "eyre",
  "flume 0.11.1",
  "futures",
+ "group",
  "itertools 0.14.0",
  "lazy_static",
  "leanbridgetree",

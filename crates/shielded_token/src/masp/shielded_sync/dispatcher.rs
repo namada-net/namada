@@ -27,8 +27,7 @@ use crate::masp::utils::{
     DecryptedData, Fetched, RetryStrategy, TrialDecrypted, blocks_left_to_fetch,
 };
 use crate::masp::{
-    MaspExtendedSpendingKey, NoteIndex, ShieldedUtils, ShieldedWallet,
-    to_viewing_key,
+    MaspExtendedSpendingKey, ShieldedUtils, ShieldedWallet, to_viewing_key,
 };
 
 struct AsyncCounterInner {
@@ -195,7 +194,6 @@ impl<Spawner> DispatcherTasks<Spawner> {
 /// Shielded sync cache.
 #[derive(Default, BorshSerialize, BorshDeserialize)]
 pub struct DispatcherCache {
-    pub(crate) note_index: Option<(BlockHeight, NoteIndex)>,
     pub(crate) fetched: Fetched,
     pub(crate) trial_decrypted: TrialDecrypted,
 }
@@ -370,10 +368,6 @@ where
             ..
         }: &InitialState,
     ) -> Result<(), eyre::Error> {
-        if let Some((_, nm)) = self.cache.note_index.take() {
-            self.ctx.note_index = nm;
-        }
-
         for (masp_indexed_tx, stx_batch) in self.cache.fetched.take() {
             if Some(&masp_indexed_tx) > last_witnessed_tx.as_ref() {
                 self.ctx.update_witnesses(
@@ -1261,11 +1255,9 @@ mod dispatcher_tests {
                 assert!(res.is_none());
 
                 let DispatcherCache {
-                    note_index,
                     fetched,
                     trial_decrypted,
                 } = utils.cache_load().await.expect("Test failed");
-                assert!(note_index.is_none());
                 assert!(fetched.is_empty());
                 assert!(trial_decrypted.is_empty());
             })

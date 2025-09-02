@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, btree_map};
 use std::fmt;
+use std::io::{Read, Write};
 
 use eyre::{ContextCompat, WrapErr, eyre};
 use masp_primitives::asset_type::AssetType;
@@ -175,6 +176,108 @@ impl fmt::Display for NotePosition {
     }
 }
 
+/// Compact representation of a [`Note`].
+#[derive(Debug, Clone, Copy)]
+#[allow(missing_docs)]
+pub struct CompactNote {
+    pub asset_type: AssetType,
+    pub value: u64,
+    pub diversifier: Diversifier,
+    pub pk_d: masp_primitives::jubjub::SubgroupPoint,
+    pub rseed: masp_primitives::sapling::Rseed,
+}
+
+impl BorshSerialize for CompactNote {
+    fn serialize<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        use group::GroupEncoding;
+
+        BorshSerialize::serialize(&self.asset_type, writer)?;
+        BorshSerialize::serialize(&self.value, writer)?;
+        BorshSerialize::serialize(&self.diversifier, writer)?;
+        BorshSerialize::serialize(&self.pk_d.to_bytes(), writer)?;
+        BorshSerialize::serialize(&self.rseed, writer)
+    }
+}
+
+impl BorshDeserialize for CompactNote {
+    fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
+        use group::GroupEncoding;
+
+        let asset_type =
+            <AssetType as BorshDeserialize>::deserialize_reader(reader)?;
+        let value = <u64 as BorshDeserialize>::deserialize_reader(reader)?;
+        let diversifier =
+            <Diversifier as BorshDeserialize>::deserialize_reader(reader)?;
+        let pk_d = masp_primitives::jubjub::SubgroupPoint::from_bytes(
+            &<[u8; 32] as BorshDeserialize>::deserialize_reader(reader)?,
+        )
+        .into_option()
+        .ok_or_else(|| std::io::Error::other("Invalid pk_d in CompactNote"))?;
+        let rseed = <masp_primitives::sapling::Rseed as BorshDeserialize>::deserialize_reader(reader)?;
+
+        Ok(Self {
+            asset_type,
+            value,
+            diversifier,
+            pk_d,
+            rseed,
+        })
+    }
+}
+
+impl CompactNote {
+    /// Create a compact version of a [`Note`].
+    pub fn new(
+        note: Note,
+        pa: masp_primitives::sapling::PaymentAddress,
+    ) -> Option<Self> {
+        let g_d = pa.g_d()?;
+        let pk_d = *pa.pk_d();
+
+        if g_d != note.g_d || pk_d != note.pk_d {
+            return None;
+        }
+
+        let diversifier = *pa.diversifier();
+        let Note {
+            asset_type,
+            value,
+            pk_d,
+            rseed,
+            ..
+        } = note;
+
+        Some(Self {
+            asset_type,
+            value,
+            diversifier,
+            pk_d,
+            rseed,
+        })
+    }
+
+    /// Convert this [`CompactNote`] back into a [`Note`].
+    pub fn into_note(self) -> Option<Note> {
+        let g_d = self.diversifier.g_d()?;
+
+        let Self {
+            asset_type,
+            value,
+            pk_d,
+            rseed,
+            ..
+        } = self;
+
+        Some(Note {
+            asset_type,
+            value,
+            g_d,
+            pk_d,
+            rseed,
+        })
+    }
+}
+
 /// Represents the current state of the shielded pool from the perspective of
 /// the chosen viewing keys.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Default)]
@@ -196,11 +299,9 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     /// Maps a nullifier to the note position to which it applies
     pub nf_map: HashMap<Nullifier, NotePosition>,
     /// Maps note positions to their corresponding notes
-    pub note_map: HashMap<NotePosition, Note>,
+    pub note_map: HashMap<NotePosition, CompactNote>,
     /// Maps note positions to their corresponding memos
     pub memo_map: HashMap<NotePosition, MemoBytes>,
-    /// Maps note positions to the diversifier of their payment address
-    pub div_map: HashMap<NotePosition, Diversifier>,
     /// Maps asset types to their decodings
     pub asset_types: HashMap<AssetType, AssetData>,
     /// A conversions cache
@@ -376,13 +477,12 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         self.pos_map.entry(*vk).or_default().insert(note_pos);
         // Compute the nullifier now to quickly recognize when spent
         let nf = note.nf(&vk.nk, note_pos.into());
-        self.note_map.insert(note_pos, note);
+        let compact_note = CompactNote::new(note, pa)
+            .context("Invalid diversifier in decrypted note")?;
+        self.note_map.insert(note_pos, compact_note);
         if !is_empty_memo(&memo) {
             self.memo_map.insert(note_pos, memo);
         }
-        // The payment address' diversifier is required to spend
-        // note
-        self.div_map.insert(note_pos, *pa.diversifier());
         self.nf_map.insert(nf, note_pos);
         #[cfg(feature = "historic")]
         {
@@ -433,7 +533,6 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
             // If the shielded spend's nullifier is in our map, then target
             // note is rendered unusable
             if let Some(note_pos) = self.nf_map.swap_remove(&ss.nullifier) {
-                self.div_map.swap_remove(&note_pos);
                 self.note_map.swap_remove(&note_pos);
                 self.spents.insert(note_pos);
                 self.tree
@@ -1168,7 +1267,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         exchanged_notes: &BTreeMap<
             NotePosition,
             (
-                Note,
+                CompactNote,
                 I128Sum,
                 I128Sum,
                 ValueSum<(MaspDigitPos, Address), i128>,
@@ -1244,7 +1343,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         BTreeMap<
             NotePosition,
             (
-                Note,
+                CompactNote,
                 I128Sum,
                 I128Sum,
                 ValueSum<(MaspDigitPos, Address), i128>,
@@ -1324,10 +1423,8 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         target: ValueSum<(MaspDigitPos, Address), i128>,
         conversions: &mut Conversions,
         usages: &mut I128Sum,
-    ) -> Result<
-        (I128Sum, Vec<(Diversifier, Note, MerklePath<Node>)>),
-        eyre::Error,
-    > {
+    ) -> Result<(I128Sum, Vec<(CompactNote, MerklePath<Node>)>), eyre::Error>
+    {
         let vk = &sk.to_viewing_key().fvk.vk;
         let mut namada_acc = ValueSum::zero();
         let mut masp_acc = I128Sum::zero();
@@ -1362,12 +1459,8 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 self.tree.witness(note_idx).wrap_err_with(|| {
                     format!("Unable to get merkle path to note {note_idx}")
                 })?;
-            let diversifier = self
-                .div_map
-                .get(&note_idx)
-                .ok_or_else(|| eyre!("Unable to get note {note_idx}"))?;
             // Commit this note to our transaction
-            notes.push((*diversifier, note, merkle_path));
+            notes.push((note, merkle_path));
             // Append the note the list of used ones
             spent_notes
                 .entry(vk.to_owned())
@@ -1984,7 +2077,16 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             }
 
             // Commit the notes found to our transaction
-            for (diversifier, note, merkle_path) in unspent_notes {
+            for (compact_note, merkle_path) in unspent_notes {
+                let diversifier = compact_note.diversifier;
+                let note = compact_note.into_note().ok_or_else(|| {
+                    TransferErr::General(
+                        "Invalid diversifier in decrypted note was stored in \
+                         shielded wallet"
+                            .into(),
+                    )
+                })?;
+
                 builder
                     .add_sapling_spend(sk, diversifier, note, merkle_path)
                     .map_err(|e| TransferErr::Build {

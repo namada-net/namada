@@ -93,6 +93,7 @@ impl WasmGasMeter {
         self.initial_gas.clone()
     }
 
+    #[track_caller]
     fn write_wasm_gas(
         &self,
         gas: Gas,
@@ -117,6 +118,7 @@ impl WasmGasMeter {
             .expect("setting the wasm global gas value shouldn't fail");
     }
 
+    #[track_caller]
     fn read_wasm_gas(
         &self,
         store: Option<rc::Rc<RefCell<wasmer::Store>>>,

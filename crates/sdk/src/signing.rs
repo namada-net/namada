@@ -2474,8 +2474,7 @@ mod test_signing {
 
     fn arbitrary_args() -> args::Tx {
         args::Tx {
-            dry_run: false,
-            dry_run_wrapper: false,
+            dry_run: None,
             dump_tx: false,
             dump_wrapper_tx: false,
             output_folder: None,

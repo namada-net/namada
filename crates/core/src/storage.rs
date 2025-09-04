@@ -785,13 +785,7 @@ impl KeySeg for String {
 
 impl KeySeg for BlockHeight {
     fn parse(string: String) -> Result<Self> {
-        let h = string.parse::<u64>().map_err(|e| {
-            Error::ParseKeySeg(format!(
-                "Unexpected height value {}, {}",
-                string, e
-            ))
-        })?;
-        Ok(BlockHeight(h))
+        panic!("tried to parse BlockHeight({string:?}) as KeySeg");
     }
 
     fn raw(&self) -> String {

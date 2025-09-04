@@ -244,6 +244,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 )]
 #[must_use = "Gas must be accounted for by the gas meter"]
 pub struct Gas {
+    #[allow(missing_docs, dead_code)]
     pub sub: u64,
 }
 

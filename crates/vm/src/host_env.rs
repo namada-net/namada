@@ -2326,7 +2326,6 @@ where
 // Internal funtion to charge gas for txs. Called by the other functions in this
 // file while the public version is left to be used directly from wasm and as a
 // hook for gas instrumentation
-#[track_caller]
 fn consume_tx_gas<MEM, D, H, CA>(
     env: &mut TxVmEnv<MEM, D, H, CA>,
     used_gas: Gas,
@@ -2337,8 +2336,6 @@ where
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
-    println!("Called consume_tx_gas from {}", std::panic::Location::caller());
-
     let (gas_meter, sentinel) = env.ctx.gas_meter_and_sentinel();
 
     // if we run out of gas, we need to stop the execution

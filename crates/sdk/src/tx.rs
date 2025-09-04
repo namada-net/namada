@@ -242,7 +242,7 @@ pub async fn prepare_tx(
     fee_amount: DenominatedAmount,
     fee_payer: common::PublicKey,
 ) -> Result<()> {
-    if args.dry_run || args.dump_tx {
+    if matches!(args.dry_run, Some(args::DryRun::Inner)) || args.dump_tx {
         Ok(())
     } else {
         signing::wrap_tx(tx, args, fee_amount, fee_payer).await
@@ -266,7 +266,7 @@ pub async fn process_tx(
     // let request_body = request.into_json();
     // println!("HTTP request body: {}", request_body);
 
-    if args.dry_run || args.dry_run_wrapper {
+    if args.dry_run.is_some() {
         expect_dry_broadcast(TxBroadcastData::DryRun(tx), context).await
     } else {
         // We use this to determine when the wrapper tx makes it on-chain
@@ -3483,6 +3483,9 @@ where
         fee_payer,
     }) = wrap_args
     {
+        // FIXME: if wrap_args is provided we wrap it but within prepare_tx we
+        // avoid wrapping it if a dry-run or dump is requested so maybe there's
+        // a way to avoid the wrap_it argument
         prepare_tx(tx_args, &mut tx, fee_amount, fee_payer).await?;
     }
 

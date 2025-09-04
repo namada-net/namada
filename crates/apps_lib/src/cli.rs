@@ -7711,7 +7711,6 @@ pub mod args {
 
             Ok(Tx::<SdkTypes> {
                 dry_run: self.dry_run,
-                dry_run_wrapper: self.dry_run_wrapper,
                 dump_tx: self.dump_tx,
                 dump_wrapper_tx: self.dump_wrapper_tx,
                 output_folder: self.output_folder,
@@ -7862,8 +7861,13 @@ pub mod args {
         }
 
         fn parse(matches: &ArgMatches) -> Self {
-            let dry_run = DRY_RUN_TX.parse(matches);
-            let dry_run_wrapper = DRY_RUN_WRAPPER_TX.parse(matches);
+            let dry_run = if DRY_RUN_TX.parse(matches) {
+                Some(DryRun::Inner)
+            } else if DRY_RUN_WRAPPER_TX.parse(matches) {
+                Some(DryRun::Wrapper)
+            } else {
+                None
+            };
             let dump_tx = DUMP_TX.parse(matches);
             let dump_wrapper_tx = DUMP_WRAPPER_TX.parse(matches);
             let force = FORCE.parse(matches);
@@ -7898,7 +7902,6 @@ pub mod args {
             let device_transport = DEVICE_TRANSPORT.parse(matches);
             Self {
                 dry_run,
-                dry_run_wrapper,
                 dump_tx,
                 dump_wrapper_tx,
                 force,

@@ -190,14 +190,14 @@ impl ProcessTxResponse {
 
 /// Build and dump a transaction either to file or to screen
 pub fn dump_tx<IO: Io>(io: &IO, args: &args::Tx, mut tx: Tx) -> Result<()> {
-    // FIXME: this should probably just be a check like the one below instead of
-    // a hard cast FIXME: also, should we make these two arguments an
-    // either? Either you dump the raw or the wrapper
-    if args.dump_tx {
-        tx.update_header(data::TxType::Raw);
+    let is_wrapper_tx = tx.header.wrapper().is_some();
+    if matches!(args.dump_tx, Some(args::DumpTx::Inner)) && is_wrapper_tx {
+        return Err(Error::Other(
+            "Requested tx-dump on a tx which is a wrapper".to_string(),
+        ));
     };
 
-    if args.dump_wrapper_tx && tx.header.wrapper().is_none() {
+    if matches!(args.dump_tx, Some(args::DumpTx::Wrapper)) && !is_wrapper_tx {
         return Err(Error::Other(
             "Requested wrapper-dump on a tx which is not a wrapper".to_string(),
         ));
@@ -242,7 +242,9 @@ pub async fn prepare_tx(
     fee_amount: DenominatedAmount,
     fee_payer: common::PublicKey,
 ) -> Result<()> {
-    if matches!(args.dry_run, Some(args::DryRun::Inner)) || args.dump_tx {
+    if matches!(args.dry_run, Some(args::DryRun::Inner))
+        || matches!(args.dump_tx, Some(args::DumpTx::Inner))
+    {
         Ok(())
     } else {
         signing::wrap_tx(tx, args, fee_amount, fee_payer).await

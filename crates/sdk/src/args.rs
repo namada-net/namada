@@ -2613,14 +2613,20 @@ impl TxExpiration {
     }
 }
 
+/// Argument for dry-runs
+#[derive(Clone, Debug)]
+pub enum DryRun {
+    /// Request a dry run of the inner transaction(s) only
+    Inner,
+    /// Request a dry run of both the inner transaction(s) and the wrapper
+    Wrapper,
+}
+
 /// Common transaction arguments
 #[derive(Clone, Debug)]
 pub struct Tx<C: NamadaTypes = SdkTypes> {
-    // FIXME: should these two be mutually exclusive? Yes
-    /// Simulate applying the transaction
-    pub dry_run: bool,
-    /// Simulate applying both the wrapper and inner transactions
-    pub dry_run_wrapper: bool,
+    /// Simulate applying the transaction (possibly the wrapper too)
+    pub dry_run: Option<DryRun>,
     /// Dump the raw transaction bytes to file
     // FIXME: should these two be mutually exclusive? Yes
     // FIXME: can we use dump tx to avoid wrapping the tx instead of the extra
@@ -2705,15 +2711,8 @@ pub trait TxBuilder<C: NamadaTypes>: Sized {
     where
         F: FnOnce(Tx<C>) -> Tx<C>;
     /// Simulate applying the transaction
-    fn dry_run(self, dry_run: bool) -> Self {
+    fn dry_run(self, dry_run: Option<DryRun>) -> Self {
         self.tx(|x| Tx { dry_run, ..x })
-    }
-    /// Simulate applying both the wrapper and inner transactions
-    fn dry_run_wrapper(self, dry_run_wrapper: bool) -> Self {
-        self.tx(|x| Tx {
-            dry_run_wrapper,
-            ..x
-        })
     }
     /// Dump the transaction bytes to file
     fn dump_tx(self, dump_tx: bool) -> Self {

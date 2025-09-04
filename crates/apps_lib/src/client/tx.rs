@@ -491,7 +491,7 @@ pub async fn submit_change_consensus_key(
         let wrapper_hash = tx.wrapper_hash();
         let resp = namada.submit(tx, &args.tx).await?;
 
-        if !(args.tx.dry_run || args.tx.dry_run_wrapper) {
+        if args.tx.dry_run.is_none() {
             if resp
                 .is_applied_and_valid(wrapper_hash.as_ref(), &cmt)
                 .is_some()
@@ -689,7 +689,7 @@ pub async fn submit_become_validator(
         let wrapper_hash = tx.wrapper_hash();
         let resp = namada.submit(tx, &args.tx).await?;
 
-        if args.tx.dry_run || args.tx.dry_run_wrapper {
+        if args.tx.dry_run.is_some() {
             display_line!(
                 namada.io(),
                 "Transaction dry run. No key or addresses have been saved."
@@ -815,7 +815,7 @@ pub async fn submit_init_validator(
     )
     .await?;
 
-    if tx_args.dry_run || tx_args.dry_run_wrapper {
+    if tx_args.dry_run.is_some() {
         eprintln!(
             "Cannot proceed to become validator in dry-run as no account has \
              been created"
@@ -1794,7 +1794,7 @@ where
         let wrapper_hash = tx.wrapper_hash();
         let resp = namada.submit(tx, &args.tx).await?;
 
-        if !(args.tx.dry_run || args.tx.dry_run_wrapper)
+        if args.tx.dry_run.is_none()
             && resp
                 .is_applied_and_valid(wrapper_hash.as_ref(), &cmt)
                 .is_some()

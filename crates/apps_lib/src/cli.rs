@@ -7712,7 +7712,6 @@ pub mod args {
             Ok(Tx::<SdkTypes> {
                 dry_run: self.dry_run,
                 dump_tx: self.dump_tx,
-                dump_wrapper_tx: self.dump_wrapper_tx,
                 output_folder: self.output_folder,
                 force: self.force,
                 broadcast_only: self.broadcast_only,
@@ -7868,8 +7867,13 @@ pub mod args {
             } else {
                 None
             };
-            let dump_tx = DUMP_TX.parse(matches);
-            let dump_wrapper_tx = DUMP_WRAPPER_TX.parse(matches);
+            let dump_tx = if DUMP_TX.parse(matches) {
+                Some(DumpTx::Inner)
+            } else if DUMP_WRAPPER_TX.parse(matches) {
+                Some(DumpTx::Wrapper)
+            } else {
+                None
+            };
             let force = FORCE.parse(matches);
             let broadcast_only = BROADCAST_ONLY.parse(matches);
             let ledger_address = CONFIG_RPC_LEDGER_ADDRESS.parse(matches);
@@ -7887,7 +7891,9 @@ pub mod args {
             let memo = MEMO_OPT.parse(matches).map(String::into_bytes);
             let wrapper_fee_payer = FEE_PAYER_OPT.parse(matches);
             // Wrap the transaction unless we want to dump the raw
-            let wrap_it = !dump_tx;
+            // FIXME: maybe this is wrong now, I think it was wrong even before
+            // the last commit. Need to remove this arg
+            let wrap_it = dump_tx.is_none();
             let output_folder = OUTPUT_FOLDER_PATH.parse(matches);
             let use_device = USE_DEVICE.parse(matches);
             let no_expiration = NO_EXPIRATION.parse(matches);
@@ -7903,7 +7909,6 @@ pub mod args {
             Self {
                 dry_run,
                 dump_tx,
-                dump_wrapper_tx,
                 force,
                 broadcast_only,
                 ledger_address,

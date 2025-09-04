@@ -2622,18 +2622,27 @@ pub enum DryRun {
     Wrapper,
 }
 
+/// Argument for dumping transactions
+#[derive(Clone, Debug)]
+pub enum DumpTx {
+    /// Dump the raw transaction
+    Inner,
+    /// Dump the wrapper transaction
+    Wrapper,
+}
+
+// FIXME: are these arguments intended for a single inner tx or for the entire
+// batch? FIXME: should we separete the arguments for wrapper txs in a single
+// field? Maybe under a single Option in case we didn't want to wrap the tx. In
+// this cases joining the dru-run and dump arguments might not be a good idea
 /// Common transaction arguments
 #[derive(Clone, Debug)]
 pub struct Tx<C: NamadaTypes = SdkTypes> {
     /// Simulate applying the transaction (possibly the wrapper too)
     pub dry_run: Option<DryRun>,
-    /// Dump the raw transaction bytes to file
-    // FIXME: should these two be mutually exclusive? Yes
-    // FIXME: can we use dump tx to avoid wrapping the tx instead of the extra
-    // wrap_it arg?
-    pub dump_tx: bool,
-    /// Dump the wrapper transaction bytes to file
-    pub dump_wrapper_tx: bool,
+    /// Dump the transaction bytes to file, either the raw or the whole wrapper
+    /// transaction
+    pub dump_tx: Option<DumpTx>,
     /// The output directory path to where serialize the data
     pub output_folder: Option<PathBuf>,
     /// Submit the transaction even if it doesn't pass client checks
@@ -2653,7 +2662,6 @@ pub struct Tx<C: NamadaTypes = SdkTypes> {
     /// The fee payer signing key
     pub wrapper_fee_payer: Option<C::PublicKey>,
     /// A flag to request wrapping the transaction
-    // FIXME: rename this?
     pub wrap_it: bool,
     /// The token in which the fee is being paid
     // FIXME: maybe we can use fee_token instead of wrap_it by making this
@@ -2715,7 +2723,7 @@ pub trait TxBuilder<C: NamadaTypes>: Sized {
         self.tx(|x| Tx { dry_run, ..x })
     }
     /// Dump the transaction bytes to file
-    fn dump_tx(self, dump_tx: bool) -> Self {
+    fn dump_tx(self, dump_tx: Option<DumpTx>) -> Self {
         self.tx(|x| Tx { dump_tx, ..x })
     }
     /// The output directory path to where serialize the data

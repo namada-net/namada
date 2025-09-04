@@ -839,7 +839,7 @@ where
                 vp_wasm_cache,
                 tx_wasm_cache,
             },
-            GasMeterKind::HostFn,
+            GasMeterKind::MutGlobal,
         ) {
             Ok(result) => {
                 // NOTE: do not commit yet cause this could be exploited to get

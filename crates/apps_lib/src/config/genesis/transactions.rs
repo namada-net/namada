@@ -77,8 +77,7 @@ fn get_tx_args(use_device: bool) -> TxArgs {
     use std::str::FromStr;
 
     TxArgs {
-        dry_run: false,
-        dry_run_wrapper: false,
+        dry_run: None,
         dump_tx: false,
         dump_wrapper_tx: false,
         output_folder: None,

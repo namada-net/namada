@@ -125,8 +125,7 @@ pub trait Namada: NamadaIo {
     fn tx_builder(&self) -> args::Tx {
         args::Tx {
             dry_run: None,
-            dump_tx: false,
-            dump_wrapper_tx: false,
+            dump_tx: None,
             output_folder: None,
             force: false,
             broadcast_only: false,
@@ -702,8 +701,7 @@ where
             native_token: native_token.clone(),
             prototype: args::Tx {
                 dry_run: None,
-                dump_tx: false,
-                dump_wrapper_tx: false,
+                dump_tx: None,
                 output_folder: None,
                 force: false,
                 broadcast_only: false,

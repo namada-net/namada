@@ -46,7 +46,10 @@ pub fn add_gas(
     gas_meter: &RefCell<impl GasMetering>,
     used_gas: Gas,
 ) -> Result<()> {
-    println!("Called vp_host_fns::add_gas from {}", std::panic::Location::caller());
+    println!(
+        "Called vp_host_fns::add_gas from {}",
+        std::panic::Location::caller()
+    );
     gas_meter.borrow_mut().consume(used_gas).map_err(|err| {
         tracing::info!("Stopping VP execution because of gas error: {}", err);
         Error::new(RuntimeError::OutOfGas(err))

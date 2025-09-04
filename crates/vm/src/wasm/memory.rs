@@ -388,6 +388,16 @@ impl VmMemory for WasmMemory {
             let bytes = read_memory_bytes(&mut *store, memory, offset, len)?;
             let len = bytes.len() as u64;
             let gas = checked!(len * MEMORY_ACCESS_GAS_PER_BYTE)?;
+
+            tracing::info!(
+                "Read {len} bytes from wasm memory at offset {offset}, \
+                 costing {gas} gas, MEMORY_ACCESS_GAS_PER_BYTE: \
+                 {MEMORY_ACCESS_GAS_PER_BYTE}"
+            );
+            tracing::info!(
+                "value is {}",
+                std::str::from_utf8(&bytes).unwrap_or("invalid")
+            );
             Ok((bytes, gas.into()))
         })
     }

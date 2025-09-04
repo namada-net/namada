@@ -2337,7 +2337,10 @@ where
     H: 'static + StorageHasher,
     CA: WasmCacheAccess,
 {
-    println!("Called consume_tx_gas from {}", std::panic::Location::caller());
+    println!(
+        "Called consume_tx_gas from {}",
+        std::panic::Location::caller()
+    );
 
     let (gas_meter, sentinel) = env.ctx.gas_meter_and_sentinel();
 

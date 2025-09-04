@@ -782,7 +782,7 @@ where
         .map_err(|e| TxRuntimeError::MemoryError(Box::new(e)))?;
     consume_tx_gas::<MEM, D, H, CA>(env, gas)?;
 
-    tracing::debug!("tx_iter_prefix {}", prefix);
+    tracing::info!("tx_iter_prefix {}", prefix);
 
     let prefix = Key::parse(prefix)?;
 

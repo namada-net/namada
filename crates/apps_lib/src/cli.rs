@@ -3693,13 +3693,14 @@ pub mod args {
     pub const TARGET: Arg<WalletAddress> = arg("target");
     pub const TARGET_OPT: ArgOpt<WalletAddress> = arg_opt("target");
     pub const TEMPLATES_PATH: Arg<PathBuf> = arg("templates-path");
+    // FIXME: add the test prelude in the cli args too
     // WARNING: use only for testing purposes, MASP frontend fees don't make
     // sense when operating from the CLI
     pub const __TEST_FRONTEND_SUS_FEE: ArgOpt<WalletAddress> =
         arg_opt("frontend-sus-fee");
     // WARNING: use only for testing purposes, MASP frontend fees don't make
     // sense when operating from the CLI
-    pub const __TEST_FRONTEND_SUS_FEE_IBC: ArgOpt<WalletAddress> =
+    pub const __TEST_FRONTEND_SUS_FEE_IBC: ArgOpt<WalletPaymentAddr> =
         arg_opt("frontend-sus-fee-ibc");
     pub const TIMEOUT_HEIGHT: ArgOpt<u64> = arg_opt("timeout-height");
     pub const TIMEOUT_SEC_OFFSET: ArgOpt<u64> = arg_opt("timeout-sec-offset");
@@ -5200,6 +5201,12 @@ pub mod args {
             let chain_ctx = ctx.borrow_mut_chain_or_exit();
             let gas_spending_key =
                 self.gas_spending_key.map(|key| chain_ctx.get_cached(&key));
+            let frontend_sus_fee =
+                self.frontend_sus_fee.map(|fee| TxTransparentTarget {
+                    target: chain_ctx.get(&fee.target),
+                    token: chain_ctx.get(&fee.token),
+                    amount: fee.amount,
+                });
 
             Ok(TxIbcTransfer::<SdkTypes> {
                 tx,
@@ -5216,7 +5223,7 @@ pub mod args {
                 ibc_memo: self.ibc_memo,
                 gas_spending_key,
                 tx_code_path: self.tx_code_path.to_path_buf(),
-                frontend_sus_fee: None,
+                frontend_sus_fee,
             })
         }
     }

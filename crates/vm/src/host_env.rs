@@ -2354,6 +2354,37 @@ where
         .into_storage_result()
 }
 
+/// TEMP
+pub fn tx_gas_trace<MEM, D, H, CA>(
+    _env: &mut TxVmEnv<MEM, D, H, CA>,
+    gas: i64,
+) -> TxResult<()>
+where
+    MEM: VmMemory,
+    D: 'static + DB + for<'iter> DBIter<'iter>,
+    H: 'static + StorageHasher,
+    CA: WasmCacheAccess,
+{
+    println!("tx wasm gas {gas}");
+    Ok(())
+}
+
+/// TEMP
+pub fn vp_gas_trace<MEM, D, H, EVAL, CA>(
+    _env: &mut VpVmEnv<MEM, D, H, EVAL, CA>,
+    gas: i64,
+) -> Result<()>
+where
+    MEM: VmMemory,
+    D: 'static + DB + for<'iter> DBIter<'iter>,
+    H: 'static + StorageHasher,
+    EVAL: VpEvaluator,
+    CA: WasmCacheAccess,
+{
+    println!("vp wasm gas {gas}");
+    Ok(())
+}
+
 /// A helper module for testing
 #[cfg(feature = "testing")]
 pub mod testing {

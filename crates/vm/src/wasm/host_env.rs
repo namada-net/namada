@@ -227,6 +227,7 @@ where
             // Gas injection hook
             "gas" => Function::new_typed_with_env(wasm_store, &env, wrap_tx::_1(host_env::tx_charge_gas)),
             // Tx Host functions
+            "namada_gas_trace" => Function::new_typed_with_env(wasm_store, &env, wrap_tx::_1(host_env::tx_gas_trace)),
             "namada_tx_delete" => Function::new_typed_with_env(wasm_store, &env, wrap_tx::_2(host_env::tx_delete)),
             "namada_tx_emit_event" => Function::new_typed_with_env(wasm_store, &env, wrap_tx::_2(host_env::tx_emit_event)),
             "namada_tx_get_block_epoch" => Function::new_typed_with_env(wasm_store, &env, wrap_tx::_0(host_env::tx_get_block_epoch)),
@@ -277,6 +278,7 @@ where
             // Gas injection hook
             "gas" => Function::new_typed_with_env(wasm_store, &env, wrap_vp::_1(host_env::vp_charge_gas)),
             // VP Host functions
+            "namada_gas_trace" => Function::new_typed_with_env(wasm_store, &env, wrap_vp::_1(host_env::vp_gas_trace)),
             "namada_vp_eval" => Function::new_typed_with_env(wasm_store, &env, wrap_vp::_4(host_env::vp_eval)),
             "namada_vp_get_block_header" => Function::new_typed_with_env(wasm_store, &env, wrap_vp::_1(host_env::vp_get_block_header)),
             "namada_vp_get_block_height" => Function::new_typed_with_env(wasm_store, &env, wrap_vp::_0(host_env::vp_get_block_height)),

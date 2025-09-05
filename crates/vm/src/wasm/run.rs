@@ -941,6 +941,32 @@ pub fn prepare_wasm_code<T: AsRef<[u8]>>(
     println!("wasm before inject {}", Hash::sha256(code.as_ref()));
     let module: elements::Module = elements::deserialize_buffer(code.as_ref())
         .map_err(Error::DeserializationError)?;
+
+    let (module, gas_fn_ix) = {
+        use elements::ValueType;
+        use parity_wasm::builder;
+
+        let gas_fn_ix =
+            module.import_count(elements::ImportCountType::Function) as u32 + 1;
+
+        let mut builder = builder::from_module(module);
+
+        let gas_ix = builder.push_signature(
+            builder::signature().with_param(ValueType::I64).build_sig(),
+        );
+
+        builder.push_import(
+            builder::import()
+                .path("env", "namada_gas_trace")
+                .external()
+                .func(gas_ix)
+                .build(),
+        );
+        dbg!(gas_ix, gas_fn_ix);
+
+        (builder.build(), gas_fn_ix)
+    };
+
     let module = match gas_meter_kind {
         GasMeterKind::HostFn => wasm_instrument::gas_metering::inject(
             module,
@@ -952,7 +978,7 @@ pub fn prepare_wasm_code<T: AsRef<[u8]>>(
         .map_err(|_original_module| Error::GasMeterInjection)?,
         GasMeterKind::MutGlobal => wasm_instrument::gas_metering::inject(
             module,
-            WasmMutGlobalGasBackend,
+            WasmMutGlobalGasBackend(gas_fn_ix),
             &GasRules,
         )
         .map_err(|_original_module| Error::GasMeterInjection)?,
@@ -1011,6 +1037,7 @@ fn inject_alloc(module: elements::Module) -> Result<elements::Module> {
         .functions_space()
         .try_into()
         .map_err(|_| Error::AllocInjection)?;
+
     let mut builder = builder::from_module(module);
 
     // Alloc fn in WAT:
@@ -1405,7 +1432,7 @@ impl wasm_instrument::gas_metering::Rules for GasRules {
     }
 }
 
-struct WasmMutGlobalGasBackend;
+struct WasmMutGlobalGasBackend(u32);
 
 impl wasm_instrument::gas_metering::Backend for WasmMutGlobalGasBackend {
     fn gas_meter<R: wasm_instrument::gas_metering::Rules>(
@@ -1417,6 +1444,9 @@ impl wasm_instrument::gas_metering::Backend for WasmMutGlobalGasBackend {
         let gas_global_idx = module.globals_space() as u32;
 
         let func_instructions = vec![
+            // Log gas
+            GetLocal(0),
+            Call(self.0),
             // test if we ran out of gas
             GetLocal(0),
             GetGlobal(gas_global_idx),

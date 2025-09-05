@@ -506,6 +506,8 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
                             gas_meter_kind,
                         ) {
                             Ok(code) => {
+                                file_write_code(&dir, &code, &hash);
+
                                 match compile(code, &store) {
                                     Ok(module) => {
                                         // Write the file

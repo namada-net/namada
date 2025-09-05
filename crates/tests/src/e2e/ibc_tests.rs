@@ -3010,7 +3010,7 @@ fn transfer_from_cosmos(
     let chain_type =
         CosmosChainType::chain_type(test.net.chain_id.as_str()).unwrap();
     let rpc = format!("tcp://127.0.0.1:{}", chain_type.get_rpc_port_number());
-    // If the receiver is a pyament address we want to mask it to the more
+    // If the receiver is a payment address we want to mask it to the more
     // general MASP internal address to improve on privacy
     let receiver = match PaymentAddress::from_str(receiver.as_ref()) {
         Ok(_) => MASP.to_string(),
@@ -3028,6 +3028,8 @@ fn transfer_from_cosmos(
         sender.as_ref(),
         "--gas-prices",
         "0.001stake",
+        "--gas",
+        "250000",
         "--node",
         &rpc,
         "--keyring-backend",
@@ -3627,7 +3629,7 @@ fn frontend_sus_fee() -> Result<()> {
         100,
         &port_id_namada,
         &channel_id_namada,
-        Some(ESTER),
+        Some(AC_PAYMENT_ADDRESS),
     )?;
     transfer_from_cosmos(
         &test_gaia,
@@ -3651,10 +3653,11 @@ fn frontend_sus_fee() -> Result<()> {
     let ibc_denom_on_namada =
         format!("{port_id_namada}/{channel_id_namada}/{COSMOS_COIN}");
     check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 100)?;
+    check_shielded_balance(&test, AC_VIEWING_KEY, &ibc_denom_on_namada, 1)?;
     check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 899)?;
-    check_balance(&test, ESTER, &ibc_denom_on_namada, 1)?;
 
-    // Unshielding transfer 10 samoleans from Namada to Gaia
+    // Unshielding transfer 10 samoleans from Namada to Gaia with transparent
+    // frontend fee FIXME: need to test also the transparent version
     let gaia_receiver = find_cosmos_address(&test_gaia, COSMOS_USER)?;
     transfer(
         &test,
@@ -3680,8 +3683,9 @@ fn frontend_sus_fee() -> Result<()> {
         &test,
     )?;
     check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 89)?;
+    check_shielded_balance(&test, AC_VIEWING_KEY, &ibc_denom_on_namada, 1)?;
+    check_balance(&test, ESTER, &ibc_denom_on_namada, 1)?;
     check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 909)?;
-    check_balance(&test, ESTER, &ibc_denom_on_namada, 2)?;
 
     Ok(())
 }

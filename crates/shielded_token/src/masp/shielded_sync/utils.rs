@@ -274,7 +274,7 @@ impl Fetched {
     /// Iterates over the fetched transactions in the order
     /// they appear in blocks, whilst taking ownership of
     /// the returned data.
-    pub fn take(&mut self) -> impl IntoIterator<Item = IndexedNoteEntry> {
+    pub fn take(&mut self) -> IndexedNoteData {
         std::mem::take(&mut self.txs)
     }
 

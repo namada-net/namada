@@ -570,6 +570,7 @@ pub async fn aux_signing_data(
             Some(AccountPublicKeysMap::from_iter(public_keys.clone())),
             1u8,
         ),
+        // FIXME: handle masp here
         Some(owner @ Address::Internal(internal)) => match internal {
             InternalAddress::Masp => (None, 0u8),
             _ => {
@@ -586,12 +587,15 @@ pub async fn aux_signing_data(
 
     let fee_payer = match &wrapper_signature {
         Some(signature) => FeeAuthorization::Signature(signature.to_owned()),
-        None => match &args.wrapper_fee_payer {
-            Some(pubkey) => FeeAuthorization::Signer {
+        None => match &args.wrap_tx {
+            Some(args::Wrapper {
+                wrapper_fee_payer: Some(pubkey),
+                ..
+            }) => FeeAuthorization::Signer {
                 pubkey: pubkey.clone(),
                 disposable_fee_payer: false,
             },
-            None => {
+            _ => {
                 if let Some(pubkey) = public_keys.first() {
                     FeeAuthorization::Signer {
                         pubkey: pubkey.to_owned(),
@@ -654,6 +658,7 @@ pub async fn aux_inner_signing_data(
             Some(AccountPublicKeysMap::from_iter(public_keys.clone())),
             1u8,
         ),
+        // FIXME: handle masp here
         Some(owner @ Address::Internal(internal)) => match internal {
             InternalAddress::Masp => (None, 0u8),
             _ => {
@@ -766,8 +771,19 @@ pub struct TxSourcePostBalance {
 /// Validate the fee amount and token
 pub async fn validate_fee<N: Namada>(
     context: &N,
+    // FIXME: should just pass the wrap_tx arg and force separately instead?
     args: &args::Tx<SdkTypes>,
 ) -> Result<DenominatedAmount, Error> {
+    let Some(args::Wrapper {
+        fee_amount,
+        fee_token,
+        ..
+    }) = &args.wrap_tx
+    else {
+        return Err(Error::Other(
+            "Requested fee validation on a non-wrapper transaction".to_string(),
+        ));
+    };
     let gas_cost_key = parameter_storage::get_gas_cost_key();
     let minimum_fee = match rpc::query_storage_value::<
         _,
@@ -775,14 +791,12 @@ pub async fn validate_fee<N: Namada>(
     >(context.client(), &gas_cost_key)
     .await
     .and_then(|map| {
-        map.get(&args.fee_token)
-            .map(ToOwned::to_owned)
-            .ok_or_else(|| {
-                Error::Other(format!(
-                    "Could not retrieve from storage the gas cost for token {}",
-                    args.fee_token
-                ))
-            })
+        map.get(fee_token).map(ToOwned::to_owned).ok_or_else(|| {
+            Error::Other(format!(
+                "Could not retrieve from storage the gas cost for token {}",
+                fee_token
+            ))
+        })
     }) {
         Ok(amount) => amount,
         Err(e) => {
@@ -793,14 +807,13 @@ pub async fn validate_fee<N: Namada>(
             }
         }
     };
-    let validated_minimum_fee = context
-        .denominate_amount(&args.fee_token, minimum_fee)
-        .await;
+    let validated_minimum_fee =
+        context.denominate_amount(fee_token, minimum_fee).await;
 
-    let fee_amount = match args.fee_amount {
+    let fee_amount = match fee_amount {
         Some(amount) => {
             let validated_fee_amount =
-                validate_amount(context, amount, &args.fee_token, args.force)
+                validate_amount(context, *amount, fee_token, args.force)
                     .await
                     .expect("Expected to be able to validate fee");
 
@@ -830,13 +843,24 @@ pub async fn validate_fee<N: Namada>(
 /// computing the updated post balance
 pub async fn validate_transparent_fee<N: Namada>(
     context: &N,
+    // FIXME: should just pass the wrap_tx arg and force separately instead?
     args: &args::Tx<SdkTypes>,
     fee_payer: &common::PublicKey,
 ) -> Result<(DenominatedAmount, TxSourcePostBalance), Error> {
     let fee_amount = validate_fee(context, args).await?;
+    let Some(args::Wrapper {
+        fee_token,
+        gas_limit,
+        ..
+    }) = &args.wrap_tx
+    else {
+        return Err(Error::Other(
+            "Requested fee validation on a non-wrapper transaction".to_string(),
+        ));
+    };
     let fee_payer_address = Address::from(fee_payer);
 
-    let balance_key = balance_key(&args.fee_token, &fee_payer_address);
+    let balance_key = balance_key(fee_token, &fee_payer_address);
     #[allow(clippy::disallowed_methods)]
     let balance = rpc::query_storage_value::<_, token::Amount>(
         context.client(),
@@ -845,16 +869,17 @@ pub async fn validate_transparent_fee<N: Namada>(
     .await
     .unwrap_or_default();
 
-    let total_fee = checked!(fee_amount.amount() * u64::from(args.gas_limit))?;
+    let total_fee =
+        checked!(fee_amount.amount() * u64::from(gas_limit.to_owned()))?;
     let mut updated_balance = TxSourcePostBalance {
         post_balance: balance,
         source: fee_payer_address.clone(),
-        token: args.fee_token.clone(),
+        token: fee_token.clone(),
     };
 
     match total_fee.checked_sub(balance) {
         Some(diff) if !diff.is_zero() => {
-            let token_addr = args.fee_token.clone();
+            let token_addr = fee_token.clone();
             if !args.force {
                 let fee_amount =
                     context.format_amount(&token_addr, total_fee).await;
@@ -884,18 +909,30 @@ pub async fn validate_transparent_fee<N: Namada>(
 /// progress on chain.
 pub async fn wrap_tx(
     tx: &mut Tx,
+    // FIXME: should just pass the wrap_tx arg and force separately instead?
     args: &args::Tx<SdkTypes>,
     fee_amount: DenominatedAmount,
     fee_payer: common::PublicKey,
 ) -> Result<(), Error> {
+    let Some(args::Wrapper {
+        fee_token,
+        gas_limit,
+        ..
+    }) = &args.wrap_tx
+    else {
+        return Err(Error::Other(
+            "Requested fee validation on a non-wrapper transaction".to_string(),
+        ));
+    };
+
     tx.add_wrapper(
         Fee {
             amount_per_gas_unit: fee_amount,
-            token: args.fee_token.clone(),
+            token: fee_token.clone(),
         },
         fee_payer,
         // TODO(namada#1625): partially validate the gas limit in client
-        args.gas_limit,
+        gas_limit.to_owned(),
     );
 
     Ok(())
@@ -2478,18 +2515,19 @@ mod test_signing {
             dump_tx: None,
             output_folder: None,
             force: false,
-            broadcast_only: false,
             ledger_address: tendermint_rpc::Url::from_str(
                 "http://127.0.0.1:42",
             )
             .expect("Test failed"),
             initialized_account_alias: None,
             wallet_alias_force: false,
-            fee_amount: None,
-            wrapper_fee_payer: None,
-            wrap_it: false,
-            fee_token: Address::Internal(InternalAddress::Governance),
-            gas_limit: namada_tx::data::GasLimit::from(2),
+            wrap_tx: Some(args::Wrapper {
+                broadcast_only: false,
+                fee_amount: None,
+                wrapper_fee_payer: None,
+                fee_token: Address::Internal(InternalAddress::Governance),
+                gas_limit: namada_tx::data::GasLimit::from(2),
+            }),
             expiration: Default::default(),
             chain_id: None,
             signing_keys: vec![],
@@ -2708,48 +2746,68 @@ mod test_signing {
         args.force = true;
         let fee = validate_fee(&context, &args).await.expect("Test failed");
         assert_eq!(fee, DenominatedAmount::new(Amount::zero(), 0.into()));
+        let args::Wrapper {
+            broadcast_only,
+            wrapper_fee_payer,
+            fee_token,
+            gas_limit,
+            ..
+        } = args.wrap_tx.as_ref().unwrap().to_owned();
 
         // now validation should the minimum fee from the client instead of
         // the args as force is false
         args.force = false;
         client_handle
             .send(Some(EncodedResponseQuery {
-                data: BTreeMap::from([(
-                    args.fee_token.clone(),
-                    Amount::from(100),
-                )])
-                .serialize_to_vec(),
+                data: BTreeMap::from([(fee_token.clone(), Amount::from(100))])
+                    .serialize_to_vec(),
                 info: "".to_string(),
                 proof: None,
                 height: Default::default(),
             }))
             .expect("Test failed");
-        args.fee_amount = Some(InputAmount::Validated(DenominatedAmount::new(
-            Amount::from_u64(1),
-            0.into(),
-        )));
+        args.wrap_tx = Some(args::Wrapper {
+            broadcast_only,
+            wrapper_fee_payer,
+            fee_token,
+            gas_limit,
+            fee_amount: Some(InputAmount::Validated(DenominatedAmount::new(
+                Amount::from_u64(1),
+                0.into(),
+            ))),
+        });
         let fee = validate_fee(&context, &args).await.expect("Test failed");
         assert_eq!(fee, DenominatedAmount::new(Amount::from(100), 0.into()));
 
         // now validation should ignore the minimum fee from the client
         // as force is true
         args.force = true;
+        let args::Wrapper {
+            broadcast_only,
+            wrapper_fee_payer,
+            fee_token,
+            gas_limit,
+            ..
+        } = args.wrap_tx.as_ref().unwrap().to_owned();
         client_handle
             .send(Some(EncodedResponseQuery {
-                data: BTreeMap::from([(
-                    args.fee_token.clone(),
-                    Amount::from(100),
-                )])
-                .serialize_to_vec(),
+                data: BTreeMap::from([(fee_token.clone(), Amount::from(100))])
+                    .serialize_to_vec(),
                 info: "".to_string(),
                 proof: None,
                 height: Default::default(),
             }))
             .expect("Test failed");
-        args.fee_amount = Some(InputAmount::Validated(DenominatedAmount::new(
-            Amount::from_u64(1),
-            0.into(),
-        )));
+        args.wrap_tx = Some(args::Wrapper {
+            broadcast_only,
+            wrapper_fee_payer,
+            fee_token,
+            gas_limit,
+            fee_amount: Some(InputAmount::Validated(DenominatedAmount::new(
+                Amount::from_u64(1),
+                0.into(),
+            ))),
+        });
         let fee = validate_fee(&context, &args).await.expect("Test failed");
         assert_eq!(fee, DenominatedAmount::new(Amount::from(1), 0.into()));
     }
@@ -2768,7 +2826,7 @@ mod test_signing {
         client_handle
             .send(Some(EncodedResponseQuery {
                 data: BTreeMap::from([(
-                    args.fee_token.clone(),
+                    args.wrap_tx.as_ref().unwrap().fee_token.clone(),
                     Amount::from(100),
                 )])
                 .serialize_to_vec(),

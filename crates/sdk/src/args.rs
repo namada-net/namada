@@ -2631,10 +2631,22 @@ pub enum DumpTx {
     Wrapper,
 }
 
-// FIXME: are these arguments intended for a single inner tx or for the entire
-// batch? FIXME: should we separete the arguments for wrapper txs in a single
-// field? Maybe under a single Option in case we didn't want to wrap the tx. In
-// this cases joining the dru-run and dump arguments might not be a good idea
+/// Arguments to request wrapping a transaction
+#[derive(Clone, Debug)]
+pub struct Wrapper<C: NamadaTypes = SdkTypes> {
+    // FIXME: can avoid the nested options?
+    /// Do not wait for the transaction to be added to the blockchain
+    pub broadcast_only: bool,
+    /// The amount being paid (for gas unit) to include the transaction
+    pub fee_amount: Option<InputAmount>,
+    /// The fee payer signing key
+    pub wrapper_fee_payer: Option<C::PublicKey>,
+    /// The token in which the fee is being paid
+    pub fee_token: C::AddrOrNativeToken,
+    /// The max amount of gas used to process tx
+    pub gas_limit: GasLimit,
+}
+
 /// Common transaction arguments
 #[derive(Clone, Debug)]
 pub struct Tx<C: NamadaTypes = SdkTypes> {
@@ -2645,10 +2657,8 @@ pub struct Tx<C: NamadaTypes = SdkTypes> {
     pub dump_tx: Option<DumpTx>,
     /// The output directory path to where serialize the data
     pub output_folder: Option<PathBuf>,
-    /// Submit the transaction even if it doesn't pass client checks
+    /// Build the transaction even if it doesn't pass client checks
     pub force: bool,
-    /// Do not wait for the transaction to be added to the blockchain
-    pub broadcast_only: bool,
     /// The address of the ledger node as host:port
     pub ledger_address: C::ConfigRpcTendermintAddress,
     /// If any new account is initialized by the tx, use the given alias to
@@ -2657,18 +2667,9 @@ pub struct Tx<C: NamadaTypes = SdkTypes> {
     /// Whether to force overwrite the above alias, if it is provided, in the
     /// wallet.
     pub wallet_alias_force: bool,
-    /// The amount being paid (for gas unit) to include the transaction
-    pub fee_amount: Option<InputAmount>,
-    /// The fee payer signing key
-    pub wrapper_fee_payer: Option<C::PublicKey>,
-    /// A flag to request wrapping the transaction
-    pub wrap_it: bool,
-    /// The token in which the fee is being paid
-    // FIXME: maybe we can use fee_token instead of wrap_it by making this
-    // optional?
-    pub fee_token: C::AddrOrNativeToken,
-    /// The max amount of gas used to process tx
-    pub gas_limit: GasLimit,
+    /// Requests wrapping the transaction, optional in case only the raw tx
+    /// should be built
+    pub wrap_tx: Option<Wrapper<C>>,
     /// The optional expiration of the transaction
     pub expiration: TxExpiration,
     /// The chain id for which the transaction is intended
@@ -2737,10 +2738,10 @@ pub trait TxBuilder<C: NamadaTypes>: Sized {
     fn force(self, force: bool) -> Self {
         self.tx(|x| Tx { force, ..x })
     }
-    /// Do not wait for the transaction to be added to the blockchain
-    fn broadcast_only(self, broadcast_only: bool) -> Self {
+    /// Wrap the transaction
+    fn wrap_it(self, wrapper: Option<Wrapper<C>>) -> Self {
         self.tx(|x| Tx {
-            broadcast_only,
+            wrap_tx: wrapper,
             ..x
         })
     }
@@ -2769,35 +2770,6 @@ pub trait TxBuilder<C: NamadaTypes>: Sized {
             wallet_alias_force,
             ..x
         })
-    }
-    /// The amount being paid (for gas unit) to include the transaction
-    fn fee_amount(self, fee_amount: InputAmount) -> Self {
-        self.tx(|x| Tx {
-            fee_amount: Some(fee_amount),
-            ..x
-        })
-    }
-    /// The fee payer signing key
-    fn wrapper_fee_payer(self, wrapper_fee_payer: C::PublicKey) -> Self {
-        self.tx(|x| Tx {
-            wrapper_fee_payer: Some(wrapper_fee_payer),
-            ..x
-        })
-    }
-    /// The token in which the fee is being paid
-    fn fee_token(self, fee_token: C::Address) -> Self {
-        self.tx(|x| Tx {
-            fee_token: fee_token.into(),
-            ..x
-        })
-    }
-    /// The max amount of gas used to process tx
-    fn gas_limit(self, gas_limit: GasLimit) -> Self {
-        self.tx(|x| Tx { gas_limit, ..x })
-    }
-    /// The optional expiration of the transaction
-    fn expiration(self, expiration: TxExpiration) -> Self {
-        self.tx(|x| Tx { expiration, ..x })
     }
     /// The chain id for which the transaction is intended
     fn chain_id(self, chain_id: ChainId) -> Self {

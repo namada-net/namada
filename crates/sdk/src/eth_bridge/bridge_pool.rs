@@ -65,81 +65,82 @@ pub async fn build_bridge_pool_tx(
     }: args::EthereumBridgePool,
 ) -> Result<(Tx, SigningData), Error> {
     let sender_ = sender.clone();
-    let (signing_data, wrap_args, transfer, tx_code_hash) = if tx_args.wrap_it {
-        let (transfer, tx_code_hash, signing_data) = futures::try_join!(
-            validate_bridge_pool_tx(
-                context,
-                tx_args.force,
-                nut,
-                asset,
-                recipient,
-                sender,
-                amount,
-                fee_amount,
-                fee_payer,
-                fee_token,
-            ),
-            query_wasm_code_hash(context, code_path.to_string_lossy()),
-            aux_signing_data(
-                context,
-                &tx_args,
-                // token owner
-                Some(sender_.clone()),
-                // tx signer
-                Some(sender_),
-                vec![],
-                false,
-                vec![],
-                None
-            ),
-        )?;
-        let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, &tx_args, &fee_payer).await?;
+    let (signing_data, wrap_args, transfer, tx_code_hash) =
+        if tx_args.wrap_tx.is_some() {
+            let (transfer, tx_code_hash, signing_data) = futures::try_join!(
+                validate_bridge_pool_tx(
+                    context,
+                    tx_args.force,
+                    nut,
+                    asset,
+                    recipient,
+                    sender,
+                    amount,
+                    fee_amount,
+                    fee_payer,
+                    fee_token,
+                ),
+                query_wasm_code_hash(context, code_path.to_string_lossy()),
+                aux_signing_data(
+                    context,
+                    &tx_args,
+                    // token owner
+                    Some(sender_.clone()),
+                    // tx signer
+                    Some(sender_),
+                    vec![],
+                    false,
+                    vec![],
+                    None
+                ),
+            )?;
+            let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
+            let (fee_amount, _) =
+                validate_transparent_fee(context, &tx_args, &fee_payer).await?;
 
-        (
-            SigningData::Wrapper(signing_data),
-            Some(WrapArgs {
-                fee_amount,
-                fee_payer,
-            }),
-            transfer,
-            tx_code_hash,
-        )
-    } else {
-        let (transfer, tx_code_hash, signing_data) = futures::try_join!(
-            validate_bridge_pool_tx(
-                context,
-                tx_args.force,
-                nut,
-                asset,
-                recipient,
-                sender,
-                amount,
-                fee_amount,
-                fee_payer,
-                fee_token,
-            ),
-            query_wasm_code_hash(context, code_path.to_string_lossy()),
-            aux_inner_signing_data(
-                context,
-                &tx_args,
-                // token owner
-                Some(sender_.clone()),
-                // tx signer
-                Some(sender_),
-                vec![],
-                vec![],
+            (
+                SigningData::Wrapper(signing_data),
+                Some(WrapArgs {
+                    fee_amount,
+                    fee_payer,
+                }),
+                transfer,
+                tx_code_hash,
             )
-        )?;
+        } else {
+            let (transfer, tx_code_hash, signing_data) = futures::try_join!(
+                validate_bridge_pool_tx(
+                    context,
+                    tx_args.force,
+                    nut,
+                    asset,
+                    recipient,
+                    sender,
+                    amount,
+                    fee_amount,
+                    fee_payer,
+                    fee_token,
+                ),
+                query_wasm_code_hash(context, code_path.to_string_lossy()),
+                aux_inner_signing_data(
+                    context,
+                    &tx_args,
+                    // token owner
+                    Some(sender_.clone()),
+                    // tx signer
+                    Some(sender_),
+                    vec![],
+                    vec![],
+                )
+            )?;
 
-        (
-            SigningData::Inner(signing_data),
-            None,
-            transfer,
-            tx_code_hash,
-        )
-    };
+            (
+                SigningData::Inner(signing_data),
+                None,
+                transfer,
+                tx_code_hash,
+            )
+        };
 
     let chain_id = tx_args
         .chain_id

@@ -510,7 +510,7 @@ where
                 .client
                 .last_block_height()
                 .await
-                .wrap_err("Failed to fetch last  block height")
+                .wrap_err("Failed to fetch last block height")
             {
                 Ok(Some(last_block_height)) => last_block_height,
                 Ok(None) => {

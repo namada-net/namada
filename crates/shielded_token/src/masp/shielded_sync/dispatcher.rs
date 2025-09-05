@@ -14,6 +14,7 @@ use futures::task::AtomicWaker;
 use masp_primitives::sapling::ViewingKey;
 use masp_primitives::transaction::Transaction;
 use namada_core::chain::BlockHeight;
+use namada_core::collections::HashMap;
 use namada_core::control_flow::ShutdownSignal;
 use namada_core::control_flow::time::{Duration, LinearBackoff, Sleep};
 use namada_core::hints;
@@ -207,7 +208,6 @@ enum DispatcherState {
 
 #[derive(Default, Debug)]
 struct InitialState {
-    last_witnessed_tx: Option<MaspIndexedTx>,
     start_height: BlockHeight,
     last_query_height: BlockHeight,
 }
@@ -229,6 +229,7 @@ where
     U: ShieldedUtils,
 {
     client: M,
+    birthdays: HashMap<ViewingKey, BlockHeight>,
     state: DispatcherState,
     tasks: DispatcherTasks<S>,
     ctx: ShieldedWallet<U>,
@@ -281,6 +282,7 @@ where
 
     Dispatcher {
         height_to_sync: BlockHeight(0),
+        birthdays: HashMap::new(),
         state,
         ctx,
         tasks,
@@ -363,12 +365,11 @@ where
     fn apply_cache_to_shielded_context(
         &mut self,
         InitialState {
-            last_witnessed_tx,
-            last_query_height,
-            ..
+            last_query_height, ..
         }: &InitialState,
     ) -> Result<(), eyre::Error> {
         for (masp_indexed_tx, stx_batch) in self.cache.fetched.take() {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
             let needs_witness_map_update =
@@ -388,6 +389,10 @@ where
 =======
 >>>>>>> 5adae714b (Defer saving shielded spends until after we update wits)
             if Some(&masp_indexed_tx) > last_witnessed_tx.as_ref() {
+=======
+            if masp_indexed_tx.indexed_tx.block_height > self.ctx.synced_height
+            {
+>>>>>>> d99fa4cb9 (Fetch all notes necessary to update cmt tree even with birthdays)
                 self.ctx.update_witnesses(
 >>>>>>> f7ef28fd4 (Build MASP witnesses locally)
                     masp_indexed_tx,
@@ -400,24 +405,36 @@ where
                     Some(masp_indexed_tx.indexed_tx),
                 )?;
             }
+
             let first_note_pos = self.ctx.note_index[&masp_indexed_tx];
-            let mut vk_heights = BTreeMap::new();
-            std::mem::swap(&mut vk_heights, &mut self.ctx.vk_heights);
-            for (vk, _) in vk_heights
-                .iter()
-                // NB: skip keys that are synced past the given `indexed_tx`
-                .filter(|&(_vk, &vk_synced_height)| {
-                    vk_synced_height < masp_indexed_tx.indexed_tx.block_height
-                })
-            {
+
+            for vk_index in 0..self.ctx.pos_map.len() {
+                let vk = self.ctx.pos_map.get_index(vk_index).unwrap().0;
+
+                if !self.vk_is_outdated(vk, &masp_indexed_tx) {
+                    // NB: skip keys that are synced past the given
+                    // `masp_indexed_tx`
+                    continue;
+                }
+
+                // NB: copy the viewing key onto the stack, to remove
+                // the borrow and allow mutating through `self.ctx`
+                let vk = *vk;
+
                 for (note_pos_offset, (note, pa, memo)) in self
                     .cache
                     .trial_decrypted
-                    .take(&masp_indexed_tx, vk)
+                    .take(&masp_indexed_tx, &vk)
                     .unwrap_or_default()
                 {
                     self.ctx.save_decrypted_shielded_outputs(
+<<<<<<< HEAD
                         vk,
+=======
+                        #[cfg(feature = "historic")]
+                        masp_indexed_tx.indexed_tx,
+                        &vk,
+>>>>>>> d99fa4cb9 (Fetch all notes necessary to update cmt tree even with birthdays)
                         first_note_pos.checked_add(note_pos_offset).unwrap(),
                         note,
                         pa,
@@ -426,23 +443,12 @@ where
                     self.config.applied_tracker.increment_by(1);
                 }
             }
-            std::mem::swap(&mut vk_heights, &mut self.ctx.vk_heights);
-        }
-
-        for vk_synced_height in self
-            .ctx
-            .vk_heights
-            .values_mut()
-            // NB: skip keys that are synced past the last input height
-            .filter(|&&mut vk_synced_height| {
-                vk_synced_height < *last_query_height
-            })
-        {
-            // NB: the entire block is synced
-            *vk_synced_height = *last_query_height;
         }
 
         self.ctx.tree.as_mut().garbage_collect_ommers();
+
+        // NB: at this point, the wallet has been synced
+        self.ctx.synced_height = *last_query_height;
 
         Ok(())
     }
@@ -453,6 +459,8 @@ where
         sks: &[DatedSpendingKey],
         fvks: &[DatedKeypair<ViewingKey>],
     ) -> Result<InitialState, eyre::Error> {
+        debug_assert!(self.birthdays.is_empty());
+
         for vk in sks
             .iter()
             .map(|esk| {
@@ -462,16 +470,24 @@ where
             })
             .chain(fvks.iter().copied())
         {
-            let synced_height = self.ctx.vk_heights.entry(vk.key).or_default();
+            // NB: store the viewing keys in the wallet
+            let decrypted_notes = self.ctx.pos_map.entry(vk.key).or_default();
 
-            if vk.birthday > *synced_height {
-                *synced_height = vk.birthday;
+            // NB: sanity check to confirm we haven't decrypted notes
+            // before the supplied birthday
+            if vk.birthday > self.ctx.synced_height
+                && !decrypted_notes.is_empty()
+            {
+                eyre::bail!(
+                    "Invalid viewing key birthday, set after notes have \
+                     already been decrypted"
+                );
             }
-        }
 
-        // the latest block height which has been added to the witness Merkle
-        // tree
-        let last_witnessed_tx = self.ctx.note_index.keys().max().cloned();
+            // NB: store the birthday in order to potentially
+            // save some work during trial decryptions
+            self.birthdays.insert(vk.key, vk.birthday);
+        }
 
         let shutdown_signal = RefCell::new(&mut self.config.shutdown_signal);
 
@@ -524,15 +540,15 @@ where
             // NB: limit fetching until the last committed height
             .min(last_block_height);
 
-        let start_height = self
-            .ctx
-            .min_height_to_sync_from()?
-            // NB: the start height cannot be greater than
-            // `last_query_height`
-            .min(last_query_height);
+        let start_height = self.ctx.synced_height.clamp(
+            // NB: the wallet is initialized with height 0
+            // if it hasn't synced any note, so we must clamp
+            // the first height to 1 explicitly
+            BlockHeight::first(),
+            last_query_height,
+        );
 
         let initial_state = InitialState {
-            last_witnessed_tx,
             last_query_height,
             start_height,
         };
@@ -647,6 +663,17 @@ where
         }
     }
 
+    fn vk_synced_height(&self, vk: &ViewingKey) -> BlockHeight {
+        self.birthdays
+            .get(vk)
+            .copied()
+            .unwrap_or(self.ctx.synced_height)
+    }
+
+    fn vk_is_outdated(&self, vk: &ViewingKey, itx: &MaspIndexedTx) -> bool {
+        self.vk_synced_height(vk) < itx.indexed_tx.block_height
+    }
+
     fn spawn_fetch_txs(&self, from: BlockHeight, to: BlockHeight) -> u64 {
         let mut spawned_tasks = 0;
 
@@ -672,12 +699,12 @@ where
     }
 
     fn spawn_trial_decryptions(&self, itx: MaspIndexedTx, tx: &Transaction) {
-        for (vk, vk_synced_height) in self.ctx.vk_heights.iter() {
-            let key_is_outdated =
-                *vk_synced_height < itx.indexed_tx.block_height;
-            let cached = self.cache.trial_decrypted.get(&itx, vk).is_some();
+        for vk in self.ctx.pos_map.keys() {
+            let vk_is_outdated = self.vk_is_outdated(vk, &itx);
+            let tx_decrypted_in_cache =
+                self.cache.trial_decrypted.get(&itx, vk).is_some();
 
-            if key_is_outdated && !cached {
+            if vk_is_outdated && !tx_decrypted_in_cache {
                 let tx = tx.clone();
                 let vk = *vk;
 
@@ -746,7 +773,6 @@ mod dispatcher_tests {
     use namada_core::task_env::TaskEnvironment;
     use namada_io::DevNullProgressBar;
     use namada_tx::IndexedTx;
-    use namada_wallet::StoredKeypair;
     use tempfile::tempdir;
 
     use super::super::utils::MaspTxKind;
@@ -779,8 +805,10 @@ mod dispatcher_tests {
             .expect("Test failed")
             .run(|s| async {
                 let mut dispatcher = config.dispatcher(s, &utils).await;
-                dispatcher.ctx.vk_heights =
-                    BTreeMap::from([(arbitrary_vk(), BlockHeight(0))]);
+                dispatcher
+                    .ctx
+                    .pos_map
+                    .insert(arbitrary_vk(), BTreeSet::new());
                 // fill up the dispatcher's cache
                 for h in 1u64..10 {
                     let itx = MaspIndexedTx {
@@ -802,16 +830,17 @@ mod dispatcher_tests {
 
                 dispatcher
                     .apply_cache_to_shielded_context(&InitialState {
-                        last_witnessed_tx: None,
                         start_height: BlockHeight::first(),
                         last_query_height: 9.into(),
                     })
                     .expect("Test failed");
                 assert!(dispatcher.cache.fetched.is_empty());
                 assert!(dispatcher.cache.trial_decrypted.is_empty());
-                let expected =
-                    BTreeMap::from([(arbitrary_vk(), BlockHeight(9))]);
-                assert_eq!(expected, dispatcher.ctx.vk_heights);
+                assert_eq!(
+                    HashMap::from([(arbitrary_vk(), BTreeSet::new())]),
+                    dispatcher.ctx.pos_map
+                );
+                assert_eq!(BlockHeight(9), dispatcher.ctx.synced_height);
             })
             .await;
     }
@@ -970,36 +999,6 @@ mod dispatcher_tests {
             .await;
     }
 
-    /// Test that upon each retry, we either resume from the
-    /// latest height that had been previously stored in the
-    /// `vk_heights`.
-    #[test]
-    fn test_min_height_to_sync_from() {
-        let temp_dir = tempdir().unwrap();
-        let mut shielded_ctx =
-            FsShieldedUtils::new(temp_dir.path().to_path_buf());
-
-        let vk = arbitrary_vk();
-
-        // Test that this function errors if not keys are
-        // present in the shielded context
-        assert!(shielded_ctx.min_height_to_sync_from().is_err());
-
-        // the min height here should be 1, since
-        // this vk hasn't decrypted any note yet
-        shielded_ctx.vk_heights.insert(vk, BlockHeight(0));
-
-        let height = shielded_ctx.min_height_to_sync_from().unwrap();
-        assert_eq!(height, BlockHeight(1));
-
-        // let's bump the vk height
-        *shielded_ctx.vk_heights.get_mut(&vk).unwrap() = BlockHeight(6);
-
-        // the min height should now be 6
-        let height = shielded_ctx.min_height_to_sync_from().unwrap();
-        assert_eq!(height, BlockHeight(6));
-    }
-
     /// We test that if a masp transaction is only partially trial-decrypted
     /// before the process is interrupted, we discard the partial results.
     #[test]
@@ -1123,7 +1122,7 @@ mod dispatcher_tests {
                 ]);
 
                 assert_eq!(keys, expected);
-                assert_eq!(ctx.vk_heights[&vk.key], BlockHeight(2));
+                assert_eq!(ctx.synced_height, BlockHeight(2));
                 assert_eq!(ctx.note_map.len(), 2);
             })
             .await;
@@ -1281,92 +1280,54 @@ mod dispatcher_tests {
             .await;
     }
 
-    /// Test the the birthdays of keys are properly reflected in the key
-    /// sync heights when starting shielded sync.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_key_birthdays() {
         let temp_dir = tempdir().unwrap();
-        let mut shielded_ctx =
-            FsShieldedUtils::new(temp_dir.path().to_path_buf());
-        let (client, masp_tx_sender) = TestingMaspClient::new(2.into());
-        // First test the case where no keys have been seen yet
-        let mut vk = DatedKeypair::new(arbitrary_vk(), Some(10.into()));
-        let StoredKeypair::Raw(mut sk) = serde_json::from_str::<'_, StoredKeypair::<DatedSpendingKey>>(r#""unencrypted:zsknam1q02rgh4mqqqqpqqm68m2lmd0xe9k5vf4fscmdxuvewqhdhwl0h492fj40tzl5f6gwfk6kgnaxpgct7mx9cw2he4724858jdfhrzdh3e4hu3us463gphqyl6k5hvkjwkv9r7rx3jtcueurgflgj6dx9qn4rg0caf0t9zawfcdwt3ramxlrs4jyan4wyp4nh9hj8s806ru0smk3437ejy56ewtw9ljz8rc3vkyznxdf3l5c70skcw6aatpv5de9zhxuxs5k6l6jz6zktgg0udvl<<30""#).expect("Test failed") else {
-            panic!("Test failed")
+        let utils = FsShieldedUtils {
+            context_dir: temp_dir.path().to_path_buf(),
         };
-        let masp_tx = arbitrary_masp_tx();
-        masp_tx_sender
-            .send(Some((
-                MaspIndexedTx {
-                    indexed_tx: IndexedTx {
-                        block_height: 1.into(),
-                        block_index: TxIndex(1),
-                        batch_index: None,
-                    },
-                    kind: MaspTxKind::Transfer,
-                },
-                masp_tx.clone(),
-            )))
-            .expect("Test failed");
-        let (_shutdown_send, shutdown_sig) = shutdown_signal();
+        let (client, _masp_tx_sender) = TestingMaspClient::new(3.into());
+        let (_send, shutdown_sig) = shutdown_signal();
         let config = ShieldedSyncConfig::builder()
-            .client(client)
             .fetched_tracker(DevNullProgressBar)
             .scanned_tracker(DevNullProgressBar)
             .applied_tracker(DevNullProgressBar)
-            .retry_strategy(RetryStrategy::Times(0))
             .shutdown_signal(shutdown_sig)
+            .client(client)
+            .retry_strategy(RetryStrategy::Times(0))
+            .block_batch_size(1)
             .build();
-        shielded_ctx
-            .sync(
-                MaspLocalTaskEnv::new(4).unwrap(),
-                config.clone(),
-                None,
-                &[sk],
-                &[vk],
-            )
-            .await
-            .expect("Test failed");
-        let birthdays = shielded_ctx
-            .vk_heights
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        assert_eq!(birthdays, vec![BlockHeight(30), BlockHeight(10),]);
 
-        // Test two cases:
-        // * A birthday is less than the synced height of key
-        // * A birthday is greater than the synced height of key
-        vk.birthday = 5.into();
-        sk.birthday = 60.into();
-        masp_tx_sender
-            .send(Some((
-                MaspIndexedTx {
-                    indexed_tx: IndexedTx {
-                        block_height: 1.into(),
-                        block_index: TxIndex(1),
-                        batch_index: None,
-                    },
-                    kind: MaspTxKind::Transfer,
-                },
-                masp_tx.clone(),
-            )))
-            .expect("Test failed");
-        shielded_ctx
-            .sync(
-                MaspLocalTaskEnv::new(4).unwrap(),
-                config,
-                None,
-                &[sk],
-                &[vk],
-            )
-            .await
-            .expect("Test failed");
-        let birthdays = shielded_ctx
-            .vk_heights
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        assert_eq!(birthdays, vec![BlockHeight(60), BlockHeight(10),])
+        MaspLocalTaskEnv::new(4)
+            .expect("Test failed")
+            .run(|s| async {
+                let mut dispatcher = config.clone().dispatcher(s, &utils).await;
+
+                let vk = arbitrary_vk();
+
+                fn itx(block_height: BlockHeight) -> MaspIndexedTx {
+                    MaspIndexedTx {
+                        kind: MaspTxKind::Transfer,
+                        indexed_tx: IndexedTx {
+                            block_height,
+                            block_index: TxIndex(0),
+                            batch_index: None,
+                        },
+                    }
+                }
+
+                dispatcher.ctx.synced_height = BlockHeight(123);
+                dispatcher.birthdays.insert(vk, BlockHeight(456));
+                assert!(
+                    !dispatcher.vk_is_outdated(&vk, &itx(BlockHeight(300)))
+                );
+
+                dispatcher.birthdays.insert(vk, BlockHeight(6));
+                assert!(dispatcher.vk_is_outdated(&vk, &itx(BlockHeight(300))));
+
+                dispatcher.birthdays.swap_remove(&vk);
+                assert!(dispatcher.vk_is_outdated(&vk, &itx(BlockHeight(300))));
+            })
+            .await;
     }
 }

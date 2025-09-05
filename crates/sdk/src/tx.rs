@@ -2843,6 +2843,12 @@ pub async fn build_ibc_transfer(
                     args.tx.force,
                 )
                 .await?;
+
+                masp_transfer_data.sources.push((
+                    args.source.clone(),
+                    args.token.clone(),
+                    validated_amount,
+                ));
                 masp_transfer_data.targets.push((
                     TransferTarget::Address(target.to_owned()),
                     token.to_owned(),
@@ -2850,7 +2856,8 @@ pub async fn build_ibc_transfer(
                 ));
 
                 transfer = transfer
-                    .credit(
+                    .transfer(
+                        source.to_owned(),
                         target.to_owned(),
                         token.to_owned(),
                         validated_amount,
@@ -4243,7 +4250,7 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
 
             (
                 vec![(
-                    TransferTarget::Address(target.to_owned()),
+                    TransferTarget::PaymentAddress(target.to_owned()),
                     token.to_owned(),
                     validated_fee_amount,
                 )],

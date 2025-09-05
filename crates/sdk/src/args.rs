@@ -549,7 +549,7 @@ pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
     /// The optional data for the frontend sustainability fee
     /// NOTE: if the swap is shielded (from MASP to MASP), no sustainability
     /// fee should be taken
-    pub frontend_sus_fee: Option<(C::Address, InputAmount)>,
+    pub frontend_sus_fee: Option<(C::PaymentAddress, InputAmount)>,
 }
 
 impl TxOsmosisSwap<SdkTypes> {
@@ -3244,6 +3244,7 @@ pub struct GenIbcShieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// The output directory path to where serialize the data
     pub output_folder: Option<PathBuf>,
     /// The target address
+    // FIXME: why isn't this a payment address?
     pub target: C::TransferTarget,
     /// Transferred token amount
     pub amount: InputAmount,
@@ -3256,7 +3257,7 @@ pub struct GenIbcShieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// shielding transaction since ics-20 only supports a single asset)
     /// NOTE: if the shielding operation is part of a swap, and this is
     /// shielded (from MASP to MASP), no sustainability fee should be taken
-    pub frontend_sus_fee: Option<(C::Address, InputAmount)>,
+    pub frontend_sus_fee: Option<(C::PaymentAddress, InputAmount)>,
 }
 
 /// IBC shielding transfer asset, to be used by [`GenIbcShieldingTransfer`]

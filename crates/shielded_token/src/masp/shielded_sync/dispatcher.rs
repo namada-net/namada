@@ -8,7 +8,7 @@ use std::sync::atomic::{self, AtomicBool, AtomicUsize};
 use std::task::{Context, Poll};
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use eyre::{WrapErr, eyre};
+use eyre::{ContextCompat, WrapErr, eyre};
 use futures::future::{Either, select};
 use futures::task::AtomicWaker;
 use masp_primitives::sapling::ViewingKey;
@@ -406,7 +406,17 @@ where
                 )?;
             }
 
-            let first_note_pos = self.ctx.note_index[&masp_indexed_tx];
+            let first_note_pos = self
+                .ctx
+                .note_index
+                .get(&masp_indexed_tx)
+                .copied()
+                .with_context(|| {
+                    format!(
+                        "Could not locate the first note position of the MASP \
+                         tx at {masp_indexed_tx:?}"
+                    )
+                })?;
 
             for vk_index in 0..self.ctx.pos_map.len() {
                 let vk = self.ctx.pos_map.get_index(vk_index).unwrap().0;

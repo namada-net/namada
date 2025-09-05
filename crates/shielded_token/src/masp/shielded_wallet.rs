@@ -287,9 +287,8 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     pub utils: U,
     /// The commitment tree produced by scanning all transactions in the MASP
     pub tree: BridgeTree,
-    /// Maps viewing keys to the block height to which they are synced.
-    /// In particular, the height given by the value *has been scanned*.
-    pub vk_heights: BTreeMap<ViewingKey, BlockHeight>,
+    /// Block height to which the wallet has been synced to
+    pub synced_height: BlockHeight,
     /// The set of note positions that have been spent
     pub spents: HashSet<NotePosition>,
     /// Maps viewing keys to applicable note positions
@@ -330,12 +329,6 @@ pub struct TxHistoryEntry {
     pub outputs: HashMap<Address, Amount>,
     /// A flag to mark the presence of conversions in the transaction
     pub conversions: bool,
-}
-
-pub(crate) struct SyncedHeights {
-    pub(crate) min_height_to_sync_from: BlockHeight,
-    #[allow(dead_code)]
-    pub(crate) max_synced_height: BlockHeight,
 }
 
 impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
@@ -444,48 +437,6 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
             Ok(())
         })
         .await
-    }
-
-    pub(crate) fn min_height_to_sync_from(
-        &self,
-    ) -> Result<BlockHeight, eyre::Error> {
-        self.synced_heights()
-            .map(|synced| synced.min_height_to_sync_from)
-    }
-
-    pub(crate) fn synced_heights(&self) -> Result<SyncedHeights, eyre::Error> {
-        if self.vk_heights.is_empty() {
-            return Err(eyre!(
-                "No viewing keys are available in the shielded context to \
-                 decrypt notes with"
-                    .to_string(),
-            ));
-        }
-
-        let (mut min_height, max_height) =
-            self.vk_heights.values().copied().fold(
-                (BlockHeight(u64::MAX), BlockHeight(0)),
-                |(mut min, mut max), next| {
-                    if next < min {
-                        min = next;
-                    }
-                    if next > max {
-                        max = next;
-                    }
-                    (min, max)
-                },
-            );
-
-        // NB: Height 0 is a sentinel, we must return height 1 instead
-        // as the first height to sync from
-        if min_height == BlockHeight(0) {
-            min_height = BlockHeight::first();
-        }
-
-        Ok(SyncedHeights {
-            min_height_to_sync_from: min_height,
-            max_synced_height: max_height,
-        })
     }
 
     #[allow(missing_docs)]

@@ -66,3 +66,6 @@ tempfile.workspace = true
 test-log.workspace = true
 wasmer-compiler.workspace = true
 wasmer-types.workspace = true
+
+[build-dependencies]
+git2.workspace = true

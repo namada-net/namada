@@ -101,9 +101,11 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
             wasmer::Target::default().hash(&mut hasher);
             hasher.finish()
         };
+        let version_prefix =
+            option_env!("GIT_DESCRIBED").unwrap_or(env!("CARGO_PKG_VERSION"));
         let version = format!(
-            "{}_{:x}",
-            concat!(env!("CARGO_PKG_VERSION"), "_", env!("RUSTUP_TOOLCHAIN")),
+            "{version_prefix}{}{:x}",
+            concat!("_", env!("RUSTUP_TOOLCHAIN"), "_"),
             target_hash,
         );
         let dir = dir.into().join(version);

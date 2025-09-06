@@ -261,7 +261,7 @@ impl<C: Client + Send + Sync> MaspClient for LedgerMaspClient<C> {
 
     #[inline(always)]
     fn capabilities(&self) -> MaspClientCapabilities {
-        MaspClientCapabilities::OnlyTransfers
+        MaspClientCapabilities::NONE
     }
 
     async fn fetch_commitment_tree(
@@ -646,7 +646,11 @@ impl MaspClient for IndexerMaspClient {
 
     #[inline(always)]
     fn capabilities(&self) -> MaspClientCapabilities {
-        MaspClientCapabilities::AllData
+        const {
+            MaspClientCapabilities::MAY_FETCH_PRE_BUILT_TREE
+                .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_NOTES_INDEX)
+                .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_WITNESS_MAP)
+        }
     }
 
     async fn fetch_commitment_tree(

@@ -291,7 +291,12 @@ where
         let mut batch = D::batch();
         self.commit_write_log_block(&mut batch)
             .into_storage_result()?;
-        self.commit_block_from_batch(batch).into_storage_result()
+        self.commit_block_from_batch(batch).into_storage_result()?;
+
+        // Clear the tx gas map
+        self.in_mem.commit_only_data.tx_gas = Default::default();
+
+        Ok(())
     }
 
     /// Commit the current block's write log to the storage. Starts a new block

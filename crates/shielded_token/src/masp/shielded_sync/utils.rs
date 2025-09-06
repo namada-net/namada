@@ -342,40 +342,39 @@ impl RetryStrategy {
 
 /// Enumerates the capabilities of a [`MaspClient`] implementation.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum MaspClientCapabilities {
-    /// The masp client implementation is only capable of fetching shielded
-    /// transfers.
-    OnlyTransfers,
-    /// The masp client implementation is capable of not only fetching shielded
-    /// transfers, but also of fetching commitment trees, witness maps, and
-    /// note maps.
-    AllData,
-}
+pub struct MaspClientCapabilities(u8);
 
 impl MaspClientCapabilities {
-    /// Check if the lack of one or more capabilities in the
-    /// masp client implementation warrants a manual update
-    /// of the witnesses map.
-    pub const fn needs_witness_map_update(&self) -> bool {
-        matches!(self, Self::OnlyTransfers)
+    #[allow(missing_docs)]
+    pub const MAY_FETCH_PRE_BUILT_NOTES_INDEX: Self = Self(0b00000010);
+    #[allow(missing_docs)]
+    pub const MAY_FETCH_PRE_BUILT_TREE: Self = Self(0b00000001);
+    #[allow(missing_docs)]
+    pub const MAY_FETCH_PRE_BUILT_WITNESS_MAP: Self = Self(0b00000100);
+    #[allow(missing_docs)]
+    pub const NONE: Self = Self(0);
+
+    /// Combine these two [`MaspClientCapabilities`].
+    pub const fn plus(self, other: Self) -> Self {
+        Self(self.0 | other.0)
     }
 
     /// Check if the masp client is able to fetch a pre-built
     /// commitment tree.
     pub const fn may_fetch_pre_built_tree(&self) -> bool {
-        matches!(self, Self::AllData)
+        self.0 & Self::MAY_FETCH_PRE_BUILT_TREE.0 != 0
     }
 
     /// Check if the masp client is able to fetch a pre-built
     /// notes index.
     pub const fn may_fetch_pre_built_notes_index(&self) -> bool {
-        matches!(self, Self::AllData)
+        self.0 & Self::MAY_FETCH_PRE_BUILT_NOTES_INDEX.0 != 0
     }
 
     /// Check if the masp client is able to fetch a pre-built
     /// witness map.
     pub const fn may_fetch_pre_built_witness_map(&self) -> bool {
-        matches!(self, Self::AllData)
+        self.0 & Self::MAY_FETCH_PRE_BUILT_WITNESS_MAP.0 != 0
     }
 }
 

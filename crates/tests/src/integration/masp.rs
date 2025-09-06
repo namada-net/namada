@@ -10276,8 +10276,36 @@ fn frontend_sus_fee() -> Result<()> {
                 NAM,
                 "--amount",
                 "10",
-                "--frontend-sus-fee",
+                "--test-frontend-sus-fee",
                 frontend_alias,
+                "--signing-keys",
+                ALBERT_KEY,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains(TX_APPLIED_SUCCESS));
+
+    // Test sus fee when shielding. Send 10 NAM from Albert to PA and 1 NAM to a
+    // shielded address owned by the frontend provider
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "shield",
+                "--source",
+                ALBERT,
+                "--target",
+                AA_PAYMENT_ADDRESS,
+                "--token",
+                NAM,
+                "--amount",
+                "10",
+                "--test-frontend-sus-fee-shielded",
+                AC_PAYMENT_ADDRESS,
                 "--signing-keys",
                 ALBERT_KEY,
                 "--node",
@@ -10296,12 +10324,13 @@ fn frontend_sus_fee() -> Result<()> {
             "shielded-sync",
             "--viewing-keys",
             AA_VIEWING_KEY,
+            AC_VIEWING_KEY,
             "--node",
             validator_one_rpc,
         ],
     )?;
 
-    // Assert NAM balance at VK(A) is 10
+    // Assert NAM balance at VK(A) is 20
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -10318,9 +10347,9 @@ fn frontend_sus_fee() -> Result<()> {
         )
     });
     assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 10"));
+    assert!(captured.contains("nam: 20"));
 
-    // Assert NAM balance at the frontend is 1
+    // Assert NAM balance at the transparent frontend is 1
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -10329,6 +10358,25 @@ fn frontend_sus_fee() -> Result<()> {
                 "balance",
                 "--owner",
                 frontend_alias,
+                "--token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains("nam: 1"));
+
+    // Assert NAM balance at the shielded frontend is 1
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                AC_VIEWING_KEY,
                 "--token",
                 NAM,
                 "--node",
@@ -10355,8 +10403,36 @@ fn frontend_sus_fee() -> Result<()> {
                 NAM,
                 "--amount",
                 "9",
-                "--frontend-sus-fee",
+                "--test-frontend-sus-fee",
                 frontend_alias,
+                "--signing-keys",
+                ALBERT_KEY,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains(TX_APPLIED_SUCCESS));
+
+    // Test sus fee when unshielding. Send 9 NAM from PA to Albert and 1 NAM to
+    // a shielded address owned by the frontend provider
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "unshield",
+                "--source",
+                AA_VIEWING_KEY,
+                "--target",
+                ALBERT,
+                "--token",
+                NAM,
+                "--amount",
+                "9",
+                "--test-frontend-sus-fee-shielded",
+                AC_PAYMENT_ADDRESS,
                 "--signing-keys",
                 ALBERT_KEY,
                 "--node",
@@ -10375,6 +10451,7 @@ fn frontend_sus_fee() -> Result<()> {
             "shielded-sync",
             "--viewing-keys",
             AA_VIEWING_KEY,
+            AC_VIEWING_KEY,
             "--node",
             validator_one_rpc,
         ],
@@ -10399,7 +10476,7 @@ fn frontend_sus_fee() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains("nam: 0"));
 
-    // Assert NAM balance at the frontend is 2
+    // Assert NAM balance at the transparent frontend is 2
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -10408,6 +10485,25 @@ fn frontend_sus_fee() -> Result<()> {
                 "balance",
                 "--owner",
                 frontend_alias,
+                "--token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains("nam: 2"));
+
+    // Assert NAM balance at the shielded frontend is 2
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                AC_VIEWING_KEY,
                 "--token",
                 NAM,
                 "--node",

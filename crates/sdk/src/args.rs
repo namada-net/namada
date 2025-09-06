@@ -390,7 +390,10 @@ pub struct TxShieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// Transfer source data
     pub sources: Vec<TxTransparentSource<C>>,
     /// The optional data for the frontend sustainability fee
-    pub frontend_sus_fee: Vec<TxTransparentTarget<C>>,
+    // FIXME: should join this with sources? No maybe better to define a single
+    // percentage to apply to all inputs and a single receiver
+    pub frontend_sus_fee:
+        Vec<Either<TxTransparentTarget<C>, TxShieldedTarget<C>>>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }
@@ -436,11 +439,13 @@ pub struct TxUnshieldingTransfer<C: NamadaTypes = SdkTypes> {
     pub tx: Tx<C>,
     /// Transfer source data
     pub sources: Vec<TxShieldedSource<C>>,
-    /// Transfer target data (potentially also carries data for the frontend
-    /// sustainability fee)
+    /// Transfer target data
     pub targets: Vec<TxTransparentTarget<C>>,
     /// Optional additional key for gas payment
     pub gas_spending_key: Option<C::SpendingKey>,
+    /// The optional data for the frontend sustainability fee
+    pub frontend_sus_fee:
+        Vec<Either<TxTransparentTarget<C>, TxShieldedTarget<C>>>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }
@@ -829,7 +834,8 @@ pub struct TxIbcTransfer<C: NamadaTypes = SdkTypes> {
     /// Optional additional keys for gas payment
     pub gas_spending_key: Option<C::SpendingKey>,
     /// The optional data for the frontend sustainability fee
-    pub frontend_sus_fee: Option<TxTransparentTarget<C>>,
+    pub frontend_sus_fee:
+        Option<Either<TxTransparentTarget<C>, TxShieldedTarget<C>>>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }

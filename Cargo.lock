@@ -6452,6 +6452,7 @@ dependencies = [
  "borsh",
  "byte-unit",
  "clru",
+ "git2",
  "itertools 0.14.0",
  "nam-wasm-instrument",
  "namada_account",

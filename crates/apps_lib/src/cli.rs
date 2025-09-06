@@ -3696,7 +3696,7 @@ pub mod args {
     // FIXME: add the test prelude in the cli args too
     // WARNING: use only for testing purposes, MASP frontend fees don't make
     // sense when operating from the CLI
-    pub const __TEST_FRONTEND_SUS_FEE: ArgOpt<WalletAddress> =
+    pub const __TEST_FRONTEND_SUS_FEE: ArgOpt<WalletTransferTarget> =
         arg_opt("frontend-sus-fee");
     // WARNING: use only for testing purposes, MASP frontend fees don't make
     // sense when operating from the CLI
@@ -4960,11 +4960,27 @@ pub mod args {
             }
             let mut frontend_sus_fee = vec![];
             for fee in self.frontend_sus_fee {
-                frontend_sus_fee.push(TxTransparentTarget {
-                    target: chain_ctx.get(&fee.target),
-                    token: chain_ctx.get(&fee.token),
-                    amount: fee.amount,
-                });
+                match fee {
+                    Either::Left(transparent_target) => {
+                        frontend_sus_fee.push(Either::Left(
+                            TxTransparentTarget {
+                                target: chain_ctx
+                                    .get(&transparent_target.target),
+                                token: chain_ctx.get(&transparent_target.token),
+                                amount: transparent_target.amount,
+                            },
+                        ));
+                    }
+                    Either::Right(shielded_target) => {
+                        frontend_sus_fee.push(Either::Right(
+                            TxShieldedTarget {
+                                target: chain_ctx.get(&shielded_target.target),
+                                token: chain_ctx.get(&shielded_target.token),
+                                amount: shielded_target.amount,
+                            },
+                        ));
+                    }
+                }
             }
 
             Ok(TxShieldingTransfer::<SdkTypes> {
@@ -4986,49 +5002,40 @@ pub mod args {
             let raw_amount = AMOUNT.parse(matches);
             let amount = InputAmount::Unvalidated(raw_amount);
             let tx_code_path = PathBuf::from(TX_TRANSFER_WASM);
+            let sources = vec![TxTransparentSource {
+                source: source.clone(),
+                token: token.clone(),
+                amount,
+            }];
+            let targets = vec![TxShieldedTarget {
+                target,
+                token: token.clone(),
+                amount,
+            }];
             let frontend_sus_fee = __TEST_FRONTEND_SUS_FEE
                 .parse(matches)
-                .map_or(vec![], |target| {
-                    vec![TxTransparentTarget {
-                        target,
-                        token: token.clone(),
-                        amount: InputAmount::Unvalidated(
-                            token::DenominatedAmount::new(
-                                // Take a constant fee of 1 on top of the input
-                                // amount
-                                1.into(),
-                                raw_amount.denom(),
-                            ),
-                        ),
-                    }]
-                });
-
-            let mut sources = if frontend_sus_fee.is_empty() {
-                vec![]
-            } else {
-                // Adjust the inputs to account for the extra token
-                vec![TxTransparentSource {
-                    source: source.clone(),
-                    token: token.clone(),
-                    amount: InputAmount::Unvalidated(
+                .map_or(Default::default(), |fee_target| {
+                    // Take a constant fee of 1 on top of the input amount
+                    let amount = InputAmount::Unvalidated(
                         token::DenominatedAmount::new(
                             1.into(),
                             raw_amount.denom(),
                         ),
-                    ),
-                }]
-            };
+                    );
 
-            sources.push(TxTransparentSource {
-                source,
-                token: token.clone(),
-                amount,
-            });
-            let targets = vec![TxShieldedTarget {
-                target,
-                token,
-                amount,
-            }];
+                    vec![match PaymentAddress::from_str(&fee_target.raw) {
+                        Ok(_) => Either::Right(TxShieldedTarget {
+                            target: fee_target.to_payment_address(),
+                            token: token.clone(),
+                            amount,
+                        }),
+                        Err(_) => Either::Left(TxTransparentTarget {
+                            target: fee_target.to_address(),
+                            token,
+                            amount,
+                        }),
+                    }]
+                });
 
             Self {
                 tx,
@@ -5092,6 +5099,31 @@ pub mod args {
                     amount: transfer_data.amount,
                 });
             }
+
+            let mut frontend_sus_fee = vec![];
+            for fee in self.frontend_sus_fee {
+                match fee {
+                    Either::Left(transparent_target) => {
+                        frontend_sus_fee.push(Either::Left(
+                            TxTransparentTarget {
+                                target: chain_ctx
+                                    .get(&transparent_target.target),
+                                token: chain_ctx.get(&transparent_target.token),
+                                amount: transparent_target.amount,
+                            },
+                        ));
+                    }
+                    Either::Right(shielded_target) => {
+                        frontend_sus_fee.push(Either::Right(
+                            TxShieldedTarget {
+                                target: chain_ctx.get(&shielded_target.target),
+                                token: chain_ctx.get(&shielded_target.token),
+                                amount: shielded_target.amount,
+                            },
+                        ));
+                    }
+                }
+            }
             let gas_spending_key =
                 self.gas_spending_key.map(|key| chain_ctx.get_cached(&key));
 
@@ -5101,6 +5133,7 @@ pub mod args {
                 gas_spending_key,
                 sources,
                 tx_code_path: self.tx_code_path.to_path_buf(),
+                frontend_sus_fee,
             })
         }
     }
@@ -5114,42 +5147,42 @@ pub mod args {
             let raw_amount = AMOUNT.parse(matches);
             let amount = InputAmount::Unvalidated(raw_amount);
             let tx_code_path = PathBuf::from(TX_TRANSFER_WASM);
-            let mut targets = vec![TxTransparentTarget {
+            let targets = vec![TxTransparentTarget {
                 target: target.clone(),
                 token: token.clone(),
                 amount,
             }];
-            let mut sources = vec![TxShieldedSource {
+            let sources = vec![TxShieldedSource {
                 source: source.clone(),
                 token: token.clone(),
                 amount,
             }];
             let gas_spending_key = GAS_SPENDING_KEY.parse(matches);
 
-            if let Some(fee_target) = __TEST_FRONTEND_SUS_FEE.parse(matches) {
-                // Take a constant fee of 1 on top of the input amount
-                targets.push(TxTransparentTarget {
-                    target: fee_target,
-                    token: token.clone(),
-                    amount: InputAmount::Unvalidated(
+            let frontend_sus_fee = __TEST_FRONTEND_SUS_FEE
+                .parse(matches)
+                .map_or(Default::default(), |fee_target| {
+                    // Take a constant fee of 1 on top of the input amount
+                    let amount = InputAmount::Unvalidated(
                         token::DenominatedAmount::new(
                             1.into(),
                             raw_amount.denom(),
                         ),
-                    ),
-                });
+                    );
 
-                sources.push(TxShieldedSource {
-                    source,
-                    token,
-                    amount: InputAmount::Unvalidated(
-                        token::DenominatedAmount::new(
-                            1.into(),
-                            raw_amount.denom(),
-                        ),
-                    ),
-                })
-            }
+                    vec![match PaymentAddress::from_str(&fee_target.raw) {
+                        Ok(_) => Either::Right(TxShieldedTarget {
+                            target: fee_target.to_payment_address(),
+                            token: token.clone(),
+                            amount,
+                        }),
+                        Err(_) => Either::Left(TxTransparentTarget {
+                            target: fee_target.to_address(),
+                            token,
+                            amount,
+                        }),
+                    }]
+                });
 
             Self {
                 tx,
@@ -5157,6 +5190,7 @@ pub mod args {
                 targets,
                 gas_spending_key,
                 tx_code_path,
+                frontend_sus_fee,
             }
         }
 
@@ -5201,12 +5235,22 @@ pub mod args {
             let chain_ctx = ctx.borrow_mut_chain_or_exit();
             let gas_spending_key =
                 self.gas_spending_key.map(|key| chain_ctx.get_cached(&key));
-            let frontend_sus_fee =
-                self.frontend_sus_fee.map(|fee| TxTransparentTarget {
-                    target: chain_ctx.get(&fee.target),
-                    token: chain_ctx.get(&fee.token),
-                    amount: fee.amount,
-                });
+            let frontend_sus_fee = self.frontend_sus_fee.map(|fee| match fee {
+                Either::Left(transparent_target) => {
+                    Either::Left(TxTransparentTarget {
+                        target: chain_ctx.get(&transparent_target.target),
+                        token: chain_ctx.get(&transparent_target.token),
+                        amount: transparent_target.amount,
+                    })
+                }
+                Either::Right(shielded_target) => {
+                    Either::Right(TxShieldedTarget {
+                        target: chain_ctx.get(&shielded_target.target),
+                        token: chain_ctx.get(&shielded_target.token),
+                        amount: shielded_target.amount,
+                    })
+                }
+            });
 
             Ok(TxIbcTransfer::<SdkTypes> {
                 tx,
@@ -5253,18 +5297,27 @@ pub mod args {
             let gas_spending_key = GAS_SPENDING_KEY.parse(matches);
             let tx_code_path = PathBuf::from(TX_IBC_WASM);
             let frontend_sus_fee =
-                __TEST_FRONTEND_SUS_FEE.parse(matches).map(|target|
-                // Take a constant fee of 1 on top of the input amount
-                TxTransparentTarget {
-                            target,
+                __TEST_FRONTEND_SUS_FEE.parse(matches).map(|fee_target| {
+                    // Take a constant fee of 1 on top of the input amount
+                    let amount = InputAmount::Unvalidated(
+                        token::DenominatedAmount::new(
+                            1.into(),
+                            raw_amount.denom(),
+                        ),
+                    );
+                    match PaymentAddress::from_str(&fee_target.raw) {
+                        Ok(_) => Either::Right(TxShieldedTarget {
+                            target: fee_target.to_payment_address(),
                             token: token.clone(),
-                            amount: InputAmount::Unvalidated(
-                                token::DenominatedAmount::new(
-                                    1.into(),
-                                    raw_amount.denom(),
-                                ),
-                            ),
-                        });
+                            amount,
+                        }),
+                        Err(_) => Either::Left(TxTransparentTarget {
+                            target: fee_target.to_address(),
+                            token: token.clone(),
+                            amount,
+                        }),
+                    }
+                });
 
             Self {
                 tx,

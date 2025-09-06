@@ -548,6 +548,9 @@ where
 
         self.force_redraw_progress_bars();
 
+        self.client
+            .hint(initial_state.start_height, initial_state.last_query_height);
+
         Ok(initial_state)
     }
 

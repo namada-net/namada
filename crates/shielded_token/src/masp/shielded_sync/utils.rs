@@ -385,6 +385,16 @@ pub trait MaspClient: Clone {
     /// Error type returned by the methods of this trait
     type Error: std::error::Error + Send + Sync + 'static;
 
+    /// Hint to this [`MaspClient`] implementation the block range
+    /// that will be fetched.
+    ///
+    /// ## Use-case
+    ///
+    /// This function is primarily used to decide when it is optimal
+    /// (latency wise) to fetch a block index (i.e. bloom filter) with
+    /// the block heights that contain MASP txs.
+    fn hint(&mut self, from: BlockHeight, to: BlockHeight);
+
     /// Return the last block height we can retrieve data from.
     #[allow(async_fn_in_trait)]
     async fn last_block_height(

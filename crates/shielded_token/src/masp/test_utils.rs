@@ -412,7 +412,7 @@ impl MaspClient for TestingMaspClient {
 
     #[inline(always)]
     fn capabilities(&self) -> MaspClientCapabilities {
-        MaspClientCapabilities::OnlyTransfers
+        MaspClientCapabilities::NONE
     }
 
     async fn fetch_commitment_tree(

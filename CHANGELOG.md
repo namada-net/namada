@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## v201.0.4
+
+Namada apps v201.0.4
+
+### IMPROVEMENTS
+
+- Use more precise version for wasm cache key to avoid collisions of serialized
+  artifacts ([\#4799](https://github.com/anoma/namada/pull/4799))
+- Clear tx gas map after every block to avoid indefinite accumulation
+  ([\#4800](https://github.com/anoma/namada/pull/4800))
+
 ## v201.0.3
 
 Namada apps v201.0.3

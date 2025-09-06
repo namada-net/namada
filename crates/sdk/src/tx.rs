@@ -3750,8 +3750,6 @@ pub async fn build_shielding_transfer<N: Namada>(
         // Transfer the frontend fee, take the amount from the source matching
         // the index of this fee entry
         match &args.sources.get(idx) {
-            // FIXME: better to remove the token from the fee argument and just
-            // use the source one
             Some(TxTransparentSource { source, token, .. })
                 if token == sus_fee_token =>
             {
@@ -3767,9 +3765,13 @@ pub async fn build_shielding_transfer<N: Namada>(
                     ))?;
 
                 if let TransferTarget::PaymentAddress(_) = sus_fee_target {
-                    // FIXME: in this case also need to update the masp sources
-                    // Add the extra shielding target for the masp frontend
-                    // sustainability fee
+                    // Add the extra shielding source and target for the masp
+                    // frontend sustainability fee
+                    transfer_data.sources.push((
+                        TransferSource::Address(source.to_owned()),
+                        sus_fee_token.to_owned(),
+                        validated_fee_amount,
+                    ));
                     transfer_data.targets.push((
                         sus_fee_target,
                         sus_fee_token.to_owned(),
@@ -3943,8 +3945,6 @@ pub async fn build_unshielding_transfer<N: Namada>(
         // Transfer the frontend fee, take the amount from the source matching
         // the index of this fee entry
         match &args.sources.get(idx) {
-            // FIXME: better to remove the token from the fee argument and just
-            // use the source one
             Some(TxShieldedSource { source, token, .. })
                 if token == sus_fee_token =>
             {

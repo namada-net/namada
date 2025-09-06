@@ -3693,15 +3693,18 @@ pub mod args {
     pub const TARGET: Arg<WalletAddress> = arg("target");
     pub const TARGET_OPT: ArgOpt<WalletAddress> = arg_opt("target");
     pub const TEMPLATES_PATH: Arg<PathBuf> = arg("templates-path");
-    // FIXME: add the test prelude in the cli args too
     // WARNING: use only for testing purposes, MASP frontend fees don't make
     // sense when operating from the CLI
-    pub const __TEST_FRONTEND_SUS_FEE: ArgOpt<WalletTransferTarget> =
-        arg_opt("frontend-sus-fee");
+    pub const __TEST_FRONTEND_SUS_FEE: ArgOpt<WalletAddress> =
+        arg_opt("test-frontend-sus-fee");
+    // WARNING: use only for testing purposes, MASP frontend fees don't make
+    // sense when operating from the CLI
+    pub const __TEST_FRONTEND_SUS_FEE_SHIELDED: ArgOpt<WalletPaymentAddr> =
+        arg_opt("test-frontend-sus-fee-shielded");
     // WARNING: use only for testing purposes, MASP frontend fees don't make
     // sense when operating from the CLI
     pub const __TEST_FRONTEND_SUS_FEE_IBC: ArgOpt<WalletPaymentAddr> =
-        arg_opt("frontend-sus-fee-ibc");
+        arg_opt("test-frontend-sus-fee-ibc");
     pub const TIMEOUT_HEIGHT: ArgOpt<u64> = arg_opt("timeout-height");
     pub const TIMEOUT_SEC_OFFSET: ArgOpt<u64> = arg_opt("timeout-sec-offset");
     pub const TM_ADDRESS_OPT: ArgOpt<String> = arg_opt("tm-address");
@@ -5012,9 +5015,9 @@ pub mod args {
                 token: token.clone(),
                 amount,
             }];
-            let frontend_sus_fee = __TEST_FRONTEND_SUS_FEE
-                .parse(matches)
-                .map_or(Default::default(), |fee_target| {
+            let frontend_sus_fee = match __TEST_FRONTEND_SUS_FEE.parse(matches)
+            {
+                Some(address) => {
                     // Take a constant fee of 1 on top of the input amount
                     let amount = InputAmount::Unvalidated(
                         token::DenominatedAmount::new(
@@ -5023,19 +5026,33 @@ pub mod args {
                         ),
                     );
 
-                    vec![match PaymentAddress::from_str(&fee_target.raw) {
-                        Ok(_) => Either::Right(TxShieldedTarget {
-                            target: fee_target.to_payment_address(),
-                            token: token.clone(),
-                            amount,
-                        }),
-                        Err(_) => Either::Left(TxTransparentTarget {
-                            target: fee_target.to_address(),
-                            token,
-                            amount,
-                        }),
-                    }]
-                });
+                    vec![Either::Left(TxTransparentTarget {
+                        target: address,
+                        token,
+                        amount,
+                    })]
+                }
+                None => {
+                    __TEST_FRONTEND_SUS_FEE_SHIELDED.parse(matches).map_or(
+                        Default::default(),
+                        |payment_address| {
+                            // Take a constant fee of 1 on top of the input
+                            // amount
+                            let amount = InputAmount::Unvalidated(
+                                token::DenominatedAmount::new(
+                                    1.into(),
+                                    raw_amount.denom(),
+                                ),
+                            );
+                            vec![Either::Right(TxShieldedTarget {
+                                target: payment_address,
+                                token: token.clone(),
+                                amount,
+                            })]
+                        },
+                    )
+                }
+            };
 
             Self {
                 tx,
@@ -5063,10 +5080,26 @@ pub mod args {
                         .def()
                         .help(wrap!("The amount to transfer in decimal.")),
                 )
-                .arg(__TEST_FRONTEND_SUS_FEE.def().help(wrap!(
-                    "The optional address of the frontend provider that will \
-                     take the masp sustainability fee."
-                )))
+                .arg(
+                    __TEST_FRONTEND_SUS_FEE
+                        .def()
+                        .help(wrap!(
+                            "The optional transparent address of the frontend \
+                             provider that will take the masp sustainability \
+                             fee."
+                        ))
+                        .conflicts_with(__TEST_FRONTEND_SUS_FEE_SHIELDED.name),
+                )
+                .arg(
+                    __TEST_FRONTEND_SUS_FEE_SHIELDED
+                        .def()
+                        .help(wrap!(
+                            "The optional payment address of the frontend \
+                             provider that will take the masp sustainability \
+                             fee."
+                        ))
+                        .conflicts_with(__TEST_FRONTEND_SUS_FEE.name),
+                )
         }
     }
 
@@ -5159,9 +5192,9 @@ pub mod args {
             }];
             let gas_spending_key = GAS_SPENDING_KEY.parse(matches);
 
-            let frontend_sus_fee = __TEST_FRONTEND_SUS_FEE
-                .parse(matches)
-                .map_or(Default::default(), |fee_target| {
+            let frontend_sus_fee = match __TEST_FRONTEND_SUS_FEE.parse(matches)
+            {
+                Some(address) => {
                     // Take a constant fee of 1 on top of the input amount
                     let amount = InputAmount::Unvalidated(
                         token::DenominatedAmount::new(
@@ -5170,19 +5203,33 @@ pub mod args {
                         ),
                     );
 
-                    vec![match PaymentAddress::from_str(&fee_target.raw) {
-                        Ok(_) => Either::Right(TxShieldedTarget {
-                            target: fee_target.to_payment_address(),
-                            token: token.clone(),
-                            amount,
-                        }),
-                        Err(_) => Either::Left(TxTransparentTarget {
-                            target: fee_target.to_address(),
-                            token,
-                            amount,
-                        }),
-                    }]
-                });
+                    vec![Either::Left(TxTransparentTarget {
+                        target: address,
+                        token,
+                        amount,
+                    })]
+                }
+                None => {
+                    __TEST_FRONTEND_SUS_FEE_SHIELDED.parse(matches).map_or(
+                        Default::default(),
+                        |payment_address| {
+                            // Take a constant fee of 1 on top of the input
+                            // amount
+                            let amount = InputAmount::Unvalidated(
+                                token::DenominatedAmount::new(
+                                    1.into(),
+                                    raw_amount.denom(),
+                                ),
+                            );
+                            vec![Either::Right(TxShieldedTarget {
+                                target: payment_address,
+                                token: token.clone(),
+                                amount,
+                            })]
+                        },
+                    )
+                }
+            };
 
             Self {
                 tx,
@@ -5217,10 +5264,26 @@ pub mod args {
                      payment. When not provided the source spending key will \
                      be used."
                 )))
-                .arg(__TEST_FRONTEND_SUS_FEE.def().help(wrap!(
-                    "The optional address of the frontend provider that will \
-                     take the masp sustainability fee."
-                )))
+                .arg(
+                    __TEST_FRONTEND_SUS_FEE
+                        .def()
+                        .help(wrap!(
+                            "The optional transparent address of the frontend \
+                             provider that will take the masp sustainability \
+                             fee."
+                        ))
+                        .conflicts_with(__TEST_FRONTEND_SUS_FEE_SHIELDED.name),
+                )
+                .arg(
+                    __TEST_FRONTEND_SUS_FEE_SHIELDED
+                        .def()
+                        .help(wrap!(
+                            "The optional payment address of the frontend \
+                             provider that will take the masp sustainability \
+                             fee."
+                        ))
+                        .conflicts_with(__TEST_FRONTEND_SUS_FEE.name),
+                )
         }
     }
 
@@ -5296,8 +5359,9 @@ pub mod args {
             let ibc_memo = IBC_MEMO.parse(matches);
             let gas_spending_key = GAS_SPENDING_KEY.parse(matches);
             let tx_code_path = PathBuf::from(TX_IBC_WASM);
-            let frontend_sus_fee =
-                __TEST_FRONTEND_SUS_FEE.parse(matches).map(|fee_target| {
+            let frontend_sus_fee = match __TEST_FRONTEND_SUS_FEE.parse(matches)
+            {
+                Some(address) => {
                     // Take a constant fee of 1 on top of the input amount
                     let amount = InputAmount::Unvalidated(
                         token::DenominatedAmount::new(
@@ -5305,19 +5369,33 @@ pub mod args {
                             raw_amount.denom(),
                         ),
                     );
-                    match PaymentAddress::from_str(&fee_target.raw) {
-                        Ok(_) => Either::Right(TxShieldedTarget {
-                            target: fee_target.to_payment_address(),
-                            token: token.clone(),
-                            amount,
-                        }),
-                        Err(_) => Either::Left(TxTransparentTarget {
-                            target: fee_target.to_address(),
-                            token: token.clone(),
-                            amount,
-                        }),
-                    }
-                });
+
+                    Some(Either::Left(TxTransparentTarget {
+                        target: address,
+                        token: token.clone(),
+                        amount,
+                    }))
+                }
+                None => {
+                    __TEST_FRONTEND_SUS_FEE_SHIELDED.parse(matches).map(
+                        |payment_address| {
+                            // Take a constant fee of 1 on top of the input
+                            // amount
+                            let amount = InputAmount::Unvalidated(
+                                token::DenominatedAmount::new(
+                                    1.into(),
+                                    raw_amount.denom(),
+                                ),
+                            );
+                            Either::Right(TxShieldedTarget {
+                                target: payment_address,
+                                token: token.clone(),
+                                amount,
+                            })
+                        },
+                    )
+                }
+            };
 
             Self {
                 tx,
@@ -5387,11 +5465,22 @@ pub mod args {
                 .arg(
                     __TEST_FRONTEND_SUS_FEE
                         .def()
-                        .conflicts_with(IBC_SHIELDING_DATA_PATH.name)
                         .help(wrap!(
-                            "The optional address of the frontend provider \
-                             that will take the masp sustainability fee."
-                        )),
+                            "The optional transparent address of the frontend \
+                             provider that will take the masp sustainability \
+                             fee."
+                        ))
+                        .conflicts_with(__TEST_FRONTEND_SUS_FEE_SHIELDED.name),
+                )
+                .arg(
+                    __TEST_FRONTEND_SUS_FEE_SHIELDED
+                        .def()
+                        .help(wrap!(
+                            "The optional payment address of the frontend \
+                             provider that will take the masp sustainability \
+                             fee."
+                        ))
+                        .conflicts_with(__TEST_FRONTEND_SUS_FEE.name),
                 )
         }
     }

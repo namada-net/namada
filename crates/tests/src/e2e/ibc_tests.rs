@@ -2788,6 +2788,11 @@ fn transfer_on_chain(
     Ok(())
 }
 
+enum MaspFrontendFee<'alias> {
+    Transparent(&'alias str),
+    Shielded(&'alias str),
+}
+
 #[allow(clippy::too_many_arguments)]
 fn transfer(
     test: &Test,
@@ -2803,7 +2808,7 @@ fn transfer(
     expected_err: Option<&str>,
     ibc_memo: Option<&str>,
     gen_refund_target: bool,
-    frontend_sus_fee: Option<&str>,
+    frontend_sus_fee: Option<MaspFrontendFee>,
 ) -> Result<u32> {
     let rpc = get_actor_rpc(test, Who::Validator(0));
 
@@ -2872,8 +2877,16 @@ fn transfer(
     }
 
     if let Some(target) = frontend_sus_fee {
-        tx_args.push("--frontend-sus-fee");
-        tx_args.push(target.as_ref());
+        match target {
+            MaspFrontendFee::Transparent(address) => {
+                tx_args.push("--test-frontend-sus-fee");
+                tx_args.push(address);
+            }
+            MaspFrontendFee::Shielded(payment_address) => {
+                tx_args.push("--test-frontend-sus-fee-shielded");
+                tx_args.push(payment_address);
+            }
+        }
     }
 
     let mut client = run!(test, Bin::Client, tx_args, Some(300))?;
@@ -3523,7 +3536,7 @@ fn gen_ibc_shielding_data(
         &rpc,
     ];
     if let Some(target) = frontend_sus_fee {
-        args.push("--frontend-sus-fee-ibc");
+        args.push("--test-frontend-sus-fee-ibc");
         args.push(target.as_ref());
     }
 
@@ -3921,7 +3934,7 @@ fn frontend_sus_fee() -> Result<()> {
     check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 899)?;
 
     // Unshielding transfer 10 samoleans from Namada to Gaia with transparent
-    // frontend fee FIXME: need to test also the transparent version
+    // frontend fee
     let gaia_receiver = find_cosmos_address(&test_gaia, COSMOS_USER)?;
     transfer(
         &test,
@@ -3938,7 +3951,7 @@ fn frontend_sus_fee() -> Result<()> {
         None,
         None,
         true,
-        Some(ESTER),
+        Some(MaspFrontendFee::Transparent(ESTER)),
     )?;
     wait_for_packet_relay(
         &hermes_dir,
@@ -3950,6 +3963,37 @@ fn frontend_sus_fee() -> Result<()> {
     check_shielded_balance(&test, AC_VIEWING_KEY, &ibc_denom_on_namada, 1)?;
     check_balance(&test, ESTER, &ibc_denom_on_namada, 1)?;
     check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 909)?;
+
+    // Unshielding transfer 10 samoleans from Namada to Gaia with shielded
+    // frontend fee
+    let gaia_receiver = find_cosmos_address(&test_gaia, COSMOS_USER)?;
+    transfer(
+        &test,
+        A_SPENDING_KEY,
+        &gaia_receiver,
+        &ibc_denom_on_namada,
+        // An extra token will be added to this amount as a frontend masp fee
+        10,
+        Some(BERTHA_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        None,
+        None,
+        None,
+        None,
+        true,
+        Some(MaspFrontendFee::Shielded(AC_PAYMENT_ADDRESS)),
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+    check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 78)?;
+    check_shielded_balance(&test, AC_VIEWING_KEY, &ibc_denom_on_namada, 2)?;
+    check_balance(&test, ESTER, &ibc_denom_on_namada, 1)?;
+    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 919)?;
 
     Ok(())
 }

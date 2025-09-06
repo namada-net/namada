@@ -162,6 +162,7 @@ where
     S: StateRead + State + StorageRead,
     CA: 'static + WasmCacheAccess,
 {
+    println!("Gas meter kind {gas_meter_kind:?}");
     let tx_code = tx
         .get_section(cmt.code_sechash())
         .and_then(|x| Section::code_sec(x.as_ref()))
@@ -210,6 +211,21 @@ where
         gas_meter,
         gas_meter_kind,
     )?;
+    {
+        let m = gas_meter.borrow();
+        println!(
+            "Gas after fetch_or_compile {}, scale {}, limit {}, available {}",
+            m.transaction_gas.sub,
+            m.get_gas_scale(),
+            m.get_gas_limit().sub,
+            m.get_available_gas().sub
+        );
+    }
+    println!(
+        "Gas after fetch_or_compile {}, available gas {}",
+        gas_meter.borrow().transaction_gas.sub,
+        gas_meter.borrow().get_available_gas().sub,
+    );
     let store = Rc::new(RefCell::new(store));
 
     let mut iterators: PrefixIterators<'_, <S as StateRead>::D> =
@@ -265,6 +281,7 @@ where
         wasmer::Instance::new(&mut *store, &module, &imports)
             .map_err(|e| Error::InstantiationError(Box::new(e)))?
     };
+    println!("wasm gas after intiantiate {:?}", wasm_gas_meter.borrow());
 
     wasm_gas_meter.borrow_mut().init(
         |meter| {
@@ -279,6 +296,16 @@ where
                 .get_global(MUT_GLOBAL_GAS_NAME)
                 .map_err(Error::MissingGasMutGlobal)?;
 
+            println!("wasm gas initial gas {}", meter.initial_gas().sub);
+            {
+                let m = gas_meter.borrow();
+                println!(
+                    "gas meter scale {}, limit {}, available: {}",
+                    m.get_gas_scale(),
+                    m.get_gas_limit().sub,
+                    m.get_available_gas().sub
+                );
+            }
             meter.init_from(
                 &*gas_meter.borrow(),
                 global.clone(),
@@ -288,6 +315,7 @@ where
             Ok(())
         },
     )?;
+    println!("wasm gas meter before call {wasm_gas_meter:?}");
 
     // Fetch guest's main memory
     let guest_memory = instance
@@ -332,9 +360,14 @@ where
     );
 
     let wasm_gas_meter = RefCell::into_inner(wasm_gas_meter);
+    println!("wasm gas meter after call {wasm_gas_meter:?}");
     wasm_gas_meter
         .flush_to_meter(&mut *gas_meter.borrow_mut())
         .map_err(|err| Error::GasError(err.to_string()))?;
+    println!(
+        "gas after call meter flush {}",
+        gas_meter.borrow().transaction_gas.sub
+    );
 
     let ok = result.map_err(|err| {
         tracing::debug!("Tx WASM failed with {}", err);
@@ -905,6 +938,7 @@ pub fn prepare_wasm_code<T: AsRef<[u8]>>(
     code: T,
     gas_meter_kind: GasMeterKind,
 ) -> Result<Vec<u8>> {
+    println!("wasm before inject {}", Hash::sha256(code.as_ref()));
     let module: elements::Module = elements::deserialize_buffer(code.as_ref())
         .map_err(Error::DeserializationError)?;
     let module = match gas_meter_kind {
@@ -955,7 +989,11 @@ pub fn prepare_wasm_code<T: AsRef<[u8]>>(
 
     let module = inject_alloc(module)?;
 
-    elements::serialize(module).map_err(Error::SerializationError)
+    let res = elements::serialize(module).map_err(Error::SerializationError)?;
+
+    println!("wasm after inject {}", Hash::sha256(&res));
+
+    Ok(res)
 }
 
 /// Inject and export allocation function that can be used to grow the initial

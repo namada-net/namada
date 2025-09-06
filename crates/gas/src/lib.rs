@@ -244,7 +244,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 )]
 #[must_use = "Gas must be accounted for by the gas meter"]
 pub struct Gas {
-    sub: u64,
+    #[allow(missing_docs, dead_code)]
+    pub sub: u64,
 }
 
 impl Gas {
@@ -435,7 +436,7 @@ pub struct TxGasMeter {
     /// The gas limit for a transaction
     tx_gas_limit: Gas,
     /// Gas consumption of the tx
-    transaction_gas: Gas,
+    pub transaction_gas: Gas,
 }
 
 /// Gas metering in a validity predicate

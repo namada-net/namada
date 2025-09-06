@@ -93,6 +93,7 @@ impl WasmGasMeter {
         self.initial_gas.clone()
     }
 
+    #[track_caller]
     fn write_wasm_gas(
         &self,
         gas: Gas,
@@ -108,6 +109,7 @@ impl WasmGasMeter {
 
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
         let value_to_sync = u64::from(gas) as i64;
+        println!("write_wasm_gas {}", value_to_sync);
 
         self.wasm_transaction_gas_global
             .as_ref()
@@ -116,6 +118,7 @@ impl WasmGasMeter {
             .expect("setting the wasm global gas value shouldn't fail");
     }
 
+    #[track_caller]
     fn read_wasm_gas(
         &self,
         store: Option<rc::Rc<RefCell<wasmer::Store>>>,
@@ -134,6 +137,7 @@ impl WasmGasMeter {
             .expect("the wasm gas global must be set while running the vm")
             .get(&mut *store.borrow_mut())
         {
+            println!("read_wasm_gas {}", available_gas);
             #[allow(clippy::cast_sign_loss)]
             {
                 namada_gas::Gas::from(

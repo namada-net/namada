@@ -373,7 +373,7 @@ where
         .into_iter();
 
     for cmt in inner_txs {
-        match apply_wasm_tx(
+        let res = apply_wasm_tx(
             wrapper_hash,
             &tx.batch_ref_tx(cmt),
             &tx_index,
@@ -384,7 +384,12 @@ where
                 tx_wasm_cache,
             },
             gas_meter_kind,
-        ) {
+        );
+        println!(
+            "dispatch_inner_txs gas {}",
+            tx_gas_meter.borrow().transaction_gas.sub
+        );
+        match res {
             Err(Error::GasError(msg)) => {
                 // Gas error aborts the execution of the entire batch
                 tx_result.insert_inner_tx_result(
@@ -510,6 +515,7 @@ where
 
     // Charge or check fees, propagate any errors to prevent committing invalid
     // data
+    println!("has block proposer {}", block_proposer.is_some());
     let payment_result = match block_proposer {
         Some(block_proposer) => {
             transfer_fee(shell_params, block_proposer, tx, wrapper, tx_index)?
@@ -559,6 +565,7 @@ where
             batch
         });
 
+    println!("apply_wrapper_tx_bytes gas {}", tx_bytes.len());
     // Account for gas
     tx_gas_meter
         .borrow_mut()
@@ -832,7 +839,7 @@ where
                 vp_wasm_cache,
                 tx_wasm_cache,
             },
-            GasMeterKind::MutGlobal,
+            GasMeterKind::HostFn,
         ) {
             Ok(result) => {
                 // NOTE: do not commit yet cause this could be exploited to get
@@ -886,6 +893,10 @@ where
         }
     };
 
+    println!(
+        "masp gas: {}",
+        masp_gas_meter.borrow().get_consumed_gas().sub
+    );
     tx_gas_meter
         .borrow_mut()
         .consume(masp_gas_meter.borrow().get_consumed_gas())
@@ -1054,6 +1065,10 @@ where
         tx_wasm_cache,
         gas_meter_kind,
     )?;
+    println!(
+        "apply_wasm_tx gas after tx {}",
+        tx_gas_meter.borrow().transaction_gas.sub
+    );
 
     let vps_result = check_vps(CheckVps {
         batched_tx,
@@ -1064,6 +1079,10 @@ where
         vp_wasm_cache,
         gas_meter_kind,
     })?;
+    println!(
+        "apply_wasm_tx gas after vps {}",
+        tx_gas_meter.borrow().transaction_gas.sub
+    );
 
     let initialized_accounts = state.write_log().get_initialized_accounts();
     let changed_keys = state.write_log().get_keys();

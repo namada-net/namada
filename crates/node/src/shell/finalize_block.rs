@@ -797,6 +797,10 @@ where
             let is_atomic_batch = tx.header.atomic;
             let commitments_len = tx.commitments().len() as u64;
             let tx_hash = tx.header_hash();
+            println!(
+                "tx {tx_hash} gas before dispatch: {}",
+                tx_gas_meter.get_consumed_gas().sub
+            );
             let tx_gas_meter = RefCell::new(tx_gas_meter);
 
             let dispatch_result = protocol::dispatch_tx(
@@ -807,6 +811,7 @@ where
             );
             let tx_gas_meter = tx_gas_meter.into_inner();
             let consumed_gas = tx_gas_meter.get_consumed_gas();
+            println!("tx {tx_hash} total gas: {}", consumed_gas.sub);
 
             // save the gas cost
             self.update_tx_gas(tx_hash, consumed_gas);
@@ -881,6 +886,8 @@ where
             );
             let tx_gas_meter = tx_gas_meter.into_inner();
             let consumed_gas = tx_gas_meter.get_consumed_gas();
+
+            println!("tx {tx_hash} total gas: {}", consumed_gas.sub);
 
             // update the gas cost of the corresponding wrapper
             self.update_tx_gas(tx_hash, consumed_gas);

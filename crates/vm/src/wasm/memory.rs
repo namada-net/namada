@@ -388,6 +388,7 @@ impl VmMemory for WasmMemory {
             let bytes = read_memory_bytes(&mut *store, memory, offset, len)?;
             let len = bytes.len() as u64;
             let gas = checked!(len * MEMORY_ACCESS_GAS_PER_BYTE)?;
+
             Ok((bytes, gas.into()))
         })
     }

@@ -386,6 +386,8 @@ pub enum TestError {
 impl MaspClient for TestingMaspClient {
     type Error = TestError;
 
+    fn hint(&mut self, _from: BlockHeight, _to: BlockHeight) {}
+
     async fn last_block_height(
         &self,
     ) -> Result<Option<BlockHeight>, Self::Error> {

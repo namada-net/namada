@@ -69,6 +69,11 @@ impl<M: Clone> Clone for LinearBackoffSleepMaspClient<M> {
 impl<M: MaspClient> MaspClient for LinearBackoffSleepMaspClient<M> {
     type Error = <M as MaspClient>::Error;
 
+    #[inline]
+    fn hint(&mut self, from: BlockHeight, to: BlockHeight) {
+        self.middleware_client.hint(from, to);
+    }
+
     async fn last_block_height(
         &self,
     ) -> Result<Option<BlockHeight>, Self::Error> {
@@ -180,6 +185,8 @@ impl<C> LedgerMaspClient<C> {
 
 impl<C: Client + Send + Sync> MaspClient for LedgerMaspClient<C> {
     type Error = Error;
+
+    fn hint(&mut self, _from: BlockHeight, _to: BlockHeight) {}
 
     async fn last_block_height(&self) -> Result<Option<BlockHeight>, Error> {
         let maybe_block = crate::rpc::query_block(&self.inner.client).await?;
@@ -425,6 +432,12 @@ impl IndexerMaspClient {
 
 impl MaspClient for IndexerMaspClient {
     type Error = Error;
+
+    fn hint(&mut self, from: BlockHeight, to: BlockHeight) {
+        if to.0 - from.0 + 1 < self.shared.max_concurrent_fetches as _ {
+            _ = self.shared.block_index.set(None);
+        }
+    }
 
     async fn last_block_height(&self) -> Result<Option<BlockHeight>, Error> {
         use serde::Deserialize;

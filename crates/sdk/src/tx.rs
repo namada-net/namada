@@ -4376,7 +4376,11 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
         )],
         targets: [
             extra_target,
-            vec![(args.target, token.clone(), validated_amount)],
+            vec![(
+                TransferTarget::PaymentAddress(args.target),
+                token.clone(),
+                validated_amount,
+            )],
         ]
         .concat(),
     };

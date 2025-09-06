@@ -7509,7 +7509,7 @@ pub mod args {
         fn parse(matches: &ArgMatches) -> Self {
             let query = Query::parse(matches);
             let output_folder = OUTPUT_FOLDER_PATH.parse(matches);
-            let target = TRANSFER_TARGET.parse(matches);
+            let target = PAYMENT_ADDRESS_TARGET.parse(matches);
             let token = TOKEN_STR.parse(matches);
             let raw_amount = AMOUNT.parse(matches);
             let amount = InputAmount::Unvalidated(raw_amount);
@@ -7560,7 +7560,11 @@ pub mod args {
                 .arg(OUTPUT_FOLDER_PATH.def().help(wrap!(
                     "The output folder path where the artifact will be stored."
                 )))
-                .arg(TRANSFER_TARGET.def().help(wrap!("The target address.")))
+                .arg(
+                    PAYMENT_ADDRESS_TARGET
+                        .def()
+                        .help(wrap!("The shielded target account address.")),
+                )
                 .arg(TOKEN.def().help(wrap!("The transfer token.")))
                 .arg(
                     AMOUNT

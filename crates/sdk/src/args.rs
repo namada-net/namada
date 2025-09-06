@@ -719,10 +719,7 @@ impl TxOsmosisSwap<SdkTypes> {
                             ledger_address: transfer.tx.ledger_address.clone(),
                         },
                         output_folder: None,
-                        target:
-                            namada_core::masp::TransferTarget::PaymentAddress(
-                                payment_addr,
-                            ),
+                        target: payment_addr,
                         asset: IbcShieldingTransferAsset::Address(
                             namada_output_addr,
                         ),
@@ -3250,8 +3247,7 @@ pub struct GenIbcShieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// The output directory path to where serialize the data
     pub output_folder: Option<PathBuf>,
     /// The target address
-    // FIXME: why isn't this a payment address?
-    pub target: C::TransferTarget,
+    pub target: C::PaymentAddress,
     /// Transferred token amount
     pub amount: InputAmount,
     /// The optional expiration of the masp shielding transaction

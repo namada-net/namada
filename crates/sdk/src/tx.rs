@@ -27,7 +27,7 @@ use namada_core::address::{Address, IBC, MASP};
 use namada_core::arith::checked;
 use namada_core::chain::Epoch;
 use namada_core::collections::HashSet;
-use namada_core::dec::Dec;
+use namada_core::dec::{Dec, POS_DECIMAL_PRECISION};
 use namada_core::hash::Hash;
 use namada_core::ibc::apps::nft_transfer::types::PrefixedClassId;
 use namada_core::ibc::apps::nft_transfer::types::msgs::transfer::MsgTransfer as IbcMsgNftTransfer;
@@ -76,10 +76,7 @@ pub use namada_tx::{Authorization, *};
 use num_traits::Zero;
 use rand_core::{OsRng, RngCore};
 
-use crate::args::{
-    TxShieldedSource, TxShieldedTarget, TxTransparentSource,
-    TxTransparentTarget, Wrapper,
-};
+use crate::args::{TxTransparentSource, TxTransparentTarget, Wrapper};
 use crate::borsh::BorshSerializeExt;
 use crate::control_flow::time;
 use crate::error::{EncodingError, Error, QueryError, Result, TxSubmitError};
@@ -2903,27 +2900,39 @@ pub async fn build_ibc_transfer(
         None
     };
 
-    if let Some(target) = &args.frontend_sus_fee {
-        let (target, token, amount) = match target {
-            either::Either::Left(TxTransparentTarget {
-                target,
-                token,
-                amount,
-            }) => (TransferTarget::Address(target.to_owned()), token, amount),
-            either::Either::Right(TxShieldedTarget {
-                target,
-                token,
-                amount,
-            }) => (TransferTarget::PaymentAddress(*target), token, amount),
-        };
-
+    if let Some((target, percentage)) = &args.frontend_sus_fee {
         match (&source, &args.ibc_shielding_data) {
             (&MASP, None) => {
+                // NOTE: The frontend fee should NOT account for the masp fee
+                // payment amount
+                let sus_fee_amt = namada_token::Amount::from_uint(
+                    validated_amount
+                        .amount()
+                        .raw_amount()
+                        .checked_mul_div(
+                            percentage.abs(),
+                            namada_core::uint::Uint::exp10(
+                                POS_DECIMAL_PRECISION as _,
+                            ),
+                        )
+                        .ok_or_else(|| {
+                            Error::Other(
+                                "Overflow in masp frontend fee computation"
+                                    .to_string(),
+                            )
+                        })?
+                        .0,
+                    0,
+                )
+                .map_err(|e| Error::Other(e.to_string()))?;
                 // Validate the amount given
-                let validated_amount = validate_amount(
+                let validated_fee_amount = validate_amount(
                     context,
-                    amount.to_owned(),
-                    token,
+                    args::InputAmount::Unvalidated(DenominatedAmount::new(
+                        sus_fee_amt,
+                        validated_amount.denom(),
+                    )),
+                    &args.token,
                     args.tx.force,
                 )
                 .await?;
@@ -2931,20 +2940,20 @@ pub async fn build_ibc_transfer(
                 masp_transfer_data.sources.push((
                     args.source.clone(),
                     args.token.clone(),
-                    validated_amount,
+                    validated_fee_amount,
                 ));
                 masp_transfer_data.targets.push((
                     target.clone(),
-                    token.to_owned(),
-                    validated_amount,
+                    args.token.to_owned(),
+                    validated_fee_amount,
                 ));
 
                 transfer = transfer
                     .transfer(
                         source.to_owned(),
                         target.effective_address(),
-                        token.to_owned(),
-                        validated_amount,
+                        args.token.to_owned(),
+                        validated_fee_amount,
                     )
                     .ok_or(Error::Other(
                         "Combined transfer overflows".to_string(),
@@ -3728,68 +3737,74 @@ pub async fn build_shielding_transfer<N: Namada>(
             .ok_or(Error::Other("Combined transfer overflows".to_string()))?;
     }
 
-    for (idx, target) in args.frontend_sus_fee.iter().enumerate() {
-        let (sus_fee_target, sus_fee_token, sus_fee_amt) = match target {
-            either::Either::Left(TxTransparentTarget {
-                target,
-                token,
-                amount,
-            }) => (TransferTarget::Address(target.to_owned()), token, amount),
-            either::Either::Right(TxShieldedTarget {
-                target,
-                token,
-                amount,
-            }) => (TransferTarget::PaymentAddress(*target), token, amount),
-        };
-
-        // Validate the amount given
-        let validated_fee_amount = validate_amount(
-            context,
-            sus_fee_amt.to_owned(),
-            sus_fee_token,
-            args.tx.force,
-        )
-        .await?;
-
-        // Transfer the frontend fee, take the amount from the source matching
-        // the index of this fee entry
-        match &args.sources.get(idx) {
-            Some(TxTransparentSource { source, token, .. })
-                if token == sus_fee_token =>
-            {
-                data = data
-                    .transfer(
-                        source.to_owned(),
-                        sus_fee_target.effective_address(),
-                        sus_fee_token.to_owned(),
-                        validated_fee_amount,
+    if let Some((sus_fee_target, percentage)) = &args.frontend_sus_fee {
+        let mut extra_transfer: Vec<(
+            Address,
+            Address,
+            Address,
+            DenominatedAmount,
+        )> = Default::default();
+        // Transfer the frontend fee, take the fee percentage from every source
+        for (account, denominated_amt) in &data.sources {
+            let sus_fee_amt = namada_token::Amount::from_uint(
+                denominated_amt
+                    .amount()
+                    .raw_amount()
+                    .checked_mul_div(
+                        percentage.abs(),
+                        namada_core::uint::Uint::exp10(
+                            POS_DECIMAL_PRECISION as _,
+                        ),
                     )
-                    .ok_or(Error::Other(
-                        "Combined transfer overflows".to_string(),
-                    ))?;
+                    .ok_or_else(|| {
+                        Error::Other(
+                            "Overflow in masp frontend fee computation"
+                                .to_string(),
+                        )
+                    })?
+                    .0,
+                0,
+            )
+            .map_err(|e| Error::Other(e.to_string()))?;
+            // Validate the amount given
+            let validated_fee_amount = validate_amount(
+                context,
+                args::InputAmount::Unvalidated(DenominatedAmount::new(
+                    sus_fee_amt,
+                    denominated_amt.denom(),
+                )),
+                &account.token,
+                args.tx.force,
+            )
+            .await?;
+            extra_transfer.push((
+                account.owner.to_owned(),
+                sus_fee_target.effective_address(),
+                account.token.to_owned(),
+                validated_fee_amount,
+            ));
 
-                if let TransferTarget::PaymentAddress(_) = sus_fee_target {
-                    // Add the extra shielding source and target for the masp
-                    // frontend sustainability fee
-                    transfer_data.sources.push((
-                        TransferSource::Address(source.to_owned()),
-                        sus_fee_token.to_owned(),
-                        validated_fee_amount,
-                    ));
-                    transfer_data.targets.push((
-                        sus_fee_target,
-                        sus_fee_token.to_owned(),
-                        validated_fee_amount,
-                    ));
-                }
-            }
-            _ => {
-                return Err(Error::Other(
-                    "Token mismatch between shielding input and the \
-                     corresponding frontend masp fee"
-                        .to_string(),
+            if sus_fee_target.payment_address().is_some() {
+                // Add the extra shielding source and target for the masp
+                // frontend sustainability fee
+                transfer_data.sources.push((
+                    TransferSource::Address(account.owner.to_owned()),
+                    account.token.to_owned(),
+                    validated_fee_amount,
+                ));
+                transfer_data.targets.push((
+                    sus_fee_target.to_owned(),
+                    account.token.to_owned(),
+                    validated_fee_amount,
                 ));
             }
+        }
+
+        // Merge the extra transfer data with the default one
+        for (source, target, token, amount) in extra_transfer {
+            data = data.transfer(source, target, token, amount).ok_or(
+                Error::Other("Combined transfer overflows".to_string()),
+            )?;
         }
     }
 
@@ -3923,68 +3938,85 @@ pub async fn build_unshielding_transfer<N: Namada>(
             .debit(MASP, token.to_owned(), validated_amount)
             .ok_or(Error::Other("Combined transfer overflows".to_string()))?;
     }
-    for (idx, target) in args.frontend_sus_fee.iter().enumerate() {
-        let (sus_fee_target, sus_fee_token, sus_fee_amt) = match target {
-            either::Either::Left(TxTransparentTarget {
-                target,
-                token,
-                amount,
-            }) => (TransferTarget::Address(target.to_owned()), token, amount),
-            either::Either::Right(TxShieldedTarget {
-                target,
-                token,
-                amount,
-            }) => (TransferTarget::PaymentAddress(*target), token, amount),
-        };
 
-        // Validate the amount given
-        let validated_fee_amount = validate_amount(
-            context,
-            sus_fee_amt.to_owned(),
-            sus_fee_token,
-            args.tx.force,
-        )
-        .await?;
-
-        // Transfer the frontend fee, take the amount from the source matching
-        // the index of this fee entry
-        match &args.sources.get(idx) {
-            Some(TxShieldedSource { source, token, .. })
-                if token == sus_fee_token =>
-            {
-                let source = TransferSource::ExtendedKey(*source);
-
-                data = data
-                    .transfer(
-                        source.effective_address(),
-                        sus_fee_target.effective_address(),
-                        sus_fee_token.to_owned(),
-                        validated_fee_amount,
+    if let Some((sus_fee_target, percentage)) = &args.frontend_sus_fee {
+        let mut extra_transfer: Vec<(
+            TransferSource,
+            Address,
+            DenominatedAmount,
+        )> = Default::default();
+        // Transfer the frontend fee, take the fee percentage from every source
+        // FIXME: wrong this should be computed on the targets. Actually maybe
+        // not if all the sources are unshielded which might be the case
+        // FIXME: should we loop on the masp transfer data instead also in the
+        // other builders? What if we add dummy notes? It doesn't matter since
+        // we will produce them later not here
+        // FIXME: actually, we should probably loop on the args.sources, same in
+        // the other builders
+        for (source, token, denominated_amt) in &transfer_data.sources {
+            // NOTE: The frontend fee should NOT account for the masp fee
+            // payment amount
+            let sus_fee_amt = namada_token::Amount::from_uint(
+                denominated_amt
+                    .amount()
+                    .raw_amount()
+                    .checked_mul_div(
+                        percentage.abs(),
+                        namada_core::uint::Uint::exp10(
+                            POS_DECIMAL_PRECISION as _,
+                        ),
                     )
-                    .ok_or(Error::Other(
-                        "Combined transfer overflows".to_string(),
-                    ))?;
+                    .ok_or_else(|| {
+                        Error::Other(
+                            "Overflow in masp frontend fee computation"
+                                .to_string(),
+                        )
+                    })?
+                    .0,
+                0,
+            )
+            .map_err(|e| Error::Other(e.to_string()))?;
+            // Validate the amount given
+            let validated_fee_amount = validate_amount(
+                context,
+                args::InputAmount::Unvalidated(DenominatedAmount::new(
+                    sus_fee_amt,
+                    denominated_amt.denom(),
+                )),
+                token,
+                args.tx.force,
+            )
+            .await?;
+            extra_transfer.push((
+                source.to_owned(),
+                token.to_owned(),
+                validated_fee_amount,
+            ));
 
-                // Add the extra unshielding source and target for the masp
-                // frontend sustainability fee
-                transfer_data.sources.push((
-                    source,
-                    sus_fee_token.to_owned(),
+            data = data
+                .transfer(
+                    source.effective_address(),
+                    sus_fee_target.effective_address(),
+                    token.to_owned(),
                     validated_fee_amount,
-                ));
-                transfer_data.targets.push((
-                    sus_fee_target,
-                    sus_fee_token.to_owned(),
-                    validated_fee_amount,
-                ));
-            }
-            _ => {
-                return Err(Error::Other(
-                    "Token mismatch between shielding input and the \
-                     corresponding frontend masp fee"
-                        .to_string(),
-                ));
-            }
+                )
+                .ok_or(Error::Other(
+                    "Combined transfer overflows".to_string(),
+                ))?;
+
+            // Add the extra shielding source and target for the masp
+            // frontend sustainability fee
+            transfer_data.targets.push((
+                sus_fee_target.to_owned(),
+                token.to_owned(),
+                validated_fee_amount,
+            ));
+        }
+
+        // Merge the extra shielding source for the masp frontend sustainability
+        // fee
+        for (source, token, amount) in extra_transfer {
+            transfer_data.sources.push((source, token, amount));
         }
     }
 
@@ -4537,11 +4569,38 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
         .await;
 
     let (extra_target, source_amount) = match &args.frontend_sus_fee {
-        Some((target, amount)) => {
+        Some((target, percentage)) => {
+            let sus_fee_amt = namada_token::Amount::from_uint(
+                validated_amount
+                    .amount()
+                    .raw_amount()
+                    .checked_mul_div(
+                        percentage.abs(),
+                        namada_core::uint::Uint::exp10(
+                            POS_DECIMAL_PRECISION as _,
+                        ),
+                    )
+                    .ok_or_else(|| {
+                        Error::Other(
+                            "Overflow in masp frontend fee computation"
+                                .to_string(),
+                        )
+                    })?
+                    .0,
+                0,
+            )
+            .map_err(|e| Error::Other(e.to_string()))?;
             // Validate the amount given
-            let validated_fee_amount =
-                validate_amount(context, amount.to_owned(), &token, false)
-                    .await?;
+            let validated_fee_amount = validate_amount(
+                context,
+                args::InputAmount::Unvalidated(DenominatedAmount::new(
+                    sus_fee_amt,
+                    validated_amount.denom(),
+                )),
+                &token,
+                false,
+            )
+            .await?;
             let source_amount =
                 checked!(validated_amount + validated_fee_amount)?;
 

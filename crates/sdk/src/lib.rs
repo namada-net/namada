@@ -191,9 +191,7 @@ pub trait Namada: NamadaIo {
         &self,
         targets: Vec<args::TxShieldedTarget>,
         sources: Vec<args::TxTransparentSource>,
-        frontend_sus_fee: Vec<
-            either::Either<args::TxTransparentTarget, args::TxShieldedTarget>,
-        >,
+        frontend_sus_fee: Option<(TransferTarget, Dec)>,
     ) -> args::TxShieldingTransfer {
         args::TxShieldingTransfer {
             sources,
@@ -211,9 +209,7 @@ pub trait Namada: NamadaIo {
         sources: Vec<args::TxShieldedSource>,
         targets: Vec<args::TxTransparentTarget>,
         gas_spending_key: Option<PseudoExtendedKey>,
-        frontend_sus_fee: Vec<
-            either::Either<args::TxTransparentTarget, args::TxShieldedTarget>,
-        >,
+        frontend_sus_fee: Option<(TransferTarget, Dec)>,
     ) -> args::TxUnshieldingTransfer {
         args::TxUnshieldingTransfer {
             sources,
@@ -309,9 +305,7 @@ pub trait Namada: NamadaIo {
         token: Address,
         amount: InputAmount,
         channel_id: ChannelId,
-        frontend_sus_fee: Option<
-            either::Either<args::TxTransparentTarget, args::TxShieldedTarget>,
-        >,
+        frontend_sus_fee: Option<(TransferTarget, Dec)>,
     ) -> args::TxIbcTransfer {
         args::TxIbcTransfer {
             source,

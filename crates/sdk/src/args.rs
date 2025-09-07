@@ -390,10 +390,7 @@ pub struct TxShieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// Transfer source data
     pub sources: Vec<TxTransparentSource<C>>,
     /// The optional data for the frontend sustainability fee
-    // FIXME: should join this with sources? No maybe better to define a single
-    // percentage to apply to all inputs and a single receiver
-    pub frontend_sus_fee:
-        Vec<Either<TxTransparentTarget<C>, TxShieldedTarget<C>>>,
+    pub frontend_sus_fee: Option<(C::TransferTarget, Dec)>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }
@@ -444,8 +441,7 @@ pub struct TxUnshieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// Optional additional key for gas payment
     pub gas_spending_key: Option<C::SpendingKey>,
     /// The optional data for the frontend sustainability fee
-    pub frontend_sus_fee:
-        Vec<Either<TxTransparentTarget<C>, TxShieldedTarget<C>>>,
+    pub frontend_sus_fee: Option<(C::TransferTarget, Dec)>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }
@@ -554,7 +550,7 @@ pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
     /// The optional data for the frontend sustainability fee
     /// NOTE: if the swap is shielded (from MASP to MASP), no sustainability
     /// fee should be taken
-    pub frontend_sus_fee: Option<(C::PaymentAddress, InputAmount)>,
+    pub frontend_sus_fee: Option<(C::PaymentAddress, Dec)>,
 }
 
 impl TxOsmosisSwap<SdkTypes> {
@@ -831,8 +827,7 @@ pub struct TxIbcTransfer<C: NamadaTypes = SdkTypes> {
     /// Optional additional keys for gas payment
     pub gas_spending_key: Option<C::SpendingKey>,
     /// The optional data for the frontend sustainability fee
-    pub frontend_sus_fee:
-        Option<Either<TxTransparentTarget<C>, TxShieldedTarget<C>>>,
+    pub frontend_sus_fee: Option<(C::TransferTarget, Dec)>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }
@@ -3259,7 +3254,7 @@ pub struct GenIbcShieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// shielding transaction since ics-20 only supports a single asset)
     /// NOTE: if the shielding operation is part of a swap, and this is
     /// shielded (from MASP to MASP), no sustainability fee should be taken
-    pub frontend_sus_fee: Option<(C::PaymentAddress, InputAmount)>,
+    pub frontend_sus_fee: Option<(C::PaymentAddress, Dec)>,
 }
 
 /// IBC shielding transfer asset, to be used by [`GenIbcShieldingTransfer`]

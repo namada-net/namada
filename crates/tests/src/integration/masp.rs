@@ -10234,7 +10234,7 @@ fn frontend_sus_fee() -> Result<()> {
                 NAM,
                 "--amount",
                 "10",
-                "--test-frontend-sus-fee-shielded",
+                "--test-frontend-sus-fee",
                 AC_PAYMENT_ADDRESS,
                 "--signing-keys",
                 ALBERT_KEY,
@@ -10317,8 +10317,11 @@ fn frontend_sus_fee() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains("nam: 1"));
 
-    // Test sus fee when unshielding. Send 9 NAM from PA to Albert and 1 NAM to
-    // a transparent address owned by the frontend provider
+    // FIXME: add a test with a non-native token
+    // FIXME: add test with masp fee unshielding (also for the ibc case) and
+    // check that the amount unshielded for fees is not subject to this frontend
+    // fee Test sus fee when unshielding. Send 9 NAM from PA to Albert and
+    // 0.9 NAM to a transparent address owned by the frontend provider
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -10345,8 +10348,8 @@ fn frontend_sus_fee() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // Test sus fee when unshielding. Send 9 NAM from PA to Albert and 1 NAM to
-    // a shielded address owned by the frontend provider
+    // Test sus fee when unshielding. Send 9 NAM from PA to Albert and 0.9 NAM
+    // to a shielded address owned by the frontend provider
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -10361,7 +10364,7 @@ fn frontend_sus_fee() -> Result<()> {
                 NAM,
                 "--amount",
                 "9",
-                "--test-frontend-sus-fee-shielded",
+                "--test-frontend-sus-fee",
                 AC_PAYMENT_ADDRESS,
                 "--signing-keys",
                 ALBERT_KEY,
@@ -10404,7 +10407,7 @@ fn frontend_sus_fee() -> Result<()> {
         )
     });
     assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 0"));
+    assert!(captured.contains("nam: 0.2"));
 
     // Assert NAM balance at the transparent frontend is 2
     let captured = CapturedOutput::of(|| {
@@ -10423,7 +10426,7 @@ fn frontend_sus_fee() -> Result<()> {
         )
     });
     assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 2"));
+    assert!(captured.contains("nam: 1.9"));
 
     // Assert NAM balance at the shielded frontend is 2
     let captured = CapturedOutput::of(|| {
@@ -10442,7 +10445,7 @@ fn frontend_sus_fee() -> Result<()> {
         )
     });
     assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 2"));
+    assert!(captured.contains("nam: 1.9"));
 
     Ok(())
 }

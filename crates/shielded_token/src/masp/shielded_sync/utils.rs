@@ -5,7 +5,7 @@ use std::ops::{Bound, RangeBounds};
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use masp_primitives::memo::MemoBytes;
-use masp_primitives::merkle_tree::{CommitmentTree, IncrementalWitness};
+use masp_primitives::merkle_tree::CommitmentTree;
 use masp_primitives::sapling::{Node, Note, PaymentAddress, ViewingKey};
 use masp_primitives::transaction::Transaction;
 use namada_core::chain::BlockHeight;
@@ -346,11 +346,7 @@ pub struct MaspClientCapabilities(u8);
 
 impl MaspClientCapabilities {
     #[allow(missing_docs)]
-    pub const MAY_FETCH_PRE_BUILT_NOTES_INDEX: Self = Self(0b00000010);
-    #[allow(missing_docs)]
     pub const MAY_FETCH_PRE_BUILT_TREE: Self = Self(0b00000001);
-    #[allow(missing_docs)]
-    pub const MAY_FETCH_PRE_BUILT_WITNESS_MAP: Self = Self(0b00000100);
     #[allow(missing_docs)]
     pub const NONE: Self = Self(0);
 
@@ -363,18 +359,6 @@ impl MaspClientCapabilities {
     /// commitment tree.
     pub const fn may_fetch_pre_built_tree(&self) -> bool {
         self.0 & Self::MAY_FETCH_PRE_BUILT_TREE.0 != 0
-    }
-
-    /// Check if the masp client is able to fetch a pre-built
-    /// notes index.
-    pub const fn may_fetch_pre_built_notes_index(&self) -> bool {
-        self.0 & Self::MAY_FETCH_PRE_BUILT_NOTES_INDEX.0 != 0
-    }
-
-    /// Check if the masp client is able to fetch a pre-built
-    /// witness map.
-    pub const fn may_fetch_pre_built_witness_map(&self) -> bool {
-        self.0 & Self::MAY_FETCH_PRE_BUILT_WITNESS_MAP.0 != 0
     }
 }
 
@@ -420,20 +404,6 @@ pub trait MaspClient: Clone {
         &self,
         height: BlockHeight,
     ) -> Result<CommitmentTree<Node>, Self::Error>;
-
-    /// Fetch the tx notes map of height `height`.
-    #[allow(async_fn_in_trait)]
-    async fn fetch_note_index(
-        &self,
-        height: BlockHeight,
-    ) -> Result<BTreeMap<MaspIndexedTx, usize>, Self::Error>;
-
-    /// Fetch the witness map of height `height`.
-    #[allow(async_fn_in_trait)]
-    async fn fetch_witness_map(
-        &self,
-        height: BlockHeight,
-    ) -> Result<HashMap<usize, IncrementalWitness<Node>>, Self::Error>;
 
     /// Check whether the given commitment anchor exists
     #[allow(async_fn_in_trait)]

@@ -1,13 +1,10 @@
 use core::str::FromStr;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use borsh::BorshDeserialize;
 use eyre::eyre;
 use masp_primitives::asset_type::AssetType;
-use masp_primitives::merkle_tree::{
-    CommitmentTree, IncrementalWitness, MerklePath,
-};
+use masp_primitives::merkle_tree::{CommitmentTree, MerklePath};
 use masp_primitives::sapling::{Node, Rseed, ViewingKey};
 use masp_primitives::transaction::Transaction;
 use masp_primitives::transaction::components::I128Sum;
@@ -28,7 +25,6 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use super::utils::MaspIndexedTx;
 use crate::ShieldedWallet;
 use crate::masp::ShieldedUtils;
 use crate::masp::shielded_wallet::{CompactNote, ShieldedQueries};
@@ -424,22 +420,6 @@ impl MaspClient for TestingMaspClient {
         unimplemented!(
             "Commitment tree fetching is not implemented by this client"
         )
-    }
-
-    async fn fetch_note_index(
-        &self,
-        _: BlockHeight,
-    ) -> Result<BTreeMap<MaspIndexedTx, usize>, Self::Error> {
-        unimplemented!(
-            "Transaction notes map fetching is not implemented by this client"
-        )
-    }
-
-    async fn fetch_witness_map(
-        &self,
-        _: BlockHeight,
-    ) -> Result<HashMap<usize, IncrementalWitness<Node>>, Self::Error> {
-        unimplemented!("Witness map fetching is not implemented by this client")
     }
 
     async fn commitment_anchor_exists(

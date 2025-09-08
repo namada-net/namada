@@ -1,15 +1,13 @@
 //! Helper functions and types
 
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::{Arc, RwLock};
 
 use borsh::BorshDeserialize;
-use masp_primitives::merkle_tree::{CommitmentTree, IncrementalWitness};
+use masp_primitives::merkle_tree::CommitmentTree;
 use masp_primitives::sapling::Node;
 use masp_primitives::transaction::Transaction as MaspTx;
 use namada_core::chain::BlockHeight;
-use namada_core::collections::HashMap;
 use namada_core::control_flow::time::{
     Duration, LinearBackoff, Sleep, SleepStrategy,
 };
@@ -110,30 +108,6 @@ impl<M: MaspClient> MaspClient for LinearBackoffSleepMaspClient<M> {
             &self.shared.backoff,
             &self.shared.sleep,
             self.middleware_client.fetch_commitment_tree(height),
-        )
-        .await
-    }
-
-    async fn fetch_note_index(
-        &self,
-        height: BlockHeight,
-    ) -> Result<BTreeMap<MaspIndexedTx, usize>, Self::Error> {
-        with_linear_backoff(
-            &self.shared.backoff,
-            &self.shared.sleep,
-            self.middleware_client.fetch_note_index(height),
-        )
-        .await
-    }
-
-    async fn fetch_witness_map(
-        &self,
-        height: BlockHeight,
-    ) -> Result<HashMap<usize, IncrementalWitness<Node>>, Self::Error> {
-        with_linear_backoff(
-            &self.shared.backoff,
-            &self.shared.sleep,
-            self.middleware_client.fetch_witness_map(height),
         )
         .await
     }
@@ -277,26 +251,6 @@ impl<C: Client + Send + Sync> MaspClient for LedgerMaspClient<C> {
     ) -> Result<CommitmentTree<Node>, Error> {
         Err(Error::Other(
             "Commitment tree fetching is not implemented by this client"
-                .to_string(),
-        ))
-    }
-
-    async fn fetch_note_index(
-        &self,
-        _: BlockHeight,
-    ) -> Result<BTreeMap<MaspIndexedTx, usize>, Error> {
-        Err(Error::Other(
-            "Transaction notes map fetching is not implemented by this client"
-                .to_string(),
-        ))
-    }
-
-    async fn fetch_witness_map(
-        &self,
-        _: BlockHeight,
-    ) -> Result<HashMap<usize, IncrementalWitness<Node>>, Error> {
-        Err(Error::Other(
-            "Witness map fetching is not implemented by this client"
                 .to_string(),
         ))
     }
@@ -659,11 +613,7 @@ impl MaspClient for IndexerMaspClient {
 
     #[inline(always)]
     fn capabilities(&self) -> MaspClientCapabilities {
-        const {
-            MaspClientCapabilities::MAY_FETCH_PRE_BUILT_TREE
-                .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_NOTES_INDEX)
-                .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_WITNESS_MAP)
-        }
+        const { MaspClientCapabilities::MAY_FETCH_PRE_BUILT_TREE }
     }
 
     async fn fetch_commitment_tree(
@@ -710,155 +660,6 @@ impl MaspClient for IndexerMaspClient {
                     "Could not deserialize the commitment tree borsh data at \
                      height {height}: {err}"
                 ))
-            },
-        )
-    }
-
-    async fn fetch_note_index(
-        &self,
-        BlockHeight(height): BlockHeight,
-    ) -> Result<BTreeMap<MaspIndexedTx, usize>, Error> {
-        use serde::Deserialize;
-
-        #[derive(Deserialize)]
-        struct Note {
-            note_position: usize,
-            #[serde(rename = "masp_tx_index")]
-            batch_index: u32,
-            block_index: u32,
-            block_height: u64,
-            is_masp_fee_payment: bool,
-        }
-
-        #[derive(Deserialize)]
-        struct Response {
-            notes_index: Vec<Note>,
-        }
-
-        let _permit = self.shared.semaphore.acquire().await.unwrap();
-
-        let response = self
-            .client
-            .get(self.endpoint("/notes-index"))
-            .keep_alive()
-            .query(&[("height", height)])
-            .send()
-            .await
-            .map_err(|err| {
-                Error::Other(format!(
-                    "Failed to fetch notes map at height {height}: {err}"
-                ))
-            })?;
-        if !response.status().is_success() {
-            let err = Self::get_server_error(response).await?;
-            return Err(Error::Other(format!(
-                "Failed to fetch notes map at height {height}: {err}"
-            )));
-        }
-        let payload: Response = response.json().await.map_err(|err| {
-            Error::Other(format!(
-                "Could not deserialize the notes map JSON response at height \
-                 {height}: {err}"
-            ))
-        })?;
-
-        let mut masp_index = 0;
-        let mut prev_block_height = None;
-
-        Ok(payload
-            .notes_index
-            .into_iter()
-            .map(
-                |Note {
-                     block_index,
-                     batch_index,
-                     block_height,
-                     note_position,
-                     is_masp_fee_payment,
-                 }| {
-                    if Some(block_height) != prev_block_height {
-                        masp_index = 0;
-                        prev_block_height = Some(block_height);
-                    } else {
-                        masp_index += 1;
-                    }
-                    (
-                        MaspIndexedTx {
-                            indexed_tx: IndexedTx {
-                                block_index: TxIndex(block_index),
-                                block_height: BlockHeight(block_height),
-                                batch_index: Some(batch_index),
-                            },
-                            kind: if is_masp_fee_payment {
-                                MaspTxKind::FeePayment
-                            } else {
-                                MaspTxKind::Transfer
-                            },
-                        },
-                        note_position,
-                    )
-                },
-            )
-            .collect())
-    }
-
-    async fn fetch_witness_map(
-        &self,
-        BlockHeight(height): BlockHeight,
-    ) -> Result<HashMap<usize, IncrementalWitness<Node>>, Error> {
-        use serde::Deserialize;
-
-        #[derive(Deserialize)]
-        struct Witness {
-            bytes: Vec<u8>,
-            index: usize,
-        }
-
-        #[derive(Deserialize)]
-        struct WitnessMapResponse {
-            witnesses: Vec<Witness>,
-        }
-
-        let _permit = self.shared.semaphore.acquire().await.unwrap();
-
-        let response = self
-            .client
-            .get(self.endpoint("/witness-map"))
-            .keep_alive()
-            .query(&[("height", height)])
-            .send()
-            .await
-            .map_err(|err| {
-                Error::Other(format!(
-                    "Failed to fetch witness map at height {height}: {err}"
-                ))
-            })?;
-        if !response.status().is_success() {
-            let err = Self::get_server_error(response).await?;
-            return Err(Error::Other(format!(
-                "Failed to fetch witness map at height {height}: {err}"
-            )));
-        }
-        let payload: WitnessMapResponse =
-            response.json().await.map_err(|err| {
-                Error::Other(format!(
-                    "Could not deserialize the witness map JSON response at \
-                     height {height}: {err}"
-                ))
-            })?;
-
-        payload.witnesses.into_iter().try_fold(
-            HashMap::new(),
-            |mut accum, Witness { index, bytes }| {
-                let witness = BorshDeserialize::try_from_slice(&bytes)
-                    .map_err(|err| {
-                        Error::Other(format!(
-                            "Could not deserialize the witness borsh data at \
-                             height {height}: {err}"
-                        ))
-                    })?;
-                accum.insert(index, witness);
-                Ok(accum)
             },
         )
     }

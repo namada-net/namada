@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use borsh::BorshSerialize;
+use data::{Fee, GasLimit};
 use masp_primitives::asset_type::AssetType;
 use masp_primitives::transaction::Transaction as MaspTransaction;
 use masp_primitives::transaction::builder::Builder;
@@ -75,7 +76,7 @@ pub use namada_tx::{Authorization, *};
 use num_traits::Zero;
 use rand_core::{OsRng, RngCore};
 
-use crate::args::{SdkTypes, TxTransparentSource, TxTransparentTarget};
+use crate::args::{TxTransparentSource, TxTransparentTarget};
 use crate::borsh::BorshSerializeExt;
 use crate::control_flow::time;
 use crate::error::{EncodingError, Error, QueryError, Result, TxSubmitError};
@@ -189,18 +190,20 @@ impl ProcessTxResponse {
 }
 
 /// Build and dump a transaction either to file or to screen
-pub fn dump_tx<IO: Io>(io: &IO, args: &args::Tx, mut tx: Tx) -> Result<()> {
-    // FIXME: should do extra checks on wether dump_tx is actually Some? Maybe
-    // we should change the interface to only accepts the two arguments we need
-    // and we should strip the Option from the dump_tx
+pub fn dump_tx<IO: Io>(
+    io: &IO,
+    dump_tx: args::DumpTx,
+    output_folder: Option<PathBuf>,
+    mut tx: Tx,
+) -> Result<()> {
     let is_wrapper_tx = tx.header.wrapper().is_some();
-    if matches!(args.dump_tx, Some(args::DumpTx::Inner)) && is_wrapper_tx {
+    if matches!(dump_tx, args::DumpTx::Inner) && is_wrapper_tx {
         return Err(Error::Other(
             "Requested tx-dump on a tx which is a wrapper".to_string(),
         ));
     };
 
-    if matches!(args.dump_tx, Some(args::DumpTx::Wrapper)) && !is_wrapper_tx {
+    if matches!(dump_tx, args::DumpTx::Wrapper) && !is_wrapper_tx {
         return Err(Error::Other(
             "Requested wrapper-dump on a tx which is not a wrapper".to_string(),
         ));
@@ -210,7 +213,7 @@ pub fn dump_tx<IO: Io>(io: &IO, args: &args::Tx, mut tx: Tx) -> Result<()> {
     // dumped tx needed to be signed offline
     tx.prune_duplicated_sections();
 
-    match args.output_folder.clone() {
+    match output_folder {
         Some(path) => {
             let tx_path = path.join(format!(
                 "{}.tx",
@@ -237,27 +240,6 @@ pub fn dump_tx<IO: Io>(io: &IO, args: &args::Tx, mut tx: Tx) -> Result<()> {
     Ok(())
 }
 
-/// Prepare a transaction for signing and submission by adding a wrapper header
-/// to it.
-pub async fn prepare_tx(
-    args: &args::Tx,
-    tx: &mut Tx,
-    fee_amount: DenominatedAmount,
-    fee_payer: common::PublicKey,
-) -> Result<()> {
-    // FIXME: change this check to only check if the wrap_tx argument is some
-    // FIXME: actually in all cases but the build_custom when we call this it is
-    // guaranteed that we checked the wrap_tx argument, so maybe we should
-    // remove this function if we can do the same for build_custom
-    if matches!(args.dry_run, Some(args::DryRun::Inner))
-        || matches!(args.dump_tx, Some(args::DumpTx::Inner))
-    {
-        Ok(())
-    } else {
-        signing::wrap_tx(tx, args, fee_amount, fee_payer).await
-    }
-}
-
 /// Submit transaction and wait for result. Returns a list of addresses
 /// initialized in the transaction if any. In dry run, this is always empty.
 pub async fn process_tx(
@@ -275,7 +257,20 @@ pub async fn process_tx(
     // let request_body = request.into_json();
     // println!("HTTP request body: {}", request_body);
 
-    if args.dry_run.is_some() {
+    if let Some(dry_run) = &args.dry_run {
+        let is_wrapper_tx = tx.header.wrapper().is_some();
+        if matches!(dry_run, args::DryRun::Inner) && is_wrapper_tx {
+            return Err(Error::Other(
+                "Requested tx-dry-run on a tx which is a wrapper".to_string(),
+            ));
+        };
+
+        if matches!(dry_run, args::DryRun::Wrapper) && !is_wrapper_tx {
+            return Err(Error::Other(
+                "Requested wrapper-dry-run on a tx which is not a wrapper"
+                    .to_string(),
+            ));
+        }
         expect_dry_broadcast(TxBroadcastData::DryRun(tx), context).await
     } else {
         // We use this to determine when the wrapper tx makes it on-chain
@@ -342,7 +337,7 @@ pub async fn build_reveal_pk(
     args: &args::Tx,
     public_key: &common::PublicKey,
 ) -> Result<(Tx, SigningData)> {
-    let (signing_data, wrap_args) = if args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             args,
@@ -363,6 +358,8 @@ pub async fn build_reveal_pk(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -732,7 +729,7 @@ pub async fn build_change_consensus_key(
         consensus_key: consensus_key.clone(),
     };
 
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -754,6 +751,8 @@ pub async fn build_change_consensus_key(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -793,7 +792,7 @@ pub async fn build_validator_commission_change(
     }: &args::CommissionRateChange,
 ) -> Result<(Tx, SigningData)> {
     let default_signer = Some(validator.clone());
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -814,6 +813,8 @@ pub async fn build_validator_commission_change(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -959,7 +960,7 @@ pub async fn build_validator_metadata_change(
     }: &args::MetaDataChange,
 ) -> Result<(Tx, SigningData)> {
     let default_signer = Some(validator.clone());
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -980,6 +981,8 @@ pub async fn build_validator_metadata_change(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -1208,7 +1211,7 @@ pub async fn build_update_steward_commission(
     }: &args::UpdateStewardCommission,
 ) -> Result<(Tx, SigningData)> {
     let default_signer = Some(steward.clone());
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -1229,6 +1232,8 @@ pub async fn build_update_steward_commission(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -1300,7 +1305,7 @@ pub async fn build_resign_steward(
     }: &args::ResignSteward,
 ) -> Result<(Tx, SigningData)> {
     let default_signer = Some(steward.clone());
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -1321,6 +1326,8 @@ pub async fn build_resign_steward(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -1372,7 +1379,7 @@ pub async fn build_unjail_validator(
     }: &args::TxUnjailValidator,
 ) -> Result<(Tx, SigningData)> {
     let default_signer = Some(validator.clone());
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -1393,6 +1400,8 @@ pub async fn build_unjail_validator(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -1500,7 +1509,7 @@ pub async fn build_deactivate_validator(
     }: &args::TxDeactivateValidator,
 ) -> Result<(Tx, SigningData)> {
     let default_signer = Some(validator.clone());
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -1521,6 +1530,8 @@ pub async fn build_deactivate_validator(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -1599,7 +1610,7 @@ pub async fn build_reactivate_validator(
     }: &args::TxReactivateValidator,
 ) -> Result<(Tx, SigningData)> {
     let default_signer = Some(validator.clone());
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -1620,6 +1631,8 @@ pub async fn build_reactivate_validator(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -1850,7 +1863,7 @@ pub async fn build_redelegation(
 
     let default_address = owner.clone();
     let default_signer = Some(default_address.clone());
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -1871,6 +1884,8 @@ pub async fn build_redelegation(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -1918,7 +1933,7 @@ pub async fn build_withdraw(
 ) -> Result<(Tx, SigningData)> {
     let default_address = source.clone().unwrap_or(validator.clone());
     let default_signer = Some(default_address.clone());
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -1939,6 +1954,8 @@ pub async fn build_withdraw(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -2029,7 +2046,7 @@ pub async fn build_claim_rewards(
 ) -> Result<(Tx, SigningData)> {
     let default_address = source.clone().unwrap_or(validator.clone());
     let default_signer = Some(default_address.clone());
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -2050,6 +2067,8 @@ pub async fn build_claim_rewards(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -2157,7 +2176,7 @@ pub async fn build_unbond(
 
     let default_address = source.clone().unwrap_or(validator.clone());
     let default_signer = Some(default_address.clone());
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -2178,6 +2197,8 @@ pub async fn build_unbond(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -2417,7 +2438,7 @@ pub async fn build_bond(
     let default_address = source.clone().unwrap_or(validator.clone());
     let default_signer = Some(default_address.clone());
     let (signing_data, wrap_args, updated_balance) =
-        if tx_args.wrap_tx.is_some() {
+        if let Some(wrap_tx) = &tx_args.wrap_tx {
             let signing_data = signing::aux_signing_data(
                 context,
                 tx_args,
@@ -2438,6 +2459,8 @@ pub async fn build_bond(
                 Some(WrapArgs {
                     fee_amount,
                     fee_payer,
+                    fee_token: wrap_tx.fee_token.to_owned(),
+                    gas_limit: wrap_tx.gas_limit,
                 }),
                 Some(updated_balance),
             )
@@ -2509,7 +2532,7 @@ pub async fn build_default_proposal(
     proposal: DefaultProposal,
 ) -> Result<(Tx, SigningData)> {
     let default_signer = Some(proposal.proposal.author.clone());
-    let (signing_data, wrap_args) = if tx.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx,
@@ -2530,6 +2553,8 @@ pub async fn build_default_proposal(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -2594,7 +2619,7 @@ pub async fn build_vote_proposal(
     current_epoch: Epoch,
 ) -> Result<(Tx, SigningData)> {
     let default_signer = Some(voter_address.clone());
-    let (signing_data, wrap_args) = if tx.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx,
@@ -2615,6 +2640,8 @@ pub async fn build_vote_proposal(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -2927,7 +2954,7 @@ pub async fn build_become_validator(
     all_pks.push(eth_hot_key.clone().unwrap());
     all_pks.push(protocol_key.clone().unwrap().clone());
 
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -2949,6 +2976,8 @@ pub async fn build_become_validator(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -2990,7 +3019,7 @@ pub async fn build_pgf_funding_proposal(
     proposal: PgfFundingProposal,
 ) -> Result<(Tx, SigningData)> {
     let default_signer = Some(proposal.proposal.author.clone());
-    let (signing_data, wrap_args) = if tx.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx,
@@ -3011,6 +3040,8 @@ pub async fn build_pgf_funding_proposal(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -3061,7 +3092,7 @@ pub async fn build_pgf_stewards_proposal(
     proposal: PgfStewardProposal,
 ) -> Result<(Tx, SigningData)> {
     let default_signer = Some(proposal.proposal.author.clone());
-    let (signing_data, wrap_args) = if tx.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx,
@@ -3082,6 +3113,8 @@ pub async fn build_pgf_stewards_proposal(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -3139,7 +3172,7 @@ pub async fn build_ibc_transfer(
 
     let source = args.source.effective_address();
     let (mut signing_data, wrap_args, updated_balance) =
-        if args.tx.wrap_tx.is_some() {
+        if let Some(wrap_tx) = &args.tx.wrap_tx {
             let signing_data = signing::aux_signing_data(
                 context,
                 &args.tx,
@@ -3170,6 +3203,8 @@ pub async fn build_ibc_transfer(
                 Some(WrapArgs {
                     fee_amount: fee_per_gas_unit,
                     fee_payer,
+                    fee_token: wrap_tx.fee_token.to_owned(),
+                    gas_limit: wrap_tx.gas_limit,
                 }),
                 updated_balance,
             )
@@ -3243,20 +3278,11 @@ pub async fn build_ibc_transfer(
     let mut transfer = token::Transfer::default();
 
     // Add masp fee payment if necessary
-    let masp_fee_data = if let Some(WrapArgs {
-        fee_amount,
-        fee_payer,
-    }) = &wrap_args
-    {
+    let masp_fee_data = if let Some(wrap_tx) = &wrap_args {
         let masp_fee_data = get_masp_fee_payment_amount(
             context,
-            // FIXME: this is guaranteed to be present since we have WrapArgs
-            // but it's probably better to move the arguments we need inside
-            // WrapArgs and only pass that to this function
-            args.tx.wrap_tx.as_ref().unwrap(),
-            fee_amount.to_owned(),
+            wrap_tx,
             // If no custom gas spending key is provided default to the source
-            fee_payer,
             args.gas_spending_key.or(args.source.spending_key()),
         )
         .await?;
@@ -3447,17 +3473,29 @@ pub async fn build_ibc_transfer(
     if let Some(WrapArgs {
         fee_amount,
         fee_payer,
+        fee_token,
+        gas_limit,
     }) = wrap_args
     {
-        prepare_tx(&args.tx, &mut tx, fee_amount, fee_payer).await?;
+        tx.add_wrapper(
+            Fee {
+                amount_per_gas_unit: fee_amount,
+                token: fee_token,
+            },
+            fee_payer,
+            gas_limit,
+        );
     }
 
     Ok((tx, signing_data, shielded_tx_epoch))
 }
 
+// FIXME: rename to GasArgs and rename the fields?
 pub(crate) struct WrapArgs {
     pub(crate) fee_amount: DenominatedAmount,
     pub(crate) fee_payer: common::PublicKey,
+    pub(crate) fee_token: Address,
+    pub(crate) gas_limit: GasLimit,
 }
 
 /// Abstraction for helping build transactions. This function will build either
@@ -3499,9 +3537,18 @@ where
     if let Some(WrapArgs {
         fee_amount,
         fee_payer,
+        fee_token,
+        gas_limit,
     }) = wrap_args
     {
-        prepare_tx(tx_args, &mut tx, fee_amount, fee_payer).await?;
+        tx.add_wrapper(
+            Fee {
+                amount_per_gas_unit: fee_amount,
+                token: fee_token,
+            },
+            fee_payer,
+            gas_limit,
+        );
     }
 
     Ok(tx)
@@ -3623,7 +3670,7 @@ pub async fn build_transparent_transfer<N: Namada>(
         None
     };
     let (signing_data, wrap_args, updated_balance) =
-        if args.tx.wrap_tx.is_some() {
+        if let Some(wrap_tx) = &args.tx.wrap_tx {
             let signing_data = signing::aux_signing_data(
                 context,
                 &args.tx,
@@ -3646,6 +3693,8 @@ pub async fn build_transparent_transfer<N: Namada>(
                 Some(WrapArgs {
                     fee_amount,
                     fee_payer,
+                    fee_token: wrap_tx.fee_token.to_owned(),
+                    gas_limit: wrap_tx.gas_limit,
                 }),
                 Some(updated_balance),
             )
@@ -3743,7 +3792,8 @@ pub async fn build_shielded_transfer<N: Namada>(
     args: &mut args::TxShieldedTransfer,
     bparams: &mut impl BuildParams,
 ) -> Result<(Tx, SigningData)> {
-    let (mut signing_data, wrap_args) = if args.tx.wrap_tx.is_some() {
+    let (mut signing_data, wrap_args) = if let Some(wrap_tx) = &args.tx.wrap_tx
+    {
         let signing_data = signing::aux_signing_data(
             context,
             &args.tx,
@@ -3766,6 +3816,8 @@ pub async fn build_shielded_transfer<N: Namada>(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -3822,19 +3874,10 @@ pub async fn build_shielded_transfer<N: Namada>(
     let mut data = token::Transfer::default();
 
     // Add masp fee payment if necessary
-    let masp_fee_data = if let Some(WrapArgs {
-        fee_amount,
-        fee_payer,
-    }) = &wrap_args
-    {
+    let masp_fee_data = if let Some(wrap_tx) = &wrap_args {
         let masp_fee_data = get_masp_fee_payment_amount(
             context,
-            // FIXME: this is guaranteed to be present since we have WrapArgs
-            // but it's probably better to move the arguments we need inside
-            // WrapArgs and only pass that to this function
-            args.tx.wrap_tx.as_ref().unwrap(),
-            fee_amount.to_owned(),
-            fee_payer,
+            wrap_tx,
             // If no custom gas spending key is provided default to the first
             // source
             args.gas_spending_key
@@ -3926,13 +3969,16 @@ pub async fn build_shielded_transfer<N: Namada>(
 // right masp data
 async fn get_masp_fee_payment_amount<N: Namada>(
     context: &N,
-    args: &args::Wrapper<SdkTypes>,
-    fee_amount: DenominatedAmount,
-    fee_payer: &common::PublicKey,
+    WrapArgs {
+        fee_amount,
+        fee_payer,
+        fee_token,
+        gas_limit,
+    }: &WrapArgs,
     gas_spending_key: Option<PseudoExtendedKey>,
 ) -> Result<Option<MaspFeeData>> {
     let fee_payer_address = Address::from(fee_payer);
-    let balance_key = balance_key(&args.fee_token, &fee_payer_address);
+    let balance_key = balance_key(fee_token, &fee_payer_address);
     #[allow(clippy::disallowed_methods)]
     let balance = rpc::query_storage_value::<_, token::Amount>(
         context.client(),
@@ -3940,7 +3986,7 @@ async fn get_masp_fee_payment_amount<N: Namada>(
     )
     .await
     .unwrap_or_default();
-    let total_fee = checked!(fee_amount.amount() * u64::from(args.gas_limit))?;
+    let total_fee = checked!(fee_amount.amount() * u64::from(*gas_limit))?;
 
     Ok(match total_fee.checked_sub(balance) {
         Some(diff) if !diff.is_zero() => Some(MaspFeeData {
@@ -3950,7 +3996,7 @@ async fn get_masp_fee_payment_amount<N: Namada>(
                     .to_string(),
             ))?,
             target: fee_payer_address,
-            token: args.fee_token.clone(),
+            token: fee_token.to_owned(),
             amount: DenominatedAmount::new(diff, fee_amount.denom()),
         }),
         _ => None,
@@ -3974,7 +4020,7 @@ pub async fn build_shielding_transfer<N: Namada>(
         None
     };
     let (mut signing_data, wrap_args, updated_balance) =
-        if args.tx.wrap_tx.is_some() {
+        if let Some(wrap_tx) = &args.tx.wrap_tx {
             let signing_data = signing::aux_signing_data(
                 context,
                 &args.tx,
@@ -3997,6 +4043,8 @@ pub async fn build_shielding_transfer<N: Namada>(
                 Some(WrapArgs {
                     fee_amount,
                     fee_payer,
+                    fee_token: wrap_tx.fee_token.to_owned(),
+                    gas_limit: wrap_tx.gas_limit,
                 }),
                 Some(updated_balance),
             )
@@ -4150,7 +4198,8 @@ pub async fn build_unshielding_transfer<N: Namada>(
     args: &mut args::TxUnshieldingTransfer,
     bparams: &mut impl BuildParams,
 ) -> Result<(Tx, SigningData)> {
-    let (mut signing_data, wrap_args) = if args.tx.wrap_tx.is_some() {
+    let (mut signing_data, wrap_args) = if let Some(wrap_tx) = &args.tx.wrap_tx
+    {
         let signing_data = signing::aux_signing_data(
             context,
             &args.tx,
@@ -4172,6 +4221,8 @@ pub async fn build_unshielding_transfer<N: Namada>(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -4234,19 +4285,10 @@ pub async fn build_unshielding_transfer<N: Namada>(
     }
 
     // Add masp fee payment if necessary
-    let masp_fee_data = if let Some(WrapArgs {
-        fee_amount,
-        fee_payer,
-    }) = &wrap_args
-    {
+    let masp_fee_data = if let Some(wrap_tx) = &wrap_args {
         let masp_fee_data = get_masp_fee_payment_amount(
             context,
-            // FIXME: this is guaranteed to be present since we have WrapArgs
-            // but it's probably better to move the arguments we need inside
-            // WrapArgs and only pass that to this function
-            args.tx.wrap_tx.as_ref().unwrap(),
-            fee_amount.to_owned(),
-            fee_payer,
+            wrap_tx,
             // If no custom gas spending key is provided default to the source
             args.gas_spending_key
                 .or(args.sources.first().map(|x| x.source)),
@@ -4389,7 +4431,7 @@ pub async fn build_init_account(
         threshold,
     }: &args::TxInitAccount,
 ) -> Result<(Tx, SigningData)> {
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -4410,6 +4452,8 @@ pub async fn build_init_account(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -4501,7 +4545,7 @@ pub async fn build_update_account(
     }: &args::TxUpdateAccount,
 ) -> Result<(Tx, SigningData)> {
     let default_signer = Some(addr.clone());
-    let (signing_data, wrap_args) = if tx_args.wrap_tx.is_some() {
+    let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -4522,6 +4566,8 @@ pub async fn build_update_account(
             Some(WrapArgs {
                 fee_amount,
                 fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
             }),
         )
     } else {
@@ -4740,9 +4786,19 @@ pub async fn build_custom(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        prepare_tx(tx_args, &mut tx, fee_amount, fee_payer).await?;
+        let wrap_tx = tx_args.wrap_tx.as_ref().ok_or_else(|| {
+            Error::Other("Missing wrapping argument for custom tx".to_string())
+        })?;
+        tx.add_wrapper(
+            Fee {
+                amount_per_gas_unit: fee_amount,
+                token: wrap_tx.fee_token.to_owned(),
+            },
+            fee_payer,
+            wrap_tx.gas_limit,
+        );
         // FIXME: what if we want to load a raw tx, sign the inner and nothing
-        // else?
+        // else? No wrapping
         Some(SigningData::Wrapper(signing_data))
     };
 
@@ -4868,10 +4924,6 @@ async fn expect_dry_broadcast(
 ) -> Result<ProcessTxResponse> {
     match to_broadcast {
         TxBroadcastData::DryRun(tx) => {
-            // FIXME. add a check here to verify that the tx type matches the
-            // type of dry-run requested FIXME: or should we do this
-            // check in a different way? Maybe with generics? In case also
-            // update dump_tx
             let result = rpc::dry_run_tx(context, tx.to_bytes()).await?;
             Ok(ProcessTxResponse::DryRun(result))
         }

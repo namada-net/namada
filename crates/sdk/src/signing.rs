@@ -36,8 +36,8 @@ use namada_parameters::storage as parameter_storage;
 use namada_token as token;
 use namada_token::storage_key::balance_key;
 use namada_tx::data::pgf::UpdateStewardCommission;
+use namada_tx::data::pos;
 use namada_tx::data::pos::BecomeValidator;
-use namada_tx::data::{Fee, pos};
 use namada_tx::{
     Authorization, MaspBuilder, Section, SignatureIndex, Signer, Tx,
 };
@@ -407,7 +407,7 @@ where
             }
 
             if !signing_tx_keypairs.is_empty() {
-                if args.dry_run || args.dry_run_wrapper {
+                if args.dry_run.is_some() {
                     tx.mock(
                         signing_tx_keypairs,
                         account_public_keys_map,
@@ -432,7 +432,7 @@ where
                         ..
                     }) if pubkey == fee_payer => {}
                     _ => {
-                        if args.dry_run || args.dry_run_wrapper {
+                        if args.dry_run.is_some() {
                             mock_hw_sig(
                                 tx,
                                 pubkey.clone(),
@@ -490,14 +490,10 @@ where
             };
             match key {
                 Ok(fee_payer_keypair) => {
-                    if args.dry_run || args.dry_run_wrapper {
-                        tx.mock_sign_wrapper(fee_payer_keypair);
-                    } else {
-                        tx.sign_wrapper(fee_payer_keypair);
-                    }
+                    tx.sign_wrapper(fee_payer_keypair);
                 }
                 Err(_) => {
-                    if args.dry_run || args.dry_run_wrapper {
+                    if args.dry_run.is_some() {
                         mock_hw_sig(tx, pubkey.clone(), Signable::FeeRawHeader);
                     } else {
                         *tx = sign(
@@ -902,40 +898,6 @@ pub async fn validate_transparent_fee<N: Namada>(
     };
 
     Ok((fee_amount, updated_balance))
-}
-
-/// Create a wrapper tx from a normal tx. Get the hash of the
-/// wrapper and its payload which is needed for monitoring its
-/// progress on chain.
-pub async fn wrap_tx(
-    tx: &mut Tx,
-    // FIXME: should just pass the wrap_tx arg and force separately instead?
-    args: &args::Tx<SdkTypes>,
-    fee_amount: DenominatedAmount,
-    fee_payer: common::PublicKey,
-) -> Result<(), Error> {
-    let Some(args::Wrapper {
-        fee_token,
-        gas_limit,
-        ..
-    }) = &args.wrap_tx
-    else {
-        return Err(Error::Other(
-            "Requested fee validation on a non-wrapper transaction".to_string(),
-        ));
-    };
-
-    tx.add_wrapper(
-        Fee {
-            amount_per_gas_unit: fee_amount,
-            token: fee_token.clone(),
-        },
-        fee_payer,
-        // TODO(namada#1625): partially validate the gas limit in client
-        gas_limit.to_owned(),
-    );
-
-    Ok(())
 }
 
 #[allow(clippy::result_large_err)]

@@ -2634,7 +2634,6 @@ pub enum DumpTx {
 /// Arguments to request wrapping a transaction
 #[derive(Clone, Debug)]
 pub struct Wrapper<C: NamadaTypes = SdkTypes> {
-    // FIXME: can avoid the nested options?
     /// Do not wait for the transaction to be added to the blockchain
     pub broadcast_only: bool,
     /// The amount being paid (for gas unit) to include the transaction

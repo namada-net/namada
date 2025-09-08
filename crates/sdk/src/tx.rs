@@ -3680,40 +3680,13 @@ pub async fn build_shielding_transfer<N: Namada>(
             validate_amount(context, amount.to_owned(), token, args.tx.force)
                 .await?;
 
-        // Check the balance of the source
-        if let Some(updated_balance) = &updated_balance {
-            let check_balance = if &updated_balance.source == source
-                && &updated_balance.token == token
-            {
-                CheckBalance::Balance(updated_balance.post_balance)
-            } else {
-                CheckBalance::Query(balance_key(token, source))
-            };
-
-            check_balance_too_low_err(
-                token,
-                source,
-                validated_amount.amount(),
-                check_balance,
-                args.tx.force,
-                context,
-            )
-            .await?;
-        }
-
-        transfer_data.sources.push((
-            TransferSource::Address(source.to_owned()),
-            token.to_owned(),
-            validated_amount,
-        ));
-
-        data = data
-            .debit(source.to_owned(), token.to_owned(), validated_amount)
-            .ok_or(Error::Other("Combined transfer overflows".to_string()))?;
-
-        // Transfer the frontend fee (if required), take the fee percentage from
+        // Compute the frontend fee (if required), take the fee percentage from
         // every source
-        if let Some((sus_fee_target, percentage)) = &args.frontend_sus_fee {
+        let validated_frontend_fee_amt = if let Some((
+            sus_fee_target,
+            percentage,
+        )) = &args.frontend_sus_fee
+        {
             let sus_fee_amt = namada_token::Amount::from_uint(
                 validated_amount
                     .amount()
@@ -3735,27 +3708,66 @@ pub async fn build_shielding_transfer<N: Namada>(
             )
             .map_err(|e| Error::Other(e.to_string()))?;
             // Validate the amount given
-            let validated_fee_amount = validate_amount(
-                context,
-                args::InputAmount::Unvalidated(DenominatedAmount::new(
-                    sus_fee_amt,
-                    validated_amount.denom(),
-                )),
+            Some((
+                sus_fee_target,
+                validate_amount(
+                    context,
+                    args::InputAmount::Unvalidated(DenominatedAmount::new(
+                        sus_fee_amt,
+                        validated_amount.denom(),
+                    )),
+                    token,
+                    args.tx.force,
+                )
+                .await?,
+            ))
+        } else {
+            None
+        };
+        let total_input_amt = checked!(
+            validated_amount
+                + validated_frontend_fee_amt
+                    .map(|(_, amt)| amt)
+                    .unwrap_or_else(|| DenominatedAmount::new(
+                        namada_token::Amount::zero(),
+                        validated_amount.denom()
+                    ))
+        )?;
+
+        // Check the balance of the source
+        if let Some(updated_balance) = &updated_balance {
+            let check_balance = if &updated_balance.source == source
+                && &updated_balance.token == token
+            {
+                CheckBalance::Balance(updated_balance.post_balance)
+            } else {
+                CheckBalance::Query(balance_key(token, source))
+            };
+
+            check_balance_too_low_err(
                 token,
+                source,
+                total_input_amt.amount(),
+                check_balance,
                 args.tx.force,
+                context,
             )
             .await?;
-            data = data
-                .transfer(
-                    source.to_owned(),
-                    sus_fee_target.effective_address(),
-                    token.to_owned(),
-                    validated_fee_amount,
-                )
-                .ok_or(Error::Other(
-                    "Combined transfer overflows".to_string(),
-                ))?;
+        }
 
+        transfer_data.sources.push((
+            TransferSource::Address(source.to_owned()),
+            token.to_owned(),
+            validated_amount,
+        ));
+
+        data = data
+            .debit(source.to_owned(), token.to_owned(), total_input_amt)
+            .ok_or(Error::Other("Combined transfer overflows".to_string()))?;
+
+        if let Some((sus_fee_target, validated_fee_amount)) =
+            validated_frontend_fee_amt
+        {
             if sus_fee_target.payment_address().is_some() {
                 // Add the extra shielding source and target
                 transfer_data.sources.push((
@@ -3769,6 +3781,15 @@ pub async fn build_shielding_transfer<N: Namada>(
                     validated_fee_amount,
                 ));
             }
+            data = data
+                .credit(
+                    sus_fee_target.effective_address(),
+                    token.to_owned(),
+                    validated_fee_amount,
+                )
+                .ok_or(Error::Other(
+                    "Combined transfer overflows".to_string(),
+                ))?;
         }
     }
 

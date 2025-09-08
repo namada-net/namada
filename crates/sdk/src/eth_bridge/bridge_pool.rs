@@ -25,6 +25,7 @@ use namada_io::{Client, Io, display, display_line, edisplay_line};
 use namada_token::Amount;
 use namada_token::storage_key::balance_key;
 use namada_tx::Tx;
+use namada_tx::data::Fee;
 use owo_colors::OwoColorize;
 use serde::Serialize;
 
@@ -45,7 +46,7 @@ use crate::signing::{
     SigningData, aux_inner_signing_data, aux_signing_data,
     validate_transparent_fee,
 };
-use crate::tx::{WrapArgs, prepare_tx};
+use crate::tx::WrapArgs;
 use crate::{MaybeSync, Namada, args};
 
 /// Craft a transaction that adds a transfer to the Ethereum bridge pool.
@@ -66,7 +67,7 @@ pub async fn build_bridge_pool_tx(
 ) -> Result<(Tx, SigningData), Error> {
     let sender_ = sender.clone();
     let (signing_data, wrap_args, transfer, tx_code_hash) =
-        if tx_args.wrap_tx.is_some() {
+        if let Some(wrap_tx) = &tx_args.wrap_tx {
             let (transfer, tx_code_hash, signing_data) = futures::try_join!(
                 validate_bridge_pool_tx(
                     context,
@@ -103,6 +104,8 @@ pub async fn build_bridge_pool_tx(
                 Some(WrapArgs {
                     fee_amount,
                     fee_payer,
+                    fee_token: wrap_tx.fee_token.to_owned(),
+                    gas_limit: wrap_tx.gas_limit,
                 }),
                 transfer,
                 tx_code_hash,
@@ -160,9 +163,18 @@ pub async fn build_bridge_pool_tx(
     if let Some(WrapArgs {
         fee_amount,
         fee_payer,
+        fee_token,
+        gas_limit,
     }) = wrap_args
     {
-        prepare_tx(&tx_args, &mut tx, fee_amount, fee_payer.to_owned()).await?;
+        tx.add_wrapper(
+            Fee {
+                amount_per_gas_unit: fee_amount,
+                token: fee_token,
+            },
+            fee_payer,
+            gas_limit,
+        );
     }
 
     Ok((tx, signing_data))

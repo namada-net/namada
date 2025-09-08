@@ -10252,7 +10252,14 @@ fn frontend_sus_fee() -> Result<()> {
     let validator_one_rpc = "http://127.0.0.1:26567";
     // Download the shielded pool parameters before starting node
     let _ = FsShieldedUtils::new(PathBuf::new());
-    let (mut node, _services) = setup::setup()?;
+    let (mut node, _services) = setup::initialize_genesis(|mut genesis| {
+        // Whitelist BTC for gas payment
+        genesis.parameters.parameters.minimum_gas_price.insert(
+            "btc".into(),
+            DenominatedAmount::new(1.into(), token::Denomination(5)),
+        );
+        genesis
+    })?;
     // Wait till epoch boundary
     node.next_masp_epoch();
 
@@ -10260,54 +10267,295 @@ fn frontend_sus_fee() -> Result<()> {
     let (frontend_alias, _frontend_key) =
         make_temp_account(&node, validator_one_rpc, "Frontend", NAM, 0)?;
 
-    // Test sus fee when shielding. Send 10 NAM from Albert to PA and 1 NAM to a
-    // transparent address owned by the frontend provider
-    let captured = CapturedOutput::of(|| {
+    for token in [NAM, BTC] {
+        // Test sus fee when shielding. Send 20 tokens from Albert to PA and 3
+        // tokens to a transparent address owned by the frontend provider
+        let captured = CapturedOutput::of(|| {
+            run(
+                &node,
+                Bin::Client,
+                apply_use_device(vec![
+                    "shield",
+                    "--source",
+                    ALBERT,
+                    "--target",
+                    AA_PAYMENT_ADDRESS,
+                    "--token",
+                    token,
+                    "--amount",
+                    "20",
+                    "--test-frontend-sus-fee",
+                    frontend_alias,
+                    "--signing-keys",
+                    ALBERT_KEY,
+                    "--node",
+                    validator_one_rpc,
+                ]),
+            )
+        });
+        assert!(captured.result.is_ok());
+        assert!(captured.contains(TX_APPLIED_SUCCESS));
+
+        // Test sus fee when shielding. Send 10 tokens from Albert to PA and 1
+        // token to a shielded address owned by the frontend provider
+        let captured = CapturedOutput::of(|| {
+            run(
+                &node,
+                Bin::Client,
+                apply_use_device(vec![
+                    "shield",
+                    "--source",
+                    ALBERT,
+                    "--target",
+                    AA_PAYMENT_ADDRESS,
+                    "--token",
+                    token,
+                    "--amount",
+                    "20",
+                    "--test-frontend-sus-fee",
+                    AC_PAYMENT_ADDRESS,
+                    "--signing-keys",
+                    ALBERT_KEY,
+                    "--node",
+                    validator_one_rpc,
+                ]),
+            )
+        });
+        assert!(captured.result.is_ok());
+        assert!(captured.contains(TX_APPLIED_SUCCESS));
+
+        // sync the shielded context
         run(
             &node,
             Bin::Client,
-            apply_use_device(vec![
-                "shield",
-                "--source",
-                ALBERT,
-                "--target",
-                AA_PAYMENT_ADDRESS,
-                "--token",
-                NAM,
-                "--amount",
-                "10",
-                "--test-frontend-sus-fee",
-                frontend_alias,
-                "--signing-keys",
-                ALBERT_KEY,
+            vec![
+                "shielded-sync",
+                "--viewing-keys",
+                AA_VIEWING_KEY,
+                AC_VIEWING_KEY,
                 "--node",
                 validator_one_rpc,
-            ]),
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains(TX_APPLIED_SUCCESS));
+            ],
+        )?;
 
-    // Test sus fee when shielding. Send 10 NAM from Albert to PA and 1 NAM to a
-    // shielded address owned by the frontend provider
+        // Assert token balance at VK(A) is 40
+        let captured = CapturedOutput::of(|| {
+            run(
+                &node,
+                Bin::Client,
+                vec![
+                    "balance",
+                    "--owner",
+                    AA_VIEWING_KEY,
+                    "--token",
+                    token,
+                    "--node",
+                    validator_one_rpc,
+                ],
+            )
+        });
+        assert!(captured.result.is_ok());
+        assert!(captured.contains(&format!("{}: 40", token.to_lowercase())));
+
+        // Assert token balance at the transparent frontend is 2
+        let captured = CapturedOutput::of(|| {
+            run(
+                &node,
+                Bin::Client,
+                vec![
+                    "balance",
+                    "--owner",
+                    frontend_alias,
+                    "--token",
+                    token,
+                    "--node",
+                    validator_one_rpc,
+                ],
+            )
+        });
+        assert!(captured.result.is_ok());
+        assert!(captured.contains(&format!("{}: 2", token.to_lowercase())));
+
+        // Assert token balance at the shielded frontend is 2
+        let captured = CapturedOutput::of(|| {
+            run(
+                &node,
+                Bin::Client,
+                vec![
+                    "balance",
+                    "--owner",
+                    AC_VIEWING_KEY,
+                    "--token",
+                    token,
+                    "--node",
+                    validator_one_rpc,
+                ],
+            )
+        });
+        assert!(captured.result.is_ok());
+        assert!(captured.contains(&format!("{}: 2", token.to_lowercase())));
+    }
+
+    for token in [NAM, BTC] {
+        // Test sus fee when unshielding. Send 9 tokens from PA to Albert and
+        // 0.9 tokens to a transparent address owned by the frontend provider
+        let captured = CapturedOutput::of(|| {
+            run(
+                &node,
+                Bin::Client,
+                apply_use_device(vec![
+                    "unshield",
+                    "--source",
+                    AA_VIEWING_KEY,
+                    "--target",
+                    ALBERT,
+                    "--token",
+                    token,
+                    "--amount",
+                    "9",
+                    "--test-frontend-sus-fee",
+                    frontend_alias,
+                    "--signing-keys",
+                    ALBERT_KEY,
+                    "--gas-limit",
+                    "60000",
+                    "--node",
+                    validator_one_rpc,
+                ]),
+            )
+        });
+        assert!(captured.result.is_ok());
+        assert!(captured.contains(TX_APPLIED_SUCCESS));
+
+        // Test sus fee when unshielding. Send 8 tokens from PA to Albert and
+        // 0.8 tokens to a shielded address owned by the frontend provider. Also
+        // pay gas fees via the masp in this case and check that the frontend
+        // fees does not account for the fee unshielding amount (no recursive
+        // fees)
+        let captured = CapturedOutput::of(|| {
+            run(
+                &node,
+                Bin::Client,
+                apply_use_device(vec![
+                    "unshield",
+                    "--source",
+                    AA_VIEWING_KEY,
+                    "--target",
+                    ALBERT,
+                    "--token",
+                    token,
+                    "--amount",
+                    "8",
+                    "--test-frontend-sus-fee",
+                    AC_PAYMENT_ADDRESS,
+                    "--gas-token",
+                    token,
+                    "--gas-limit",
+                    "70000",
+                    "--node",
+                    validator_one_rpc,
+                ]),
+            )
+        });
+        assert!(captured.result.is_ok());
+        assert!(captured.contains(TX_APPLIED_SUCCESS));
+
+        // sync the shielded context
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "shielded-sync",
+                "--viewing-keys",
+                AA_VIEWING_KEY,
+                AC_VIEWING_KEY,
+                "--node",
+                validator_one_rpc,
+            ],
+        )?;
+
+        // Assert token balance at VK(A) is 20.6
+        let captured = CapturedOutput::of(|| {
+            run(
+                &node,
+                Bin::Client,
+                vec![
+                    "balance",
+                    "--owner",
+                    AA_VIEWING_KEY,
+                    "--token",
+                    token,
+                    "--node",
+                    validator_one_rpc,
+                ],
+            )
+        });
+        assert!(captured.result.is_ok());
+        assert!(captured.contains(&format!("{}: 20.6", token.to_lowercase())));
+
+        // Assert token balance at the transparent frontend is 2.9
+        let captured = CapturedOutput::of(|| {
+            run(
+                &node,
+                Bin::Client,
+                vec![
+                    "balance",
+                    "--owner",
+                    frontend_alias,
+                    "--token",
+                    token,
+                    "--node",
+                    validator_one_rpc,
+                ],
+            )
+        });
+        assert!(captured.result.is_ok());
+        assert!(captured.contains(&format!("{}: 2.9", token.to_lowercase())));
+
+        // Assert token balance at the shielded frontend is 2.8
+        let captured = CapturedOutput::of(|| {
+            run(
+                &node,
+                Bin::Client,
+                vec![
+                    "balance",
+                    "--owner",
+                    AC_VIEWING_KEY,
+                    "--token",
+                    token,
+                    "--node",
+                    validator_one_rpc,
+                ],
+            )
+        });
+        assert!(captured.result.is_ok());
+        assert!(captured.contains(&format!("{}: 2.8", token.to_lowercase())));
+    }
+
+    // Test sus fee when unshielding. Send 10 BTCs from PA to Albert and
+    // 1 BTC to a shielded address owned by the frontend provider. Also pay gas
+    // fees via the masp with a different token and check that the frontend fees
+    // does not account for the fee unshielding amount (no recursive fees)
     let captured = CapturedOutput::of(|| {
         run(
             &node,
             Bin::Client,
             apply_use_device(vec![
-                "shield",
+                "unshield",
                 "--source",
-                ALBERT,
+                AA_VIEWING_KEY,
                 "--target",
-                AA_PAYMENT_ADDRESS,
+                ALBERT,
                 "--token",
-                NAM,
+                BTC,
                 "--amount",
                 "10",
                 "--test-frontend-sus-fee",
                 AC_PAYMENT_ADDRESS,
-                "--signing-keys",
-                ALBERT_KEY,
+                "--gas-token",
+                NAM,
+                "--gas-limit",
+                "100000",
                 "--node",
                 validator_one_rpc,
             ]),
@@ -10330,7 +10578,26 @@ fn frontend_sus_fee() -> Result<()> {
         ],
     )?;
 
-    // Assert NAM balance at VK(A) is 20
+    // Assert BTC balance at VK(A) is 9.6
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                AA_VIEWING_KEY,
+                "--token",
+                BTC,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains("btc: 9.6"));
+
+    // Assert NAM balance at VK(A) is 19.6
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -10347,9 +10614,9 @@ fn frontend_sus_fee() -> Result<()> {
         )
     });
     assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 20"));
+    assert!(captured.contains("nam: 19.6"));
 
-    // Assert NAM balance at the transparent frontend is 1
+    // Assert BTC balance at the shielded frontend is 3.8
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -10357,18 +10624,18 @@ fn frontend_sus_fee() -> Result<()> {
             vec![
                 "balance",
                 "--owner",
-                frontend_alias,
+                AC_VIEWING_KEY,
                 "--token",
-                NAM,
+                BTC,
                 "--node",
                 validator_one_rpc,
             ],
         )
     });
     assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 1"));
+    assert!(captured.contains("btc: 3.8"));
 
-    // Assert NAM balance at the shielded frontend is 1
+    // Assert NAM balance at the shielded frontend is 2.8
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -10385,137 +10652,7 @@ fn frontend_sus_fee() -> Result<()> {
         )
     });
     assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 1"));
-
-    // FIXME: add a test with a non-native token
-    // FIXME: add test with masp fee unshielding (also for the ibc case) and
-    // check that the amount unshielded for fees is not subject to this frontend
-    // fee Test sus fee when unshielding. Send 9 NAM from PA to Albert and
-    // 0.9 NAM to a transparent address owned by the frontend provider
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            apply_use_device(vec![
-                "unshield",
-                "--source",
-                AA_VIEWING_KEY,
-                "--target",
-                ALBERT,
-                "--token",
-                NAM,
-                "--amount",
-                "9",
-                "--test-frontend-sus-fee",
-                frontend_alias,
-                "--signing-keys",
-                ALBERT_KEY,
-                "--node",
-                validator_one_rpc,
-            ]),
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // Test sus fee when unshielding. Send 9 NAM from PA to Albert and 0.9 NAM
-    // to a shielded address owned by the frontend provider
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            apply_use_device(vec![
-                "unshield",
-                "--source",
-                AA_VIEWING_KEY,
-                "--target",
-                ALBERT,
-                "--token",
-                NAM,
-                "--amount",
-                "9",
-                "--test-frontend-sus-fee",
-                AC_PAYMENT_ADDRESS,
-                "--signing-keys",
-                ALBERT_KEY,
-                "--node",
-                validator_one_rpc,
-            ]),
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AC_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-
-    // Assert NAM balance at VK(A) is 0
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            vec![
-                "balance",
-                "--owner",
-                AA_VIEWING_KEY,
-                "--token",
-                NAM,
-                "--node",
-                validator_one_rpc,
-            ],
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 0.2"));
-
-    // Assert NAM balance at the transparent frontend is 2
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            vec![
-                "balance",
-                "--owner",
-                frontend_alias,
-                "--token",
-                NAM,
-                "--node",
-                validator_one_rpc,
-            ],
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 1.9"));
-
-    // Assert NAM balance at the shielded frontend is 2
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            vec![
-                "balance",
-                "--owner",
-                AC_VIEWING_KEY,
-                "--token",
-                NAM,
-                "--node",
-                validator_one_rpc,
-            ],
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 1.9"));
+    assert!(captured.contains("nam: 2.8"));
 
     Ok(())
 }

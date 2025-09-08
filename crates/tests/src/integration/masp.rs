@@ -10586,3 +10586,265 @@ fn frontend_sus_fee() -> Result<()> {
 
     Ok(())
 }
+
+// Check that the clients performs balance checks correctly when adding a masp
+// frontend sus fee
+#[test]
+fn frontend_sus_fee_client_checks() -> Result<()> {
+    // This address doesn't matter for tests. But an argument is required.
+    let validator_one_rpc = "http://127.0.0.1:26567";
+    // Download the shielded pool parameters before starting node
+    let _ = FsShieldedUtils::new(PathBuf::new());
+    let (mut node, _services) = setup::setup()?;
+    // Wait till epoch boundary
+    node.next_masp_epoch();
+
+    // Initialize source address
+    let (source, _source_key) =
+        make_temp_account(&node, validator_one_rpc, "Source", NAM, 100)?;
+
+    // Test a shielding tx where the amount and the transparent masp fee amount
+    // together exceed the source balance
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "shield",
+                "--source",
+                source,
+                "--target",
+                AA_PAYMENT_ADDRESS,
+                "--token",
+                NAM,
+                "--amount",
+                "100",
+                "--test-frontend-sus-fee",
+                ALBERT,
+                "--signing-keys",
+                ALBERT_KEY,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_err());
+    assert!(captured.contains(
+        "is lower than the amount to be transferred. Amount to transfer is \
+         110.000000 and the balance is 100.000000."
+    ));
+
+    // Test a shielding tx where the amount and the shielded masp fee amount
+    // together exceed the source balance
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "shield",
+                "--source",
+                source,
+                "--target",
+                AA_PAYMENT_ADDRESS,
+                "--token",
+                NAM,
+                "--amount",
+                "100",
+                "--test-frontend-sus-fee",
+                AC_PAYMENT_ADDRESS,
+                "--signing-keys",
+                ALBERT_KEY,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_err());
+    assert!(captured.contains(
+        "is lower than the amount to be transferred. Amount to transfer is \
+         110.000000 and the balance is 100.000000."
+    ));
+
+    // Test a shielding tx where the amount, the gas fee amount and the shielded
+    // masp fee amount together exceed the source balance
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "shield",
+                "--source",
+                source,
+                "--target",
+                AA_PAYMENT_ADDRESS,
+                "--token",
+                NAM,
+                "--amount",
+                "100",
+                "--test-frontend-sus-fee",
+                AC_PAYMENT_ADDRESS,
+                "--signing-keys",
+                source,
+                "--gas-limit",
+                "100000",
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_err());
+    assert!(captured.contains(
+        "is lower than the amount to be transferred. Amount to transfer is \
+         110.000000 and the balance is 99.000000."
+    ));
+
+    // Shield some tokens to the source
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "shield",
+                "--source",
+                ALBERT,
+                "--target",
+                AA_PAYMENT_ADDRESS,
+                "--token",
+                NAM,
+                "--amount",
+                "100",
+                "--signing-keys",
+                ALBERT_KEY,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains(TX_APPLIED_SUCCESS));
+
+    // sync the shielded context
+    run(
+        &node,
+        Bin::Client,
+        vec![
+            "shielded-sync",
+            "--viewing-keys",
+            AA_VIEWING_KEY,
+            "--node",
+            validator_one_rpc,
+        ],
+    )?;
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            vec![
+                "balance",
+                "--owner",
+                AA_VIEWING_KEY,
+                "--token",
+                NAM,
+                "--node",
+                validator_one_rpc,
+            ],
+        )
+    });
+    assert!(captured.result.is_ok());
+    assert!(captured.contains("nam: 100"));
+
+    // Test an unshielding tx where the amount and the transparent masp fee
+    // amount together exceed the source balance
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "unshield",
+                "--source",
+                AA_VIEWING_KEY,
+                "--target",
+                source,
+                "--token",
+                NAM,
+                "--amount",
+                "100",
+                "--test-frontend-sus-fee",
+                ALBERT,
+                "--signing-keys",
+                ALBERT_KEY,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_err());
+    assert!(captured.contains(
+        "Failed to construct MASP transaction shielded parts: Insufficient \
+         funds: 10 tnam1q9kn74xfzytqkqyycfrhycr8ajam8ny935cge0z5 missing"
+    ));
+
+    // Test an unshielding tx where the amount and the shielded masp fee amount
+    // together exceed the source balance
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "unshield",
+                "--source",
+                AA_VIEWING_KEY,
+                "--target",
+                source,
+                "--token",
+                NAM,
+                "--amount",
+                "100",
+                "--test-frontend-sus-fee",
+                AC_PAYMENT_ADDRESS,
+                "--signing-keys",
+                ALBERT_KEY,
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_err());
+    assert!(captured.contains(
+        "Failed to construct MASP transaction shielded parts: Insufficient \
+         funds: 10 tnam1q9kn74xfzytqkqyycfrhycr8ajam8ny935cge0z5 missing"
+    ));
+
+    // Test an unshielding tx where the amount, the gas fee unshielding amount
+    // and the shielded masp fee amount together exceed the source balance
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "unshield",
+                "--source",
+                AA_VIEWING_KEY,
+                "--target",
+                source,
+                "--token",
+                NAM,
+                "--amount",
+                "100",
+                "--test-frontend-sus-fee",
+                AC_PAYMENT_ADDRESS,
+                "--gas-limit",
+                "100000",
+                "--node",
+                validator_one_rpc,
+            ]),
+        )
+    });
+    assert!(captured.result.is_err());
+    assert!(captured.contains(
+        "Failed to construct MASP transaction shielded parts: Insufficient \
+         funds: 11 tnam1q9kn74xfzytqkqyycfrhycr8ajam8ny935cge0z5 missing"
+    ));
+
+    Ok(())
+}

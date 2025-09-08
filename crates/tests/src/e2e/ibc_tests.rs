@@ -4056,6 +4056,33 @@ fn frontend_sus_fee() -> Result<()> {
     check_balance(&test, ESTER, NAM, 1000000)?;
     check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 920)?;
 
+    // Unshielding transfer more samoleans than available with transparent
+    // frontend fee and shielded gas fees. Verify that client checks prevent
+    // this
+    transfer(
+        &test,
+        A_SPENDING_KEY,
+        &gaia_receiver,
+        &ibc_denom_on_namada,
+        // An extra 10 tokens will be added to this amount as a frontend masp
+        // fee
+        100,
+        None,
+        &port_id_namada,
+        &channel_id_namada,
+        None,
+        None,
+        Some(
+            "Failed to construct MASP transaction shielded parts: \
+             Insufficient funds: 43 \
+             tnam1p5n6vw2v870lnjwu7h0l4humkhlf5d78ay693qmv missing",
+        ),
+        None,
+        true,
+        Some(ESTER),
+        None,
+    )?;
+
     Ok(())
 }
 

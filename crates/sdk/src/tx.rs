@@ -277,6 +277,7 @@ pub async fn process_tx(
         // We use this to determine when the wrapper tx makes it on-chain
         let tx_hash = tx.header_hash().to_string();
         let cmts = tx.commitments().clone();
+        // FIXME: add a check to avoid submitting raw txs? Yes
         let wrapper_hash = tx.wrapper_hash();
         // We use this to determine when the inner tx makes it
         // on-chain
@@ -4822,7 +4823,7 @@ pub async fn build_custom(
         signatures,
         wrapper_signature,
     }: &args::TxCustom,
-) -> Result<(Tx, Option<SigningData>)> {
+) -> Result<(Tx, SigningData)> {
     let mut tx = if let Some(serialized_tx) = serialized_tx {
         Tx::try_from_json_bytes(serialized_tx.as_ref()).map_err(|_| {
             Error::Other(
@@ -4861,9 +4862,9 @@ pub async fn build_custom(
     //    2. If only the inner sigs were provided we generate a SigningData that
     //       will attach them and then sign the wrapper online
     //    3. If the wrapper signature was provided then we also expect the inner
-    //       signature(s) to have been provided, in this case we attach all the
-    //       signatures here and return no SigningData
-    let signing_data = if let Some(wrapper_signature) = &wrapper_signature {
+    //       signature(s) to have been provided, in this case we generate a
+    //       SigningData to attach all these signatures
+    let signing_data = if wrapper_signature.is_some() {
         if tx.header.wrapper().is_none() {
             return Err(Error::Other(
                 "A wrapper signature was provided but the transaction is not \
@@ -4871,26 +4872,22 @@ pub async fn build_custom(
                     .to_string(),
             ));
         }
-        // Attach the provided signatures to the tx without the need to produce
-        // any more signatures
-        // FIXME: don't we attach the signatures when we dump the tx?
-        let signatures = signatures.iter().try_fold(
-            vec![],
-            |mut acc, bytes| -> Result<Vec<_>> {
-                let sig = SignatureIndex::try_from_json_bytes(bytes).map_err(
-                    |err| Error::Encode(EncodingError::Serde(err.to_string())),
-                )?;
-                acc.push(sig);
-                Ok(acc)
-            },
-        )?;
-        tx.add_signatures(signatures)
-            .add_section(Section::Authorization(
-                serde_json::from_slice(wrapper_signature).map_err(|err| {
-                    Error::Encode(EncodingError::Serde(err.to_string()))
-                })?,
-            ));
-        None
+
+        SigningData::Wrapper(
+            signing::aux_signing_data(
+                context,
+                tx_args,
+                owner.clone(),
+                owner.clone(),
+                vec![],
+                // The wrapper signature is provided so no need to generate a
+                // disposable address anyway
+                false,
+                signatures.to_owned(),
+                wrapper_signature.to_owned(),
+            )
+            .await?,
+        )
     } else {
         let signing_data = signing::aux_signing_data(
             context,
@@ -4898,12 +4895,11 @@ pub async fn build_custom(
             owner.clone(),
             owner.clone(),
             vec![],
-            // FIXME: is this correct? Probably not I should chech the owner
+            // The possible masp fee paying transaction has already been
+            // produced so no need to generate a disposable address anyway
             false,
             signatures.to_owned(),
-            // FIXME: actually can't we unify the two branches and pass the
-            // wrapper signatures here?
-            None,
+            wrapper_signature.to_owned(),
         )
         .await?;
 
@@ -4919,10 +4915,20 @@ pub async fn build_custom(
                 fee_payer,
                 wrap_tx.gas_limit,
             );
+            SigningData::Wrapper(signing_data)
+        } else {
+            SigningData::Inner(
+                signing::aux_inner_signing_data(
+                    context,
+                    tx_args,
+                    owner.clone(),
+                    owner.clone(),
+                    vec![],
+                    signatures.to_owned(),
+                )
+                .await?,
+            )
         }
-        // FIXME: what if we want to load a raw tx, sign the inner and nothing
-        // else? No wrapping
-        Some(SigningData::Wrapper(signing_data))
     };
 
     Ok((tx, signing_data))

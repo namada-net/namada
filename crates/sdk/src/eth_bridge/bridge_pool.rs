@@ -96,8 +96,13 @@ pub async fn build_bridge_pool_tx(
                 ),
             )?;
             let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-            let (fee_amount, _) =
-                validate_transparent_fee(context, &tx_args, &fee_payer).await?;
+            let (fee_amount, _) = validate_transparent_fee(
+                context,
+                wrap_tx,
+                tx_args.force,
+                &fee_payer,
+            )
+            .await?;
 
             (
                 SigningData::Wrapper(signing_data),

@@ -13,7 +13,7 @@ use masp_primitives::transaction::components::sapling::fees::{
     InputView, OutputView,
 };
 use namada_account::{AccountPublicKeysMap, InitAccount, UpdateAccount};
-use namada_core::address::{Address, ImplicitAddress, InternalAddress, MASP};
+use namada_core::address::{Address, ImplicitAddress, MASP};
 use namada_core::arith::checked;
 use namada_core::collections::{HashMap, HashSet};
 use namada_core::ibc::primitives::IntoHostTime;
@@ -566,15 +566,11 @@ pub async fn aux_signing_data(
             Some(AccountPublicKeysMap::from_iter(public_keys.clone())),
             1u8,
         ),
-        // FIXME: handle masp here
-        Some(owner @ Address::Internal(internal)) => match internal {
-            InternalAddress::Masp => (None, 0u8),
-            _ => {
-                return Err(Error::from(TxSubmitError::InvalidAccount(
-                    owner.encode(),
-                )));
-            }
-        },
+        Some(owner @ Address::Internal(_)) => {
+            return Err(Error::from(TxSubmitError::InvalidAccount(
+                owner.encode(),
+            )));
+        }
         None => (
             Some(AccountPublicKeysMap::from_iter(public_keys.clone())),
             0u8,
@@ -654,15 +650,11 @@ pub async fn aux_inner_signing_data(
             Some(AccountPublicKeysMap::from_iter(public_keys.clone())),
             1u8,
         ),
-        // FIXME: handle masp here
-        Some(owner @ Address::Internal(internal)) => match internal {
-            InternalAddress::Masp => (None, 0u8),
-            _ => {
-                return Err(Error::from(TxSubmitError::InvalidAccount(
-                    owner.encode(),
-                )));
-            }
-        },
+        Some(owner @ Address::Internal(_)) => {
+            return Err(Error::from(TxSubmitError::InvalidAccount(
+                owner.encode(),
+            )));
+        }
         None => (
             Some(AccountPublicKeysMap::from_iter(public_keys.clone())),
             0u8,
@@ -2440,6 +2432,7 @@ mod test_signing {
     use assert_matches::assert_matches;
     use masp_primitives::consensus::BlockHeight;
     use masp_primitives::transaction::components::sapling::builder::SaplingMetadata;
+    use namada_core::address::InternalAddress;
     use namada_core::chain::ChainId;
     use namada_core::hash::Hash;
     use namada_core::ibc::PGFIbcTarget;

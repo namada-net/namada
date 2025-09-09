@@ -3571,7 +3571,6 @@ pub async fn build_ibc_transfer(
     Ok((tx, signing_data, shielded_tx_epoch))
 }
 
-// FIXME: rename to GasArgs and rename the fields?
 pub(crate) struct WrapArgs {
     pub(crate) fee_amount: DenominatedAmount,
     pub(crate) fee_payer: common::PublicKey,

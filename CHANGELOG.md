@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v201.0.5
+
+Namada apps v201.0.5
+
 ## v201.0.4
 
 Namada apps v201.0.4

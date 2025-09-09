@@ -31,7 +31,7 @@ members = [
 [workspace.package]
 authors = ["Heliax AG <hello@heliax.dev>"]
 edition = "2024"
-license = "GPL-3.0"
+license = "GPL-3.0-or-later"
 version = "0.251.0"
 
 [workspace.dependencies]

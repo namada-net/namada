@@ -1426,6 +1426,8 @@ fn ibc_unlimited_channel() -> Result<()> {
         None,
         None,
         false,
+        None,
+        None,
     )?;
     wait_for_packet_relay(
         &hermes_dir,
@@ -1456,6 +1458,8 @@ fn ibc_unlimited_channel() -> Result<()> {
         None,
         None,
         false,
+        None,
+        None,
     )?;
     // wait for the timeout
     sleep(10);

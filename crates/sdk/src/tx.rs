@@ -2832,33 +2832,10 @@ pub async fn build_ibc_transfer(
             (&MASP, None) => {
                 // NOTE: The frontend fee should NOT account for the masp fee
                 // payment amount
-                let sus_fee_amt = namada_token::Amount::from_uint(
-                    validated_amount
-                        .amount()
-                        .raw_amount()
-                        .checked_mul_div(
-                            percentage.abs(),
-                            namada_core::uint::Uint::exp10(
-                                POS_DECIMAL_PRECISION as _,
-                            ),
-                        )
-                        .ok_or_else(|| {
-                            Error::Other(
-                                "Overflow in masp frontend fee computation"
-                                    .to_string(),
-                            )
-                        })?
-                        .0,
-                    0,
-                )
-                .map_err(|e| Error::Other(e.to_string()))?;
-                // Validate the amount given
-                let validated_fee_amount = validate_amount(
+                let validated_fee_amount = compute_masp_frontend_sus_fee(
                     context,
-                    args::InputAmount::Unvalidated(DenominatedAmount::new(
-                        sus_fee_amt,
-                        validated_amount.denom(),
-                    )),
+                    &validated_amount,
+                    percentage,
                     &args.token,
                     args.tx.force,
                 )
@@ -3499,6 +3476,45 @@ async fn get_masp_fee_payment_amount<N: Namada>(
     })
 }
 
+// Extract the validate amount for the masp frontend sustainability fee
+async fn compute_masp_frontend_sus_fee(
+    context: &impl Namada,
+    input_amount: &namada_token::DenominatedAmount,
+    percentage: &namada_core::dec::Dec,
+    token: &Address,
+    force: bool,
+) -> Result<namada_token::DenominatedAmount> {
+    let sus_fee_amt = namada_token::Amount::from_uint(
+        input_amount
+            .amount()
+            .raw_amount()
+            .checked_mul_div(
+                percentage.abs(),
+                namada_core::uint::Uint::exp10(POS_DECIMAL_PRECISION as _),
+            )
+            .ok_or_else(|| {
+                Error::Other(
+                    "Overflow in masp frontend fee computation".to_string(),
+                )
+            })?
+            .0,
+        0,
+    )
+    .map_err(|e| Error::Other(e.to_string()))?;
+
+    // Validate the amount given
+    validate_amount(
+        context,
+        args::InputAmount::Unvalidated(DenominatedAmount::new(
+            sus_fee_amt,
+            input_amount.denom(),
+        )),
+        token,
+        force,
+    )
+    .await
+}
+
 /// Build a shielding transfer
 pub async fn build_shielding_transfer<N: Namada>(
     context: &N,
@@ -3556,40 +3572,15 @@ pub async fn build_shielding_transfer<N: Namada>(
             percentage,
         )) = &args.frontend_sus_fee
         {
-            let sus_fee_amt = namada_token::Amount::from_uint(
-                validated_amount
-                    .amount()
-                    .raw_amount()
-                    .checked_mul_div(
-                        percentage.abs(),
-                        namada_core::uint::Uint::exp10(
-                            POS_DECIMAL_PRECISION as _,
-                        ),
-                    )
-                    .ok_or_else(|| {
-                        Error::Other(
-                            "Overflow in masp frontend fee computation"
-                                .to_string(),
-                        )
-                    })?
-                    .0,
-                0,
+            let validated_fee_amount = compute_masp_frontend_sus_fee(
+                context,
+                &validated_amount,
+                percentage,
+                token,
+                args.tx.force,
             )
-            .map_err(|e| Error::Other(e.to_string()))?;
-            // Validate the amount given
-            Some((
-                sus_fee_target,
-                validate_amount(
-                    context,
-                    args::InputAmount::Unvalidated(DenominatedAmount::new(
-                        sus_fee_amt,
-                        validated_amount.denom(),
-                    )),
-                    token,
-                    args.tx.force,
-                )
-                .await?,
-            ))
+            .await?;
+            Some((sus_fee_target, validated_fee_amount))
         } else {
             None
         };
@@ -3809,33 +3800,10 @@ pub async fn build_unshielding_transfer<N: Namada>(
         if let Some((sus_fee_target, percentage)) = &args.frontend_sus_fee {
             // NOTE: The frontend fee should NOT account for the masp fee
             // payment amount
-            let sus_fee_amt = namada_token::Amount::from_uint(
-                validated_amount
-                    .amount()
-                    .raw_amount()
-                    .checked_mul_div(
-                        percentage.abs(),
-                        namada_core::uint::Uint::exp10(
-                            POS_DECIMAL_PRECISION as _,
-                        ),
-                    )
-                    .ok_or_else(|| {
-                        Error::Other(
-                            "Overflow in masp frontend fee computation"
-                                .to_string(),
-                        )
-                    })?
-                    .0,
-                0,
-            )
-            .map_err(|e| Error::Other(e.to_string()))?;
-            // Validate the amount given
-            let validated_fee_amount = validate_amount(
+            let validated_fee_amount = compute_masp_frontend_sus_fee(
                 context,
-                args::InputAmount::Unvalidated(DenominatedAmount::new(
-                    sus_fee_amt,
-                    validated_amount.denom(),
-                )),
+                &validated_amount,
+                percentage,
                 token,
                 args.tx.force,
             )
@@ -4370,33 +4338,10 @@ pub async fn gen_ibc_shielding_transfer<N: Namada>(
 
     let (extra_target, source_amount) = match &args.frontend_sus_fee {
         Some((target, percentage)) => {
-            let sus_fee_amt = namada_token::Amount::from_uint(
-                validated_amount
-                    .amount()
-                    .raw_amount()
-                    .checked_mul_div(
-                        percentage.abs(),
-                        namada_core::uint::Uint::exp10(
-                            POS_DECIMAL_PRECISION as _,
-                        ),
-                    )
-                    .ok_or_else(|| {
-                        Error::Other(
-                            "Overflow in masp frontend fee computation"
-                                .to_string(),
-                        )
-                    })?
-                    .0,
-                0,
-            )
-            .map_err(|e| Error::Other(e.to_string()))?;
-            // Validate the amount given
-            let validated_fee_amount = validate_amount(
+            let validated_fee_amount = compute_masp_frontend_sus_fee(
                 context,
-                args::InputAmount::Unvalidated(DenominatedAmount::new(
-                    sus_fee_amt,
-                    validated_amount.denom(),
-                )),
+                &validated_amount,
+                percentage,
                 &token,
                 false,
             )

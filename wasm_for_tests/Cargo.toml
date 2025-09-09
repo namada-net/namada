@@ -29,8 +29,13 @@ members = [
 [workspace.package]
 authors = ["Heliax AG <hello@heliax.dev>"]
 edition = "2024"
+<<<<<<< HEAD
 license = "GPL-3.0"
 version = "0.251.1"
+=======
+license = "GPL-3.0-or-later"
+version = "0.251.0"
+>>>>>>> 52ed58664 (update licence, fix cargo-about licence check)
 
 [workspace.dependencies]
 namada_test_utils = { path = "../crates/test_utils" }

@@ -335,7 +335,6 @@ where
     let (mut tx, signing_data) = args.build(namada).await?;
 
     if matches!(args.tx.dump_tx, Some(args::DumpTx::Wrapper)) {
-        // FIXME: here we attach the inner signatures when dumping the wrapper
         // Attach the provided inner signatures to the tx (if any)
         let signatures = args
             .signatures
@@ -354,22 +353,12 @@ where
         return tx::dump_tx(namada.io(), dump_tx, args.tx.output_folder, tx);
     }
 
-    if let Some(signing_data) = signing_data {
-        let owners = args
-            .owner
-            .map_or_else(Default::default, |owner| vec![owner]);
-        let refs: Vec<&Address> = owners.iter().collect();
-        batch_opt_reveal_pk_and_submit(
-            namada,
-            &args.tx,
-            &refs,
-            (tx, signing_data),
-        )
+    let owners = args
+        .owner
+        .map_or_else(Default::default, |owner| vec![owner]);
+    let refs: Vec<&Address> = owners.iter().collect();
+    batch_opt_reveal_pk_and_submit(namada, &args.tx, &refs, (tx, signing_data))
         .await?;
-    } else {
-        // Just submit without the need for signing
-        namada.submit(tx, &args.tx).await?;
-    }
 
     Ok(())
 }

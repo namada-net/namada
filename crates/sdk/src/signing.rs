@@ -767,19 +767,13 @@ pub struct TxSourcePostBalance {
 /// Validate the fee amount and token
 pub async fn validate_fee<N: Namada>(
     context: &N,
-    // FIXME: should just pass the wrap_tx arg and force separately instead?
-    args: &args::Tx<SdkTypes>,
-) -> Result<DenominatedAmount, Error> {
-    let Some(args::Wrapper {
+    args::Wrapper {
         fee_amount,
         fee_token,
         ..
-    }) = &args.wrap_tx
-    else {
-        return Err(Error::Other(
-            "Requested fee validation on a non-wrapper transaction".to_string(),
-        ));
-    };
+    }: &args::Wrapper<SdkTypes>,
+    force: bool,
+) -> Result<DenominatedAmount, Error> {
     let gas_cost_key = parameter_storage::get_gas_cost_key();
     let minimum_fee = match rpc::query_storage_value::<
         _,
@@ -796,7 +790,7 @@ pub async fn validate_fee<N: Namada>(
     }) {
         Ok(amount) => amount,
         Err(e) => {
-            if !args.force {
+            if !force {
                 return Err(e);
             } else {
                 token::Amount::zero()
@@ -809,13 +803,13 @@ pub async fn validate_fee<N: Namada>(
     let fee_amount = match fee_amount {
         Some(amount) => {
             let validated_fee_amount =
-                validate_amount(context, *amount, fee_token, args.force)
+                validate_amount(context, *amount, fee_token, force)
                     .await
                     .expect("Expected to be able to validate fee");
 
             if validated_fee_amount >= validated_minimum_fee {
                 validated_fee_amount
-            } else if !args.force {
+            } else if !force {
                 // Update the fee amount if it's not enough
                 display_line!(
                     context.io(),
@@ -839,21 +833,16 @@ pub async fn validate_fee<N: Namada>(
 /// computing the updated post balance
 pub async fn validate_transparent_fee<N: Namada>(
     context: &N,
-    // FIXME: should just pass the wrap_tx arg and force separately instead?
-    args: &args::Tx<SdkTypes>,
+    args: &args::Wrapper<SdkTypes>,
+    force: bool,
     fee_payer: &common::PublicKey,
 ) -> Result<(DenominatedAmount, TxSourcePostBalance), Error> {
-    let fee_amount = validate_fee(context, args).await?;
-    let Some(args::Wrapper {
+    let fee_amount = validate_fee(context, args, force).await?;
+    let args::Wrapper {
         fee_token,
         gas_limit,
         ..
-    }) = &args.wrap_tx
-    else {
-        return Err(Error::Other(
-            "Requested fee validation on a non-wrapper transaction".to_string(),
-        ));
-    };
+    } = args;
     let fee_payer_address = Address::from(fee_payer);
 
     let balance_key = balance_key(fee_token, &fee_payer_address);
@@ -876,7 +865,7 @@ pub async fn validate_transparent_fee<N: Namada>(
     match total_fee.checked_sub(balance) {
         Some(diff) if !diff.is_zero() => {
             let token_addr = fee_token.clone();
-            if !args.force {
+            if !force {
                 let fee_amount =
                     context.format_amount(&token_addr, total_fee).await;
 
@@ -2694,7 +2683,7 @@ mod test_signing {
         // we should fail to validate the fee due to an unresponsive client
         client_handle.send(None).expect("Test failed");
         let Error::Query(crate::error::QueryError::NoResponse(msg)) =
-            validate_fee(&context, &args)
+            validate_fee(&context, args.wrap_tx.as_ref().unwrap(), args.force)
                 .await
                 .expect_err("Test failed")
         else {
@@ -2706,7 +2695,10 @@ mod test_signing {
         // client is unresponsive
         client_handle.send(None).expect("Test failed");
         args.force = true;
-        let fee = validate_fee(&context, &args).await.expect("Test failed");
+        let fee =
+            validate_fee(&context, args.wrap_tx.as_ref().unwrap(), args.force)
+                .await
+                .expect("Test failed");
         assert_eq!(fee, DenominatedAmount::new(Amount::zero(), 0.into()));
         let args::Wrapper {
             broadcast_only,
@@ -2738,7 +2730,10 @@ mod test_signing {
                 0.into(),
             ))),
         });
-        let fee = validate_fee(&context, &args).await.expect("Test failed");
+        let fee =
+            validate_fee(&context, args.wrap_tx.as_ref().unwrap(), args.force)
+                .await
+                .expect("Test failed");
         assert_eq!(fee, DenominatedAmount::new(Amount::from(100), 0.into()));
 
         // now validation should ignore the minimum fee from the client
@@ -2770,7 +2765,9 @@ mod test_signing {
                 0.into(),
             ))),
         });
-        let fee = validate_fee(&context, &args).await.expect("Test failed");
+        let fee = validate_fee(&context, &args.wrap_tx.unwrap(), args.force)
+            .await
+            .expect("Test failed");
         assert_eq!(fee, DenominatedAmount::new(Amount::from(1), 0.into()));
     }
 
@@ -2803,7 +2800,13 @@ mod test_signing {
         let public_key = secret_key.to_public();
 
         assert_matches!(
-            validate_transparent_fee(&context, &args, &public_key).await,
+            validate_transparent_fee(
+                &context,
+                &args.wrap_tx.unwrap(),
+                args.force,
+                &public_key
+            )
+            .await,
             Err(Error::Tx(TxSubmitError::BalanceTooLowForFees(_, _, _, _)))
         );
     }

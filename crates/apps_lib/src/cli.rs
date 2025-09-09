@@ -5023,10 +5023,15 @@ pub mod args {
                         .def()
                         .help(wrap!("The amount to transfer in decimal.")),
                 )
-                .arg(__TEST_FRONTEND_SUS_FEE.def().help(wrap!(
-                    "The optional address of the frontend provider that will \
-                     take the masp sustainability fee."
-                )))
+                .arg(
+                    __TEST_FRONTEND_SUS_FEE
+                        .def()
+                        .help(wrap!(
+                            "The optional address of the frontend provider \
+                             that will take the masp sustainability fee."
+                        ))
+                        .hide(true),
+                )
         }
     }
 
@@ -5139,10 +5144,15 @@ pub mod args {
                      payment. When not provided the source spending key will \
                      be used."
                 )))
-                .arg(__TEST_FRONTEND_SUS_FEE.def().help(wrap!(
-                    "The optional address of the frontend provider that will \
-                     take the masp sustainability fee."
-                )))
+                .arg(
+                    __TEST_FRONTEND_SUS_FEE
+                        .def()
+                        .help(wrap!(
+                            "The optional address of the frontend provider \
+                             that will take the masp sustainability fee."
+                        ))
+                        .hide(true),
+                )
         }
     }
 
@@ -5277,10 +5287,15 @@ pub mod args {
                      payment (if this is a shielded action).  When not \
                      provided the source spending key will be used."
                 )))
-                .arg(__TEST_FRONTEND_SUS_FEE.def().help(wrap!(
-                    "The optional address of the frontend provider that will \
-                     take the masp sustainability fee."
-                )))
+                .arg(
+                    __TEST_FRONTEND_SUS_FEE
+                        .def()
+                        .help(wrap!(
+                            "The optional address of the frontend provider \
+                             that will take the masp sustainability fee."
+                        ))
+                        .hide(true),
+                )
         }
     }
 
@@ -7388,10 +7403,15 @@ pub mod args {
                 .arg(CHANNEL_ID.def().help(wrap!(
                     "The channel ID via which the token is received."
                 )))
-                .arg(__TEST_FRONTEND_SUS_FEE_IBC.def().help(wrap!(
-                    "The optional address of the frontend provider that will \
-                     take the masp sustainability fee."
-                )))
+                .arg(
+                    __TEST_FRONTEND_SUS_FEE_IBC
+                        .def()
+                        .help(wrap!(
+                            "The optional address of the frontend provider \
+                             that will take the masp sustainability fee."
+                        ))
+                        .hide(true),
+                )
         }
     }
 

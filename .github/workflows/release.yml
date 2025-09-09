@@ -80,7 +80,7 @@ jobs:
         with:
           tool: cargo-binstall
       - name: Install cargo-about
-        run: cargo binstall cargo-about --no-confirm
+        run: cargo binstall cargo-about@0.8.0 --no-confirm
       - name: Download wasm artifacts
         uses: actions/download-artifact@v4
         with:

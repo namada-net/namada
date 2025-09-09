@@ -351,7 +351,8 @@ pub async fn build_reveal_pk(
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
         let (fee_amount, _) =
-            validate_transparent_fee(context, args, &fee_payer).await?;
+            validate_transparent_fee(context, wrap_tx, args.force, &fee_payer)
+                .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -743,8 +744,13 @@ pub async fn build_change_consensus_key(
         .await?;
 
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _updated_balance) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _updated_balance) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -805,8 +811,13 @@ pub async fn build_validator_commission_change(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -973,8 +984,13 @@ pub async fn build_validator_metadata_change(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -1224,8 +1240,13 @@ pub async fn build_update_steward_commission(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -1318,8 +1339,13 @@ pub async fn build_resign_steward(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -1392,8 +1418,13 @@ pub async fn build_unjail_validator(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -1522,8 +1553,13 @@ pub async fn build_deactivate_validator(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -1623,8 +1659,13 @@ pub async fn build_reactivate_validator(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -1876,8 +1917,13 @@ pub async fn build_redelegation(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -1946,8 +1992,13 @@ pub async fn build_withdraw(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -2059,8 +2110,13 @@ pub async fn build_claim_rewards(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -2189,8 +2245,13 @@ pub async fn build_unbond(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -2451,8 +2512,13 @@ pub async fn build_bond(
             )
             .await?;
             let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-            let (fee_amount, updated_balance) =
-                validate_transparent_fee(context, tx_args, &fee_payer).await?;
+            let (fee_amount, updated_balance) = validate_transparent_fee(
+                context,
+                wrap_tx,
+                tx_args.force,
+                &fee_payer,
+            )
+            .await?;
 
             (
                 SigningData::Wrapper(signing_data),
@@ -2546,7 +2612,8 @@ pub async fn build_default_proposal(
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
         let (fee_amount, _updated_balance) =
-            validate_transparent_fee(context, tx, &fee_payer).await?;
+            validate_transparent_fee(context, wrap_tx, tx.force, &fee_payer)
+                .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -2633,7 +2700,8 @@ pub async fn build_vote_proposal(
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
         let (fee_amount, _) =
-            validate_transparent_fee(context, tx, &fee_payer).await?;
+            validate_transparent_fee(context, wrap_tx, tx.force, &fee_payer)
+                .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -2968,8 +3036,13 @@ pub async fn build_become_validator(
         .await?;
 
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _updated_balance) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _updated_balance) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -3033,7 +3106,8 @@ pub async fn build_pgf_funding_proposal(
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
         let (fee_amount, _updated_balance) =
-            validate_transparent_fee(context, tx, &fee_payer).await?;
+            validate_transparent_fee(context, wrap_tx, tx.force, &fee_payer)
+                .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -3106,7 +3180,8 @@ pub async fn build_pgf_stewards_proposal(
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
         let (fee_amount, _updated_balance) =
-            validate_transparent_fee(context, tx, &fee_payer).await?;
+            validate_transparent_fee(context, wrap_tx, tx.force, &fee_payer)
+                .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -3171,56 +3246,62 @@ pub async fn build_ibc_transfer(
         get_refund_target(context, &args.source, &args.refund_target).await?;
 
     let source = args.source.effective_address();
-    let (mut signing_data, wrap_args, updated_balance) =
-        if let Some(wrap_tx) = &args.tx.wrap_tx {
-            let signing_data = signing::aux_signing_data(
-                context,
-                &args.tx,
-                Some(source.clone()),
-                Some(source.clone()),
-                vec![],
-                args.source.spending_key().is_some(),
-                vec![],
-                None,
-            )
-            .await?;
-            let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-            let (fee_per_gas_unit, updated_balance) =
-                if let TransferSource::ExtendedKey(_) = args.source {
-                    // MASP fee payment
-                    (validate_fee(context, &args.tx).await?, None)
-                } else {
-                    // Transparent fee payment
-                    validate_transparent_fee(context, &args.tx, &fee_payer)
-                        .await
-                        .map(|(fee_amount, updated_balance)| {
-                            (fee_amount, Some(updated_balance))
-                        })?
-                };
+    let (mut signing_data, wrap_args, updated_balance) = if let Some(wrap_tx) =
+        &args.tx.wrap_tx
+    {
+        let signing_data = signing::aux_signing_data(
+            context,
+            &args.tx,
+            Some(source.clone()),
+            Some(source.clone()),
+            vec![],
+            args.source.spending_key().is_some(),
+            vec![],
+            None,
+        )
+        .await?;
+        let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
+        let (fee_per_gas_unit, updated_balance) =
+            if let TransferSource::ExtendedKey(_) = args.source {
+                // MASP fee payment
+                (validate_fee(context, wrap_tx, args.tx.force).await?, None)
+            } else {
+                // Transparent fee payment
+                validate_transparent_fee(
+                    context,
+                    wrap_tx,
+                    args.tx.force,
+                    &fee_payer,
+                )
+                .await
+                .map(|(fee_amount, updated_balance)| {
+                    (fee_amount, Some(updated_balance))
+                })?
+            };
 
-            (
-                SigningData::Wrapper(signing_data),
-                Some(WrapArgs {
-                    fee_amount: fee_per_gas_unit,
-                    fee_payer,
-                    fee_token: wrap_tx.fee_token.to_owned(),
-                    gas_limit: wrap_tx.gas_limit,
-                }),
-                updated_balance,
-            )
-        } else {
-            let signing_data = signing::aux_inner_signing_data(
-                context,
-                &args.tx,
-                Some(source.clone()),
-                Some(source.clone()),
-                vec![],
-                vec![],
-            )
-            .await?;
+        (
+            SigningData::Wrapper(signing_data),
+            Some(WrapArgs {
+                fee_amount: fee_per_gas_unit,
+                fee_payer,
+                fee_token: wrap_tx.fee_token.to_owned(),
+                gas_limit: wrap_tx.gas_limit,
+            }),
+            updated_balance,
+        )
+    } else {
+        let signing_data = signing::aux_inner_signing_data(
+            context,
+            &args.tx,
+            Some(source.clone()),
+            Some(source.clone()),
+            vec![],
+            vec![],
+        )
+        .await?;
 
-            (SigningData::Inner(signing_data), None, None)
-        };
+        (SigningData::Inner(signing_data), None, None)
+    };
 
     // Check that the source address exists on chain
     let source =
@@ -3685,8 +3766,13 @@ pub async fn build_transparent_transfer<N: Namada>(
 
             // Transparent fee payment
             let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-            let (fee_amount, updated_balance) =
-                validate_transparent_fee(context, &args.tx, &fee_payer).await?;
+            let (fee_amount, updated_balance) = validate_transparent_fee(
+                context,
+                wrap_tx,
+                args.tx.force,
+                &fee_payer,
+            )
+            .await?;
 
             (
                 SigningData::Wrapper(signing_data),
@@ -3808,7 +3894,7 @@ pub async fn build_shielded_transfer<N: Namada>(
         .await?;
 
         // Shielded fee payment
-        let fee_amount = validate_fee(context, &args.tx).await?;
+        let fee_amount = validate_fee(context, wrap_tx, args.tx.force).await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
 
         (
@@ -4035,8 +4121,13 @@ pub async fn build_shielding_transfer<N: Namada>(
 
             // Transparent fee payment
             let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-            let (fee_amount, updated_balance) =
-                validate_transparent_fee(context, &args.tx, &fee_payer).await?;
+            let (fee_amount, updated_balance) = validate_transparent_fee(
+                context,
+                wrap_tx,
+                args.tx.force,
+                &fee_payer,
+            )
+            .await?;
 
             (
                 SigningData::Wrapper(signing_data),
@@ -4213,7 +4304,7 @@ pub async fn build_unshielding_transfer<N: Namada>(
         .await?;
 
         // Shielded fee payment
-        let fee_amount = validate_fee(context, &args.tx).await?;
+        let fee_amount = validate_fee(context, wrap_tx, args.tx.force).await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
 
         (
@@ -4444,8 +4535,13 @@ pub async fn build_init_account(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -4558,8 +4654,13 @@ pub async fn build_update_account(
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let (fee_amount, _) =
-            validate_transparent_fee(context, tx_args, &fee_payer).await?;
+        let (fee_amount, _) = validate_transparent_fee(
+            context,
+            wrap_tx,
+            tx_args.force,
+            &fee_payer,
+        )
+        .await?;
 
         (
             SigningData::Wrapper(signing_data),
@@ -4685,8 +4786,6 @@ pub async fn build_update_account(
 }
 
 /// Submit a custom transaction
-// FIXME: look here, how should we handle custom txs? They are a bit different,
-// leave this as the last thing to modify
 pub async fn build_custom(
     context: &impl Namada,
     args::TxCustom {
@@ -4768,14 +4867,11 @@ pub async fn build_custom(
             ));
         None
     } else {
-        let default_signer = owner.clone();
-        let fee_amount = validate_fee(context, tx_args).await?;
-
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
             owner.clone(),
-            default_signer,
+            owner.clone(),
             vec![],
             // FIXME: is this correct? Probably not I should chech the owner
             false,
@@ -4785,18 +4881,20 @@ pub async fn build_custom(
             None,
         )
         .await?;
-        let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-        let wrap_tx = tx_args.wrap_tx.as_ref().ok_or_else(|| {
-            Error::Other("Missing wrapping argument for custom tx".to_string())
-        })?;
-        tx.add_wrapper(
-            Fee {
-                amount_per_gas_unit: fee_amount,
-                token: wrap_tx.fee_token.to_owned(),
-            },
-            fee_payer,
-            wrap_tx.gas_limit,
-        );
+
+        if let Some(wrap_tx) = &tx_args.wrap_tx {
+            let fee_amount =
+                validate_fee(context, wrap_tx, tx_args.force).await?;
+            let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
+            tx.add_wrapper(
+                Fee {
+                    amount_per_gas_unit: fee_amount,
+                    token: wrap_tx.fee_token.to_owned(),
+                },
+                fee_payer,
+                wrap_tx.gas_limit,
+            );
+        }
         // FIXME: what if we want to load a raw tx, sign the inner and nothing
         // else? No wrapping
         Some(SigningData::Wrapper(signing_data))

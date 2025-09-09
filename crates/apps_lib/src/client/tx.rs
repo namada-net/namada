@@ -257,10 +257,6 @@ async fn batch_opt_reveal_pk_and_submit<N: Namada>(
 where
     <N::Client as namada_sdk::io::Client>::Error: std::fmt::Display,
 {
-    if !matches!(tx_data.1, SigningData::Wrapper(_)) {
-        panic!("Expected wrapper signing data to submit the transaction");
-    }
-
     let mut batched_tx_data = vec![];
 
     for owner in owners {
@@ -291,9 +287,13 @@ where
         let (mut batched_tx, batched_signing_data) =
             namada_sdk::tx::build_batch(batched_tx_data)?;
         // Sign the batch with the union of the signers required for each part
-        for sig_data in batched_signing_data {
-            sign(namada, &mut batched_tx, args, sig_data).await?;
-        }
+        sign(
+            namada,
+            &mut batched_tx,
+            args,
+            SigningData::Wrapper(batched_signing_data),
+        )
+        .await?;
         // Then finally submit everything in one go
         namada.submit(batched_tx, args).await
     }

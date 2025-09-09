@@ -97,32 +97,8 @@ pub enum FeeAuthorization {
     Signature(Vec<u8>),
 }
 
-// FIXME: remove this after fixing the interface of build_batch
-impl PartialEq for FeeAuthorization {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            // Compare only the public key ignoring the disposable flag
-            (
-                FeeAuthorization::Signer {
-                    pubkey,
-                    disposable_fee_payer: _,
-                },
-                FeeAuthorization::Signer {
-                    pubkey: other_pubkey,
-                    disposable_fee_payer: _,
-                },
-            ) => pubkey == other_pubkey,
-            (
-                FeeAuthorization::Signature(vec),
-                FeeAuthorization::Signature(other_vec),
-            ) => vec == other_vec,
-            _ => false,
-        }
-    }
-}
-
 /// A structure holding the signing data for a wrapper transaction
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct SigningWrapperData {
     /// The signing data for each one of the inner transactions of this batch
     pub signing_data: Vec<SigningTxData>,
@@ -155,14 +131,16 @@ impl SigningWrapperData {
 }
 
 #[allow(missing_docs)]
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub enum SigningData {
     Inner(SigningTxData),
     Wrapper(SigningWrapperData),
 }
 
 impl SigningData {
-    fn into_components(self) -> (Vec<SigningTxData>, Option<FeeAuthorization>) {
+    pub(crate) fn into_components(
+        self,
+    ) -> (Vec<SigningTxData>, Option<FeeAuthorization>) {
         match self {
             SigningData::Inner(signing_tx_data) => {
                 (vec![signing_tx_data], None)

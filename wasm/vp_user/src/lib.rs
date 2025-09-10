@@ -78,8 +78,11 @@ fn validate_tx(
                     source, validator, ..
                 })
                 | PosAction::Withdraw(Withdraw { source, validator })
-                | PosAction::ClaimRewards(ClaimRewards { validator, source }) =>
-                {
+                | PosAction::ClaimRewards(ClaimRewards {
+                    validator,
+                    source,
+                    receiver: _,
+                }) => {
                     let source = source.unwrap_or(validator);
                     gadget.verify_signatures_when(
                         || source == addr,

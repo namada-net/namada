@@ -297,7 +297,11 @@ where
 fn has_bal_inc_protocol_action(action: &Action, owner: Owner<'_>) -> bool {
     match action {
         Action::Pos(
-            PosAction::ClaimRewards(ClaimRewards { validator, source })
+            PosAction::ClaimRewards(ClaimRewards {
+                validator,
+                source,
+                receiver: _,
+            })
             | PosAction::Withdraw(Withdraw { validator, source }),
         ) => match owner {
             Owner::Account(owner) => {
@@ -1111,6 +1115,7 @@ mod tests {
             .push_action(Action::Pos(PosAction::ClaimRewards(ClaimRewards {
                 validator: established_address_1(),
                 source: None,
+                receiver: None,
             })))
             .unwrap();
 

@@ -350,7 +350,7 @@ pub fn masp_commitment_anchor_key(anchor: impl Into<Scalar>) -> storage::Key {
     storage::Key::from(address::MASP.to_db_key())
         .push(&MASP_NOTE_COMMITMENT_ANCHOR_PREFIX.to_owned())
         .expect("Cannot obtain a storage key")
-        .push(&Hash(anchor.into().to_bytes()))
+        .push(&Hash(anchor.into().to_bytes_le()))
         .expect("Cannot obtain a storage key")
 }
 

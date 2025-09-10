@@ -309,6 +309,7 @@ where
         let mut used_pubkeys = HashSet::new();
 
         // First try to sign the raw header with the supplied signatures
+        // FIXME: remove this if, it's useless
         if !signing_tx_data.signatures.is_empty() {
             let signatures = signing_tx_data
                 .signatures
@@ -361,7 +362,11 @@ where
                     Some(FeeAuthorization::Signer {
                         pubkey: fee_payer,
                         ..
-                    }) if pubkey == fee_payer => {}
+                    }) if pubkey == fee_payer => {
+                        // We will sign the inner tx together with the wrapper,
+                        // we can anticipate the accounting of this signature
+                        used_pubkeys.insert(pubkey.clone());
+                    }
                     _ => {
                         if let Ok(ntx) = sign(
                             tx.clone(),
@@ -424,15 +429,6 @@ where
                         user_data,
                     )
                     .await?;
-                    // //FIXME: I need to add this to hte used pubkeys
-                    // //FIXME: actually what's the point of this?
-                    // if signing_wrapper_data
-                    //     .signing_data
-                    //     .public_keys
-                    //     .contains(pubkey)
-                    // {
-                    //     used_pubkeys.insert(pubkey.clone());
-                    // }
                 }
             }
         }

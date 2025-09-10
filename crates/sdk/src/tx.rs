@@ -277,8 +277,12 @@ pub async fn process_tx(
         // We use this to determine when the wrapper tx makes it on-chain
         let tx_hash = tx.header_hash().to_string();
         let cmts = tx.commitments().clone();
-        // FIXME: add a check to avoid submitting raw txs? Yes
         let wrapper_hash = tx.wrapper_hash();
+        if wrapper_hash.is_none() {
+            return Err(Error::Other(
+                "Can't submit a non-wrapper transaction".to_string(),
+            ));
+        }
         // We use this to determine when the inner tx makes it
         // on-chain
         let to_broadcast = TxBroadcastData::Live { tx, tx_hash };

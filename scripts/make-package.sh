@@ -16,6 +16,6 @@ ln ${BIN} ../../${PACKAGE_NAME} && \
 cd ../.. && \
 ln wasm/*.*.wasm wasm/checksums.json ${PACKAGE_NAME}/wasm && \
 ln LICENSE ${PACKAGE_NAME} && \
-cargo about generate about.hbs --output-file ${PACKAGE_NAME}/LICENSE.thirdparty && \
+cargo about generate about.hbs --fail --output-file ${PACKAGE_NAME}/LICENSE.thirdparty && \
 tar -c -z -f ${PACKAGE_NAME}.tar.gz ${PACKAGE_NAME} && \
 rm -rf ${PACKAGE_NAME}

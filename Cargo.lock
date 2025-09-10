@@ -5231,12 +5231,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d97bbf43eb4f088f8ca469930cde17fa036207c9a5e02ccc5107c4e8b17c964"
 
 [[package]]
-name = "memzero"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93c0d11ac30a033511ae414355d80f70d9f29a44a49140face477117a1ee90db"
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5480,15 +5474,15 @@ dependencies = [
 
 [[package]]
 name = "nam-tiny-hderive"
-version = "0.3.1-nam.0"
+version = "0.3.1-nam.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9dfd77f274636f722e966c394b381a70233ed4c25150864a4c53d398028a6818"
+checksum = "b2cd44792ed5cd84dc9dedc3d572242ac00e76c244e85eb4bf34da2c6239ce30"
 dependencies = [
  "base58",
  "hmac",
  "k256",
- "memzero",
  "sha2 0.10.8",
+ "zeroize",
 ]
 
 [[package]]

@@ -245,7 +245,7 @@ tendermint-rpc = {version = "0.40.3", default-features = false}
 test-log = {version = "0.2", default-features = false, features = ["trace"]}
 textwrap-macros = "0.3"
 tiny-bip39 = {version = "2.0"}
-tiny-hderive = {package = "nam-tiny-hderive", version = "0.3.1-nam.0"}
+tiny-hderive = {package = "nam-tiny-hderive", version = "0.3.1-nam.1"}
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 thiserror = "2.0"
 tokio = {version = "1.8", default-features = false}

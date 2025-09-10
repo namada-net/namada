@@ -355,6 +355,7 @@ where
         let mut used_pubkeys = HashSet::new();
 
         // First try to sign the raw header with the supplied signatures
+        // FIXME: remove this if, it's useless
         if !signing_tx_data.signatures.is_empty() {
             let signatures = signing_tx_data
                 .signatures
@@ -443,7 +444,11 @@ where
                     Some(FeeAuthorization::Signer {
                         pubkey: fee_payer,
                         ..
-                    }) if pubkey == fee_payer => {}
+                    }) if pubkey == fee_payer => {
+                        // We will sign the inner tx together with the wrapper,
+                        // we can anticipate the accounting of this signature
+                        used_pubkeys.insert(pubkey.clone());
+                    }
                     _ => {
                         if args.dry_run.is_some() {
                             mock_hw_sig(
@@ -541,6 +546,7 @@ where
                         )
                         .await?;
                     }
+<<<<<<< HEAD
                     // //FIXME: I need to add this to hte used pubkeys
                     // //FIXME: actually what's the point of this?
                     // if signing_wrapper_data
@@ -551,6 +557,8 @@ where
                     //     used_pubkeys.insert(pubkey.clone());
                     // }
 >>>>>>> 1e39180f7 (Refactors the signatures structures of the SDK)
+=======
+>>>>>>> c6b833468 (Fixes the accounting of the number of signatures)
                 }
             }
         }

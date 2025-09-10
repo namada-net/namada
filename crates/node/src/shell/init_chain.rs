@@ -177,7 +177,7 @@ where
                 bls12_381::Scalar::from(
                     self.state.in_mem().conversion_state.tree.root(),
                 )
-                .to_bytes(),
+                .to_bytes_le(),
             ),
         )?;
 

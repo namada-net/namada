@@ -2,10 +2,32 @@
 
 use namada_core::address::Address;
 use namada_core::storage::DbKeySeg;
+use namada_macros::StorageKeys;
 
 use super::ADDRESS;
 use crate::types::BondId;
 use crate::{Epoch, Key, KeySeg, epoched, lazy_map, lazy_vec};
+
+#[derive(StorageKeys)]
+struct Params {
+    proposal: &'static str,
+    max_validator_slots: &'static str,
+    pipeline_len: &'static str,
+    unbonding_len: &'static str,
+    tm_votes_per_token: &'static str,
+    block_proposer_reward: &'static str,
+    block_vote_reward: &'static str,
+    max_inflation_rate: &'static str,
+    target_staked_ratio: &'static str,
+    duplicate_vote_min_slash_rate: &'static str,
+    light_client_attack_min_slash_rate: &'static str,
+    cubic_slashing_window_length: &'static str,
+    validator_stake_threshold: &'static str,
+    liveness_window_check: &'static str,
+    liveness_threshold: &'static str,
+    rewards_gain_p: &'static str,
+    rewards_gain_d: &'static str,
+}
 
 const PARAMS_STORAGE_KEY: &str = "params";
 const VALIDATOR_ADDRESSES_KEY: &str = "validator_addresses";
@@ -71,16 +93,144 @@ pub fn is_pos_key(key: &Key) -> bool {
     }
 }
 
-/// Storage key for PoS parameters.
-pub fn params_key() -> Key {
+/// Storage key prefix for PoS parameters.
+///
+/// Each param is stored in a key derived for `Params`.
+pub fn params_prefix() -> Key {
     Key::from(ADDRESS.to_db_key())
         .push(&PARAMS_STORAGE_KEY.to_owned())
         .expect("Cannot obtain a storage key")
 }
 
+/// Proposal param storage key
+pub fn param_proposal_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.proposal.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Max validator slots param storage key
+pub fn param_max_validator_slots_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.max_validator_slots.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Pipeline length param storage key
+pub fn param_pipeline_len_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.pipeline_len.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Unbonding length param storage key
+pub fn param_unbonding_len_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.unbonding_len.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Tendermint votes per token param storage key
+pub fn param_tm_votes_per_token_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.tm_votes_per_token.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Block proposer reward param storage key
+pub fn param_block_proposer_reward_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.block_proposer_reward.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Block vote reward param storage key
+pub fn param_block_vote_reward_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.block_vote_reward.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Max inflation rate param storage key
+pub fn param_max_inflation_rate_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.max_inflation_rate.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Target staked ratio param storage key
+pub fn param_target_staked_ratio_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.target_staked_ratio.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Duplicate vote minimum slash rate param storage key
+pub fn param_duplicate_vote_min_slash_rate_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.duplicate_vote_min_slash_rate.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Light client attack minimum slash rate param storage key
+pub fn param_light_client_attack_min_slash_rate_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.light_client_attack_min_slash_rate.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Cubic slashing window length param storage key
+pub fn param_cubic_slashing_window_length_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.cubic_slashing_window_length.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Validator stake threshold param storage key
+pub fn param_validator_stake_threshold_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.validator_stake_threshold.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Liveness window check param storage key
+pub fn param_liveness_window_check_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.liveness_window_check.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Liveness threshold param storage key
+pub fn param_liveness_threshold_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.liveness_threshold.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Rewards gain P param storage key
+pub fn param_rewards_gain_p_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.rewards_gain_p.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
+/// Rewards gain D param storage key
+pub fn param_rewards_gain_d_key() -> Key {
+    params_prefix()
+        .push(&Params::VALUES.rewards_gain_d.to_owned())
+        .expect("Cannot obtain a storage key")
+}
+
 /// Is storage key for PoS parameters?
 pub fn is_params_key(key: &Key) -> bool {
-    matches!(&key.segments[..], [DbKeySeg::AddressSeg(addr), DbKeySeg::StringSeg(key)] if addr == &ADDRESS && key == PARAMS_STORAGE_KEY)
+    matches!(
+        &key.segments[..],
+        [
+            DbKeySeg::AddressSeg(addr),
+            DbKeySeg::StringSeg(key),
+            DbKeySeg::StringSeg(_sub_key),
+        ] if addr == &ADDRESS && key == PARAMS_STORAGE_KEY
+    )
 }
 
 /// Storage key prefix for validator data.

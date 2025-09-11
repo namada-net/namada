@@ -746,7 +746,7 @@ fn values_spanning_multiple_masp_digits() -> Result<()> {
                 NAM,
                 "--amount",
                 &UNSHIELD_REWARDS_AMT.to_string(),
-                "--signing-keys",
+                "--gas-payer",
                 BERTHA_KEY,
                 "--node",
                 RPC,
@@ -4292,7 +4292,7 @@ fn masp_txs_and_queries() -> Result<()> {
             let tx_args = if dry_run && is_use_device() {
                 continue;
             } else if dry_run {
-                [tx_args.clone(), vec!["--dry-run"]].concat()
+                [tx_args.clone(), vec!["--dry-run-wrapper"]].concat()
             } else {
                 tx_args.clone()
             };
@@ -4467,8 +4467,6 @@ fn multiple_unfetched_txs_same_block() -> Result<()> {
                 NAM,
                 "--amount",
                 "50",
-                "--gas-payer",
-                ALBERT_KEY,
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-tx",
@@ -8534,9 +8532,11 @@ fn speculative_context() -> Result<()> {
     Ok(())
 }
 
-// Test that mixed masp tranfers and fee payments are correctly labeld by the
-// protocol (by means of events) and reconstructed in the correct order by the
-// client
+// FIXME: check again all the usages of dry-run, dry-run-wrapper, dump-tx,
+// dump-wrapper-tx, signing-keys, gas-payer in the tests and see if other args
+// that we pass in can be avoided Test that mixed masp tranfers and fee payments
+// are correctly labeld by the protocol (by means of events) and reconstructed
+// in the correct order by the client
 #[test]
 fn masp_events() -> Result<()> {
     // This address doesn't matter for tests. But an argument is required.
@@ -8546,22 +8546,12 @@ fn masp_events() -> Result<()> {
     let (mut node, _services) = setup::setup()?;
     _ = node.next_masp_epoch();
 
-    let native_token = node
-        .shell
-        .lock()
-        .unwrap()
-        .state
-        .in_mem()
-        .native_token
-        .clone();
-
     // 0. Initialize accounts we can access the secret keys of
     let (adam_alias, adam_key) =
         make_temp_account(&node, validator_one_rpc, "Adam", NAM, 100_000)?;
     let adam_pk = adam_key.to_public();
     let (bradley_alias, bradley_key) =
         make_temp_account(&node, validator_one_rpc, "Bradley", NAM, 0)?;
-    let bradley_pk = bradley_key.to_public();
     let (cooper_alias, cooper_key) =
         make_temp_account(&node, validator_one_rpc, "Cooper", NAM, 0)?;
     let cooper_pk = cooper_key.to_public();
@@ -8665,7 +8655,7 @@ fn masp_events() -> Result<()> {
                 "1000",
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
-                "--dump-tx",
+                "--dump-wrapper-tx",
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -8721,7 +8711,7 @@ fn masp_events() -> Result<()> {
                 C_SPENDING_KEY,
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
-                "--dump-tx",
+                "--dump-wrapper-tx",
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -8754,10 +8744,6 @@ fn masp_events() -> Result<()> {
                 NAM,
                 "--amount",
                 "1",
-                // Fake a transparent gas payer, fees will actually be paid by
-                // the first tx of this batch
-                "--gas-payer",
-                CHRISTEL_KEY,
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-tx",
@@ -8807,7 +8793,8 @@ fn masp_events() -> Result<()> {
 
     let signing_data = SigningTxData {
         owner: None,
-        public_keys: [cooper_pk.clone()].into(),
+        // No need to sign the raw tx, only the masp section
+        public_keys: Default::default(),
         threshold: 1,
         account_public_keys_map: None,
         shielded_hash: None,
@@ -8830,15 +8817,9 @@ fn masp_events() -> Result<()> {
         ),
         (
             tx1.clone(),
-            SigningData::Wrapper(SigningWrapperData {
-                signing_data: vec![SigningTxData {
-                    shielded_hash: get_shielded_hash(&tx1),
-                    ..signing_data.clone()
-                }],
-                fee_auth: FeeAuthorization::Signer {
-                    pubkey: cooper_pk.clone(),
-                    disposable_fee_payer: false,
-                },
+            SigningData::Inner(SigningTxData {
+                shielded_hash: get_shielded_hash(&tx1),
+                ..signing_data.clone()
             }),
         ),
     ])
@@ -8871,7 +8852,7 @@ fn masp_events() -> Result<()> {
                 "0.00001",
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
-                "--dump-tx",
+                "--dump-wrapper-tx",
                 "--ledger-address",
                 validator_one_rpc,
             ]),
@@ -8904,29 +8885,22 @@ fn masp_events() -> Result<()> {
 
     let mut txs = vec![];
     for (idx, bytes) in txs_bytes.iter().enumerate() {
-        let (sk, pk) = if idx == 0 {
-            (adam_key.clone(), adam_pk.clone())
-        } else if idx == 1 {
-            (cooper_key.clone(), cooper_pk.clone())
-        } else {
-            (bradley_key.clone(), bradley_pk.clone())
-        };
         let mut tx = Tx::try_from_json_bytes(bytes).unwrap();
-        tx.add_wrapper(
-            tx::data::wrapper::Fee {
-                amount_per_gas_unit: DenominatedAmount::native(10.into()),
-                token: native_token.clone(),
-            },
-            pk.clone(),
-            100_000.into(),
-        );
-        tx.sign_raw(
-            vec![sk.clone()],
-            AccountPublicKeysMap::from_iter(vec![(pk)].into_iter()),
-            None,
-        );
+        let sk = if idx == 0 {
+            tx.sign_raw(
+                vec![adam_key.clone()],
+                AccountPublicKeysMap::from_iter(
+                    vec![(adam_pk.clone())].into_iter(),
+                ),
+                None,
+            );
+            adam_key.clone()
+        } else if idx == 1 {
+            cooper_key.clone()
+        } else {
+            bradley_key.clone()
+        };
         tx.sign_wrapper(sk);
-
         txs.push(tx.to_bytes());
     }
 

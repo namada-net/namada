@@ -63,33 +63,6 @@ const MAX_HW_CONVERT: usize = 15;
 // introduced.
 const MAX_HW_OUTPUT: usize = 15;
 
-// FIXME: remove if unused, or review the docs
-// /// Wrapper around `signing::aux_signing_data` that stores the optional
-// /// disposable address to the wallet
-// pub async fn aux_signing_data(
-//     context: &impl Namada,
-//     args: &args::Tx,
-//     owner: Option<Address>,
-//     default_signer: Option<Address>,
-//     disposable_signing_key: bool,
-//     signatures: Vec<Vec<u8>>,
-//     wrapper_signature: Option<Vec<u8>>,
-// ) -> Result<signing::SigningTxData, error::Error> {
-//     let signing_data = signing::aux_signing_data(
-//         context,
-//         args,
-//         owner,
-//         default_signer,
-//         vec![],
-//         disposable_signing_key,
-//         signatures,
-//         wrapper_signature,
-//     )
-//     .await?;
-
-//     Ok(signing_data)
-// }
-
 pub async fn with_hardware_wallet<U, T>(
     mut tx: Tx,
     pubkey: common::PublicKey,
@@ -334,7 +307,7 @@ where
 {
     let (mut tx, signing_data) = args.build(namada).await?;
 
-    if matches!(args.tx.dump_tx, Some(args::DumpTx::Wrapper)) {
+    if let Some(dump_tx) = args.tx.dump_tx {
         // Attach the provided inner signatures to the tx (if any)
         let signatures = args
             .signatures
@@ -348,8 +321,6 @@ where
             })
             .collect::<error::Result<Vec<_>>>()?;
         tx.add_signatures(signatures);
-    }
-    if let Some(dump_tx) = args.tx.dump_tx {
         return tx::dump_tx(namada.io(), dump_tx, args.tx.output_folder, tx);
     }
 

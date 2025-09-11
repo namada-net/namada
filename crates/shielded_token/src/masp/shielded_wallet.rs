@@ -1322,6 +1322,87 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         (res, rem)
     }
 
+    #[allow(async_fn_in_trait)]
+    async fn add_shielded_parts(
+        &mut self,
+        context: &impl NamadaIo,
+        masp_tx_combined_data: MaspTxCombinedData,
+        epoch: MaspEpoch,
+        expiration_height: u32,
+    ) -> Result<Builder<Network, PseudoExtendedKey>, TransferErr> {
+        let MaspTxCombinedData {
+            source_data,
+            target_data,
+            mut denoms,
+        } = masp_tx_combined_data;
+
+        let mut builder = Builder::<Network, PseudoExtendedKey>::new(
+            NETWORK,
+            // NOTE: this is going to add 20 more blocks to the actual
+            // expiration but there's no other exposed function that we could
+            // use from the masp crate to specify the expiration better
+            expiration_height.into(),
+        );
+
+        {
+            // Load the current shielded context given
+            // the spending key we possess
+            self.load_with_caching(context.client())
+                .await
+                .map_err(|e| TransferErr::General(e.to_string()))?;
+        }
+        // Track the conversions used across spending keys
+        let mut conversions = Conversions::new();
+        let mut usages = I128Sum::zero();
+        let mut notes_tracker = SpentNotesTracker::new();
+        // Commit all the transaction inputs sans conversions
+        for (source, amount) in &source_data {
+            self.add_inputs(
+                context,
+                &mut builder,
+                source,
+                amount,
+                epoch,
+                &mut denoms,
+                &mut notes_tracker,
+                &mut conversions,
+                &mut usages,
+            )
+            .await?;
+        }
+
+        // Commit the consolidated conversion notes from the summations
+        for (asset_type, (conv, wit)) in conversions {
+            let value = usages.get(&asset_type);
+            if value.is_positive() {
+                builder
+                    .add_sapling_convert(
+                        conv.clone(),
+                        value as u64,
+                        wit.clone(),
+                    )
+                    .map_err(|e| TransferErr::Build {
+                        error: builder::Error::SaplingBuild(e),
+                    })?;
+            }
+        }
+
+        // Commit the transaction outputs
+        for (target, amount) in target_data {
+            self.add_outputs(
+                context,
+                &mut builder,
+                &target,
+                amount,
+                epoch,
+                &mut denoms,
+            )
+            .await?;
+        }
+
+        Ok(builder)
+    }
+
     /// Make shielded components to embed within a Transfer object. If no
     /// shielded payment address nor spending key is specified, then no
     /// shielded components are produced. Otherwise, a transaction containing
@@ -1330,47 +1411,20 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
     /// understood that transparent account changes are effected only by the
     /// amounts and signatures specified by the containing Transfer object.
     #[allow(async_fn_in_trait)]
-    async fn gen_shielded_transfer(
+    async fn build_shielded_transfer(
         &mut self,
         context: &impl NamadaIo,
-        data: MaspTransferData,
-        fee_data: Option<MaspFeeData>,
+        epoch: MaspEpoch,
         expiration: Option<DateTimeUtc>,
-        bparams: &mut impl BuildParams,
-    ) -> Result<Option<ShieldedTransfer>, TransferErr> {
-        // Determine epoch in which to submit potential shielded transaction
-        let epoch = Self::query_masp_epoch(context.client())
-            .await
-            .map_err(|e| TransferErr::General(e.to_string()))?;
-        // Try to get a seed from env var, if any.
-        #[allow(unused_mut)]
-        let mut rng = StdRng::from_rng(OsRng).unwrap();
-        #[cfg(feature = "testing")]
-        let mut rng = if let Ok(seed) = std::env::var(ENV_VAR_MASP_TEST_SEED)
-            .map_err(|e| TransferErr::General(e.to_string()))
-            .and_then(|seed| {
-                let exp_str =
-                    format!("Env var {ENV_VAR_MASP_TEST_SEED} must be a u64.");
-                let parsed_seed: u64 =
-                    seed.parse().map_err(|_| TransferErr::General(exp_str))?;
-                Ok(parsed_seed)
-            }) {
-            tracing::warn!(
-                "UNSAFE: Using a seed from {ENV_VAR_MASP_TEST_SEED} env var \
-                 to build proofs."
-            );
-            StdRng::seed_from_u64(seed)
-        } else {
-            rng
-        };
-
+        masp_tx_combined_data: MaspTxCombinedData,
+    ) -> Result<Builder<Network, PseudoExtendedKey>, TransferErr> {
         // TODO: if the user requested the default expiration, there might be a
         // small discrepancy between the datetime we calculate here and the one
         // we set for the transaction (since we compute two different
         // DateTimeUtc::now()). This should be small enough to not cause
         // any issue, in case refactor the build process to compute a single
         // expiration at the beginning and use it both here and for the
-        // transaction
+        // transactiontnam1q9gr66cvu4hrzm0sd5kmlnjje82gs3xlfg3v6nu7
         let expiration_height: u32 = match expiration {
             Some(expiration) => {
                 // Try to match a DateTime expiration with a plausible
@@ -1419,82 +1473,14 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 u32::MAX - 20
             }
         };
-        let mut builder = Builder::<Network, PseudoExtendedKey>::new(
-            NETWORK,
-            // NOTE: this is going to add 20 more blocks to the actual
-            // expiration but there's no other exposed function that we could
-            // use from the masp crate to specify the expiration better
-            expiration_height.into(),
-        );
-
-        let mut notes_tracker = SpentNotesTracker::new();
-        {
-            // Load the current shielded context given
-            // the spending key we possess
-            self.load_with_caching(context.client())
-                .await
-                .map_err(|e| TransferErr::General(e.to_string()))?;
-        }
-
-        let MaspTxCombinedData {
-            source_data,
-            target_data,
-            mut denoms,
-        } = Self::combine_data_for_masp_transfer(context, data, fee_data)
-            .await?;
-        if source_data.iter().all(|x| x.0.spending_key().is_none())
-            && target_data.iter().all(|x| x.0.payment_address().is_none())
-        {
-            // No shielded components are needed when neither sources nor
-            // destinations are shielded
-            return Ok(None);
-        };
-
-        // Track the conversions used across spending keys
-        let mut conversions = Conversions::new();
-        let mut usages = I128Sum::zero();
-        // Commit all the transaction inputs sans conversions
-        for (source, amount) in &source_data {
-            self.add_inputs(
+        let builder = self
+            .add_shielded_parts(
                 context,
-                &mut builder,
-                source,
-                amount,
+                masp_tx_combined_data,
                 epoch,
-                &mut denoms,
-                &mut notes_tracker,
-                &mut conversions,
-                &mut usages,
+                expiration_height,
             )
             .await?;
-        }
-        // Commit the consolidated conversion notes from the summations
-        for (asset_type, (conv, wit)) in conversions {
-            let value = usages.get(&asset_type);
-            if value.is_positive() {
-                builder
-                    .add_sapling_convert(
-                        conv.clone(),
-                        value as u64,
-                        wit.clone(),
-                    )
-                    .map_err(|e| TransferErr::Build {
-                        error: builder::Error::SaplingBuild(e),
-                    })?;
-            }
-        }
-        // Commit the transaction outputs
-        for (target, amount) in target_data {
-            self.add_outputs(
-                context,
-                &mut builder,
-                &target,
-                amount,
-                epoch,
-                &mut denoms,
-            )
-            .await?;
-        }
 
         // Final safety check on the value balance to verify that the
         // transaction is balanced
@@ -1541,6 +1527,79 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
 
             return Err(TransferErr::InsufficientFunds(batch.into()));
         }
+
+        Ok(builder)
+    }
+
+    /// Make shielded components to embed within a Transfer object. If no
+    /// shielded payment address nor spending key is specified, then no
+    /// shielded components are produced. Otherwise, a transaction containing
+    /// nullifiers and/or note commitments are produced. Dummy transparent
+    /// UTXOs are sometimes used to make transactions balanced, but it is
+    /// understood that transparent account changes are effected only by the
+    /// amounts and signatures specified by the containing Transfer object.
+    #[allow(async_fn_in_trait)]
+    async fn gen_shielded_transfer(
+        &mut self,
+        context: &impl NamadaIo,
+        data: MaspTransferData,
+        fee_data: Option<MaspFeeData>,
+        expiration: Option<DateTimeUtc>,
+        bparams: &mut impl BuildParams,
+    ) -> Result<Option<ShieldedTransfer>, TransferErr> {
+        let masp_tx_combined_data =
+            Self::combine_data_for_masp_transfer(context, data, fee_data)
+                .await?;
+
+        if masp_tx_combined_data
+            .source_data
+            .iter()
+            .all(|x| x.0.spending_key().is_none())
+            && masp_tx_combined_data
+                .target_data
+                .iter()
+                .all(|x| x.0.payment_address().is_none())
+        {
+            // No shielded components are needed when neither sources nor
+            // destinations are shielded
+            return Ok(None);
+        };
+
+        // Determine epoch in which to submit potential shielded transaction
+        let epoch = Self::query_masp_epoch(context.client())
+            .await
+            .map_err(|e| TransferErr::General(e.to_string()))?;
+
+        // Try to get a seed from env var, if any.
+        #[allow(unused_mut)]
+        let mut rng = StdRng::from_rng(OsRng).unwrap();
+        #[cfg(feature = "testing")]
+        let mut rng = if let Ok(seed) = std::env::var(ENV_VAR_MASP_TEST_SEED)
+            .map_err(|e| TransferErr::General(e.to_string()))
+            .and_then(|seed| {
+                let exp_str =
+                    format!("Env var {ENV_VAR_MASP_TEST_SEED} must be a u64.");
+                let parsed_seed: u64 =
+                    seed.parse().map_err(|_| TransferErr::General(exp_str))?;
+                Ok(parsed_seed)
+            }) {
+            tracing::warn!(
+                "UNSAFE: Using a seed from {ENV_VAR_MASP_TEST_SEED} env var \
+                 to build proofs."
+            );
+            StdRng::seed_from_u64(seed)
+        } else {
+            rng
+        };
+
+        let builder = self
+            .build_shielded_transfer(
+                context,
+                epoch,
+                expiration,
+                masp_tx_combined_data,
+            )
+            .await?;
 
         let builder_clone = builder.clone().map_builder(WalletMap);
         // Build and return the constructed transaction

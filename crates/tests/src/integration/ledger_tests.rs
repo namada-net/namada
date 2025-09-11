@@ -204,7 +204,7 @@ fn ledger_txs_and_queries() -> Result<()> {
             {
                 continue;
             } else if dry_run {
-                [tx_args.clone(), vec!["--dry-run"]].concat()
+                [tx_args.clone(), vec!["--dry-run-wrapper"]].concat()
             } else {
                 tx_args.clone()
             };

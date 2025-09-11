@@ -3908,6 +3908,13 @@ pub async fn build_shielded_transfer<N: Namada>(
     args: &mut args::TxShieldedTransfer,
     bparams: &mut impl BuildParams,
 ) -> Result<(Tx, SigningData)> {
+    // FIXME: ok so this part should be take out of the builders which should
+    // only build the raw tx. After that we should check, in order:
+    //    - Dump the raw
+    //    - Dry-run the raw
+    //    - Dump the wrapper
+    //    - Dry-run the wrapper
+    //    - Submit the tx
     let (mut signing_data, wrap_args) = if let Some(wrap_tx) = &args.tx.wrap_tx
     {
         let signing_data = signing::aux_signing_data(
@@ -3937,6 +3944,8 @@ pub async fn build_shielded_transfer<N: Namada>(
             }),
         )
     } else {
+        // FIXME: issue, we look for the signers here but maybe we want to dump
+        // the tx without signing it
         let signing_data = signing::aux_inner_signing_data(
             context,
             &args.tx,
@@ -4868,31 +4877,17 @@ pub async fn build_custom(
     //    3. If the wrapper signature was provided then we also expect the inner
     //       signature(s) to have been provided, in this case we generate a
     //       SigningData to attach all these signatures
-    let signing_data = if wrapper_signature.is_some() {
-        if tx.header.wrapper().is_none() {
-            return Err(Error::Other(
-                "A wrapper signature was provided but the transaction is not \
-                 a wrapper"
-                    .to_string(),
-            ));
-        }
-
-        SigningData::Wrapper(
-            signing::aux_signing_data(
-                context,
-                tx_args,
-                owner.clone(),
-                owner.clone(),
-                vec![],
-                // The wrapper signature is provided so no need to generate a
-                // disposable address anyway
-                false,
-                signatures.to_owned(),
-                wrapper_signature.to_owned(),
-            )
-            .await?,
-        )
-    } else {
+    let is_tx_raw = tx.header.wrapper().is_none();
+    // FIXME: do we need this? In case can we move it in the match were we
+    // generate the SigningData?
+    if wrapper_signature.is_some() && is_tx_raw {
+        return Err(Error::Other(
+            "A wrapper signature was provided but the transaction is not a \
+             wrapper"
+                .to_string(),
+        ));
+    }
+    let signing_data = {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
@@ -4907,21 +4902,29 @@ pub async fn build_custom(
         )
         .await?;
 
-        if let Some(wrap_tx) = &tx_args.wrap_tx {
-            let fee_amount =
-                validate_fee(context, wrap_tx, tx_args.force).await?;
-            let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-            tx.add_wrapper(
-                Fee {
-                    amount_per_gas_unit: fee_amount,
-                    token: wrap_tx.fee_token.to_owned(),
-                },
-                fee_payer,
-                wrap_tx.gas_limit,
-            );
-            SigningData::Wrapper(signing_data)
-        } else {
-            SigningData::Inner(
+        match &tx_args.wrap_tx {
+            Some(wrap_tx) => {
+                // FIXME: actually is this correct? What if I want to rewrap?
+                // Would be better to just look at the wrapper signature first
+                if is_tx_raw {
+                    let fee_amount =
+                        validate_fee(context, wrap_tx, tx_args.force).await?;
+                    let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
+                    tx.add_wrapper(
+                        Fee {
+                            amount_per_gas_unit: fee_amount,
+                            token: wrap_tx.fee_token.to_owned(),
+                        },
+                        fee_payer,
+                        wrap_tx.gas_limit,
+                    );
+                }
+                SigningData::Wrapper(signing_data)
+            }
+            None if wrapper_signature.is_some() => {
+                SigningData::Wrapper(signing_data)
+            }
+            _ => SigningData::Inner(
                 signing::aux_inner_signing_data(
                     context,
                     tx_args,
@@ -4931,7 +4934,7 @@ pub async fn build_custom(
                     signatures.to_owned(),
                 )
                 .await?,
-            )
+            ),
         }
     };
 

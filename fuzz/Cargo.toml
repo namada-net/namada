@@ -3,6 +3,7 @@ name = "namada_fuzz"
 version = "0.251.0"
 publish = false
 edition = "2024"
+license = "GPL-3.0-or-later"
 
 [package.metadata]
 cargo-fuzz = true

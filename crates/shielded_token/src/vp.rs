@@ -300,7 +300,7 @@ where
                 for description in &bundle.shielded_converts {
                     // Check if the provided anchor matches the current
                     // conversion tree's one
-                    if namada_core::hash::Hash(description.anchor.to_bytes())
+                    if namada_core::hash::Hash(description.anchor.to_bytes_le())
                         != expected_anchor
                     {
                         let error = Error::new_const(

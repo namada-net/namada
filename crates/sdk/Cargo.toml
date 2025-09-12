@@ -20,7 +20,7 @@ mainnet = [
   "namada_events/mainnet",
   "namada_token/mainnet",
 ]
-multicore = ["masp_proofs/multicore", "namada_token/multicore"]
+multicore = ["namada_token/multicore"]
 std = ["fd-lock", "download-params", "namada_token/std", "namada_wallet/std"]
 async-send = ["namada_io/async-send"]
 namada-eth-bridge = ["namada_ethereum_bridge/namada-eth-bridge"]

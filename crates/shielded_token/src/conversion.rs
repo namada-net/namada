@@ -888,7 +888,7 @@ where
         &crate::storage_key::masp_convert_anchor_key(),
         namada_core::hash::Hash(
             bls12_381::Scalar::from(storage.conversion_state().tree.root())
-                .to_bytes(),
+                .to_bytes_le(),
         ),
     )?;
 

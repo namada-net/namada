@@ -188,6 +188,7 @@ test-e2e:
 test-integration:
 	RUST_BACKTRACE=$(RUST_BACKTRACE) \
 	$(cargo) +$(nightly) test --lib $(jobs) integration::$(TEST_FILTER) \
+	--features historic-masp \
 	-Z unstable-options \
 	-- \
 	--test-threads=1 \
@@ -217,6 +218,7 @@ test-unit-with-coverage:
 test-integration-with-coverage:
 	$(cargo) +$(nightly) llvm-cov --lib --output-path lcov.info \
 		--lcov \
+		--features historic-masp \
 		-- integration \
 		--test-threads=1 \
 		-Z unstable-options --report-time

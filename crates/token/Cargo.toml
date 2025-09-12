@@ -28,6 +28,7 @@ testing = [
     "masp_primitives",
 ]
 arbitrary = ["dep:arbitrary", "namada_core/arbitrary"]
+historic-masp = ["masp", "namada_shielded_token/historic"]
 
 [dependencies]
 masp_primitives = { workspace = true, optional = true }

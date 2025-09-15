@@ -4877,39 +4877,69 @@ pub async fn build_custom(
     //    3. If the wrapper signature was provided then we also expect the inner
     //       signature(s) to have been provided, in this case we generate a
     //       SigningData to attach all these signatures
-    let is_tx_raw = tx.header.wrapper().is_none();
-    // FIXME: do we need this? In case can we move it in the match were we
-    // generate the SigningData?
-    if wrapper_signature.is_some() && is_tx_raw {
-        return Err(Error::Other(
-            "A wrapper signature was provided but the transaction is not a \
-             wrapper"
-                .to_string(),
-        ));
-    }
-    let signing_data = {
-        let signing_data = signing::aux_signing_data(
-            context,
-            tx_args,
-            owner.clone(),
-            owner.clone(),
-            vec![],
-            // The possible masp fee paying transaction has already been
-            // produced so no need to generate a disposable address anyway
-            false,
-            signatures.to_owned(),
-            wrapper_signature.to_owned(),
-        )
-        .await?;
+    let signing_data = match tx.header.wrapper() {
+        Some(_) => {
+            let wrapper_signing_data = signing::aux_signing_data(
+                context,
+                tx_args,
+                owner.clone(),
+                owner.clone(),
+                vec![],
+                // The possible masp fee paying transaction has already been
+                // produced so no need to generate a disposable address anyway
+                false,
+                signatures.to_owned(),
+                wrapper_signature.to_owned(),
+            )
+            .await?;
 
-        match &tx_args.wrap_tx {
-            Some(wrap_tx) => {
-                // FIXME: actually is this correct? What if I want to rewrap?
-                // Would be better to just look at the wrapper signature first
-                if is_tx_raw {
+            if let (Some(wrap_tx), Ok(fee_payer)) =
+                (&tx_args.wrap_tx, wrapper_signing_data.fee_payer_or_err())
+            {
+                // If no wrapper signature is provided wrap the tx, even if it
+                // is already wrapped (wrapper overwrite)
+                let fee_amount =
+                    validate_fee(context, wrap_tx, tx_args.force).await?;
+                tx.add_wrapper(
+                    Fee {
+                        amount_per_gas_unit: fee_amount,
+                        token: wrap_tx.fee_token.to_owned(),
+                    },
+                    fee_payer.to_owned(),
+                    wrap_tx.gas_limit,
+                );
+            }
+            SigningData::Wrapper(wrapper_signing_data)
+        }
+        None => {
+            if wrapper_signature.is_some() {
+                return Err(Error::Other(
+                    "A wrapper signature was provided but the transaction is \
+                     not a wrapper"
+                        .to_string(),
+                ));
+            }
+
+            match &tx_args.wrap_tx {
+                Some(wrap_tx) => {
+                    let wrapper_signing_data = signing::aux_signing_data(
+                        context,
+                        tx_args,
+                        owner.clone(),
+                        owner.clone(),
+                        vec![],
+                        // The possible masp fee paying transaction has already
+                        // been produced so no need to
+                        // generate a disposable address anyway
+                        false,
+                        signatures.to_owned(),
+                        wrapper_signature.to_owned(),
+                    )
+                    .await?;
                     let fee_amount =
                         validate_fee(context, wrap_tx, tx_args.force).await?;
-                    let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
+                    let fee_payer =
+                        wrapper_signing_data.fee_payer_or_err()?.to_owned();
                     tx.add_wrapper(
                         Fee {
                             amount_per_gas_unit: fee_amount,
@@ -4918,23 +4948,20 @@ pub async fn build_custom(
                         fee_payer,
                         wrap_tx.gas_limit,
                     );
+                    SigningData::Wrapper(wrapper_signing_data)
                 }
-                SigningData::Wrapper(signing_data)
+                None => SigningData::Inner(
+                    signing::aux_inner_signing_data(
+                        context,
+                        tx_args,
+                        owner.clone(),
+                        owner.clone(),
+                        vec![],
+                        signatures.to_owned(),
+                    )
+                    .await?,
+                ),
             }
-            None if wrapper_signature.is_some() => {
-                SigningData::Wrapper(signing_data)
-            }
-            _ => SigningData::Inner(
-                signing::aux_inner_signing_data(
-                    context,
-                    tx_args,
-                    owner.clone(),
-                    owner.clone(),
-                    vec![],
-                    signatures.to_owned(),
-                )
-                .await?,
-            ),
         }
     };
 

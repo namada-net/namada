@@ -1935,6 +1935,7 @@ fn offline_sign() -> Result<()> {
         )
     });
     assert!(captured.result.is_ok());
+    assert!(captured.contains(TX_APPLIED_SUCCESS));
 
     // 5. Assert changed balances
     let captured = CapturedOutput::of(|| {

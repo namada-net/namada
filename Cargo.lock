@@ -5165,9 +5165,9 @@ dependencies = [
 
 [[package]]
 name = "masp_note_encryption"
-version = "3.0.2"
+version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64f9613c4a4d10243666b43c50b254878f0c847ea7b6dda5c039330c87da574b"
+checksum = "6e730c7e90ff73f42b633e33aa1f0223e9f0711918c6b3f3c0e5a627f48466c5"
 dependencies = [
  "arbitrary",
  "borsh",
@@ -5181,9 +5181,9 @@ dependencies = [
 
 [[package]]
 name = "masp_primitives"
-version = "3.0.2"
+version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef321800f2cf54d4ec0466c2eae710324a84431768343efc3296f184bd066b8a"
+checksum = "dd89527ee93d1376993a961cca2cbcdb38a2c1e110499ebfdfcce125ee1a9882"
 dependencies = [
  "aes",
  "arbitrary",
@@ -5202,7 +5202,7 @@ dependencies = [
  "masp_note_encryption",
  "memuse",
  "nam-blstrs",
- "nam-jubjub",
+ "nam-jubjub 1.10.1-nam.1",
  "nam-num-traits",
  "nonempty 0.11.0",
  "proptest",
@@ -5215,9 +5215,9 @@ dependencies = [
 
 [[package]]
 name = "masp_proofs"
-version = "3.0.2"
+version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cabbec72d68e7a97f3e6ff854d1d2b2581cdd333b52211ac108427da9e74e0e"
+checksum = "426f51b4ce9dda4d4256b2010e3cd77a0ba8a9f7b48e45a4765e50904af5a199"
 dependencies = [
  "blake2b_simd",
  "directories 5.0.1",
@@ -5230,7 +5230,7 @@ dependencies = [
  "minreq",
  "nam-bellperson",
  "nam-blstrs",
- "nam-jubjub",
+ "nam-jubjub 1.10.1-nam.1",
  "nam-redjubjub",
  "pairing",
  "rand_core",
@@ -5488,6 +5488,20 @@ version = "0.10.1-nam.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ca0332b3fddf1e07e6fa7867844cdd5711a2128baa21ada02a0fadd3594ab8a"
 dependencies = [
+ "bitvec",
+ "ff",
+ "group",
+ "nam-blstrs",
+ "rand_core",
+ "subtle",
+]
+
+[[package]]
+name = "nam-jubjub"
+version = "1.10.1-nam.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a23e14862160638c432432025599689ccd1e28c05428d8a437986240c0b89f2"
+dependencies = [
  "arbitrary",
  "bitvec",
  "ff",
@@ -5685,7 +5699,7 @@ dependencies = [
  "ledger-transport-hid",
  "linkme",
  "masp_primitives",
- "nam-jubjub",
+ "nam-jubjub 0.10.1-nam.1",
  "nam-ledger-lib",
  "nam-ledger-namada-rs",
  "namada_core",
@@ -6228,7 +6242,7 @@ dependencies = [
  "linkme",
  "masp_primitives",
  "masp_proofs",
- "nam-jubjub",
+ "nam-jubjub 0.10.1-nam.1",
  "namada_account",
  "namada_core",
  "namada_ethereum_bridge",

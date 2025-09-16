@@ -85,7 +85,7 @@ use crate::rpc::{
     query_wasm_code_hash, validate_amount,
 };
 use crate::signing::{
-    self, SigningData, SigningWrapperData, validate_fee,
+    self, NoSigOkData, SigningData, SigningWrapperData, validate_fee,
     validate_transparent_fee,
 };
 use crate::tendermint_rpc::endpoint::broadcast::tx_sync::Response;
@@ -377,6 +377,7 @@ pub async fn build_reveal_pk(
             Some(public_key.into()),
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -775,6 +776,7 @@ pub async fn build_change_consensus_key(
             None,
             vec![consensus_key.clone()],
             vec![],
+            false,
         )
         .await?;
 
@@ -842,6 +844,7 @@ pub async fn build_validator_commission_change(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -1015,6 +1018,7 @@ pub async fn build_validator_metadata_change(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -1271,6 +1275,7 @@ pub async fn build_update_steward_commission(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -1370,6 +1375,7 @@ pub async fn build_resign_steward(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -1449,6 +1455,7 @@ pub async fn build_unjail_validator(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -1584,6 +1591,7 @@ pub async fn build_deactivate_validator(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -1690,6 +1698,7 @@ pub async fn build_reactivate_validator(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -1948,6 +1957,7 @@ pub async fn build_redelegation(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -2023,6 +2033,7 @@ pub async fn build_withdraw(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -2141,6 +2152,7 @@ pub async fn build_claim_rewards(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -2276,6 +2288,7 @@ pub async fn build_unbond(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -2544,6 +2557,7 @@ pub async fn build_bond(
                 default_signer,
                 vec![],
                 vec![],
+                false,
             )
             .await?;
 
@@ -2638,6 +2652,7 @@ pub async fn build_default_proposal(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -2726,6 +2741,7 @@ pub async fn build_vote_proposal(
             default_signer.clone(),
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -3067,6 +3083,7 @@ pub async fn build_become_validator(
             None,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -3132,6 +3149,7 @@ pub async fn build_pgf_funding_proposal(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -3206,6 +3224,7 @@ pub async fn build_pgf_stewards_proposal(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -3263,7 +3282,7 @@ pub async fn build_ibc_transfer(
             vec![],
             args.source.spending_key().is_some(),
             vec![],
-            None,
+            refund_target.as_ref().map(|_| NoSigOkData::Other),
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -3303,6 +3322,7 @@ pub async fn build_ibc_transfer(
             Some(source.clone()),
             vec![],
             vec![],
+            refund_target.is_some(),
         )
         .await?;
 
@@ -3822,6 +3842,7 @@ pub async fn build_transparent_transfer<N: Namada>(
                 source,
                 vec![],
                 vec![],
+                false,
             )
             .await?;
 
@@ -3908,13 +3929,6 @@ pub async fn build_shielded_transfer<N: Namada>(
     args: &mut args::TxShieldedTransfer,
     bparams: &mut impl BuildParams,
 ) -> Result<(Tx, SigningData)> {
-    // FIXME: ok so this part should be take out of the builders which should
-    // only build the raw tx. After that we should check, in order:
-    //    - Dump the raw
-    //    - Dry-run the raw
-    //    - Dump the wrapper
-    //    - Dry-run the wrapper
-    //    - Submit the tx
     let (mut signing_data, wrap_args) = if let Some(wrap_tx) = &args.tx.wrap_tx
     {
         let signing_data = signing::aux_signing_data(
@@ -3926,7 +3940,7 @@ pub async fn build_shielded_transfer<N: Namada>(
             vec![],
             true,
             vec![],
-            None,
+            Some(NoSigOkData::Other),
         )
         .await?;
 
@@ -3944,8 +3958,6 @@ pub async fn build_shielded_transfer<N: Namada>(
             }),
         )
     } else {
-        // FIXME: issue, we look for the signers here but maybe we want to dump
-        // the tx without signing it
         let signing_data = signing::aux_inner_signing_data(
             context,
             &args.tx,
@@ -3953,6 +3965,7 @@ pub async fn build_shielded_transfer<N: Namada>(
             None,
             vec![],
             vec![],
+            true,
         )
         .await?;
 
@@ -4186,6 +4199,7 @@ pub async fn build_shielding_transfer<N: Namada>(
                 source,
                 vec![],
                 vec![],
+                false,
             )
             .await?;
 
@@ -4338,7 +4352,7 @@ pub async fn build_unshielding_transfer<N: Namada>(
             vec![],
             true,
             vec![],
-            None,
+            Some(NoSigOkData::Other),
         )
         .await?;
 
@@ -4363,6 +4377,7 @@ pub async fn build_unshielding_transfer<N: Namada>(
             None,
             vec![],
             vec![],
+            true,
         )
         .await?;
 
@@ -4599,6 +4614,7 @@ pub async fn build_init_account(
             None,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -4718,6 +4734,7 @@ pub async fn build_update_account(
             default_signer,
             vec![],
             vec![],
+            false,
         )
         .await?;
 
@@ -4889,7 +4906,13 @@ pub async fn build_custom(
                 // produced so no need to generate a disposable address anyway
                 false,
                 signatures.to_owned(),
-                wrapper_signature.to_owned(),
+                Some(
+                    wrapper_signature
+                        .as_ref()
+                        .map_or(NoSigOkData::Other, |sig| {
+                            NoSigOkData::WrapperSig(sig.to_owned())
+                        }),
+                ),
             )
             .await?;
 
@@ -4933,7 +4956,13 @@ pub async fn build_custom(
                         // generate a disposable address anyway
                         false,
                         signatures.to_owned(),
-                        wrapper_signature.to_owned(),
+                        Some(
+                            wrapper_signature
+                                .as_ref()
+                                .map_or(NoSigOkData::Other, |sig| {
+                                    NoSigOkData::WrapperSig(sig.to_owned())
+                                }),
+                        ),
                     )
                     .await?;
                     let fee_amount =
@@ -4958,6 +4987,7 @@ pub async fn build_custom(
                         owner.clone(),
                         vec![],
                         signatures.to_owned(),
+                        true,
                     )
                     .await?,
                 ),

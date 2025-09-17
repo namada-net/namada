@@ -1226,6 +1226,201 @@ fn ibc_rate_limit() -> Result<()> {
     Ok(())
 }
 
+<<<<<<< HEAD
+=======
+/// Unlimited IBC transfer test
+#[test]
+fn ibc_unlimited_channel() -> Result<()> {
+    const PIPELINE_LEN: u64 = 5;
+    // No IBC transfer is allowed first
+    let update_genesis =
+        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
+            genesis.parameters.parameters.epochs_per_year =
+                epochs_per_year_from_min_duration(20);
+            // for the trusting period of IBC client
+            genesis.parameters.pos_params.pipeline_len = PIPELINE_LEN;
+            genesis.parameters.gov_params.min_proposal_grace_epochs = 3;
+            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+        };
+    let (ledger, gaia, test, test_gaia) =
+        run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
+    let _bg_ledger = ledger.background();
+    let _bg_gaia = gaia.background();
+
+    let hermes_dir = setup_hermes(&test, &test_gaia)?;
+    let port_id_namada = FT_PORT_ID.parse().unwrap();
+    let port_id_gaia: PortId = FT_PORT_ID.parse().unwrap();
+    let (channel_id_namada, channel_id_gaia) = create_channel_with_hermes(
+        &hermes_dir,
+        &test,
+        &test_gaia,
+        &port_id_namada,
+        &port_id_gaia,
+    )?;
+
+    // Start relaying
+    let hermes = run_hermes(&hermes_dir)?;
+    let bg_hermes = hermes.background();
+
+    let ibc_denom_on_namada =
+        format!("{port_id_namada}/{channel_id_namada}/{COSMOS_COIN}");
+    let ibc_token_addr = ibc_token(&ibc_denom_on_namada).to_string();
+    let token_addr = find_address(&test, APFEL)?;
+    let ibc_denom_on_gaia =
+        format!("{port_id_gaia}/{channel_id_gaia}/{token_addr}");
+
+    // Try to transfer from Gaia, but it should be timed out
+    let namada_receiver = find_address(&test, ALBERT)?.to_string();
+    transfer_from_cosmos(
+        &test_gaia,
+        COSMOS_USER,
+        &namada_receiver,
+        COSMOS_COIN,
+        1,
+        &port_id_gaia,
+        &channel_id_gaia,
+        None,
+        Some(Duration::new(10, 0)),
+    )?;
+    wait_for_packet_relay(&hermes_dir, &port_id_gaia, &channel_id_gaia, &test)?;
+
+    // Check if Namada hasn't received it
+    check_balance(&test, ALBERT, &ibc_token_addr, 0)?;
+
+    // Try to transfer from Namada, but it should be rejected
+    let gaia_receiver = find_cosmos_address(&test_gaia, COSMOS_USER)?;
+    transfer(
+        &test,
+        ALBERT,
+        &gaia_receiver,
+        APFEL,
+        1,
+        Some(ALBERT_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        None,
+        None,
+        // expect an error of the throughput limit
+        Some(
+            "Transfer exceeding the per-epoch throughput limit is not allowed",
+        ),
+        None,
+        false,
+    )?;
+
+    // Proposal on Namada
+    // Delegate some token
+    delegate_token(&test)?;
+    let rpc = get_actor_rpc(&test, Who::Validator(0));
+    let mut epoch = get_epoch(&test, &rpc).unwrap();
+    let delegated = epoch + PIPELINE_LEN;
+    while epoch < delegated {
+        epoch = epoch_sleep(&test, &rpc, 120)?;
+    }
+    // proposal to set the unlimited channel
+    let start_epoch = propose_unlimited_channel(&test)?;
+    let mut epoch = get_epoch(&test, &rpc).unwrap();
+    // Vote
+    while epoch < start_epoch {
+        epoch = epoch_sleep(&test, &rpc, 120)?;
+    }
+    submit_votes(&test)?;
+
+    // wait for the grace
+    let grace_epoch = start_epoch + 6u64;
+    while epoch < grace_epoch {
+        epoch = epoch_sleep(&test, &rpc, 120)?;
+    }
+
+    // Retry transfer from Gaia
+    transfer_from_cosmos(
+        &test_gaia,
+        COSMOS_USER,
+        &namada_receiver,
+        COSMOS_COIN,
+        1,
+        &port_id_gaia,
+        &channel_id_gaia,
+        None,
+        None,
+    )?;
+    wait_for_packet_relay(&hermes_dir, &port_id_gaia, &channel_id_gaia, &test)?;
+
+    // Check if Namada has received it
+    check_balance(&test, ALBERT, &ibc_denom_on_namada, 1)?;
+
+    // Retry transfer from Namada
+    transfer(
+        &test,
+        ALBERT,
+        &gaia_receiver,
+        APFEL,
+        1,
+        Some(ALBERT_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        None,
+        None,
+        None,
+        None,
+        false,
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+
+    // Check if Gaia has received it
+    check_cosmos_balance(
+        &test_gaia,
+        COSMOS_USER,
+        &ibc_denom_on_gaia,
+        1_000_000,
+    )?;
+
+    // Stop Hermes for timeout test
+    let mut hermes = bg_hermes.foreground();
+    hermes.interrupt()?;
+
+    // Timeout transfer from Namada
+    transfer(
+        &test,
+        ALBERT,
+        &gaia_receiver,
+        &ibc_denom_on_namada,
+        1,
+        Some(ALBERT_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        Some(Duration::new(10, 0)),
+        None,
+        None,
+        None,
+        false,
+    )?;
+    // wait for the timeout
+    sleep(10);
+
+    // Restart relaying
+    let hermes = run_hermes(&hermes_dir)?;
+    let _bg_hermes = hermes.background();
+
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+
+    // Check if the token has been refunded
+    check_balance(&test, ALBERT, &ibc_denom_on_namada, 1)?;
+
+    Ok(())
+}
+
+>>>>>>> 41ddaee3c (add test)
 /// Create a packet forward memo and serialize it
 fn packet_forward_memo(
     receiver: Signer,

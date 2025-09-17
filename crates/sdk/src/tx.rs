@@ -347,7 +347,8 @@ pub async fn build_reveal_pk(
         let signing_data = signing::aux_signing_data(
             context,
             args,
-            None,
+            // FIXME: I think the owner is useless cause the implicit vp
+            // doesn't check the signatures when revealing a pk
             Some(public_key.into()),
             vec![],
             false,
@@ -373,7 +374,6 @@ pub async fn build_reveal_pk(
         let signing_data = signing::aux_inner_signing_data(
             context,
             args,
-            None,
             Some(public_key.into()),
             vec![],
             vec![],
@@ -742,7 +742,6 @@ pub async fn build_change_consensus_key(
             context,
             tx_args,
             None,
-            None,
             vec![consensus_key.clone()],
             false,
             vec![],
@@ -772,7 +771,6 @@ pub async fn build_change_consensus_key(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            None,
             None,
             vec![consensus_key.clone()],
             vec![],
@@ -810,7 +808,6 @@ pub async fn build_validator_commission_change(
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
-            Some(validator.clone()),
             default_signer,
             vec![],
             false,
@@ -840,7 +837,6 @@ pub async fn build_validator_commission_change(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            Some(validator.clone()),
             default_signer,
             vec![],
             vec![],
@@ -984,7 +980,6 @@ pub async fn build_validator_metadata_change(
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
-            Some(validator.clone()),
             default_signer,
             vec![],
             false,
@@ -1014,7 +1009,6 @@ pub async fn build_validator_metadata_change(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            Some(validator.clone()),
             default_signer,
             vec![],
             vec![],
@@ -1241,7 +1235,6 @@ pub async fn build_update_steward_commission(
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
-            Some(steward.clone()),
             default_signer,
             vec![],
             false,
@@ -1271,7 +1264,6 @@ pub async fn build_update_steward_commission(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            Some(steward.clone()),
             default_signer,
             vec![],
             vec![],
@@ -1341,7 +1333,6 @@ pub async fn build_resign_steward(
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
-            Some(steward.clone()),
             default_signer,
             vec![],
             false,
@@ -1371,7 +1362,6 @@ pub async fn build_resign_steward(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            Some(steward.clone()),
             default_signer,
             vec![],
             vec![],
@@ -1421,7 +1411,6 @@ pub async fn build_unjail_validator(
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
-            Some(validator.clone()),
             default_signer,
             vec![],
             false,
@@ -1451,7 +1440,6 @@ pub async fn build_unjail_validator(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            Some(validator.clone()),
             default_signer,
             vec![],
             vec![],
@@ -1557,7 +1545,6 @@ pub async fn build_deactivate_validator(
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
-            Some(validator.clone()),
             default_signer,
             vec![],
             false,
@@ -1587,7 +1574,6 @@ pub async fn build_deactivate_validator(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            Some(validator.clone()),
             default_signer,
             vec![],
             vec![],
@@ -1664,7 +1650,6 @@ pub async fn build_reactivate_validator(
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
-            Some(validator.clone()),
             default_signer,
             vec![],
             false,
@@ -1694,7 +1679,6 @@ pub async fn build_reactivate_validator(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            Some(validator.clone()),
             default_signer,
             vec![],
             vec![],
@@ -1923,7 +1907,6 @@ pub async fn build_redelegation(
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
-            Some(default_address),
             default_signer,
             vec![],
             false,
@@ -1953,7 +1936,6 @@ pub async fn build_redelegation(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            Some(default_address),
             default_signer,
             vec![],
             vec![],
@@ -1993,13 +1975,11 @@ pub async fn build_withdraw(
         tx_code_path,
     }: &args::Withdraw,
 ) -> Result<(Tx, SigningData)> {
-    let default_address = source.clone().unwrap_or(validator.clone());
-    let default_signer = Some(default_address.clone());
+    let default_signer = Some(source.clone().unwrap_or(validator.clone()));
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
-            Some(default_address),
             default_signer,
             vec![],
             false,
@@ -2029,7 +2009,6 @@ pub async fn build_withdraw(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            Some(default_address),
             default_signer,
             vec![],
             vec![],
@@ -2112,13 +2091,11 @@ pub async fn build_claim_rewards(
         tx_code_path,
     }: &args::ClaimRewards,
 ) -> Result<(Tx, SigningData)> {
-    let default_address = source.clone().unwrap_or(validator.clone());
-    let default_signer = Some(default_address.clone());
+    let default_signer = Some(source.clone().unwrap_or(validator.clone()));
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
-            Some(default_address),
             default_signer,
             vec![],
             false,
@@ -2148,7 +2125,6 @@ pub async fn build_claim_rewards(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            Some(default_address),
             default_signer,
             vec![],
             vec![],
@@ -2254,7 +2230,6 @@ pub async fn build_unbond(
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
-            Some(default_address),
             default_signer,
             vec![],
             false,
@@ -2284,7 +2259,6 @@ pub async fn build_unbond(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            Some(default_address),
             default_signer,
             vec![],
             vec![],
@@ -2515,14 +2489,12 @@ pub async fn build_bond(
         }
     }
 
-    let default_address = source.clone().unwrap_or(validator.clone());
-    let default_signer = Some(default_address.clone());
+    let default_signer = Some(source.clone().unwrap_or(validator.clone()));
     let (signing_data, wrap_args, updated_balance) =
         if let Some(wrap_tx) = &tx_args.wrap_tx {
             let signing_data = signing::aux_signing_data(
                 context,
                 tx_args,
-                Some(default_address.clone()),
                 default_signer,
                 vec![],
                 false,
@@ -2553,7 +2525,6 @@ pub async fn build_bond(
             let signing_data = signing::aux_inner_signing_data(
                 context,
                 tx_args,
-                Some(default_address.clone()),
                 default_signer,
                 vec![],
                 vec![],
@@ -2622,7 +2593,6 @@ pub async fn build_default_proposal(
         let signing_data = signing::aux_signing_data(
             context,
             tx,
-            Some(proposal.proposal.author.clone()),
             default_signer,
             vec![],
             false,
@@ -2648,7 +2618,6 @@ pub async fn build_default_proposal(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx,
-            Some(proposal.proposal.author.clone()),
             default_signer,
             vec![],
             vec![],
@@ -2711,8 +2680,7 @@ pub async fn build_vote_proposal(
         let signing_data = signing::aux_signing_data(
             context,
             tx,
-            default_signer.clone(),
-            default_signer.clone(),
+            default_signer,
             vec![],
             false,
             vec![],
@@ -2737,8 +2705,7 @@ pub async fn build_vote_proposal(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx,
-            default_signer.clone(),
-            default_signer.clone(),
+            default_signer,
             vec![],
             vec![],
             false,
@@ -3049,7 +3016,6 @@ pub async fn build_become_validator(
             context,
             tx_args,
             None,
-            None,
             all_pks,
             false,
             vec![],
@@ -3079,7 +3045,6 @@ pub async fn build_become_validator(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            None,
             None,
             vec![],
             vec![],
@@ -3119,7 +3084,6 @@ pub async fn build_pgf_funding_proposal(
         let signing_data = signing::aux_signing_data(
             context,
             tx,
-            Some(proposal.proposal.author.clone()),
             default_signer,
             vec![],
             false,
@@ -3145,7 +3109,6 @@ pub async fn build_pgf_funding_proposal(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx,
-            Some(proposal.proposal.author.clone()),
             default_signer,
             vec![],
             vec![],
@@ -3194,7 +3157,6 @@ pub async fn build_pgf_stewards_proposal(
         let signing_data = signing::aux_signing_data(
             context,
             tx,
-            Some(proposal.proposal.author.clone()),
             default_signer,
             vec![],
             false,
@@ -3220,7 +3182,6 @@ pub async fn build_pgf_stewards_proposal(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx,
-            Some(proposal.proposal.author.clone()),
             default_signer,
             vec![],
             vec![],
@@ -3278,7 +3239,6 @@ pub async fn build_ibc_transfer(
             context,
             &args.tx,
             Some(source.clone()),
-            Some(source.clone()),
             vec![],
             args.source.spending_key().is_some(),
             vec![],
@@ -3318,7 +3278,6 @@ pub async fn build_ibc_transfer(
         let signing_data = signing::aux_inner_signing_data(
             context,
             &args.tx,
-            Some(source.clone()),
             Some(source.clone()),
             vec![],
             vec![],
@@ -3805,8 +3764,7 @@ pub async fn build_transparent_transfer<N: Namada>(
             let signing_data = signing::aux_signing_data(
                 context,
                 &args.tx,
-                source.clone(),
-                source.clone(),
+                source,
                 vec![],
                 false,
                 vec![],
@@ -3838,7 +3796,6 @@ pub async fn build_transparent_transfer<N: Namada>(
             let signing_data = signing::aux_inner_signing_data(
                 context,
                 &args.tx,
-                source.clone(),
                 source,
                 vec![],
                 vec![],
@@ -3936,7 +3893,6 @@ pub async fn build_shielded_transfer<N: Namada>(
             &args.tx,
             // places
             None,
-            None,
             vec![],
             true,
             vec![],
@@ -3961,7 +3917,6 @@ pub async fn build_shielded_transfer<N: Namada>(
         let signing_data = signing::aux_inner_signing_data(
             context,
             &args.tx,
-            None,
             None,
             vec![],
             vec![],
@@ -4162,7 +4117,6 @@ pub async fn build_shielding_transfer<N: Namada>(
             let signing_data = signing::aux_signing_data(
                 context,
                 &args.tx,
-                source.clone(),
                 source,
                 vec![],
                 false,
@@ -4195,7 +4149,6 @@ pub async fn build_shielding_transfer<N: Namada>(
             let signing_data = signing::aux_inner_signing_data(
                 context,
                 &args.tx,
-                source.clone(),
                 source,
                 vec![],
                 vec![],
@@ -4348,7 +4301,6 @@ pub async fn build_unshielding_transfer<N: Namada>(
             context,
             &args.tx,
             None,
-            None,
             vec![],
             true,
             vec![],
@@ -4373,7 +4325,6 @@ pub async fn build_unshielding_transfer<N: Namada>(
         let signing_data = signing::aux_inner_signing_data(
             context,
             &args.tx,
-            None,
             None,
             vec![],
             vec![],
@@ -4581,7 +4532,6 @@ pub async fn build_init_account(
             context,
             tx_args,
             None,
-            None,
             vec![],
             false,
             vec![],
@@ -4610,7 +4560,6 @@ pub async fn build_init_account(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            None,
             None,
             vec![],
             vec![],
@@ -4700,7 +4649,6 @@ pub async fn build_update_account(
         let signing_data = signing::aux_signing_data(
             context,
             tx_args,
-            Some(addr.clone()),
             default_signer,
             vec![],
             false,
@@ -4730,7 +4678,6 @@ pub async fn build_update_account(
         let signing_data = signing::aux_inner_signing_data(
             context,
             tx_args,
-            Some(addr.clone()),
             default_signer,
             vec![],
             vec![],
@@ -4880,6 +4827,7 @@ pub async fn build_custom(
         data_path.clone().map(|data| tx.add_serialized_data(data));
         tx
     };
+    // FIXME: review the issue with sign_offline and the public key map
 
     // Wrap the tx only if it's not already. If the user passed the argument for
     // the wrapper signatures we also assume the followings:
@@ -4896,16 +4844,22 @@ pub async fn build_custom(
     //       SigningData to attach all these signatures
     let signing_data = match tx.header.wrapper() {
         Some(_) => {
+            if wrapper_signature.is_some() && tx_args.wrap_tx.is_some() {
+                return Err(Error::Other(
+                    "Both a wrapper signature and a request to wrap the \
+                     transaction were provided: only one at a time can be"
+                        .to_string(),
+                ));
+            }
             let wrapper_signing_data = signing::aux_signing_data(
                 context,
                 tx_args,
-                owner.clone(),
-                owner.clone(),
+                owner.to_owned(),
                 vec![],
                 // The possible masp fee paying transaction has already been
                 // produced so no need to generate a disposable address anyway
                 false,
-                signatures.to_owned(),
+                signatures.clone(),
                 Some(
                     wrapper_signature
                         .as_ref()
@@ -4916,6 +4870,18 @@ pub async fn build_custom(
             )
             .await?;
 
+            // FIXME: maybe this logic is broken
+            // FIXME: no it's useful cause we might want to rewrap a dumped
+            // wrapper (e.g. if it's expired or the tx failed for gas or so on)
+            // FIXME: ok but in these cases why do we dump the wrapper in the
+            // first place? we should have the dumped inner, we load it, wrap
+            // it, sign it and send it. If it fails we can redo
+            // FIXME: dumping the wrapper is only useful if we want to sign the
+            // wrapper offline, so we dump the wrapper, sign if offline and
+            // submit it. What if it expires and gets rejected? Need to rewrap
+            // it, which we do right here FIXME: review this pattern
+            // matching, it might be useless now that we do the check at the
+            // beginning of this branch
             if let (Some(wrap_tx), Ok(fee_payer)) =
                 (&tx_args.wrap_tx, wrapper_signing_data.fee_payer_or_err())
             {
@@ -4948,7 +4914,6 @@ pub async fn build_custom(
                     let wrapper_signing_data = signing::aux_signing_data(
                         context,
                         tx_args,
-                        owner.clone(),
                         owner.clone(),
                         vec![],
                         // The possible masp fee paying transaction has already
@@ -4983,7 +4948,6 @@ pub async fn build_custom(
                     signing::aux_inner_signing_data(
                         context,
                         tx_args,
-                        owner.clone(),
                         owner.clone(),
                         vec![],
                         signatures.to_owned(),

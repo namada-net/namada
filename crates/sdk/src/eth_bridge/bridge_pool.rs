@@ -85,8 +85,6 @@ pub async fn build_bridge_pool_tx(
                 aux_signing_data(
                     context,
                     &tx_args,
-                    // token owner
-                    Some(sender_.clone()),
                     // tx signer
                     Some(sender_),
                     vec![],
@@ -133,8 +131,6 @@ pub async fn build_bridge_pool_tx(
                 aux_inner_signing_data(
                     context,
                     &tx_args,
-                    // token owner
-                    Some(sender_.clone()),
                     // tx signer
                     Some(sender_),
                     vec![],

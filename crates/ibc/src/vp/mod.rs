@@ -384,7 +384,41 @@ where
         Ok(())
     }
 
+<<<<<<< HEAD
     fn check_limits(&self, keys_changed: &BTreeSet<Key>) -> Result<bool> {
+=======
+    fn check_limits(
+        &self,
+        tx_data: &[u8],
+        keys_changed: &BTreeSet<Key>,
+    ) -> Result<bool> {
+        // Check the unlimited channels
+        let message = crate::decode_message::<Transfer>(tx_data)?;
+        let transfer_channel = match &message {
+            IbcMessage::Transfer(msg_transfer) => {
+                Some(&msg_transfer.message.chan_id_on_a)
+            }
+            IbcMessage::NftTransfer(msg_nft_transfer) => {
+                Some(&msg_nft_transfer.message.chan_id_on_a)
+            }
+            IbcMessage::Envelope(boxed) => match &**boxed {
+                MsgEnvelope::Packet(PacketMsg::Recv(msg)) => {
+                    Some(&msg.packet.chan_id_on_b)
+                }
+                MsgEnvelope::Packet(PacketMsg::Timeout(msg)) => {
+                    Some(&msg.packet.chan_id_on_a)
+                }
+                _ => None,
+            },
+        };
+        if let Some(channel) = transfer_channel {
+            let unlimited_channel_key = unlimited_channel_key(channel);
+            if self.ctx.has_key_pre(&unlimited_channel_key)? {
+                return Ok(true);
+            }
+        }
+
+>>>>>>> 456bd4a2c (check channel for timeout)
         let tokens: BTreeSet<&Address> = keys_changed
             .iter()
             .filter_map(|k| {

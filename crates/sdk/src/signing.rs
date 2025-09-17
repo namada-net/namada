@@ -235,8 +235,8 @@ pub fn find_key_by_pk<U: WalletIo>(
 /// is given, an `Error` is returned.
 async fn inner_tx_signers(
     context: &impl Namada,
-    args: &args::Tx<SdkTypes>,
-    default: Option<Address>,
+    signing_keys: &[common::PublicKey],
+    default_signer: Option<Address>,
     signatures: &[Vec<u8>],
     // FIXME: can't join this with owner?
     // Flag to signal that a missing signer is acceptable. This is useful for
@@ -244,30 +244,32 @@ async fn inner_tx_signers(
     // MASP source or custom txs)
     no_sig_ok: bool,
 ) -> Result<HashSet<common::PublicKey>, Error> {
-    let signer = if !args.signing_keys.is_empty() {
-        return Ok(args.signing_keys.clone().into_iter().collect());
-    } else if signatures.is_empty() {
-        // Otherwise use the signer determined by the caller
-        default
+    if !signing_keys.is_empty() {
+        Ok(signing_keys.iter().cloned().collect())
     } else {
-        // If explicit signature(s) are provided signing keys are not required
-        // anymore
-        // FIXME: this is not completely true, we might want to add another
-        // inner signature online. But we have to make sure we don't provide the
-        // default every time then, only when we really want to sign online.
-        // This might not be possible
-        return Ok(Default::default());
-    };
-
-    // Now actually fetch the signing key and apply it
-    match signer {
-        Some(signer) => Ok([find_pk(context, &signer).await?].into()),
-        None if no_sig_ok => Ok(Default::default()),
-        _ => other_err(
-            "All transactions must be signed; please either specify the key \
-             or the address from which to look up the signing key."
-                .to_string(),
-        ),
+        match default_signer {
+            // Use the signer determined by the caller, fetch the signing
+            // key and apply it
+            // FIXME: here only call find_pk if the address is implicit
+            Some(signer) => Ok([find_pk(context, &signer).await?].into()),
+            None => {
+                if !signatures.is_empty() {
+                    // If explicit signatures are provided provide no more
+                    // signers
+                    Ok(Default::default())
+                } else if no_sig_ok {
+                    // If no signature is acceptable provide no signer
+                    Ok(Default::default())
+                } else {
+                    other_err(
+                        "All transactions must be signed; please either \
+                         specify the key or the address from which to look up \
+                         the signing key."
+                            .to_string(),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -527,30 +529,31 @@ pub enum NoSigOkData {
     Other,
 }
 
-/// Return the necessary data regarding an account to be able to generate a
-/// signature section for both the inner transaction and the wrapper
+/// Return the necessary data regarding an account to be able to generate
+/// signature sections for both the inner and the wrapper transaction
+// FIXME: can remove too_many_arguments?
 #[allow(clippy::too_many_arguments)]
 pub async fn aux_signing_data(
     context: &impl Namada,
     args: &args::Tx<SdkTypes>,
     owner: Option<Address>,
-    // FIXME: why both owner and default? Remove one of the two, possibly
-    // default
-    default_signer: Option<Address>,
+    // FIXME: we could avoid passing args and providing instead the wrap_tx
+    // (mandatory) and the set of public keys (we joing them before the call).
+    // It wouldn't be the same, we attach the extra signing keys to the resul
+    // of inner_tx_signers which could be based on the owner
     extra_public_keys: Vec<common::PublicKey>,
-    // FIXME: this is not needed if wrapper signature is provided or the tx is
-    // already wrapped (unless rewrapping)
+    // FIXME: this is only needed if we need to wrap the tx (wrap_tx is some)
+    // which is always the case when we call this function. Actually not, for
+    // custom txs the tx might already be wrapped but we still call this to
+    // extract the wrapper signer
     is_shielded_source: bool,
     signatures: Vec<Vec<u8>>,
     // FIXME: can't join this with owner?
     // FIXME: better, if the wrapper signature is provided only the optional
-    // signatures should be given, everything else is useless FIXME: is it
-    // better to call another function when we have a wrapper signature? Maybe
-    // yes so that we can simplify this
+    // signatures should be given, everything else is useless
     no_sig_data: Option<NoSigOkData>,
 ) -> Result<SigningWrapperData, Error> {
-    // FIXME: rename or remove
-    let is_custom_tx = match no_sig_data {
+    let no_sig_ok = match no_sig_data {
         Some(NoSigOkData::WrapperSig(wrapper_sig)) =>
         // Can't produce any more inner signatures when the wrapper signature is
         // provided. Just attach the available serialized signatures
@@ -572,10 +575,10 @@ pub async fn aux_signing_data(
     };
     let mut public_keys = inner_tx_signers(
         context,
-        args,
-        default_signer.clone(),
+        args.signing_keys.as_slice(),
+        owner.clone(),
         &signatures,
-        is_custom_tx,
+        no_sig_ok,
     )
     .await?;
     public_keys.extend(extra_public_keys.clone());
@@ -606,24 +609,26 @@ pub async fn aux_signing_data(
             0u8,
         ),
     };
-    let fee_auth = match &args.wrap_tx {
-        Some(args::Wrapper {
+    let fee_auth = match args.wrap_tx.as_ref().ok_or_else(|| {
+        Error::Other("Missing expected wrapper arguments".to_string())
+    })? {
+        args::Wrapper {
             wrapper_fee_payer: Some(pubkey),
             ..
-        }) => FeeAuthorization::Signer {
+        } => FeeAuthorization::Signer {
             pubkey: pubkey.clone(),
             disposable_fee_payer: false,
         },
         _ => {
-            if let Some(pubkey) = public_keys.first() {
-                FeeAuthorization::Signer {
-                    pubkey: pubkey.to_owned(),
-                    disposable_fee_payer: false,
-                }
-            } else if is_shielded_source {
+            if is_shielded_source {
                 FeeAuthorization::Signer {
                     pubkey: gen_disposable_signing_key(context).await,
                     disposable_fee_payer: true,
+                }
+            } else if let Some(pubkey) = public_keys.first() {
+                FeeAuthorization::Signer {
+                    pubkey: pubkey.to_owned(),
+                    disposable_fee_payer: false,
                 }
             } else {
                 return Err(Error::Tx(TxSubmitError::InvalidFeePayer));
@@ -650,10 +655,9 @@ pub async fn aux_signing_data(
 /// signature section for the inner transaction only
 pub async fn aux_inner_signing_data(
     context: &impl Namada,
+    // FIXME: technically we only need the signing keys
     args: &args::Tx<SdkTypes>,
-    // FIXME: why both default and owner? Same for the other aux function
     owner: Option<Address>,
-    default_signer: Option<Address>,
     extra_public_keys: Vec<common::PublicKey>,
     signatures: Vec<Vec<u8>>,
     // FIXME: can join this with owner?
@@ -661,8 +665,8 @@ pub async fn aux_inner_signing_data(
 ) -> Result<SigningTxData, Error> {
     let mut public_keys = inner_tx_signers(
         context,
-        args,
-        default_signer.clone(),
+        args.signing_keys.as_slice(),
+        owner.clone(),
         &signatures,
         no_sig_ok,
     )
@@ -2691,9 +2695,15 @@ mod test_signing {
     #[tokio::test]
     async fn test_tx_signers_failure() {
         let args = arbitrary_args();
-        inner_tx_signers(&TestNamadaImpl::new(None).0, &args, None, &[], false)
-            .await
-            .expect_err("Test failed");
+        inner_tx_signers(
+            &TestNamadaImpl::new(None).0,
+            args.signing_keys.as_slice(),
+            None,
+            &[],
+            false,
+        )
+        .await
+        .expect_err("Test failed");
     }
 
     /// Test the unhappy flows in trying to validate

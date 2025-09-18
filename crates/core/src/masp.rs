@@ -23,6 +23,7 @@ use sha2::Sha256;
 use crate::address::{Address, DecodeError, HASH_HEX_LEN, IBC, MASP};
 use crate::borsh::BorshSerializeExt;
 use crate::chain::Epoch;
+use crate::hash::Hash;
 use crate::impl_display_and_from_str_via_format;
 use crate::string_encoding::{
     self, MASP_EXT_FULL_VIEWING_KEY_HRP, MASP_EXT_SPENDING_KEY_HRP,
@@ -76,6 +77,18 @@ pub struct MaspTxId(
 impl From<TxIdInner> for MaspTxId {
     fn from(txid: TxIdInner) -> Self {
         Self(txid)
+    }
+}
+
+impl From<Hash> for MaspTxId {
+    fn from(hash: Hash) -> Self {
+        MaspTxId(TxIdInner::from_bytes(hash.0))
+    }
+}
+
+impl From<MaspTxId> for Hash {
+    fn from(tx_id: MaspTxId) -> Self {
+        Hash(*tx_id.0.as_ref())
     }
 }
 

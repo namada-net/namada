@@ -24,6 +24,7 @@ pub use namada_core::borsh::{
 };
 pub use namada_core::masp::MaspTransaction;
 pub use namada_core::storage;
+use namada_core::token::DenominatedAmount;
 pub use namada_events::{Event, EventToEmit, EventType};
 pub use namada_storage::{Result, ResultExt, StorageRead, StorageWrite};
 
@@ -109,4 +110,10 @@ pub trait TxEnv: StorageRead + StorageWrite {
     fn update_masp_note_commitment_tree(
         transaction: &MaspTransaction,
     ) -> Result<bool>;
+
+    /// The amount of the given token needed to pay a MASP shielding fee
+    fn get_masp_shielding_fee_amount(
+        &self,
+        token: &Address,
+    ) -> Result<Option<DenominatedAmount>>;
 }

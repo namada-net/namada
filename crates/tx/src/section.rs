@@ -61,6 +61,15 @@ pub enum Section {
     MaspBuilder(MaspBuilder),
     /// Wrap a header with a section for the purposes of computing hashes
     Header(Header),
+    /// Data associated with paying the fee for an (un)shielding transaction
+    MaspSustainabilityFee {
+        /// The key for the implicit account
+        payer: common::PublicKey,
+        /// The address of the token paying the fee
+        token: Address,
+        /// The inner tx this fee is for
+        cmt: MaspTxId,
+    },
 }
 
 /// A Namada transaction header indicating where transaction subcomponents can
@@ -147,6 +156,12 @@ impl Section {
             Self::MaspBuilder(mb) => mb.hash(hasher),
             Self::MaspTx(tx) => {
                 hasher.update(tx.serialize_to_vec());
+                hasher
+            }
+            Self::MaspSustainabilityFee { payer, token, cmt } => {
+                hasher.update(payer.serialize_to_vec());
+                hasher.update(token.serialize_to_vec());
+                hasher.update(cmt.serialize_to_vec());
                 hasher
             }
             Self::Header(header) => header.hash(hasher),

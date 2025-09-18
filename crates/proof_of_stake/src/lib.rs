@@ -117,6 +117,8 @@ use crate::validator_set_update::{
 
 /// Event descriptor for claim-rewards token transfer
 pub const CLAIM_REWARDS_EVENT_DESC: &str = "pos-claim-rewards";
+/// Event descriptor for withdraw-tokens unbonded token transfer
+pub const WITHDRAW_TOKENS_EVENT_DESC: &str = "pos-withdraw-token";
 
 /// PoS storage `Keys/Read/Write` implementation
 #[derive(Debug)]
@@ -1553,7 +1555,7 @@ pub fn withdraw_tokens<S, Gov, Token>(
 where
     S: StorageRead + StorageWrite,
     Gov: governance::Read<S>,
-    Token: trans_token::Write<S>,
+    Token: trans_token::Write<S> + trans_token::Events<S>,
 {
     let params = read_pos_params::<S, Gov>(storage)?;
     let source = source.unwrap_or(validator);
@@ -1665,6 +1667,16 @@ where
         &ADDRESS,
         source,
         withdrawable_amount,
+    )?;
+
+    Token::emit_transfer_event(
+        storage,
+        WITHDRAW_TOKENS_EVENT_DESC.into(),
+        trans_token::EventLevel::Tx,
+        &staking_token,
+        withdrawable_amount,
+        trans_token::UserAccount::Internal(ADDRESS),
+        trans_token::UserAccount::Internal(source.clone()),
     )?;
 
     // TODO: Transfer the slashed tokens from the PoS address to the Slash Pool

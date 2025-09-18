@@ -8532,11 +8532,9 @@ fn speculative_context() -> Result<()> {
     Ok(())
 }
 
-// FIXME: check again all the usages of dry-run, dry-run-wrapper, dump-tx,
-// dump-wrapper-tx, signing-keys, gas-payer in the tests and see if other args
-// that we pass in can be avoided Test that mixed masp tranfers and fee payments
-// are correctly labeld by the protocol (by means of events) and reconstructed
-// in the correct order by the client
+// Test that mixed masp tranfers and fee payments are correctly labeld by the
+// protocol (by means of events) and reconstructed in the correct order by the
+// client
 #[test]
 fn masp_events() -> Result<()> {
     // This address doesn't matter for tests. But an argument is required.

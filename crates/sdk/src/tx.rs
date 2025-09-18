@@ -85,8 +85,8 @@ use crate::rpc::{
     query_wasm_code_hash, validate_amount,
 };
 use crate::signing::{
-    self, NoSigOkData, SigningData, SigningWrapperData, validate_fee,
-    validate_transparent_fee,
+    self, FeeAuthorization, SigningData, SigningTxData, SigningWrapperData,
+    validate_fee, validate_transparent_fee,
 };
 use crate::tendermint_rpc::endpoint::broadcast::tx_sync::Response;
 use crate::tendermint_rpc::error::Error as RpcError;
@@ -346,14 +346,13 @@ pub async fn build_reveal_pk(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            args,
+            wrap_tx,
             // FIXME: I think the owner is useless cause the implicit vp
             // doesn't check the signatures when revealing a pk
             Some(public_key.into()),
-            vec![],
+            args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -373,11 +372,9 @@ pub async fn build_reveal_pk(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            args,
+            args.signing_keys.to_owned(),
             Some(public_key.into()),
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -738,14 +735,19 @@ pub async fn build_change_consensus_key(
     };
 
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
+        let signing_keys = [
+            tx_args.signing_keys.to_owned(),
+            vec![consensus_key.to_owned()],
+        ]
+        .concat();
+
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             None,
-            vec![consensus_key.clone()],
+            signing_keys,
             false,
             vec![],
-            None,
         )
         .await?;
 
@@ -768,13 +770,17 @@ pub async fn build_change_consensus_key(
             }),
         )
     } else {
+        let signing_keys = [
+            tx_args.signing_keys.to_owned(),
+            vec![consensus_key.to_owned()],
+        ]
+        .concat();
+
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            signing_keys,
             None,
-            vec![consensus_key.clone()],
             vec![],
-            false,
         )
         .await?;
 
@@ -807,12 +813,11 @@ pub async fn build_validator_commission_change(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx_args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -836,11 +841,9 @@ pub async fn build_validator_commission_change(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            tx_args.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -979,12 +982,11 @@ pub async fn build_validator_metadata_change(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx_args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -1008,11 +1010,9 @@ pub async fn build_validator_metadata_change(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            tx_args.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -1234,12 +1234,11 @@ pub async fn build_update_steward_commission(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx_args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -1263,11 +1262,9 @@ pub async fn build_update_steward_commission(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            tx_args.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -1332,12 +1329,11 @@ pub async fn build_resign_steward(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx_args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -1361,11 +1357,9 @@ pub async fn build_resign_steward(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            tx_args.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -1410,12 +1404,11 @@ pub async fn build_unjail_validator(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx_args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -1439,11 +1432,9 @@ pub async fn build_unjail_validator(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            tx_args.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -1544,12 +1535,11 @@ pub async fn build_deactivate_validator(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx_args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -1573,11 +1563,9 @@ pub async fn build_deactivate_validator(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            tx_args.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -1649,12 +1637,11 @@ pub async fn build_reactivate_validator(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx_args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -1678,11 +1665,9 @@ pub async fn build_reactivate_validator(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            tx_args.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -1906,12 +1891,11 @@ pub async fn build_redelegation(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx_args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -1935,11 +1919,9 @@ pub async fn build_redelegation(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            tx_args.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -1979,12 +1961,11 @@ pub async fn build_withdraw(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx_args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -2008,11 +1989,9 @@ pub async fn build_withdraw(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            tx_args.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -2095,12 +2074,11 @@ pub async fn build_claim_rewards(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx_args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -2124,11 +2102,9 @@ pub async fn build_claim_rewards(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            tx_args.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -2229,12 +2205,11 @@ pub async fn build_unbond(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx_args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -2258,11 +2233,9 @@ pub async fn build_unbond(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            tx_args.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -2494,12 +2467,11 @@ pub async fn build_bond(
         if let Some(wrap_tx) = &tx_args.wrap_tx {
             let signing_data = signing::aux_signing_data(
                 context,
-                tx_args,
+                wrap_tx,
                 default_signer,
-                vec![],
+                tx_args.signing_keys.to_owned(),
                 false,
                 vec![],
-                None,
             )
             .await?;
             let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -2524,11 +2496,9 @@ pub async fn build_bond(
         } else {
             let signing_data = signing::aux_inner_signing_data(
                 context,
-                tx_args,
+                tx_args.signing_keys.to_owned(),
                 default_signer,
                 vec![],
-                vec![],
-                false,
             )
             .await?;
 
@@ -2592,12 +2562,11 @@ pub async fn build_default_proposal(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -2617,11 +2586,9 @@ pub async fn build_default_proposal(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx,
+            tx.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -2679,12 +2646,11 @@ pub async fn build_vote_proposal(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -2704,11 +2670,9 @@ pub async fn build_vote_proposal(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx,
+            tx.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -3005,7 +2969,11 @@ pub async fn build_become_validator(
         return Err(Error::Other("Invalid address".to_string()));
     };
 
-    let mut all_pks = account.get_all_public_keys();
+    let mut all_pks = [
+        tx_args.signing_keys.to_owned(),
+        account.get_all_public_keys(),
+    ]
+    .concat();
     all_pks.push(consensus_key.clone().unwrap().clone());
     all_pks.push(eth_cold_key.clone().unwrap());
     all_pks.push(eth_hot_key.clone().unwrap());
@@ -3014,12 +2982,11 @@ pub async fn build_become_validator(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             None,
             all_pks,
             false,
             vec![],
-            None,
         )
         .await?;
 
@@ -3042,15 +3009,9 @@ pub async fn build_become_validator(
             }),
         )
     } else {
-        let signing_data = signing::aux_inner_signing_data(
-            context,
-            tx_args,
-            None,
-            vec![],
-            vec![],
-            false,
-        )
-        .await?;
+        let signing_data =
+            signing::aux_inner_signing_data(context, all_pks, None, vec![])
+                .await?;
 
         (SigningData::Inner(signing_data), None)
     };
@@ -3083,12 +3044,11 @@ pub async fn build_pgf_funding_proposal(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -3108,11 +3068,9 @@ pub async fn build_pgf_funding_proposal(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx,
+            tx.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -3156,12 +3114,11 @@ pub async fn build_pgf_stewards_proposal(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -3181,11 +3138,9 @@ pub async fn build_pgf_stewards_proposal(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx,
+            tx.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -3237,12 +3192,11 @@ pub async fn build_ibc_transfer(
     {
         let signing_data = signing::aux_signing_data(
             context,
-            &args.tx,
+            wrap_tx,
             Some(source.clone()),
-            vec![],
+            args.tx.signing_keys.to_owned(),
             args.source.spending_key().is_some(),
             vec![],
-            refund_target.as_ref().map(|_| NoSigOkData::Other),
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -3277,11 +3231,9 @@ pub async fn build_ibc_transfer(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            &args.tx,
+            args.tx.signing_keys.to_owned(),
             Some(source.clone()),
             vec![],
-            vec![],
-            refund_target.is_some(),
         )
         .await?;
 
@@ -3763,12 +3715,11 @@ pub async fn build_transparent_transfer<N: Namada>(
         if let Some(wrap_tx) = &args.tx.wrap_tx {
             let signing_data = signing::aux_signing_data(
                 context,
-                &args.tx,
+                wrap_tx,
                 source,
-                vec![],
+                args.tx.signing_keys.to_owned(),
                 false,
                 vec![],
-                None,
             )
             .await?;
 
@@ -3795,11 +3746,9 @@ pub async fn build_transparent_transfer<N: Namada>(
         } else {
             let signing_data = signing::aux_inner_signing_data(
                 context,
-                &args.tx,
+                args.tx.signing_keys.to_owned(),
                 source,
                 vec![],
-                vec![],
-                false,
             )
             .await?;
 
@@ -3890,13 +3839,12 @@ pub async fn build_shielded_transfer<N: Namada>(
     {
         let signing_data = signing::aux_signing_data(
             context,
-            &args.tx,
+            wrap_tx,
             // places
             None,
-            vec![],
+            args.tx.signing_keys.to_owned(),
             true,
             vec![],
-            Some(NoSigOkData::Other),
         )
         .await?;
 
@@ -3916,11 +3864,9 @@ pub async fn build_shielded_transfer<N: Namada>(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            &args.tx,
+            args.tx.signing_keys.to_owned(),
             None,
             vec![],
-            vec![],
-            true,
         )
         .await?;
 
@@ -4116,12 +4062,11 @@ pub async fn build_shielding_transfer<N: Namada>(
         if let Some(wrap_tx) = &args.tx.wrap_tx {
             let signing_data = signing::aux_signing_data(
                 context,
-                &args.tx,
+                wrap_tx,
                 source,
-                vec![],
+                args.tx.signing_keys.to_owned(),
                 false,
                 vec![],
-                None,
             )
             .await?;
 
@@ -4148,11 +4093,9 @@ pub async fn build_shielding_transfer<N: Namada>(
         } else {
             let signing_data = signing::aux_inner_signing_data(
                 context,
-                &args.tx,
+                args.tx.signing_keys.to_owned(),
                 source,
                 vec![],
-                vec![],
-                false,
             )
             .await?;
 
@@ -4295,16 +4238,17 @@ pub async fn build_unshielding_transfer<N: Namada>(
     args: &mut args::TxUnshieldingTransfer,
     bparams: &mut impl BuildParams,
 ) -> Result<(Tx, SigningData)> {
+    // FIXME: should return an error if signing keys here? Or maybe just print a
+    // warning?
     let (mut signing_data, wrap_args) = if let Some(wrap_tx) = &args.tx.wrap_tx
     {
         let signing_data = signing::aux_signing_data(
             context,
-            &args.tx,
+            wrap_tx,
             None,
-            vec![],
+            args.tx.signing_keys.to_owned(),
             true,
             vec![],
-            Some(NoSigOkData::Other),
         )
         .await?;
 
@@ -4324,11 +4268,9 @@ pub async fn build_unshielding_transfer<N: Namada>(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            &args.tx,
+            args.tx.signing_keys.to_owned(),
             None,
             vec![],
-            vec![],
-            true,
         )
         .await?;
 
@@ -4530,12 +4472,11 @@ pub async fn build_init_account(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             None,
-            vec![],
+            tx_args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -4559,11 +4500,9 @@ pub async fn build_init_account(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            tx_args.signing_keys.to_owned(),
             None,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -4648,12 +4587,11 @@ pub async fn build_update_account(
     let (signing_data, wrap_args) = if let Some(wrap_tx) = &tx_args.wrap_tx {
         let signing_data = signing::aux_signing_data(
             context,
-            tx_args,
+            wrap_tx,
             default_signer,
-            vec![],
+            tx_args.signing_keys.to_owned(),
             false,
             vec![],
-            None,
         )
         .await?;
         let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -4677,11 +4615,9 @@ pub async fn build_update_account(
     } else {
         let signing_data = signing::aux_inner_signing_data(
             context,
-            tx_args,
+            tx_args.signing_keys.to_owned(),
             default_signer,
             vec![],
-            vec![],
-            false,
         )
         .await?;
 
@@ -4842,62 +4778,70 @@ pub async fn build_custom(
     //    3. If the wrapper signature was provided then we also expect the inner
     //       signature(s) to have been provided, in this case we generate a
     //       SigningData to attach all these signatures
+    // FIXME: can remove the signing_data variable?
+    // FIXME: use if instead of match on the wrapper
     let signing_data = match tx.header.wrapper() {
         Some(_) => {
-            if wrapper_signature.is_some() && tx_args.wrap_tx.is_some() {
-                return Err(Error::Other(
-                    "Both a wrapper signature and a request to wrap the \
-                     transaction were provided: only one at a time can be"
-                        .to_string(),
-                ));
-            }
-            let wrapper_signing_data = signing::aux_signing_data(
-                context,
-                tx_args,
-                owner.to_owned(),
-                vec![],
-                // The possible masp fee paying transaction has already been
-                // produced so no need to generate a disposable address anyway
-                false,
-                signatures.clone(),
-                Some(
-                    wrapper_signature
-                        .as_ref()
-                        .map_or(NoSigOkData::Other, |sig| {
-                            NoSigOkData::WrapperSig(sig.to_owned())
-                        }),
-                ),
-            )
-            .await?;
+            let wrapper_signing_data =
+                match (wrapper_signature, &tx_args.wrap_tx) {
+                    (None, None) => {
+                        return Err(Error::Other(
+                            "A wrapper signature or a wrapper signer must be \
+                             provided when loading a wrapped custom \
+                             transaction"
+                                .to_string(),
+                        ));
+                    }
+                    (None, Some(wrap_tx)) => {
+                        let signing_data = signing::aux_signing_data(
+                            context,
+                            wrap_tx,
+                            owner.to_owned(),
+                            tx_args.signing_keys.to_owned(),
+                            // The optional masp fee paying transaction has
+                            // already been
+                            // produced so no need to generate a disposable
+                            // address anyway
+                            false,
+                            signatures.clone(),
+                        )
+                        .await?;
 
-            // FIXME: maybe this logic is broken
-            // FIXME: no it's useful cause we might want to rewrap a dumped
-            // wrapper (e.g. if it's expired or the tx failed for gas or so on)
-            // FIXME: ok but in these cases why do we dump the wrapper in the
-            // first place? we should have the dumped inner, we load it, wrap
-            // it, sign it and send it. If it fails we can redo
-            // FIXME: dumping the wrapper is only useful if we want to sign the
-            // wrapper offline, so we dump the wrapper, sign if offline and
-            // submit it. What if it expires and gets rejected? Need to rewrap
-            // it, which we do right here FIXME: review this pattern
-            // matching, it might be useless now that we do the check at the
-            // beginning of this branch
-            if let (Some(wrap_tx), Ok(fee_payer)) =
-                (&tx_args.wrap_tx, wrapper_signing_data.fee_payer_or_err())
-            {
-                // If no wrapper signature is provided wrap the tx, even if it
-                // is already wrapped (wrapper overwrite)
-                let fee_amount =
-                    validate_fee(context, wrap_tx, tx_args.force).await?;
-                tx.add_wrapper(
-                    Fee {
-                        amount_per_gas_unit: fee_amount,
-                        token: wrap_tx.fee_token.to_owned(),
+                        // Wrap the tx if no wrapper signature is provided, even
+                        // if it is already wrapped
+                        // (wrapper overwrite)
+                        let fee_amount =
+                            validate_fee(context, wrap_tx, tx_args.force)
+                                .await?;
+                        tx.add_wrapper(
+                            Fee {
+                                amount_per_gas_unit: fee_amount,
+                                token: wrap_tx.fee_token.to_owned(),
+                            },
+                            signing_data.fee_payer_or_err()?.to_owned(),
+                            wrap_tx.gas_limit,
+                        );
+
+                        signing_data
+                    }
+                    // If both a serialized wrapper signature and a request to
+                    // wrap the tx are passed, the serialized signature takes
+                    // precedence
+                    (Some(wrapper_sig), _) => SigningWrapperData {
+                        signing_data: vec![SigningTxData {
+                            owner: None,
+                            public_keys: Default::default(),
+                            threshold: 0,
+                            account_public_keys_map: Default::default(),
+                            shielded_hash: None,
+                            signatures: signatures.to_owned(),
+                        }],
+                        fee_auth: FeeAuthorization::Signature(
+                            wrapper_sig.to_owned(),
+                        ),
                     },
-                    fee_payer.to_owned(),
-                    wrap_tx.gas_limit,
-                );
-            }
+                };
+
             SigningData::Wrapper(wrapper_signing_data)
         }
         None => {
@@ -4913,21 +4857,14 @@ pub async fn build_custom(
                 Some(wrap_tx) => {
                     let wrapper_signing_data = signing::aux_signing_data(
                         context,
-                        tx_args,
+                        wrap_tx,
                         owner.clone(),
-                        vec![],
-                        // The possible masp fee paying transaction has already
+                        tx_args.signing_keys.to_owned(),
+                        // The optional masp fee paying transaction has already
                         // been produced so no need to
                         // generate a disposable address anyway
                         false,
                         signatures.to_owned(),
-                        Some(
-                            wrapper_signature
-                                .as_ref()
-                                .map_or(NoSigOkData::Other, |sig| {
-                                    NoSigOkData::WrapperSig(sig.to_owned())
-                                }),
-                        ),
                     )
                     .await?;
                     let fee_amount =
@@ -4947,11 +4884,9 @@ pub async fn build_custom(
                 None => SigningData::Inner(
                     signing::aux_inner_signing_data(
                         context,
-                        tx_args,
+                        tx_args.signing_keys.to_owned(),
                         owner.clone(),
-                        vec![],
                         signatures.to_owned(),
-                        true,
                     )
                     .await?,
                 ),

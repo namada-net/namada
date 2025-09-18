@@ -12,6 +12,12 @@ use namada_sdk::masp::{
     MaspLocalTaskEnv, ShieldedContext, ShieldedSyncConfig, ShieldedUtils,
 };
 
+const MASP_INDEXER_CLIENT_USER_AGENT: &str = {
+    const TOKENS: &[&str] =
+        &["Namada Masp Indexer Client/", env!("CARGO_PKG_VERSION")];
+    konst::string::str_concat!(TOKENS)
+};
+
 #[allow(clippy::too_many_arguments)]
 pub async fn syncing<
     U: ShieldedUtils + MaybeSend + MaybeSync,
@@ -116,6 +122,7 @@ pub async fn syncing<
 
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(60))
+            .user_agent(MASP_INDEXER_CLIENT_USER_AGENT)
             .build()
             .map_err(|err| {
                 Error::Other(format!("Failed to build http client: {err}"))

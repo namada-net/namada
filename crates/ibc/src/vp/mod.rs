@@ -400,13 +400,15 @@ where
             IbcMessage::NftTransfer(msg_nft_transfer) => {
                 Some(&msg_nft_transfer.message.chan_id_on_a)
             }
-            IbcMessage::Envelope(boxed) => {
-                if let MsgEnvelope::Packet(PacketMsg::Recv(msg)) = &**boxed {
+            IbcMessage::Envelope(boxed) => match &**boxed {
+                MsgEnvelope::Packet(PacketMsg::Recv(msg)) => {
                     Some(&msg.packet.chan_id_on_b)
-                } else {
-                    None
                 }
-            }
+                MsgEnvelope::Packet(PacketMsg::Timeout(msg)) => {
+                    Some(&msg.packet.chan_id_on_a)
+                }
+                _ => None,
+            },
         };
         if let Some(channel) = transfer_channel {
             let unlimited_channel_key = unlimited_channel_key(channel);

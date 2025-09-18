@@ -830,7 +830,9 @@ where
                 .expect("Must update merkle tree after migration");
         }
 
+        let pre_root = self.state.in_mem().block.pre_commit_tree.root();
         let merkle_root = self.state.in_mem().merkle_root();
+        assert_eq!(pre_root, merkle_root);
 
         tracing::info!(
             "Committed block hash: {merkle_root}, height: {height_to_commit}",

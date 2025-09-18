@@ -52,7 +52,7 @@ mod migrations {
     };
     use namada_core::collections::HashMap;
 
-    use crate::masp::bridge_tree::pkg::{Level, Position, Source};
+    use crate::masp::bridge_tree::pkg::{Address, Position};
     use crate::masp::bridge_tree::{BridgeTree, InnerBridgeTree};
     use crate::masp::shielded_wallet::CompactNote;
     use crate::masp::{NotePosition, WitnessMap};
@@ -119,60 +119,38 @@ mod migrations {
             .map(|wit| wit.tree().to_frontier().take().unwrap())
             .collect();
 
-        let tracking: BTreeSet<_> = prior_bridges
+        let mut tracking = BTreeSet::new();
+        let mut ommers = BTreeMap::new();
+
+        for position in prior_bridges
             .iter()
-            .flat_map(|prior_bridge_frontier| {
-                prior_bridge_frontier
-                    .position()
-                    .witness_addrs(Level::from(
-                        SAPLING_COMMITMENT_TREE_DEPTH as u8,
-                    ))
-                    .filter_map(|(addr, source)| {
-                        if source == Source::Future {
-                            Some(addr)
-                        } else {
-                            None
-                        }
-                    })
-            })
-            .collect();
+            .map(|prior_bridge_frontier| prior_bridge_frontier.position())
+        {
+            let mut next_incomplete_parent =
+                Address::from(position).current_incomplete();
 
-        let ommers: BTreeMap<_, _> = prior_bridges
-            .iter()
-            .map(|prior_bridge_frontier| {
-                let position = prior_bridge_frontier.position();
+            for ommer in witness_map[&position].filled().iter().copied() {
+                let ommer_addr = {
+                    let next = next_incomplete_parent;
 
-                position
-                    .witness_addrs(Level::from(
-                        SAPLING_COMMITMENT_TREE_DEPTH as u8,
-                    ))
-                    .filter_map(|(addr, source)| {
-                        if source == Source::Future {
-                            Some(addr)
-                        } else {
-                            None
-                        }
-                    })
-                    .zip(witness_map[&position].filled().iter().cloned())
-                    .collect::<BTreeMap<_, _>>()
-            })
-            .reduce(|mut this, mut other| {
-                this.append(&mut other);
-                this
-            })
-            .unwrap_or_default();
+                    next_incomplete_parent =
+                        next_incomplete_parent.next_incomplete_parent();
 
-        let mut tree: BridgeTree = InnerBridgeTree::from_parts(
-            frontier,
-            prior_bridges,
-            tracking,
-            ommers,
-        )
-        .unwrap()
-        .into();
+                    next.sibling()
+                };
+                ommers.insert(ommer_addr, ommer);
+            }
 
-        tree.as_mut().garbage_collect_ommers();
-        tree
+            if next_incomplete_parent.level()
+                < (SAPLING_COMMITMENT_TREE_DEPTH as u8).into()
+            {
+                tracking.insert(next_incomplete_parent);
+            }
+        }
+
+        InnerBridgeTree::from_parts(frontier, prior_bridges, tracking, ommers)
+            .unwrap()
+            .into()
     }
 
     #[cfg(test)]
@@ -202,15 +180,42 @@ mod migrations {
         }
 
         // convert to bridge tree
-        let bridge_tree = migrate_bridge_tree(&tree, &witness_map);
-
-        // check if roots and merkle proofs match
-        assert_eq!(tree.root(), bridge_tree.as_ref().root());
+        let mut bridge_tree = migrate_bridge_tree(&tree, &witness_map);
 
         for i in (0u64..10).filter(|&i| i % 2 == 0) {
             assert_eq!(
                 witness_map[&NotePosition::from(i)].path(),
-                bridge_tree.witness(i)
+                bridge_tree.witness(i),
+                "Position {i} not equal,\n{witness_map:#?}\n{bridge_tree:#?}"
+            );
+        }
+
+        // add new incremental witnesses
+        for i in 10u64..20 {
+            let node = Node::from_scalar(i.into());
+
+            tree.append(node).unwrap();
+            bridge_tree.as_mut().append(node).unwrap();
+
+            for wit in witness_map.values_mut() {
+                wit.append(node).unwrap();
+            }
+
+            if i % 2 == 0 {
+                witness_map
+                    .insert(i.into(), IncrementalWitness::from_tree(&tree));
+                bridge_tree.as_mut().mark().unwrap();
+            }
+        }
+
+        // check if roots and merkle proofs match
+        assert_eq!(tree.root(), bridge_tree.as_ref().root());
+
+        for i in (0u64..20).filter(|&i| i % 2 == 0) {
+            assert_eq!(
+                witness_map[&NotePosition::from(i)].path(),
+                bridge_tree.witness(i),
+                "Position {i} not equal,\n{witness_map:#?}\n{bridge_tree:#?}"
             );
         }
     }

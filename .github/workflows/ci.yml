@@ -464,7 +464,7 @@ jobs:
   test-e2e:
     runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
     container:
-      image: ghcr.io/heliaxdev/namada-ci:namada-v2.0.0
+      image: ghcr.io/heliaxdev/namada-ci:namada-v3.0.0-alpha
     if: github.event.pull_request.draft == false || contains(github.head_ref, 'mergify/merge-queue') || contains(github.ref_name, 'mergify/merge-queue')
     needs: [build-wasm, build-binaries]
     timeout-minutes: 50
@@ -635,7 +635,7 @@ jobs:
   test-e2e-with-device-automation:
     runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
     container:
-      image: ghcr.io/heliaxdev/namada-ci:namada-v2.0.0
+      image: ghcr.io/heliaxdev/namada-ci:namada-v3.0.0-alpha
     if: github.event.pull_request.draft == false || contains(github.head_ref, 'mergify/merge-queue') || contains(github.ref_name, 'mergify/merge-queue')
     needs: [build-wasm, build-binaries]
     timeout-minutes: 50

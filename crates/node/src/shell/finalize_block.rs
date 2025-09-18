@@ -1353,6 +1353,7 @@ mod test_finalize_block {
 
     use super::*;
     use crate::oracle::control::Command;
+    use crate::protocol::ProtocolGasPrice;
     use crate::shell::test_utils::*;
     use crate::shims::abcipp_shim_types::shim::request::{
         FinalizeBlock, ProcessedTx,
@@ -1372,7 +1373,7 @@ mod test_finalize_block {
         let mut wrapper_tx =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
                 Fee {
-                    amount_per_gas_unit: DenominatedAmount::native(1.into()),
+                    amount_per_gas_unit: DenominatedAmount::native(10.into()),
                     token: shell.state.in_mem().native_token.clone(),
                 },
                 keypair.ref_to(),
@@ -1412,7 +1413,7 @@ mod test_finalize_block {
         let mut batch =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
                 Fee {
-                    amount_per_gas_unit: DenominatedAmount::native(1.into()),
+                    amount_per_gas_unit: DenominatedAmount::native(10.into()),
                     token: shell.state.in_mem().native_token.clone(),
                 },
                 sk.ref_to(),
@@ -3276,7 +3277,7 @@ mod test_finalize_block {
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
                 Fee {
-                    amount_per_gas_unit: DenominatedAmount::native(1.into()),
+                    amount_per_gas_unit: DenominatedAmount::native(10.into()),
                     token: shell.state.in_mem().native_token.clone(),
                 },
                 keypair.ref_to(),
@@ -3289,7 +3290,7 @@ mod test_finalize_block {
         let mut new_wrapper = wrapper.clone();
         new_wrapper.update_header(TxType::Wrapper(Box::new(WrapperTx::new(
             Fee {
-                amount_per_gas_unit: DenominatedAmount::native(1.into()),
+                amount_per_gas_unit: DenominatedAmount::native(10.into()),
                 token: shell.state.in_mem().native_token.clone(),
             },
             keypair_2.ref_to(),
@@ -3383,7 +3384,7 @@ mod test_finalize_block {
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
                 Fee {
-                    amount_per_gas_unit: DenominatedAmount::native(1.into()),
+                    amount_per_gas_unit: DenominatedAmount::native(10.into()),
                     token: shell.state.in_mem().native_token.clone(),
                 },
                 keypair.ref_to(),
@@ -3405,7 +3406,7 @@ mod test_finalize_block {
         let mut new_wrapper = wrapper.clone();
         new_wrapper.update_header(TxType::Wrapper(Box::new(WrapperTx::new(
             Fee {
-                amount_per_gas_unit: DenominatedAmount::native(1.into()),
+                amount_per_gas_unit: DenominatedAmount::native(10.into()),
                 token: shell.state.in_mem().native_token.clone(),
             },
             keypair_2.ref_to(),
@@ -3491,7 +3492,7 @@ mod test_finalize_block {
                 Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
                     Fee {
                         amount_per_gas_unit: DenominatedAmount::native(
-                            1.into(),
+                            10.into(),
                         ),
                         token: shell.state.in_mem().native_token.clone(),
                     },
@@ -3509,9 +3510,7 @@ mod test_finalize_block {
         let mut unsigned_wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
                 Fee {
-                    amount_per_gas_unit: DenominatedAmount::native(
-                        Amount::zero(),
-                    ),
+                    amount_per_gas_unit: DenominatedAmount::native(10.into()),
                     token: shell.state.in_mem().native_token.clone(),
                 },
                 keypair.ref_to(),
@@ -3703,7 +3702,9 @@ mod test_finalize_block {
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
                 Fee {
-                    amount_per_gas_unit: DenominatedAmount::native(0.into()),
+                    amount_per_gas_unit: DenominatedAmount::native(
+                        Amount::zero(),
+                    ),
                     token: shell.state.in_mem().native_token.clone(),
                 },
                 keypair.ref_to(),
@@ -3991,10 +3992,11 @@ mod test_finalize_block {
         assert_eq!(balance, 0.into());
     }
 
-    // Test that the fees collected from a block are withdrew from the wrapper
-    // signer and credited to the block proposer
+    // Test that when fees are paid in the native token, the tip is withdrew
+    // from the wrapper signer and credited to the block proposer and the
+    // base fee is burned
     #[test]
-    fn test_fee_payment_to_block_proposer() {
+    fn test_fee_distribution_native_token() {
         let (mut shell, _, _, _) = setup();
 
         let validator = shell.mode.get_validator_address().unwrap().to_owned();
@@ -4014,11 +4016,14 @@ mod test_finalize_block {
             &validator,
         )
         .unwrap();
+        let total_supply =
+            namada_sdk::token::get_effective_total_native_supply(&shell.state)
+                .unwrap();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
                 Fee {
-                    amount_per_gas_unit: DenominatedAmount::native(1.into()),
+                    amount_per_gas_unit: DenominatedAmount::native(11.into()),
                     token: shell.state.in_mem().native_token.clone(),
                 },
                 namada_apps_lib::wallet::defaults::albert_keypair().ref_to(),
@@ -4029,12 +4034,16 @@ mod test_finalize_block {
             .add_code(TestWasms::TxNoOp.read_bytes(), None)
             .add_data("Transaction data");
         wrapper.sign_wrapper(albert_keypair());
-        let fee_amount =
-            wrapper.header().wrapper().unwrap().get_tx_fee().unwrap();
-        let fee_amount = namada_sdk::token::denom_to_amount(
-            fee_amount,
-            &wrapper.header().wrapper().unwrap().fee.token,
+        let protocol_minimum_gas_price = parameters::read_gas_cost(
             &shell.state,
+            &wrapper.header.wrapper().unwrap().fee.token,
+        )
+        .unwrap()
+        .unwrap();
+        let fee_components = get_fee_components(
+            &wrapper.header().wrapper().unwrap(),
+            &shell.state,
+            &ProtocolGasPrice(protocol_minimum_gas_price),
         )
         .unwrap();
 
@@ -4074,7 +4083,7 @@ mod test_finalize_block {
         .unwrap();
         assert_eq!(
             new_proposer_balance,
-            proposer_balance.checked_add(fee_amount).unwrap()
+            proposer_balance.checked_add(fee_components.tip).unwrap()
         );
 
         let new_signer_balance = namada_sdk::token::read_balance(
@@ -4085,8 +4094,171 @@ mod test_finalize_block {
         .unwrap();
         assert_eq!(
             new_signer_balance,
-            signer_balance.checked_sub(fee_amount).unwrap()
+            signer_balance
+                .checked_sub(fee_components.get_total_fee().unwrap())
+                .unwrap()
+        );
+
+        // Check burning of the base fee
+        let new_total_supply =
+            namada_sdk::token::get_effective_total_native_supply(&shell.state)
+                .unwrap();
+        assert_eq!(
+            new_total_supply,
+            total_supply.checked_sub(fee_components.base).unwrap()
         )
+    }
+
+    // Test that when fees are paid in a foreign token, the tip is withdrew from
+    // the wrapper signer and credited to the block proposer and the base fee is
+    // sent to the PGF account
+    #[test]
+    fn test_fee_distribution_foreign_token() {
+        let (mut shell, _, _, _) = setup();
+        let btc = namada_sdk::address::testing::btc();
+        let btc_denom = read_denom(&shell.state, &btc).unwrap().unwrap();
+        let fee_amount: Amount = (WRAPPER_GAS_LIMIT * 2).into();
+
+        // Credit some tokens for fee payment
+        namada_sdk::token::credit_tokens(
+            &mut shell.state,
+            &btc,
+            &Address::from(&albert_keypair().to_public()),
+            fee_amount,
+        )
+        .unwrap();
+        let signer_balance = read_balance(
+            &shell.state,
+            &btc,
+            &Address::from(&albert_keypair().to_public()),
+        )
+        .unwrap();
+        assert_eq!(signer_balance, fee_amount.clone());
+
+        // Whitelist BTC for fee payment
+        let gas_cost_key = namada_sdk::parameters::storage::get_gas_cost_key();
+        let mut gas_prices: BTreeMap<Address, Amount> =
+            shell.read_storage_key(&gas_cost_key).unwrap();
+        gas_prices.insert(btc.clone(), 1.into());
+        shell.shell.state.write(&gas_cost_key, gas_prices).unwrap();
+        shell.commit();
+
+        let validator = shell.mode.get_validator_address().unwrap().to_owned();
+        let pos_params = read_pos_params(&shell.state).unwrap();
+        let consensus_key =
+            proof_of_stake::storage::validator_consensus_key_handle(&validator)
+                .get(&shell.state, Epoch::default(), &pos_params)
+                .unwrap()
+                .unwrap();
+        let proposer_address = HEXUPPER
+            .decode(consensus_key.tm_raw_hash().as_bytes())
+            .unwrap();
+
+        let proposer_balance =
+            namada_sdk::token::read_balance(&shell.state, &btc, &validator)
+                .unwrap();
+        let total_btc_supply =
+            namada_sdk::token::read_total_supply(&shell.state, &btc).unwrap();
+
+        let mut wrapper =
+            Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
+                Fee {
+                    amount_per_gas_unit: DenominatedAmount::new(
+                        2.into(),
+                        btc_denom,
+                    ),
+                    token: btc.clone(),
+                },
+                namada_apps_lib::wallet::defaults::albert_keypair().ref_to(),
+                WRAPPER_GAS_LIMIT.into(),
+            ))));
+        wrapper.header.chain_id = shell.chain_id.clone();
+        wrapper
+            .add_code(TestWasms::TxNoOp.read_bytes(), None)
+            .add_data("Transaction data");
+        wrapper.sign_wrapper(albert_keypair());
+        let protocol_minimum_gas_price = parameters::read_gas_cost(
+            &shell.state,
+            &wrapper.header.wrapper().unwrap().fee.token,
+        )
+        .unwrap()
+        .unwrap();
+        let fee_components = get_fee_components(
+            &wrapper.header().wrapper().unwrap(),
+            &shell.state,
+            &ProtocolGasPrice(protocol_minimum_gas_price),
+        )
+        .unwrap();
+
+        let signer_balance = namada_sdk::token::read_balance(
+            &shell.state,
+            &btc,
+            &wrapper.header().wrapper().unwrap().fee_payer(),
+        )
+        .unwrap();
+        let pgf_balance = namada_sdk::token::read_balance(
+            &shell.state,
+            &btc,
+            &namada_sdk::address::PGF,
+        )
+        .unwrap();
+
+        let processed_tx = ProcessedTx {
+            tx: wrapper.to_bytes().into(),
+            result: TxResult {
+                code: ResultCode::Ok.into(),
+                info: "".into(),
+            },
+        };
+
+        let event = &shell
+            .finalize_block(FinalizeBlock {
+                txs: vec![processed_tx],
+                proposer_address,
+                ..Default::default()
+            })
+            .expect("Test failed")[0];
+
+        // Check fee payment
+        assert_eq!(*event.kind(), APPLIED_TX);
+        let code = event.read_attribute::<CodeAttr>().expect("Test failed");
+        assert_eq!(code, ResultCode::Ok);
+
+        let new_proposer_balance =
+            namada_sdk::token::read_balance(&shell.state, &btc, &validator)
+                .unwrap();
+        assert_eq!(
+            new_proposer_balance,
+            proposer_balance.checked_add(fee_components.tip).unwrap()
+        );
+
+        let new_signer_balance = namada_sdk::token::read_balance(
+            &shell.state,
+            &btc,
+            &wrapper.header().wrapper().unwrap().fee_payer(),
+        )
+        .unwrap();
+        assert_eq!(
+            new_signer_balance,
+            signer_balance
+                .checked_sub(fee_components.get_total_fee().unwrap())
+                .unwrap()
+        );
+
+        // Check that the base fee has been sent to pgf and no burning happened
+        let new_pgf_balance = namada_sdk::token::read_balance(
+            &shell.state,
+            &btc,
+            &namada_sdk::address::PGF,
+        )
+        .unwrap();
+        assert_eq!(
+            new_pgf_balance,
+            pgf_balance.checked_add(fee_components.base).unwrap()
+        );
+        let new_total_supply =
+            namada_sdk::token::read_total_supply(&shell.state, &btc).unwrap();
+        assert_eq!(new_total_supply, total_btc_supply)
     }
 
     #[test]
@@ -6096,7 +6268,7 @@ mod test_finalize_block {
                 Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
                     Fee {
                         amount_per_gas_unit: DenominatedAmount::native(
-                            1.into(),
+                            10.into(),
                         ),
                         token: shell.state.in_mem().native_token.clone(),
                     },
@@ -6178,7 +6350,7 @@ mod test_finalize_block {
                 Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
                     Fee {
                         amount_per_gas_unit: DenominatedAmount::native(
-                            1.into(),
+                            10.into(),
                         ),
                         token: shell.state.in_mem().native_token.clone(),
                     },
@@ -6256,7 +6428,7 @@ mod test_finalize_block {
                 Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
                     Fee {
                         amount_per_gas_unit: DenominatedAmount::native(
-                            1.into(),
+                            10.into(),
                         ),
                         token: shell.state.in_mem().native_token.clone(),
                     },
@@ -6327,7 +6499,7 @@ mod test_finalize_block {
                 Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
                     Fee {
                         amount_per_gas_unit: DenominatedAmount::native(
-                            1.into(),
+                            10.into(),
                         ),
                         token: shell.state.in_mem().native_token.clone(),
                     },

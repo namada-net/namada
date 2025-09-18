@@ -44,16 +44,11 @@ pub enum VersionedWalletRef<'w, U: ShieldedUtils> {
 }
 
 mod migrations {
-    use std::collections::{BTreeMap, BTreeSet};
-
     use masp_primitives::merkle_tree::CommitmentTree;
-    use masp_primitives::sapling::{
-        Diversifier, Node, Note, SAPLING_COMMITMENT_TREE_DEPTH,
-    };
+    use masp_primitives::sapling::{Diversifier, Node, Note};
     use namada_core::collections::HashMap;
 
-    use crate::masp::bridge_tree::pkg::{Address, Position};
-    use crate::masp::bridge_tree::{BridgeTree, InnerBridgeTree};
+    use crate::masp::bridge_tree::BridgeTree;
     use crate::masp::shielded_wallet::CompactNote;
     use crate::masp::{NotePosition, WitnessMap};
 
@@ -97,60 +92,8 @@ mod migrations {
         tree: &CommitmentTree<Node>,
         witness_map: &WitnessMap,
     ) -> BridgeTree {
-        let witness_map = {
-            let mut map: HashMap<Position, _> = witness_map
-                .iter()
-                .map(|(pos, wit)| {
-                    ((*pos).into(), wit.clone().into_incrementalmerkletree())
-                })
-                .collect();
-            map.sort_unstable_keys();
-            map
-        };
-
-        let frontier = tree
-            .clone()
-            .into_incrementalmerkletree()
-            .to_frontier()
-            .take();
-
-        let prior_bridges: Vec<_> = witness_map
-            .values()
-            .map(|wit| wit.tree().to_frontier().take().unwrap())
-            .collect();
-
-        let mut tracking = BTreeSet::new();
-        let mut ommers = BTreeMap::new();
-
-        for position in prior_bridges
-            .iter()
-            .map(|prior_bridge_frontier| prior_bridge_frontier.position())
-        {
-            let mut next_incomplete_parent =
-                Address::from(position).current_incomplete();
-
-            for ommer in witness_map[&position].filled().iter().copied() {
-                let ommer_addr = {
-                    let next = next_incomplete_parent;
-
-                    next_incomplete_parent =
-                        next_incomplete_parent.next_incomplete_parent();
-
-                    next.sibling()
-                };
-                ommers.insert(ommer_addr, ommer);
-            }
-
-            if next_incomplete_parent.level()
-                < (SAPLING_COMMITMENT_TREE_DEPTH as u8).into()
-            {
-                tracking.insert(next_incomplete_parent);
-            }
-        }
-
-        InnerBridgeTree::from_parts(frontier, prior_bridges, tracking, ommers)
+        BridgeTree::from_tree_and_witness_map(tree.clone(), witness_map.clone())
             .unwrap()
-            .into()
     }
 
     #[cfg(test)]

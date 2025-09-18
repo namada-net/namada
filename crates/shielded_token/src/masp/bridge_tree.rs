@@ -1,9 +1,16 @@
 //! Bridge tree wrapper types to be used by the MASP.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 pub use bridgetree as pkg; // Re-export the bridgetree crate as `pkg`.
-use masp_primitives::merkle_tree::MerklePath;
+use eyre::{Context, ContextCompat};
+use masp_primitives::merkle_tree::{CommitmentTree, MerklePath};
 use masp_primitives::sapling::{Node, SAPLING_COMMITMENT_TREE_DEPTH};
 use namada_core::borsh::*;
+use namada_core::collections::HashMap;
+
+use self::pkg::{Address, Position};
+use crate::masp::WitnessMap;
 
 /// Inner type wrapped in [`BridgeTree`].
 pub type InnerBridgeTree =
@@ -43,6 +50,73 @@ impl BridgeTree {
         Self(bridgetree::BridgeTree::new())
     }
 
+    /// Instantiate a [`BridgeTree`] from a [`CommitmentTree`] and
+    /// [`WitnessMap`].
+    ///
+    /// Does not verify that each witness in the [`WitnessMap`] has the same
+    /// root, nor does it check that these roots match that of the provided
+    /// [`CommitmentTree`].
+    pub fn from_tree_and_witness_map(
+        tree: CommitmentTree<Node>,
+        witness_map: WitnessMap,
+    ) -> eyre::Result<Self> {
+        let witness_map = {
+            let mut map: HashMap<Position, _> = witness_map
+                .into_iter()
+                .map(|(pos, wit)| {
+                    (pos.into(), wit.into_incrementalmerkletree())
+                })
+                .collect();
+            map.sort_unstable_keys();
+            map
+        };
+
+        let frontier = tree.into_incrementalmerkletree().to_frontier().take();
+        let mut tracking = BTreeSet::new();
+        let mut ommers = BTreeMap::new();
+        let mut prior_bridges = Vec::with_capacity(witness_map.len());
+
+        for (position, inc_witness) in witness_map {
+            let mut next_incomplete_parent =
+                Address::from(position).current_incomplete();
+
+            for ommer in inc_witness.filled().iter().copied() {
+                let ommer_addr = {
+                    let next = next_incomplete_parent;
+
+                    next_incomplete_parent =
+                        next_incomplete_parent.next_incomplete_parent();
+
+                    next.sibling()
+                };
+                ommers.insert(ommer_addr, ommer);
+            }
+
+            if next_incomplete_parent.level()
+                < (SAPLING_COMMITMENT_TREE_DEPTH as u8).into()
+            {
+                tracking.insert(next_incomplete_parent);
+            }
+
+            prior_bridges.push(
+                inc_witness
+                    .tree()
+                    .to_frontier()
+                    .take()
+                    .context("IncrementalWitness with empty commitment tree")?,
+            );
+        }
+
+        Ok(InnerBridgeTree::from_parts(
+            frontier,
+            prior_bridges,
+            tracking,
+            ommers,
+        )
+        .context("Failed to create InnerBridgeTree from constituent parts")?
+        .into())
+    }
+
     /// Witness the node at `node_pos`.
     ///
     /// Returns a proof targeting the latest anchor in this tree.
@@ -79,9 +153,7 @@ impl BridgeTree {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
-
-    use masp_primitives::merkle_tree::{CommitmentTree, IncrementalWitness};
+    use masp_primitives::merkle_tree::IncrementalWitness;
 
     use super::*;
 

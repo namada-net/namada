@@ -109,7 +109,8 @@ arbitrary = {version = "1.4", features = ["derive"]}
 ark-bls12-381 = {version = "0.5"}
 ark-serialize = {version = "0.5"}
 ark-std = "0.5"
-arse-merkle-tree = {package = "nam-sparse-merkle-tree", version = "0.3.3-nam.0", default-features = false, features = ["std", "borsh"]}
+# arse-merkle-tree = {package = "nam-sparse-merkle-tree", version = "0.3.3-nam.0", default-features = false, features = ["std", "borsh"]}
+arse-merkle-tree = {package = "nam-sparse-merkle-tree", git = "https://github.com/namada-net/sparse-merkle-tree.git", rev = "604ef3b73d3c18c3c8047c6f164649bf94a565dd", default-features = false, features = ["std", "borsh"]}
 assert_cmd = "2.0"
 assert_matches = "1.5"
 async-trait = {version = "0.1"}

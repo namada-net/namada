@@ -129,7 +129,7 @@ jobs:
     timeout-minutes: 10
     runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
     container:
-      image: ghcr.io/heliaxdev/namada-ci:wasm-v2.0.0
+      image: ghcr.io/heliaxdev/namada-ci:wasm-v2.2.0
     strategy:
       fail-fast: true
       matrix:

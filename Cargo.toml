@@ -174,7 +174,7 @@ impl-num-traits = "0.2"
 indexmap = { package = "nam-indexmap", version = "2.7.1-nam.0", features = ["borsh-schema", "serde"] }
 init-once = "0.6"
 itertools = "0.14"
-jubjub = { package = "nam-jubjub", version = "0.10.1-nam.0" }
+jubjub = { package = "nam-jubjub", version = "1.10.1-nam.1" }
 k256 = { version = "0.13", default-features = false, features = ["ecdsa", "pkcs8", "precomputed-tables", "serde", "std"]}
 kdam = "0.6"
 konst = { version = "0.3", default-features = false }
@@ -189,8 +189,8 @@ libfuzzer-sys = "0.4"
 libloading = "0.8"
 linkme = "0.3"
 madato = "0.7"
-masp_primitives = "2.0.0"
-masp_proofs = { version = "2.0.0", default-features = false, features = ["local-prover"] }
+masp_primitives = "3.0.5"
+masp_proofs = { version = "3.0.5", default-features = false, features = ["local-prover"] }
 num256 = "0.6"
 num_cpus = "1.13"
 num_enum = "0.7"

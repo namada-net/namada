@@ -235,8 +235,12 @@ impl TrialDecrypted {
     }
 
     /// Check if the tx with  [`MaspIndexedTx`] was successfully decrypted
-    pub fn has_indexed_tx(&self, ix: &MaspIndexedTx) -> bool {
-        self.inner.contains_key(ix)
+    pub fn decrypted_by_any_vk(&self, ix: &MaspIndexedTx) -> bool {
+        self.inner.get(ix).is_some_and(|viewing_keys_to_notes| {
+            viewing_keys_to_notes
+                .values()
+                .any(|decrypted_notes| !decrypted_notes.is_empty())
+        })
     }
 }
 
@@ -270,7 +274,7 @@ impl Fetched {
     /// Iterates over the fetched transactions in the order
     /// they appear in blocks, whilst taking ownership of
     /// the returned data.
-    pub fn take(&mut self) -> impl IntoIterator<Item = IndexedNoteEntry> {
+    pub fn take(&mut self) -> IndexedNoteData {
         std::mem::take(&mut self.txs)
     }
 
@@ -338,40 +342,39 @@ impl RetryStrategy {
 
 /// Enumerates the capabilities of a [`MaspClient`] implementation.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum MaspClientCapabilities {
-    /// The masp client implementation is only capable of fetching shielded
-    /// transfers.
-    OnlyTransfers,
-    /// The masp client implementation is capable of not only fetching shielded
-    /// transfers, but also of fetching commitment trees, witness maps, and
-    /// note maps.
-    AllData,
-}
+pub struct MaspClientCapabilities(u8);
 
 impl MaspClientCapabilities {
-    /// Check if the lack of one or more capabilities in the
-    /// masp client implementation warrants a manual update
-    /// of the witnesses map.
-    pub const fn needs_witness_map_update(&self) -> bool {
-        matches!(self, Self::OnlyTransfers)
+    #[allow(missing_docs)]
+    pub const MAY_FETCH_PRE_BUILT_NOTES_INDEX: Self = Self(0b00000010);
+    #[allow(missing_docs)]
+    pub const MAY_FETCH_PRE_BUILT_TREE: Self = Self(0b00000001);
+    #[allow(missing_docs)]
+    pub const MAY_FETCH_PRE_BUILT_WITNESS_MAP: Self = Self(0b00000100);
+    #[allow(missing_docs)]
+    pub const NONE: Self = Self(0);
+
+    /// Combine these two [`MaspClientCapabilities`].
+    pub const fn plus(self, other: Self) -> Self {
+        Self(self.0 | other.0)
     }
 
     /// Check if the masp client is able to fetch a pre-built
     /// commitment tree.
     pub const fn may_fetch_pre_built_tree(&self) -> bool {
-        matches!(self, Self::AllData)
+        self.0 & Self::MAY_FETCH_PRE_BUILT_TREE.0 != 0
     }
 
     /// Check if the masp client is able to fetch a pre-built
     /// notes index.
     pub const fn may_fetch_pre_built_notes_index(&self) -> bool {
-        matches!(self, Self::AllData)
+        self.0 & Self::MAY_FETCH_PRE_BUILT_NOTES_INDEX.0 != 0
     }
 
     /// Check if the masp client is able to fetch a pre-built
     /// witness map.
     pub const fn may_fetch_pre_built_witness_map(&self) -> bool {
-        matches!(self, Self::AllData)
+        self.0 & Self::MAY_FETCH_PRE_BUILT_WITNESS_MAP.0 != 0
     }
 }
 
@@ -381,6 +384,16 @@ impl MaspClientCapabilities {
 pub trait MaspClient: Clone {
     /// Error type returned by the methods of this trait
     type Error: std::error::Error + Send + Sync + 'static;
+
+    /// Hint to this [`MaspClient`] implementation the block range
+    /// that will be fetched.
+    ///
+    /// ## Use-case
+    ///
+    /// This function is primarily used to decide when it is optimal
+    /// (latency wise) to fetch a block index (i.e. bloom filter) with
+    /// the block heights that contain MASP txs.
+    fn hint(&mut self, from: BlockHeight, to: BlockHeight);
 
     /// Return the last block height we can retrieve data from.
     #[allow(async_fn_in_trait)]

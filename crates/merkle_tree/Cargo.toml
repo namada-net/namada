@@ -24,6 +24,7 @@ namada_migrations = { workspace = true, optional = true }
 
 arse-merkle-tree.workspace = true
 borsh.workspace = true
+derivative.workspace = true
 eyre.workspace = true
 ics23.workspace = true
 linkme = { workspace = true, optional = true }

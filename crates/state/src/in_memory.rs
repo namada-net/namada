@@ -109,8 +109,11 @@ pub enum ProcessProposalCachedResult {
 /// The block storage data
 #[derive(Debug)]
 pub struct BlockStorage<H: StorageHasher> {
-    /// Merkle tree of all the other data in block storage
+    /// Canonical merkle tree of all the other data in block storage.
     pub tree: MerkleTree<H>,
+    /// Pre-commit merkle tree copy. This is used to determine merkle tree root
+    /// hash on `Abci::FinalizeBlock` before commit.
+    pub pre_commit_tree: MerkleTree<H>,
     /// From the start of `FinalizeBlock` until the end of `Commit`, this is
     /// height of the block that is going to be committed. Otherwise, it is the
     /// height of the most recently committed block, or `BlockHeight::sentinel`
@@ -139,6 +142,7 @@ where
     ) -> Self {
         let block = BlockStorage {
             tree: MerkleTree::default(),
+            pre_commit_tree: MerkleTree::default(),
             height: BlockHeight::default(),
             epoch: Epoch::default(),
             pred_epochs: Epochs::default(),
@@ -304,6 +308,29 @@ where
 
         let key = key_prefix.push(&"current_epoch".to_string())?;
         self.block.tree.update(&key, encode(&self.block.epoch))?;
+
+        Ok(())
+    }
+
+    /// Update the pre-commit merkle tree with epoch data
+    pub fn update_epoch_in_pre_commit_merkle_tree(&mut self) -> Result<()> {
+        let key_prefix: Key =
+            Address::Internal(InternalAddress::PoS).to_db_key().into();
+
+        let key = key_prefix.push(&"epoch_start_height".to_string())?;
+        self.block
+            .pre_commit_tree
+            .update(&key, encode(&self.next_epoch_min_start_height))?;
+
+        let key = key_prefix.push(&"epoch_start_time".to_string())?;
+        self.block
+            .pre_commit_tree
+            .update(&key, encode(&self.next_epoch_min_start_time))?;
+
+        let key = key_prefix.push(&"current_epoch".to_string())?;
+        self.block
+            .pre_commit_tree
+            .update(&key, encode(&self.block.epoch))?;
 
         Ok(())
     }

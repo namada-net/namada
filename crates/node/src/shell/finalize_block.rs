@@ -68,6 +68,8 @@ pub struct Response {
     /// A list of updates to the validator set.
     /// These will reflect the validator set at current height + 2.
     pub validator_updates: Vec<validator::Update>,
+    /// Merkle tree root hash
+    pub app_hash: AppHash,
 }
 
 impl<D, H> Shell<D, H>
@@ -81,6 +83,12 @@ where
     ///
     /// Apply the transactions included in the block.
     pub fn finalize_block(&mut self, req: Request) -> ShellResult<Response> {
+        // Copy merkle tree from canonical tree and pre-commit block to it
+        {
+            let block = &mut self.state.in_mem_mut().block;
+            block.pre_commit_tree = block.tree.clone();
+        }
+
         let Request {
             txs,
             decided_last_commit,
@@ -269,10 +277,25 @@ where
 
         debug_assert_eq!(txs.len(), tx_results.len());
 
+        self.state.pre_commit_block()?;
+
+        if let Some(migration) = &self.scheduled_migration {
+            if height == migration.height {
+                let migration = migration
+                    .load_and_validate()
+                    .expect("The scheduled migration is not valid.");
+                migrations::pre_commit(&mut self.state, migration);
+            }
+        }
+
+        let merkle_root = self.state.in_mem().block.pre_commit_tree.root();
+        let app_hash = AppHash::try_from(merkle_root.0.to_vec())
+            .expect("expected a valid app hash");
         Ok(Response {
             events,
             tx_results,
             validator_updates,
+            app_hash,
         })
     }
 

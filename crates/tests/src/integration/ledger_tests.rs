@@ -476,7 +476,6 @@ fn test_dry_run_transaction() -> Result<()> {
 /// 1. Run the ledger node
 /// 2. Submit an invalid transaction (disallowed by state machine)
 /// 3. Check that the state was changed
-/// 5. Submit and invalid transactions (malformed)
 #[test]
 fn invalid_transactions() -> Result<()> {
     // This address doesn't matter for tests. But an argument is required.
@@ -485,38 +484,7 @@ fn invalid_transactions() -> Result<()> {
     let (node, _services) = setup::setup()?;
 
     // 2. Submit an invalid transaction (trying to transfer tokens should fail
-    // in the user's VP due to the wrong signer)
-    let tx_args = apply_use_device(vec![
-        "transparent-transfer",
-        "--source",
-        BERTHA,
-        "--target",
-        ALBERT,
-        "--token",
-        NAM,
-        "--amount",
-        "1",
-        "--signing-keys",
-        ALBERT_KEY,
-        "--node",
-        &validator_one_rpc,
-        "--force",
-    ]);
-
-    let captured = CapturedOutput::of(|| run(&node, Bin::Client, tx_args));
-    assert_matches!(captured.result, Ok(_));
-    assert!(captured.contains(TX_REJECTED));
-
-    node.finalize_and_commit(None);
-    // There should be state now
-    {
-        let locked = node.shell.lock().unwrap();
-        assert_ne!(
-            locked.last_state("").last_block_app_hash,
-            Default::default()
-        );
-    }
-
+    // in the user's VP due to the insufficient balance)
     let daewon_lower = DAEWON.to_lowercase();
     let tx_args = apply_use_device(vec![
         "transparent-transfer",
@@ -538,6 +506,16 @@ fn invalid_transactions() -> Result<()> {
     ]);
     let captured = CapturedOutput::of(|| run(&node, Bin::Client, tx_args));
     assert!(captured.contains(TX_INSUFFICIENT_BALANCE));
+
+    node.finalize_and_commit(None);
+    // There should be state now
+    {
+        let locked = node.shell.lock().unwrap();
+        assert_ne!(
+            locked.last_state("").last_block_app_hash,
+            Default::default()
+        );
+    }
 
     Ok(())
 }

@@ -84,13 +84,12 @@ pub async fn build_bridge_pool_tx(
                 query_wasm_code_hash(context, code_path.to_string_lossy()),
                 aux_signing_data(
                     context,
-                    &tx_args,
+                    wrap_tx,
                     // tx signer
                     Some(sender_),
                     vec![],
                     false,
                     vec![],
-                    None
                 ),
             )?;
             let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
@@ -130,12 +129,10 @@ pub async fn build_bridge_pool_tx(
                 query_wasm_code_hash(context, code_path.to_string_lossy()),
                 aux_inner_signing_data(
                     context,
-                    &tx_args,
+                    tx_args.signing_keys,
                     // tx signer
                     Some(sender_),
                     vec![],
-                    vec![],
-                    false
                 )
             )?;
 

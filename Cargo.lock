@@ -5677,6 +5677,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "kdam",
+ "konst",
  "lazy_static",
  "ledger-transport",
  "ledger-transport-hid",

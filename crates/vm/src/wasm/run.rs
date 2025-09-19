@@ -157,6 +157,7 @@ pub fn tx<S, CA>(
     vp_wasm_cache: &mut VpCache<CA>,
     tx_wasm_cache: &mut TxCache<CA>,
     gas_meter_kind: GasMeterKind,
+    dry_run: bool,
 ) -> Result<BTreeSet<Address>>
 where
     S: StateRead + State + StorageRead,
@@ -241,6 +242,7 @@ where
 
     let mut env = TxVmEnv::new(
         WasmMemory::new(Rc::downgrade(&store)),
+        dry_run,
         write_log,
         in_mem,
         db,
@@ -389,6 +391,7 @@ pub fn vp<S, CA>(
     verifiers: &BTreeSet<Address>,
     mut vp_wasm_cache: VpCache<CA>,
     gas_meter_kind: GasMeterKind,
+    dry_run: bool,
 ) -> Result<()>
 where
     S: StateRead,
@@ -424,6 +427,7 @@ where
 
     let mut env = VpVmEnv::new(
         WasmMemory::new(Rc::downgrade(&store)),
+        dry_run,
         address,
         state.write_log(),
         state.in_mem(),
@@ -849,6 +853,7 @@ where
         let mut env = VpVmEnv {
             memory: WasmMemory::new(Rc::downgrade(&store)),
             ctx,
+            dry_run: false,
         };
         let yielded_value_borrow = env.ctx.yielded_value;
         let imports = {
@@ -1623,6 +1628,7 @@ mod tests {
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
+            false,
         );
         assert!(result.is_ok(), "Expected success, got {:?}", result);
 
@@ -1643,6 +1649,7 @@ mod tests {
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
+            false,
         )
         .expect_err("Expected to run out of memory");
 
@@ -1716,6 +1723,7 @@ mod tests {
                 &verifiers,
                 vp_cache.clone(),
                 GasMeterKind::MutGlobal,
+                false,
             )
             .is_ok()
         );
@@ -1749,6 +1757,7 @@ mod tests {
                 &verifiers,
                 vp_cache,
                 GasMeterKind::MutGlobal,
+                false,
             )
             .is_err()
         );
@@ -1800,6 +1809,7 @@ mod tests {
             &verifiers,
             vp_cache.clone(),
             GasMeterKind::MutGlobal,
+            false,
         );
         assert!(result.is_ok(), "Expected success, got {:?}", result);
 
@@ -1820,6 +1830,7 @@ mod tests {
             &verifiers,
             vp_cache,
             GasMeterKind::MutGlobal,
+            false,
         )
         .expect_err("Expected to run out of memory");
 
@@ -1871,6 +1882,7 @@ mod tests {
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
+            false,
         );
         // Depending on platform, we get a different error from the running out
         // of memory
@@ -1928,6 +1940,7 @@ mod tests {
             &verifiers,
             vp_cache,
             GasMeterKind::MutGlobal,
+            false,
         );
         // Depending on platform, we get a different error from the running out
         // of memory
@@ -1990,6 +2003,7 @@ mod tests {
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
+            false,
         )
         .expect_err("Expected to run out of memory");
 
@@ -2048,6 +2062,7 @@ mod tests {
             &verifiers,
             vp_cache,
             GasMeterKind::MutGlobal,
+            false,
         )
         .expect_err("Expected to run out of memory");
 
@@ -2126,6 +2141,7 @@ mod tests {
                 &verifiers,
                 vp_cache,
                 GasMeterKind::MutGlobal,
+                false
             )
             .is_err()
         );
@@ -2237,6 +2253,7 @@ mod tests {
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
+            false,
         );
 
         assert!(matches!(result.unwrap_err(), Error::GasError(_)));
@@ -2279,6 +2296,7 @@ mod tests {
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
+            false,
         );
 
         assert!(matches!(result.unwrap_err(), Error::GasError(_)));
@@ -2323,6 +2341,7 @@ mod tests {
             &verifiers,
             vp_cache.clone(),
             GasMeterKind::MutGlobal,
+            false,
         );
 
         assert!(matches!(result.unwrap_err(), Error::GasError(_)));
@@ -2368,6 +2387,7 @@ mod tests {
             &verifiers,
             vp_cache.clone(),
             GasMeterKind::MutGlobal,
+            false,
         );
 
         assert!(matches!(result.unwrap_err(), Error::GasError(_)));
@@ -2544,6 +2564,7 @@ mod tests {
             &verifiers,
             vp_cache.clone(),
             GasMeterKind::MutGlobal,
+            false,
         )
     }
 
@@ -2591,6 +2612,7 @@ mod tests {
             vp_cache,
             tx_cache,
             GasMeterKind::MutGlobal,
+            false,
         )
     }
 
@@ -2646,6 +2668,7 @@ mod tests {
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
+            false,
         )
         .unwrap();
 

@@ -285,6 +285,7 @@ impl BenchShellInner {
             &mut self.inner.vp_wasm_cache,
             &mut self.inner.tx_wasm_cache,
             run::GasMeterKind::MutGlobal,
+            false,
         )
         .unwrap()
     }

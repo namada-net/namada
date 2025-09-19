@@ -1519,7 +1519,7 @@ where
             ))))?;
 
     fee_data_check(wrapper, minimum_gas_price, shell_params)?;
-    protocol::check_fees(shell_params, tx, wrapper)
+    protocol::check_fees(shell_params, tx, wrapper, false)
         .map_err(Error::TxApply)
         .map(|_| ())
 }

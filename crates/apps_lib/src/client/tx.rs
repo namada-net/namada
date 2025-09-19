@@ -195,10 +195,6 @@ pub async fn submit_reveal_aux(
     args: &args::Tx,
     address: &Address,
 ) -> Result<Option<(Tx, SigningData)>, error::Error> {
-    if args.dump_tx.is_some() {
-        return Ok(None);
-    }
-
     if let Address::Implicit(ImplicitAddress(pkh)) = address {
         let public_key = context
             .wallet_mut()
@@ -1223,12 +1219,12 @@ pub async fn submit_shielded_transfer(
     let (mut tx, signing_data) =
         args.clone().build(namada, &mut bparams).await?;
     let disposable_fee_payer = match signing_data {
-        SigningData::Inner(_) => false,
+        SigningData::Inner(_) => None,
         SigningData::Wrapper(ref signing_wrapper_data) => {
-            signing_wrapper_data.disposable_fee_payer()
+            Some(signing_wrapper_data.disposable_fee_payer())
         }
     };
-    if !disposable_fee_payer {
+    if let Some(false) = disposable_fee_payer {
         display_line!(
             namada.io(),
             "{}: {}\n",
@@ -1258,7 +1254,7 @@ pub async fn submit_shielded_transfer(
             )
         })?;
     if let Some(dump_tx) = args.tx.dump_tx {
-        if disposable_fee_payer {
+        if let Some(true) = disposable_fee_payer {
             display_line!(
                 namada.io(),
                 "Transaction dry run. The disposable address will not be \
@@ -1270,7 +1266,7 @@ pub async fn submit_shielded_transfer(
     } else {
         sign(namada, &mut tx, &args.tx, signing_data).await?;
         // Store the generated disposable signing key to wallet in case of need
-        if disposable_fee_payer {
+        if let Some(true) = disposable_fee_payer {
             namada.wallet().await.save().map_err(|_| {
                 error::Error::Other(
                     "Failed to save disposable address to wallet".to_string(),
@@ -1396,12 +1392,12 @@ pub async fn submit_unshielding_transfer(
     let (mut tx, signing_data) =
         args.clone().build(namada, &mut bparams).await?;
     let disposable_fee_payer = match signing_data {
-        SigningData::Inner(_) => false,
+        SigningData::Inner(_) => None,
         SigningData::Wrapper(ref signing_wrapper_data) => {
-            signing_wrapper_data.disposable_fee_payer()
+            Some(signing_wrapper_data.disposable_fee_payer())
         }
     };
-    if !disposable_fee_payer {
+    if let Some(false) = disposable_fee_payer {
         display_line!(
             namada.io(),
             "{}: {}\n",
@@ -1431,7 +1427,7 @@ pub async fn submit_unshielding_transfer(
             )
         })?;
     if let Some(dump_tx) = args.tx.dump_tx {
-        if disposable_fee_payer {
+        if let Some(true) = disposable_fee_payer {
             display_line!(
                 namada.io(),
                 "Transaction dry run. The disposable address will not be \
@@ -1443,7 +1439,7 @@ pub async fn submit_unshielding_transfer(
     } else {
         sign(namada, &mut tx, &args.tx, signing_data).await?;
         // Store the generated disposable signing key to wallet in case of need
-        if disposable_fee_payer {
+        if let Some(true) = disposable_fee_payer {
             namada.wallet().await.save().map_err(|_| {
                 error::Error::Other(
                     "Failed to save disposable address to wallet".to_string(),
@@ -1492,12 +1488,12 @@ where
         .await
         .map_err(|e| bparams_err.unwrap_or(e))?;
     let disposable_fee_payer = match signing_data {
-        SigningData::Inner(_) => false,
+        SigningData::Inner(_) => None,
         SigningData::Wrapper(ref signing_wrapper_data) => {
-            signing_wrapper_data.disposable_fee_payer()
+            Some(signing_wrapper_data.disposable_fee_payer())
         }
     };
-    if args.source.spending_key().is_some() && !disposable_fee_payer {
+    if let Some(false) = disposable_fee_payer {
         display_line!(
             namada.io(),
             "{}: {}\n",
@@ -1524,7 +1520,7 @@ where
         tx.sections.iter().find_map(|section| section.masp_tx());
     if let Some(dump_tx) = args.tx.dump_tx {
         tx::dump_tx(namada.io(), dump_tx, args.tx.output_folder, tx)?;
-        if disposable_fee_payer {
+        if let Some(true) = disposable_fee_payer {
             display_line!(
                 namada.io(),
                 "Transaction dry run. The disposable address will not be \
@@ -1536,7 +1532,7 @@ where
         }
     } else {
         // Store the generated disposable signing key to wallet in case of need
-        if disposable_fee_payer {
+        if let Some(true) = disposable_fee_payer {
             namada.wallet().await.save().map_err(|_| {
                 error::Error::Other(
                     "Failed to save disposable address to wallet".to_string(),

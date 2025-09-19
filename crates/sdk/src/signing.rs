@@ -542,9 +542,6 @@ pub async fn aux_signing_data(
             disposable_fee_payer: false,
         },
         _ => {
-            // FIXME: in theory though we want to leave freedom to the user,
-            // just guide them, look at where we print the other warning message
-            // and add this one as well, then mention this thing in the PR
             if let Some(pubkey) = public_keys.first() {
                 FeeAuthorization::Signer {
                     pubkey: pubkey.to_owned(),

@@ -347,9 +347,7 @@ pub async fn build_reveal_pk(
         let signing_data = signing::aux_signing_data(
             context,
             wrap_tx,
-            // FIXME: I think the owner is useless cause the implicit vp
-            // doesn't check the signatures when revealing a pk
-            Some(public_key.into()),
+            None,
             args.signing_keys.to_owned(),
             false,
             vec![],
@@ -4238,8 +4236,6 @@ pub async fn build_unshielding_transfer<N: Namada>(
     args: &mut args::TxUnshieldingTransfer,
     bparams: &mut impl BuildParams,
 ) -> Result<(Tx, SigningData)> {
-    // FIXME: should return an error if signing keys here? Or maybe just print a
-    // warning?
     let (mut signing_data, wrap_args) = if let Some(wrap_tx) = &args.tx.wrap_tx
     {
         let signing_data = signing::aux_signing_data(
@@ -4763,7 +4759,6 @@ pub async fn build_custom(
         data_path.clone().map(|data| tx.add_serialized_data(data));
         tx
     };
-    // FIXME: review the issue with sign_offline and the public key map
 
     // Wrap the tx only if it's not already. If the user passed the argument for
     // the wrapper signatures we also assume the followings:
@@ -4778,119 +4773,109 @@ pub async fn build_custom(
     //    3. If the wrapper signature was provided then we also expect the inner
     //       signature(s) to have been provided, in this case we generate a
     //       SigningData to attach all these signatures
-    // FIXME: can remove the signing_data variable?
-    // FIXME: use if instead of match on the wrapper
-    let signing_data = match tx.header.wrapper() {
-        Some(_) => {
-            let wrapper_signing_data =
-                match (wrapper_signature, &tx_args.wrap_tx) {
-                    (None, None) => {
-                        return Err(Error::Other(
-                            "A wrapper signature or a wrapper signer must be \
-                             provided when loading a wrapped custom \
-                             transaction"
-                                .to_string(),
-                        ));
-                    }
-                    (None, Some(wrap_tx)) => {
-                        let signing_data = signing::aux_signing_data(
-                            context,
-                            wrap_tx,
-                            owner.to_owned(),
-                            tx_args.signing_keys.to_owned(),
-                            // The optional masp fee paying transaction has
-                            // already been
-                            // produced so no need to generate a disposable
-                            // address anyway
-                            false,
-                            signatures.clone(),
-                        )
-                        .await?;
-
-                        // Wrap the tx if no wrapper signature is provided, even
-                        // if it is already wrapped
-                        // (wrapper overwrite)
-                        let fee_amount =
-                            validate_fee(context, wrap_tx, tx_args.force)
-                                .await?;
-                        tx.add_wrapper(
-                            Fee {
-                                amount_per_gas_unit: fee_amount,
-                                token: wrap_tx.fee_token.to_owned(),
-                            },
-                            signing_data.fee_payer_or_err()?.to_owned(),
-                            wrap_tx.gas_limit,
-                        );
-
-                        signing_data
-                    }
-                    // If both a serialized wrapper signature and a request to
-                    // wrap the tx are passed, the serialized signature takes
-                    // precedence
-                    (Some(wrapper_sig), _) => SigningWrapperData {
-                        signing_data: vec![SigningTxData {
-                            owner: None,
-                            public_keys: Default::default(),
-                            threshold: 0,
-                            account_public_keys_map: Default::default(),
-                            shielded_hash: None,
-                            signatures: signatures.to_owned(),
-                        }],
-                        fee_auth: FeeAuthorization::Signature(
-                            wrapper_sig.to_owned(),
-                        ),
-                    },
-                };
-
-            SigningData::Wrapper(wrapper_signing_data)
-        }
-        None => {
-            if wrapper_signature.is_some() {
+    let signing_data = if tx.header.wrapper().is_some() {
+        let wrapper_signing_data = match (wrapper_signature, &tx_args.wrap_tx) {
+            (None, None) => {
                 return Err(Error::Other(
-                    "A wrapper signature was provided but the transaction is \
-                     not a wrapper"
+                    "A wrapper signature or a wrapper signer must be provided \
+                     when loading a wrapped custom transaction"
                         .to_string(),
                 ));
             }
+            (None, Some(wrap_tx)) => {
+                let signing_data = signing::aux_signing_data(
+                    context,
+                    wrap_tx,
+                    owner.to_owned(),
+                    tx_args.signing_keys.to_owned(),
+                    // The optional masp fee paying transaction has
+                    // already been
+                    // produced so no need to generate a disposable
+                    // address anyway
+                    false,
+                    signatures.clone(),
+                )
+                .await?;
 
-            match &tx_args.wrap_tx {
-                Some(wrap_tx) => {
-                    let wrapper_signing_data = signing::aux_signing_data(
-                        context,
-                        wrap_tx,
-                        owner.clone(),
-                        tx_args.signing_keys.to_owned(),
-                        // The optional masp fee paying transaction has already
-                        // been produced so no need to
-                        // generate a disposable address anyway
-                        false,
-                        signatures.to_owned(),
-                    )
-                    .await?;
-                    let fee_amount =
-                        validate_fee(context, wrap_tx, tx_args.force).await?;
-                    let fee_payer =
-                        wrapper_signing_data.fee_payer_or_err()?.to_owned();
-                    tx.add_wrapper(
-                        Fee {
-                            amount_per_gas_unit: fee_amount,
-                            token: wrap_tx.fee_token.to_owned(),
-                        },
-                        fee_payer,
-                        wrap_tx.gas_limit,
-                    );
-                    SigningData::Wrapper(wrapper_signing_data)
-                }
-                None => SigningData::Inner(
-                    signing::aux_inner_signing_data(
-                        context,
-                        tx_args.signing_keys.to_owned(),
-                        owner.clone(),
-                        signatures.to_owned(),
-                    )
-                    .await?,
-                ),
+                // Wrap the tx if no wrapper signature is provided, even
+                // if it is already wrapped
+                // (wrapper overwrite)
+                let fee_amount =
+                    validate_fee(context, wrap_tx, tx_args.force).await?;
+                tx.add_wrapper(
+                    Fee {
+                        amount_per_gas_unit: fee_amount,
+                        token: wrap_tx.fee_token.to_owned(),
+                    },
+                    signing_data.fee_payer_or_err()?.to_owned(),
+                    wrap_tx.gas_limit,
+                );
+
+                signing_data
             }
+            // If both a serialized wrapper signature and a request to
+            // wrap the tx are passed, the serialized signature takes
+            // precedence
+            (Some(wrapper_sig), _) => SigningWrapperData {
+                signing_data: vec![SigningTxData {
+                    owner: None,
+                    public_keys: Default::default(),
+                    threshold: 0,
+                    account_public_keys_map: Default::default(),
+                    shielded_hash: None,
+                    signatures: signatures.to_owned(),
+                }],
+                fee_auth: FeeAuthorization::Signature(wrapper_sig.to_owned()),
+            },
+        };
+
+        SigningData::Wrapper(wrapper_signing_data)
+    } else {
+        if wrapper_signature.is_some() {
+            return Err(Error::Other(
+                "A wrapper signature was provided but the transaction is not \
+                 a wrapper"
+                    .to_string(),
+            ));
+        }
+
+        match &tx_args.wrap_tx {
+            Some(wrap_tx) => {
+                let wrapper_signing_data = signing::aux_signing_data(
+                    context,
+                    wrap_tx,
+                    owner.clone(),
+                    tx_args.signing_keys.to_owned(),
+                    // The optional masp fee paying transaction has already
+                    // been produced so no need to
+                    // generate a disposable address anyway
+                    false,
+                    signatures.to_owned(),
+                )
+                .await?;
+                let fee_amount =
+                    validate_fee(context, wrap_tx, tx_args.force).await?;
+                let fee_payer =
+                    wrapper_signing_data.fee_payer_or_err()?.to_owned();
+                tx.add_wrapper(
+                    Fee {
+                        amount_per_gas_unit: fee_amount,
+                        token: wrap_tx.fee_token.to_owned(),
+                    },
+                    fee_payer,
+                    wrap_tx.gas_limit,
+                );
+                SigningData::Wrapper(wrapper_signing_data)
+            }
+            None => SigningData::Inner(
+                signing::aux_inner_signing_data(
+                    context,
+                    tx_args.signing_keys.to_owned(),
+                    owner.clone(),
+                    signatures.to_owned(),
+                )
+                .await?,
+            ),
         }
     };
 

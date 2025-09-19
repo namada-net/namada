@@ -133,6 +133,8 @@ fn ledger_txs_and_queries() -> Result<()> {
             NAM,
             "--amount",
             "10.1",
+            "--signing-keys",
+            ESTER,
             "--node",
             &validator_one_rpc,
         ]),
@@ -2517,7 +2519,13 @@ fn wrap_tx_by_elsewho() -> Result<()> {
         run(
             &node,
             Bin::Client,
-            apply_use_device(vec!["reveal-pk", "--public-key", key_alias]),
+            apply_use_device(vec![
+                "reveal-pk",
+                "--public-key",
+                key_alias,
+                "--gas-payer",
+                key_alias,
+            ]),
         )
     });
     assert!(captured.result.is_ok());
@@ -2725,7 +2733,13 @@ fn offline_wrap_tx_by_elsewho() -> Result<()> {
         run(
             &node,
             Bin::Client,
-            apply_use_device(vec!["reveal-pk", "--public-key", key_alias]),
+            apply_use_device(vec![
+                "reveal-pk",
+                "--public-key",
+                key_alias,
+                "--gas-payer",
+                key_alias,
+            ]),
         )
     });
     assert!(captured.result.is_ok());
@@ -2988,7 +3002,13 @@ fn offline_wrapper_tx() -> Result<()> {
         run(
             &node,
             Bin::Client,
-            apply_use_device(vec!["reveal-pk", "--public-key", key_alias]),
+            apply_use_device(vec![
+                "reveal-pk",
+                "--public-key",
+                key_alias,
+                "--gas-payer",
+                key_alias,
+            ]),
         )
     });
     assert!(captured.result.is_ok());

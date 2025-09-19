@@ -663,6 +663,82 @@ impl Authorization {
 
         Ok(verifications)
     }
+
+    /// Mock a signature verification while still consuming gas. Used
+    /// for dry-running txs.
+    pub fn dry_run_signature<F>(
+        &self,
+        verified_pks: &mut HashSet<u8>,
+        public_keys_index_map: &AccountPublicKeysMap,
+        signer: &Option<Address>,
+        consume_verify_sig_gas: &mut F,
+    ) -> std::result::Result<u8, VerifySigError>
+    where
+        F: FnMut() -> std::result::Result<(), namada_gas::Error>,
+    {
+        // Records whether there are any successful verifications
+        let mut verifications = 0;
+        match &self.signer {
+            // Verify the signatures against the given public keys if the
+            // account addresses match
+            Signer::Address(addr) if Some(addr) == signer.as_ref() => {
+                for idx in self.signatures.keys() {
+                    if public_keys_index_map
+                        .get_public_key_from_index(*idx)
+                        .is_some()
+                    {
+                        consume_verify_sig_gas()?;
+                        verified_pks.insert(*idx);
+                        // Cannot overflow
+                        #[allow(clippy::arithmetic_side_effects)]
+                        {
+                            verifications += 1;
+                        }
+                    }
+                }
+            }
+            // If the account addresses do not match, then there is no efficient
+            // way to map signatures to the given public keys
+            Signer::Address(_) => {}
+            // Verify the signatures against the subset of this section's public
+            // keys that are also in the given map
+            Signer::PubKeys(pks) => {
+                if pks.len() > usize::from(u8::MAX) {
+                    return Err(VerifySigError::PksOverflow);
+                }
+                #[allow(clippy::disallowed_types)] // ordering doesn't matter
+                let unique_pks: std::collections::HashSet<
+                    &common::PublicKey,
+                > = std::collections::HashSet::from_iter(pks.iter());
+                if unique_pks.len() != pks.len() {
+                    return Err(VerifySigError::RepeatedPks);
+                }
+                for (idx, pk) in pks.iter().enumerate() {
+                    let map_idx =
+                        public_keys_index_map.get_index_from_public_key(pk);
+
+                    if let Some(map_idx) = map_idx {
+                        let sig_idx = u8::try_from(idx)
+                            .map_err(|_| VerifySigError::PksOverflow)?;
+                        consume_verify_sig_gas()?;
+                        consume_verify_sig_gas()?;
+                        _ = self
+                            .signatures
+                            .get(&sig_idx)
+                            .ok_or(VerifySigError::MissingSignature)?;
+                        verified_pks.insert(map_idx);
+                        // Cannot overflow
+                        #[allow(clippy::arithmetic_side_effects)]
+                        {
+                            verifications += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(verifications)
+    }
 }
 
 /// A section representing a multisig over another section

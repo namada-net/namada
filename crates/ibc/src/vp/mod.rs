@@ -404,6 +404,9 @@ where
                 MsgEnvelope::Packet(PacketMsg::Recv(msg)) => {
                     Some(&msg.packet.chan_id_on_b)
                 }
+                MsgEnvelope::Packet(PacketMsg::Ack(msg)) => {
+                    Some(&msg.packet.chan_id_on_a)
+                }
                 MsgEnvelope::Packet(PacketMsg::Timeout(msg)) => {
                     Some(&msg.packet.chan_id_on_a)
                 }

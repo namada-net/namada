@@ -27,6 +27,7 @@ namada-eth-bridge = ["namada_ethereum_bridge/namada-eth-bridge"]
 benches = ["namada_core/benches", "namada_core/testing", "namada_state/benches"]
 wasm-runtime = ["namada_vm/wasm-runtime"]
 masp = ["namada_core/task_env", "namada_core/control_flow", "namada_token/masp"]
+historic-masp = ["masp", "namada_token/historic-masp"]
 # for tests and test utilities
 testing = [
   "masp_primitives/test-dependencies",

@@ -461,33 +461,47 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
             self.memo_map.insert(note_pos, memo);
         }
         self.nf_map.insert(nf, note_pos);
+
         #[cfg(feature = "historic")]
-        {
-            self.vk_map.insert(note_pos, *vk);
+        self.save_decrypted_shielded_outputs_history(
+            indexed_tx, vk, note_pos, &note,
+        )?;
 
-            // Update the history
-            let asset_data = self
-                .asset_types
-                .get(&note.asset_type)
-                .ok_or_else(|| eyre!("Can not get the asset data"))?
-                .to_owned();
-            let output_entry = self
-                .history
-                .entry(vk.to_owned())
-                .or_default()
-                .entry(indexed_tx)
-                .or_default()
-                .outputs
-                .entry(asset_data.token)
-                .or_insert(Amount::zero());
-            // No need to take care of the denomination as that should already
-            // be the default one for the given token
-            let note_amount =
-                Amount::from_masp_denominated(note.value, asset_data.position);
+        Ok(())
+    }
 
-            *output_entry = checked!(output_entry + note_amount)
-                .wrap_err("Overflow in shielded history outputs")?;
-        }
+    #[cfg(feature = "historic")]
+    fn save_decrypted_shielded_outputs_history(
+        &mut self,
+        indexed_tx: IndexedTx,
+        vk: &ViewingKey,
+        note_pos: NotePosition,
+        note: &Note,
+    ) -> Result<(), eyre::Error> {
+        self.vk_map.insert(note_pos, *vk);
+
+        // Update the history
+        let asset_data = self
+            .asset_types
+            .get(&note.asset_type)
+            .ok_or_else(|| eyre!("Can not get the asset data"))?
+            .to_owned();
+        let output_entry = self
+            .history
+            .entry(vk.to_owned())
+            .or_default()
+            .entry(indexed_tx)
+            .or_default()
+            .outputs
+            .entry(asset_data.token)
+            .or_insert(Amount::zero());
+        // No need to take care of the denomination as that should already
+        // be the default one for the given token
+        let note_amount =
+            Amount::from_masp_denominated(note.value, asset_data.position);
+
+        *output_entry = checked!(output_entry + note_amount)
+            .wrap_err("Overflow in shielded history outputs")?;
 
         Ok(())
     }
@@ -510,6 +524,13 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
             // If the shielded spend's nullifier is in our map, then target
             // note is rendered unusable
             if let Some(note_pos) = self.nf_map.swap_remove(&ss.nullifier) {
+                #[cfg(feature = "historic")]
+                self.save_shielded_spends_history(
+                    &note_pos,
+                    used_conversions,
+                    update_history,
+                )?;
+
                 self.note_map.swap_remove(&note_pos);
                 self.spents.insert(note_pos);
                 self.tree
@@ -518,56 +539,56 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
                     .unwrap_or_else(|err| {
                         panic!("Failed to remove marked leaf: {err}")
                     });
-
-                #[cfg(feature = "historic")]
-                {
-                    // Update the history if required
-                    if let Some(indexed_tx) = update_history {
-                        let vk =
-                            self.vk_map.get(&note_pos).ok_or_else(|| {
-                                eyre!(
-                                    "Missing viewing key for the provided \
-                                     note position"
-                                )
-                            })?;
-                        let note =
-                            self.note_map.get(&note_pos).ok_or_else(|| {
-                                eyre!(
-                                    "Missing note for the provided note \
-                                     position"
-                                )
-                            })?;
-                        let asset_data = self
-                            .asset_types
-                            .get(&note.asset_type)
-                            .ok_or_else(|| eyre!("Can not get the asset data"))?
-                            .to_owned();
-
-                        let history_entry = self
-                            .history
-                            .entry(vk.to_owned())
-                            .or_default()
-                            .entry(indexed_tx)
-                            .or_default();
-                        history_entry.conversions = used_conversions;
-
-                        let input_entry = history_entry
-                            .inputs
-                            .entry(asset_data.token)
-                            .or_insert(Amount::zero());
-                        // No need to take care of the denomination as that
-                        // should already be the default
-                        // one for the given token
-                        let note_amount = Amount::from_masp_denominated(
-                            note.value,
-                            asset_data.position,
-                        );
-                        *input_entry = checked!(input_entry + note_amount)
-                            .wrap_err("Overflow in shielded history inputs")?;
-                    }
-                }
             }
         }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "historic")]
+    fn save_shielded_spends_history(
+        &mut self,
+        note_pos: &NotePosition,
+        used_conversions: bool,
+        update_history: Option<IndexedTx>,
+    ) -> Result<(), eyre::Error> {
+        // Update the history if required
+        let Some(indexed_tx) = update_history else {
+            return Ok(());
+        };
+
+        let vk = self.vk_map.get(note_pos).ok_or_else(|| {
+            eyre!("Missing viewing key for the provided note position")
+        })?;
+        let note = self.note_map.get(note_pos).ok_or_else(|| {
+            eyre!("Missing note for the provided note position")
+        })?;
+        let asset_data = self
+            .asset_types
+            .get(&note.asset_type)
+            .ok_or_else(|| eyre!("Can not get the asset data"))?
+            .to_owned();
+
+        let history_entry = self
+            .history
+            .entry(vk.to_owned())
+            .or_default()
+            .entry(indexed_tx)
+            .or_default();
+        history_entry.conversions = used_conversions;
+
+        let input_entry = history_entry
+            .inputs
+            .entry(asset_data.token)
+            .or_insert(Amount::zero());
+        // No need to take care of the denomination as that
+        // should already be the default
+        // one for the given token
+        let note_amount =
+            Amount::from_masp_denominated(note.value, asset_data.position);
+
+        *input_entry = checked!(input_entry + note_amount)
+            .wrap_err("Overflow in shielded history inputs")?;
 
         Ok(())
     }

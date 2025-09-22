@@ -124,9 +124,15 @@ check-crates:
 
 clippy-wasm = $(cargo) +$(nightly) clippy --manifest-path $(wasm)/Cargo.toml --all-targets -- -D warnings
 
-# Need a separate command for benchmarks to prevent the "testing" feature flag from being activated
+# Need a separate command for benchmarks to prevent the "testing"
+# feature flag from being activated. Another special case is the
+# "historic" feature flag present in `namada_shielded_token`.
 clippy:
 	$(cargo) +$(nightly) clippy $(jobs) --all-targets --workspace --exclude namada_benchmarks -- -D warnings && \
+	$(cargo) +$(nightly) clippy $(jobs) \
+		--package namada_shielded_token \
+		--features historic \
+		-- -D warnings && \
 	$(cargo) +$(nightly) clippy $(jobs) --all-targets --package namada_benchmarks -- -D warnings && \
 	make -C $(wasms) clippy && \
 	make -C $(wasms_for_tests) clippy

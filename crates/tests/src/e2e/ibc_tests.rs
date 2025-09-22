@@ -844,14 +844,14 @@ fn fee_payment_with_ibc_token() -> Result<()> {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }
 
-    // Transfer 250 samoleans from Gaia to Namada
+    // Transfer 500 samoleans from Gaia to Namada
     let namada_receiver = find_address(&test, ALBERT_KEY)?.to_string();
     transfer_from_cosmos(
         &test_gaia,
         COSMOS_USER,
         &namada_receiver,
         COSMOS_COIN,
-        250,
+        500,
         &port_id_gaia,
         &channel_id_gaia,
         None,
@@ -860,8 +860,10 @@ fn fee_payment_with_ibc_token() -> Result<()> {
     wait_for_packet_relay(&hermes_dir, &port_id_gaia, &channel_id_gaia, &test)?;
 
     // Check the token on Namada
-    check_balance(&test, ALBERT_KEY, &ibc_token_on_namada, 250)?;
-    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 750)?;
+    check_balance(&test, ALBERT_KEY, &ibc_token_on_namada, 500)?;
+    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 500)?;
+    check_balance(&test, PGF_ADDRESS.to_string(), &ibc_token_on_namada, 0)?;
+    check_ibc_token_supply(&test, &ibc_token_on_namada, 500)?;
 
     // Transparent transfer in Namada paying gas with samoleans
     transfer_on_chain(
@@ -872,12 +874,21 @@ fn fee_payment_with_ibc_token() -> Result<()> {
         NAM,
         50,
         ALBERT_KEY,
-        &["--gas-token", &ibc_token_on_namada, "--gas-limit", "250"],
+        &[
+            "--gas-token",
+            &ibc_token_on_namada,
+            "--gas-limit",
+            "250",
+            "--gas-price",
+            "2",
+        ],
     )?;
     check_balance(&test, ALBERT, NAM, 1_999_950)?;
     check_balance(&test, CHRISTEL, NAM, 2_000_050)?;
     check_balance(&test, ALBERT_KEY, &ibc_token_on_namada, 0)?;
     check_balance(&test, "validator-0", &ibc_token_on_namada, 250)?;
+    check_balance(&test, PGF_ADDRESS.to_string(), &ibc_token_on_namada, 250)?;
+    check_ibc_token_supply(&test, &ibc_token_on_namada, 500)?;
 
     Ok(())
 }
@@ -3291,6 +3302,23 @@ fn check_balance(
     let expected =
         format!("{}: {expected_amount}", token.as_ref().to_lowercase());
     client.exp_string(&expected)?;
+    client.assert_success();
+    Ok(())
+}
+
+fn check_ibc_token_supply(
+    test: &Test,
+    token: impl AsRef<str>,
+    expected_amount: u64,
+) -> Result<()> {
+    let rpc = get_actor_rpc(test, Who::Validator(0));
+
+    let query_args =
+        vec!["total-supply", "--token", token.as_ref(), "--node", &rpc];
+    let mut client = run!(test, Bin::Client, query_args, Some(40))?;
+    let expected = format!("Total supply of token tnam.*: {expected_amount}");
+
+    client.exp_regex(&expected)?;
     client.assert_success();
     Ok(())
 }

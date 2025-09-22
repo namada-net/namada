@@ -475,6 +475,29 @@ pub struct MaspTxResult {
     masp_section_ref: MaspTxRef,
 }
 
+pub(crate) struct ProtocolGasPrice(pub(crate) token::Amount);
+
+/// A trait to handle the available gas prices for a given token, the protocol
+/// one and the optional override coming from a block proposer local
+/// configuration
+pub(crate) trait MinimumGasPrice {
+    /// The gas price, potentially coming from the local configuration of the
+    /// block proposer (only for prepare_proposal)
+    fn price(&self) -> token::Amount;
+    /// The protocol imposed gas price
+    fn protocol_price(&self) -> token::Amount;
+}
+
+impl MinimumGasPrice for ProtocolGasPrice {
+    fn price(&self) -> token::Amount {
+        self.0
+    }
+
+    fn protocol_price(&self) -> token::Amount {
+        self.0
+    }
+}
+
 /// Performs the required operation on a wrapper transaction:
 ///  - replay protection
 ///  - fee payment
@@ -507,12 +530,32 @@ where
         .write_log_mut()
         .write_tx_hash(tx.header_hash())
         .expect("Error while writing tx hash to storage");
+    let protocol_minimum_gas_price =
+        parameters::read_gas_cost(shell_params.state, &wrapper.fee.token)
+            .expect("Must be able to read gas cost parameter")
+            .ok_or(Error::FeeError(format!(
+                "The provided {} token is not allowed for fee payment",
+                wrapper.fee.token
+            )))?;
 
     // Charge or check fees, propagate any errors to prevent committing invalid
     // data
     let payment_result = match block_proposer {
         Some(block_proposer) => {
-            transfer_fee(shell_params, block_proposer, tx, wrapper, tx_index)?
+            let fee_components = crate::shell::get_fee_components(
+                wrapper,
+                shell_params.state,
+                &ProtocolGasPrice(protocol_minimum_gas_price),
+            )
+            .map_err(|e| Error::FeeError(e.to_string()))?;
+            transfer_fee(
+                shell_params,
+                block_proposer,
+                tx,
+                wrapper,
+                tx_index,
+                &fee_components,
+            )?
         }
         None => check_fees(shell_params, tx, wrapper)?,
     };
@@ -568,15 +611,32 @@ where
     Ok(batch_results)
 }
 
-/// Perform the actual transfer of fees from the fee payer to the block
-/// proposer. No modifications to the write log are committed or dropped in this
-/// function: this logic is up to the caller.
+/// The fee amounts split between the tip and the base fee
+pub struct FeeComponents {
+    pub base: token::Amount,
+    pub tip: token::Amount,
+}
+
+impl FeeComponents {
+    pub fn get_total_fee(&self) -> Result<Amount> {
+        checked!(self.base + self.tip).map_err(|_| {
+            Error::FeeError(
+                "Overflow in total fee reconstruction, this should not happen"
+                    .to_string(),
+            )
+        })
+    }
+}
+
+/// Perform the actual transfer of fees. No modifications to the write log are
+/// committed or dropped in this function: this logic is up to the caller.
 pub fn transfer_fee<S, D, H, CA>(
     shell_params: &mut ShellParams<'_, S, D, H, CA>,
     block_proposer: &Address,
     tx: &Tx,
     wrapper: &WrapperTx,
     tx_index: &TxIndex,
+    fee_components: &FeeComponents,
 ) -> Result<Option<MaspTxResult>>
 where
     S: 'static
@@ -590,149 +650,173 @@ where
     H: 'static + StorageHasher + Sync,
     CA: 'static + WasmCacheAccess + Sync,
 {
-    match wrapper.get_tx_fee() {
-        Ok(fees) => {
-            let fees = token::denom_to_amount(
-                fees,
-                &wrapper.fee.token,
-                shell_params.state,
-            )
-            .map_err(Error::Error)?;
+    #[cfg(not(fuzzing))]
+    let balance = token::read_balance(
+        shell_params.state,
+        &wrapper.fee.token,
+        &wrapper.fee_payer(),
+    )
+    .map_err(Error::Error)?;
 
-            #[cfg(not(fuzzing))]
-            let balance = token::read_balance(
-                shell_params.state,
-                &wrapper.fee.token,
-                &wrapper.fee_payer(),
-            )
-            .map_err(Error::Error)?;
+    // Use half of the max value to make the balance check pass
+    // sometimes with arbitrary fees
+    #[cfg(fuzzing)]
+    let balance = Amount::max().checked_div_u64(2).unwrap();
 
-            // Use half of the max value to make the balance check pass
-            // sometimes with arbitrary fees
-            #[cfg(fuzzing)]
-            let balance = Amount::max().checked_div_u64(2).unwrap();
+    let fees = fee_components.get_total_fee()?;
 
-            let (post_bal, valid_batched_tx_result) = if let Some(post_bal) =
-                balance.checked_sub(fees)
-            {
-                fee_token_transfer(
+    let (post_bal, valid_batched_tx_result) = if let Some(post_bal) =
+        balance.checked_sub(fees)
+    {
+        fee_token_transfer(
+            shell_params.state,
+            &wrapper.fee.token,
+            &wrapper.fee_payer(),
+            block_proposer,
+            fee_components,
+        )?;
+
+        (post_bal, None)
+    } else {
+        // See if the first inner transaction of the batch pays the fees
+        // with a masp unshield
+        match try_masp_fee_payment(shell_params, tx, tx_index) {
+            Ok(valid_batched_tx_result) => {
+                #[cfg(not(fuzzing))]
+                let balance = token::read_balance(
                     shell_params.state,
                     &wrapper.fee.token,
                     &wrapper.fee_payer(),
-                    block_proposer,
-                    fees,
-                )?;
+                )
+                .expect("Could not read balance key from storage");
+                #[cfg(fuzzing)]
+                let balance = Amount::max().checked_div_u64(2).unwrap();
 
-                (post_bal, None)
-            } else {
-                // See if the first inner transaction of the batch pays the fees
-                // with a masp unshield
-                match try_masp_fee_payment(shell_params, tx, tx_index) {
-                    Ok(valid_batched_tx_result) => {
-                        #[cfg(not(fuzzing))]
-                        let balance = token::read_balance(
+                let post_bal = match balance.checked_sub(fees) {
+                    Some(post_bal) => {
+                        // This cannot fail given the checked_sub check
+                        // here above
+                        fee_token_transfer(
                             shell_params.state,
                             &wrapper.fee.token,
                             &wrapper.fee_payer(),
-                        )
-                        .expect("Could not read balance key from storage");
-                        #[cfg(fuzzing)]
-                        let balance = Amount::max().checked_div_u64(2).unwrap();
+                            block_proposer,
+                            fee_components,
+                        )?;
 
-                        let post_bal = match balance.checked_sub(fees) {
-                            Some(post_bal) => {
-                                // This cannot fail given the checked_sub check
-                                // here above
-                                fee_token_transfer(
-                                    shell_params.state,
-                                    &wrapper.fee.token,
-                                    &wrapper.fee_payer(),
-                                    block_proposer,
-                                    fees,
-                                )?;
-
-                                post_bal
-                            }
-                            None => {
-                                // This shouldn't happen as it should be
-                                // prevented
-                                // from process_proposal.
-                                tracing::error!(
-                                    "Transfer of tx fee cannot be applied to \
-                                     due to insufficient funds. This \
-                                     shouldn't happen."
-                                );
-                                return Err(Error::FeeError(
-                                    "Insufficient funds for fee payment"
-                                        .to_string(),
-                                ));
-                            }
-                        };
-
-                        // Batched tx result must be returned (and considered)
-                        // only if fee payment was
-                        // successful
-                        (post_bal, Some(valid_batched_tx_result))
+                        post_bal
                     }
-                    Err(e) => {
+                    None => {
                         // This shouldn't happen as it should be prevented by
                         // process_proposal.
                         tracing::error!(
-                            "Transfer of tx fee cannot be applied because of \
-                             an error: {}. This shouldn't happen.",
-                            e
+                            "Transfer of tx fee cannot be applied to due to \
+                             insufficient funds. This shouldn't happen."
                         );
-                        return Err(e.into());
+                        return Err(Error::FeeError(
+                            "Insufficient funds for fee payment".to_string(),
+                        ));
                     }
-                }
-            };
+                };
 
-            let target_post_balance = Some(
-                token::read_balance(
-                    shell_params.state,
-                    &wrapper.fee.token,
-                    block_proposer,
-                )
-                .map_err(Error::Error)?
-                .into(),
-            );
-
-            const FEE_PAYMENT_DESCRIPTOR: std::borrow::Cow<'static, str> =
-                std::borrow::Cow::Borrowed("wrapper-fee-payment");
-            let current_block_height = shell_params
-                .state
-                .in_mem()
-                .get_last_block_height()
-                .next_height();
-            shell_params.state.write_log_mut().emit_event(
-                TokenEvent {
-                    descriptor: FEE_PAYMENT_DESCRIPTOR,
-                    level: EventLevel::Tx,
-                    operation: TokenOperation::transfer(
-                        UserAccount::Internal(wrapper.fee_payer()),
-                        UserAccount::Internal(block_proposer.clone()),
-                        wrapper.fee.token.clone(),
-                        fees.into(),
-                        post_bal.into(),
-                        target_post_balance,
-                    ),
-                }
-                .with(HeightAttr(current_block_height))
-                .with(TxHashAttr(tx.header_hash())),
-            );
-
-            Ok(valid_batched_tx_result)
+                // Batched tx result must be returned (and considered) only if
+                // fee payment was successful
+                (post_bal, Some(valid_batched_tx_result))
+            }
+            Err(e) => {
+                // This shouldn't happen as it should be prevented by
+                // process_proposal.
+                tracing::error!(
+                    "Transfer of tx fee cannot be applied because of an \
+                     error: {}. This shouldn't happen.",
+                    e
+                );
+                return Err(e.into());
+            }
         }
-        Err(e) => {
-            // Fee overflow. This shouldn't happen as it should be prevented
-            // by process_proposal.
-            tracing::error!(
-                "Transfer of tx fee cannot be applied to due to fee overflow. \
-                 This shouldn't happen."
-            );
-            Err(Error::FeeError(format!("{}", e)))
-        }
+    };
+
+    const BASE_FEE_PAYMENT_DESCRIPTOR: std::borrow::Cow<'static, str> =
+        std::borrow::Cow::Borrowed("wrapper-base-fee");
+    const FEE_TIP_PAYMENT_DESCRIPTOR: std::borrow::Cow<'static, str> =
+        std::borrow::Cow::Borrowed("wrapper-fee-tip");
+    let current_block_height = shell_params
+        .state
+        .in_mem()
+        .get_last_block_height()
+        .next_height();
+
+    // Event for the tip (if present)
+    if fee_components.tip.is_positive() {
+        let proposer_post_balance = Some(
+            token::read_balance(
+                shell_params.state,
+                &wrapper.fee.token,
+                block_proposer,
+            )
+            .map_err(Error::Error)?
+            .into(),
+        );
+        shell_params.state.write_log_mut().emit_event(
+            TokenEvent {
+                descriptor: FEE_TIP_PAYMENT_DESCRIPTOR,
+                level: EventLevel::Tx,
+                operation: TokenOperation::transfer(
+                    UserAccount::Internal(wrapper.fee_payer()),
+                    UserAccount::Internal(block_proposer.clone()),
+                    wrapper.fee.token.clone(),
+                    fee_components.tip.into(),
+                    post_bal.into(),
+                    proposer_post_balance,
+                ),
+            }
+            .with(HeightAttr(current_block_height))
+            .with(TxHashAttr(tx.header_hash())),
+        );
     }
+    // Event for the base fee
+    let operation = if wrapper.fee.token
+        == shell_params
+            .state
+            .get_native_token()
+            .map_err(Error::Error)?
+    {
+        TokenOperation::Burn {
+            target_account: UserAccount::Internal(wrapper.fee_payer()),
+            token: wrapper.fee.token.clone(),
+            amount: fee_components.base.into(),
+            post_balance: post_bal.into(),
+        }
+    } else {
+        let pgf_post_balance = Some(
+            token::read_balance(
+                shell_params.state,
+                &wrapper.fee.token,
+                &namada_sdk::address::PGF,
+            )
+            .map_err(Error::Error)?
+            .into(),
+        );
+        TokenOperation::transfer(
+            UserAccount::Internal(wrapper.fee_payer()),
+            UserAccount::Internal(namada_sdk::address::PGF),
+            wrapper.fee.token.clone(),
+            fee_components.base.into(),
+            post_bal.into(),
+            pgf_post_balance,
+        )
+    };
+    shell_params.state.write_log_mut().emit_event(
+        TokenEvent {
+            descriptor: BASE_FEE_PAYMENT_DESCRIPTOR,
+            level: EventLevel::Tx,
+            operation,
+        }
+        .with(HeightAttr(current_block_height))
+        .with(TxHashAttr(tx.header_hash())),
+    );
+
+    Ok(valid_batched_tx_result)
 }
 
 /// Custom wrapper type for masp fee payment errors. The purpose of this type is
@@ -933,24 +1017,67 @@ fn get_optional_masp_ref<S: Read<Err = state::Error>>(
 }
 
 // Manage the token transfer for the fee payment. If an error is detected the
-// write log is dropped to prevent committing an inconsistent state. Propagates
-// the result to the caller
+// write log is dropped to prevent committing an inconsistent state.
+// WARNING: the `token::burn_tokens` function does not return an error if the
+// amount to burn exceeds the balance of the target address: it just burns
+// whatever balance is available. Because of this, the caller of this function
+// must ensure that the balance of the fee payer is enough to cover the entire
+// fee cost.
 fn fee_token_transfer<WLS>(
     state: &mut WLS,
     token: &Address,
     src: &Address,
     dest: &Address,
-    amount: Amount,
+    fee_components: &FeeComponents,
 ) -> Result<()>
 where
     WLS: State + StorageRead + TxWrites,
 {
-    token::transfer(&mut state.with_tx_writes(), token, src, dest, amount)
-        .map_err(|err| {
-            state.write_log_mut().drop_tx();
+    fn fee_transfer_inner<WLS>(
+        state: &mut WLS,
+        token: &Address,
+        src: &Address,
+        dest: &Address,
+        fee_components: &FeeComponents,
+    ) -> std::result::Result<(), state::Error>
+    where
+        WLS: State + StorageRead + TxWrites,
+    {
+        if token == &state.get_native_token()? {
+            // Burn the base fee
+            token::burn_tokens(
+                &mut state.with_tx_writes(),
+                token,
+                src,
+                fee_components.base,
+            )?;
+        } else {
+            // Transfer base fee to the PGF account
+            token::transfer(
+                &mut state.with_tx_writes(),
+                token,
+                src,
+                &namada_sdk::address::PGF,
+                fee_components.base,
+            )?;
+        }
 
-            Error::Error(err)
-        })
+        // Transfer tip to the block proposer
+        token::transfer(
+            &mut state.with_tx_writes(),
+            token,
+            src,
+            dest,
+            fee_components.tip,
+        )
+    }
+
+    // Make sure to drop the content of the write log in case of any error
+    fee_transfer_inner(state, token, src, dest, fee_components).map_err(|err| {
+        state.write_log_mut().drop_tx();
+
+        Error::Error(err)
+    })
 }
 
 /// Check if the fee payer has enough transparent balance to pay fees

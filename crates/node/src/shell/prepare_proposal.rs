@@ -344,29 +344,57 @@ where
     H: StorageHasher + Sync + 'static,
     CA: 'static + WasmCacheAccess + Sync,
 {
-    let minimum_gas_price = compute_min_gas_price(
+    let proposer_gas_price = get_proposer_gas_price(
         &wrapper.fee.token,
         proposer_local_config,
         shell_params.state,
     )?;
+    let fee_components = super::fee_data_check(
+        wrapper,
+        &proposer_gas_price,
+        shell_params.state,
+    )?;
 
-    super::fee_data_check(wrapper, minimum_gas_price, shell_params)?;
-
-    protocol::transfer_fee(shell_params, proposer, tx, wrapper, tx_index)
-        .map_or_else(|e| Err(Error::TxApply(e)), |_| Ok(()))
+    protocol::transfer_fee(
+        shell_params,
+        proposer,
+        tx,
+        wrapper,
+        tx_index,
+        &fee_components,
+    )
+    .map_or_else(|e| Err(Error::TxApply(e)), |_| Ok(()))
 }
 
-fn compute_min_gas_price<D, H>(
+// The gas prices of the block proposer.
+// WARNING: this type should not be exposed to other modules as the local config
+// price override shall not be considered outside the prepare proposal step
+struct ProposerGasPrice {
+    protocol: Amount,
+    proposer: Option<Amount>,
+}
+
+impl protocol::MinimumGasPrice for ProposerGasPrice {
+    fn price(&self) -> namada_sdk::token::Amount {
+        self.proposer.unwrap_or(self.protocol)
+    }
+
+    fn protocol_price(&self) -> namada_sdk::token::Amount {
+        self.protocol
+    }
+}
+
+fn get_proposer_gas_price<D, H>(
     fee_token: &Address,
     proposer_local_config: Option<&ValidatorLocalConfig>,
     temp_state: &TempWlState<'_, D, H>,
-) -> Result<Amount, Error>
+) -> Result<ProposerGasPrice, Error>
 where
     D: DB + for<'iter> DBIter<'iter> + Sync + 'static,
     H: StorageHasher + Sync + 'static,
 {
     #[cfg(not(fuzzing))]
-    let consensus_min_gas_price =
+    let protocol_min_gas_price =
         namada_sdk::parameters::read_gas_cost(temp_state, fee_token)
             .expect("Must be able to read gas cost parameter")
             .ok_or_else(|| {
@@ -376,16 +404,20 @@ where
                 )))
             })?;
     #[cfg(fuzzing)]
-    let consensus_min_gas_price = {
+    let protocol_min_gas_price = {
         let _ = temp_state;
         Amount::from_u64(10)
     };
-
-    let Some(config) = proposer_local_config else {
-        return Ok(consensus_min_gas_price);
+    let mut minimum_gas_price = ProposerGasPrice {
+        protocol: protocol_min_gas_price,
+        proposer: None,
     };
 
-    let validator_min_gas_price = config
+    let Some(config) = proposer_local_config else {
+        return Ok(minimum_gas_price);
+    };
+
+    let proposer_min_gas_price = config
         .accepted_gas_tokens
         .get(fee_token)
         .ok_or_else(|| {
@@ -396,23 +428,23 @@ where
         })?
         .to_owned();
 
-    // The validator's local config overrides the consensus param
-    // when creating a block, as long as its min gas price for
-    // `token` is not lower than the consensus value
-    Ok(if validator_min_gas_price < consensus_min_gas_price {
+    // The validator's local config overrides the consensus param when creating
+    // a block, as long as its min gas price for `token` is not lower than the
+    // consensus value
+    if proposer_min_gas_price < protocol_min_gas_price {
         tracing::warn!(
             fee_token = %fee_token,
-            validator_min_gas_price = %DenominatedAmount::from(validator_min_gas_price),
-            consensus_min_gas_price = %DenominatedAmount::from(consensus_min_gas_price),
+            validator_min_gas_price = %DenominatedAmount::from(proposer_min_gas_price),
+            consensus_min_gas_price = %DenominatedAmount::from(protocol_min_gas_price),
             "The gas price for the given token set by the block proposer \
              is lower than the value agreed upon by consensus. \
              Falling back to consensus value."
         );
-
-        consensus_min_gas_price
     } else {
-        validator_min_gas_price
-    })
+        minimum_gas_price.proposer = Some(proposer_min_gas_price);
+    };
+
+    Ok(minimum_gas_price)
 }
 
 #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
@@ -443,6 +475,7 @@ mod test_prepare_proposal {
     use namada_vote_ext::{ethereum_events, ethereum_tx_data_variants};
 
     use super::*;
+    use crate::protocol::MinimumGasPrice;
     use crate::shell::EthereumTxData;
     use crate::shell::test_utils::{
         self, TestShell, gen_keypair, get_pkh_from_address,
@@ -1501,13 +1534,13 @@ mod test_prepare_proposal {
                 m
             },
         };
-        let computed_min_gas_price = compute_min_gas_price(
+        let computed_min_gas_price = get_proposer_gas_price(
             &shell.state.in_mem().native_token,
             Some(&config),
             &temp_state,
         )
         .unwrap();
 
-        assert_eq!(computed_min_gas_price, consensus_min_gas_price);
+        assert_eq!(computed_min_gas_price.price(), consensus_min_gas_price);
     }
 }

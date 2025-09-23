@@ -63,7 +63,7 @@ pub use namada_state::{
 pub use namada_systems::proof_of_stake::*;
 use namada_systems::{governance, trans_token};
 pub use parameters::{OwnedPosParams, PosParams};
-use storage::write_validator_name;
+use storage::{update_total_active_deltas, write_validator_name};
 pub use types::GenesisValidator;
 use types::{DelegationEpochs, into_tm_voting_power};
 
@@ -3009,6 +3009,23 @@ where
             offset,
         )?;
     }
+
+    // Remove the validator's stake from active total
+    let offset_epoch = checked!(current_epoch + start_offset)?;
+    let stake = read_validator_stake(storage, params, validator, offset_epoch)?;
+    if stake.is_positive() {
+        update_total_active_deltas::<S, Gov>(
+            storage,
+            params,
+            stake
+                .change()
+                .negate()
+                .expect("Negative stake cannot overflow"),
+            current_epoch,
+            Some(start_offset),
+        )?;
+    }
+
     Ok(())
 }
 

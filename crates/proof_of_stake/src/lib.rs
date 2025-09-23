@@ -3277,6 +3277,47 @@ fn prune_old_delegations(
     Ok(())
 }
 
+/// Temporary migration code to fix the total active stake value
+pub fn fix_total_active_stake<S, Gov>(storage: &mut S) -> Result<()>
+where
+    S: StorageRead + StorageWrite,
+    Gov: governance::Read<S>,
+{
+    let epoch = storage.get_block_epoch()?;
+    let validators = storage::read_all_validator_addresses(storage, epoch)?;
+    let mut total_stake = token::Amount::zero();
+    let params = read_pos_params::<_, Gov>(storage)?;
+    for validator in validators {
+        let state = storage::read_validator_state::<_, Gov>(
+            storage, &validator, epoch,
+        )?;
+        let is_active = matches!(
+            state,
+            Some(
+                ValidatorState::Consensus
+                    | ValidatorState::BelowCapacity
+                    | ValidatorState::BelowThreshold,
+            )
+        );
+        if is_active {
+            let stake =
+                read_validator_stake(storage, &params, &validator, epoch)?;
+            total_stake =
+                total_stake.checked_add(stake).expect("Must not overflow");
+        }
+    }
+
+    let total_active_deltas = storage::total_active_deltas_handle();
+    total_active_deltas.set::<S, Gov>(
+        storage,
+        total_stake.change(),
+        epoch,
+        0,
+    )?;
+
+    Ok(())
+}
+
 #[cfg(any(test, feature = "testing"))]
 /// PoS related utility functions to help set up tests.
 pub mod test_utils {

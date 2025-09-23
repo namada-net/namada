@@ -510,6 +510,35 @@ impl Authorization {
         secret_keys: BTreeMap<u8, common::SecretKey>,
         signer: Option<Address>,
     ) -> Self {
+        Self::create_signatures(
+            targets,
+            secret_keys,
+            signer,
+            common::SigScheme::sign,
+        )
+    }
+
+    /// Place mock signatures over the given section hash with
+    /// the given key and return a section
+    pub fn mock(
+        targets: Vec<namada_core::hash::Hash>,
+        secret_keys: BTreeMap<u8, common::SecretKey>,
+        signer: Option<Address>,
+    ) -> Self {
+        Self::create_signatures(targets, secret_keys, signer, |kp, _| {
+            common::SigScheme::mock(kp)
+        })
+    }
+
+    fn create_signatures<F>(
+        targets: Vec<namada_core::hash::Hash>,
+        secret_keys: BTreeMap<u8, common::SecretKey>,
+        signer: Option<Address>,
+        create_sig: F,
+    ) -> Self
+    where
+        F: Fn(&common::SecretKey, namada_core::hash::Hash) -> common::Signature,
+    {
         // If no signer address is given, then derive the signer's public keys
         // from the given secret keys.
         let signer = if let Some(addr) = signer {
@@ -539,9 +568,7 @@ impl Authorization {
         // commitment made above
         let signatures = secret_keys
             .iter()
-            .map(|(index, secret_key)| {
-                (*index, common::SigScheme::sign(secret_key, target))
-            })
+            .map(|(index, secret_key)| (*index, create_sig(secret_key, target)))
             .collect();
         Self {
             signatures,
@@ -720,7 +747,6 @@ impl Authorization {
                     if let Some(map_idx) = map_idx {
                         let sig_idx = u8::try_from(idx)
                             .map_err(|_| VerifySigError::PksOverflow)?;
-                        consume_verify_sig_gas()?;
                         consume_verify_sig_gas()?;
                         _ = self
                             .signatures

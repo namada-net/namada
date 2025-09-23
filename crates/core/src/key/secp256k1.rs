@@ -602,6 +602,17 @@ impl super::SigScheme for SigScheme {
             Ok(())
         }
     }
+
+    fn mock(_: &Self::SecretKey) -> Self::Signature {
+        Signature(
+            k256::ecdsa::Signature::from_scalars(
+                k256::Scalar::ONE,
+                k256::Scalar::ONE,
+            )
+            .unwrap(),
+            RecoveryId::from_byte(0).unwrap(),
+        )
+    }
 }
 
 #[cfg(feature = "arbitrary")]

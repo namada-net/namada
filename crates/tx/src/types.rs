@@ -823,8 +823,31 @@ impl Tx {
 
     /// Add fee payer keypair to the tx builder
     pub fn sign_wrapper(&mut self, keypair: common::SecretKey) -> &mut Self {
+        self.create_wrapper_sig(keypair, Authorization::new)
+    }
+
+    /// Mock adding fee payer keypair to the tx builder
+    pub fn mock_sign_wrapper(
+        &mut self,
+        keypair: common::SecretKey,
+    ) -> &mut Self {
+        self.create_wrapper_sig(keypair, Authorization::mock)
+    }
+
+    fn create_wrapper_sig<F>(
+        &mut self,
+        keypair: common::SecretKey,
+        create_sig: F,
+    ) -> &mut Self
+    where
+        F: Fn(
+            Vec<namada_core::hash::Hash>,
+            BTreeMap<u8, common::SecretKey>,
+            Option<Address>,
+        ) -> Authorization,
+    {
         self.protocol_filter();
-        self.add_section(Section::Authorization(Authorization::new(
+        self.add_section(Section::Authorization(create_sig(
             self.sechashes(),
             [(0, keypair)].into_iter().collect(),
             None,
@@ -839,6 +862,44 @@ impl Tx {
         account_public_keys_map: AccountPublicKeysMap,
         signer: Option<Address>,
     ) -> &mut Self {
+        self.create_sig_raw(
+            keypairs,
+            account_public_keys_map,
+            signer,
+            Authorization::new,
+        )
+    }
+
+    /// Add signing keys to the tx builder with mock
+    /// signatures
+    pub fn mock(
+        &mut self,
+        keypairs: Vec<common::SecretKey>,
+        account_public_keys_map: AccountPublicKeysMap,
+        signer: Option<Address>,
+    ) -> &mut Self {
+        self.create_sig_raw(
+            keypairs,
+            account_public_keys_map,
+            signer,
+            Authorization::mock,
+        )
+    }
+
+    fn create_sig_raw<F>(
+        &mut self,
+        keypairs: Vec<common::SecretKey>,
+        account_public_keys_map: AccountPublicKeysMap,
+        signer: Option<Address>,
+        create_sig: F,
+    ) -> &mut Self
+    where
+        F: Fn(
+            Vec<namada_core::hash::Hash>,
+            BTreeMap<u8, common::SecretKey>,
+            Option<Address>,
+        ) -> Authorization,
+    {
         // The inner tx signer signs the Raw version of the Header
         let hashes = vec![self.raw_header_hash()];
         self.protocol_filter();
@@ -849,7 +910,7 @@ impl Tx {
             (0..).zip(keypairs).collect()
         };
 
-        self.add_section(Section::Authorization(Authorization::new(
+        self.add_section(Section::Authorization(create_sig(
             hashes,
             secret_keys,
             signer,

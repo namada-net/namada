@@ -516,6 +516,17 @@ impl super::SigScheme for SigScheme {
             _ => Err(VerifySigError::MismatchedScheme),
         }
     }
+
+    fn mock(keypair: &SecretKey) -> Self::Signature {
+        match keypair {
+            SecretKey::Ed25519(kp) => {
+                Signature::Ed25519(ed25519::SigScheme::mock(kp))
+            }
+            SecretKey::Secp256k1(kp) => {
+                Signature::Secp256k1(secp256k1::SigScheme::mock(kp))
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -356,6 +356,122 @@ fn ledger_txs_and_queries() -> Result<()> {
     Ok(())
 }
 
+/// We test that we can dry-run transactions without
+/// producing valid signatures. The gas estimation cost
+/// should be the close to the same between dry-run and actual execution.
+///
+/// Steps:
+///  1. Add a public key to the software wallet, but not its corresponding
+///     secret. This mocks the scenario where a hardware wallet is being used
+///  2. Dry-run a transaction from Bertha to the implicit account of the above
+///     public key. Get the gas cost.
+///  3. Actually perform the transfer and get the gas cost.
+///  4. Check that the difference in gas cost between the dry-run and actual tx
+///     is within 10% of the actual gas cost
+///  5. Test that we dry-run a tx requiring a signature from the public key in
+///     the first step without using a hardware wallet.
+#[test]
+fn test_dry_run_transaction() -> Result<()> {
+    // This address doesn't matter for tests. But an argument is required.
+    let validator_one_rpc = "http://127.0.0.1:26567";
+    // This is a public key whose secret counterpart is not in the software
+    // wallet.
+    const HARDWARE_WALLET_PK: &str =
+        "tpknam1qpxpjvd9tm8jef9y07zsxhyhr2maeav06m9crh24ldkhtwrt7wj0y4gvem8";
+    // The implicit address corresponding to HARDWARE_WALLET_PK
+    const HARDWARE_WALLET_IMPLICIT: &str =
+        "tnam1qqre7pwsjp9hgdfefehspujks0mdt3p90c7m3f7p";
+
+    let (node, _services) = setup::setup()?;
+
+    let tx_args = vec![
+        "add",
+        "--alias",
+        "hw_pk",
+        "--value",
+        HARDWARE_WALLET_PK,
+        "--unsafe-dont-encrypt",
+    ];
+    let captured = CapturedOutput::of(|| run(&node, Bin::Wallet, tx_args));
+    assert_matches!(captured.result, Ok(_));
+
+    let tx_args = vec![
+        "transparent-transfer",
+        "--source",
+        BERTHA,
+        "--target",
+        HARDWARE_WALLET_IMPLICIT,
+        "--token",
+        NAM,
+        "--amount",
+        "1000.1",
+        "--signing-keys",
+        BERTHA_KEY,
+        "--dry-run-wrapper",
+        "--node",
+        &validator_one_rpc,
+    ];
+    let captured = CapturedOutput::of(|| run(&node, Bin::Client, tx_args));
+    assert_matches!(captured.result, Ok(_));
+    assert!(!captured.contains(TX_REJECTED));
+    let matches = captured
+        .matches("batch consumed [0-9]+")
+        .expect("Test failed");
+    let dry_run_gas =
+        u64::from_str(matches.split(' ').next_back().expect("Test failed"))
+            .expect("Test failed");
+    let tx_args = vec![
+        "transparent-transfer",
+        "--source",
+        BERTHA,
+        "--target",
+        HARDWARE_WALLET_IMPLICIT,
+        "--token",
+        NAM,
+        "--amount",
+        "1000.1",
+        "--signing-keys",
+        BERTHA_KEY,
+        "--node",
+        &validator_one_rpc,
+    ];
+    let captured = CapturedOutput::of(|| run(&node, Bin::Client, tx_args));
+    assert_matches!(captured.result, Ok(_));
+    assert!(captured.contains(TX_APPLIED_SUCCESS));
+    let matches = captured
+        .matches("batch consumed [0-9]+")
+        .expect("Test failed");
+    let actual_gas =
+        u64::from_str(matches.split(' ').next_back().expect("Test failed"))
+            .expect("Test failed");
+
+    // check that the gas difference is at most 10% different from the actual
+    assert!(10 * dry_run_gas.abs_diff(actual_gas) <= actual_gas);
+
+    let tx_args = apply_use_device(vec![
+        "transparent-transfer",
+        "--source",
+        HARDWARE_WALLET_IMPLICIT,
+        "--target",
+        ALBERT,
+        "--token",
+        NAM,
+        "--amount",
+        "10.1",
+        "--dry-run",
+        "--signing-keys",
+        HARDWARE_WALLET_PK,
+        "--gas-payer",
+        HARDWARE_WALLET_IMPLICIT,
+        "--node",
+        &validator_one_rpc,
+    ]);
+    let captured = CapturedOutput::of(|| run(&node, Bin::Client, tx_args));
+    assert_matches!(captured.result, Ok(_));
+    assert!(!captured.contains(TX_REJECTED));
+    Ok(())
+}
+
 /// In this test we:
 /// 1. Run the ledger node
 /// 2. Submit an invalid transaction (disallowed by state machine)

@@ -2638,6 +2638,17 @@ where
         params.pipeline_len,
     )?;
 
+    // Add the validator's stake to active total
+    let stake =
+        read_validator_stake(storage, &params, validator, pipeline_epoch)?;
+    update_total_active_deltas::<S, Gov>(
+        storage,
+        &params,
+        stake.change(),
+        current_epoch,
+        Some(params.pipeline_len),
+    )?;
+
     Ok(())
 }
 

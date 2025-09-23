@@ -1983,7 +1983,7 @@ where
 
     let tx = unsafe { env.ctx.tx.get() };
 
-    match if env.dry_run {
+    match if !env.dry_run {
         tx.verify_signatures(
             &HashSet::from_iter(hashes),
             public_keys_map,
@@ -2153,17 +2153,31 @@ where
     let tx = unsafe { env.ctx.tx.get() };
 
     let (gas_meter, sentinel) = env.ctx.gas_meter_and_sentinel();
-    match tx.verify_signatures(
-        &HashSet::from_iter(hashes),
-        public_keys_map,
-        &None,
-        threshold,
-        || {
-            gas_meter
-                .borrow_mut()
-                .consume(gas::VERIFY_TX_SIG_GAS.into())
-        },
-    ) {
+    match if !env.dry_run {
+        tx.verify_signatures(
+            &HashSet::from_iter(hashes),
+            public_keys_map,
+            &None,
+            threshold,
+            || {
+                gas_meter
+                    .borrow_mut()
+                    .consume(gas::VERIFY_TX_SIG_GAS.into())
+            },
+        )
+    } else {
+        tx.dry_run_signatures(
+            &HashSet::from_iter(hashes),
+            public_keys_map,
+            &None,
+            threshold,
+            || {
+                gas_meter
+                    .borrow_mut()
+                    .consume(gas::VERIFY_TX_SIG_GAS.into())
+            },
+        )
+    } {
         Ok(_) => Ok(HostEnvResult::Success.to_i64()),
         Err(err) => match err {
             namada_tx::VerifySigError::Gas(inner) => {

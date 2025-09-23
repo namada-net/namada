@@ -42,11 +42,8 @@ use crate::queries::{
     TransferToEthereumStatus,
 };
 use crate::rpc::{query_storage_value, query_wasm_code_hash, validate_amount};
-use crate::signing::{
-    SigningData, aux_inner_signing_data, aux_signing_data,
-    validate_transparent_fee,
-};
-use crate::tx::WrapArgs;
+use crate::signing::SigningData;
+use crate::tx::{ExtendedWrapperArgs, WrapArgs, derive_build_data};
 use crate::{MaybeSync, Namada, args};
 
 /// Craft a transaction that adds a transfer to the Ethereum bridge pool.
@@ -66,83 +63,40 @@ pub async fn build_bridge_pool_tx(
     }: args::EthereumBridgePool,
 ) -> Result<(Tx, SigningData), Error> {
     let sender_ = sender.clone();
-    let (signing_data, wrap_args, transfer, tx_code_hash) =
-        if let Some(wrap_tx) = &tx_args.wrap_tx {
-            let (transfer, tx_code_hash, signing_data) = futures::try_join!(
-                validate_bridge_pool_tx(
-                    context,
-                    tx_args.force,
-                    nut,
-                    asset,
-                    recipient,
-                    sender,
-                    amount,
-                    fee_amount,
-                    fee_payer,
-                    fee_token,
-                ),
-                query_wasm_code_hash(context, code_path.to_string_lossy()),
-                aux_signing_data(
-                    context,
-                    wrap_tx,
-                    // tx signer
-                    Some(sender_),
-                    vec![],
-                    false,
-                    vec![],
-                ),
-            )?;
-            let fee_payer = signing_data.fee_payer_or_err()?.to_owned();
-            let (fee_amount, _) = validate_transparent_fee(
+    let (signing_data, wrap_args, transfer, tx_code_hash) = {
+        let (transfer, tx_code_hash, (signing_data, wrap_args, _)) = futures::try_join!(
+            validate_bridge_pool_tx(
                 context,
-                wrap_tx,
                 tx_args.force,
-                &fee_payer,
-            )
-            .await?;
+                nut,
+                asset,
+                recipient,
+                sender,
+                amount,
+                fee_amount,
+                fee_payer,
+                fee_token,
+            ),
+            query_wasm_code_hash(context, code_path.to_string_lossy()),
+            derive_build_data(
+                context,
+                tx_args
+                    .wrap_tx
+                    .as_ref()
+                    .map(|wrap_args| ExtendedWrapperArgs {
+                        wrap_args,
+                        disposable_gas_payer: false
+                    }),
+                tx_args.force,
+                // tx signer
+                Some(sender_),
+                vec![],
+                vec![],
+            ),
+        )?;
 
-            (
-                SigningData::Wrapper(signing_data),
-                Some(WrapArgs {
-                    fee_amount,
-                    fee_payer,
-                    fee_token: wrap_tx.fee_token.to_owned(),
-                    gas_limit: wrap_tx.gas_limit,
-                }),
-                transfer,
-                tx_code_hash,
-            )
-        } else {
-            let (transfer, tx_code_hash, signing_data) = futures::try_join!(
-                validate_bridge_pool_tx(
-                    context,
-                    tx_args.force,
-                    nut,
-                    asset,
-                    recipient,
-                    sender,
-                    amount,
-                    fee_amount,
-                    fee_payer,
-                    fee_token,
-                ),
-                query_wasm_code_hash(context, code_path.to_string_lossy()),
-                aux_inner_signing_data(
-                    context,
-                    tx_args.signing_keys,
-                    // tx signer
-                    Some(sender_),
-                    vec![],
-                )
-            )?;
-
-            (
-                SigningData::Inner(signing_data),
-                None,
-                transfer,
-                tx_code_hash,
-            )
-        };
+        (signing_data, wrap_args, transfer, tx_code_hash)
+    };
 
     let chain_id = tx_args
         .chain_id

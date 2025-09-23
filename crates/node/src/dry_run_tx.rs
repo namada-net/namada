@@ -30,7 +30,6 @@ where
     CA: 'static + WasmCacheAccess + Sync,
 {
     let tx = Tx::try_from_bytes(&request.data[..]).into_storage_result()?;
-    tx.validate_tx().into_storage_result()?;
 
     let gas_scale = parameters::get_gas_scale(&state)?;
     let height = state.in_mem().get_block_height().0;

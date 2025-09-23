@@ -208,6 +208,7 @@ enum DispatcherState {
 
 #[derive(Default, Debug)]
 struct InitialState {
+    synced: bool,
     start_height: BlockHeight,
     last_query_height: BlockHeight,
 }
@@ -311,6 +312,11 @@ where
         let initial_state = self
             .perform_initial_setup(last_query_height, sks, fvks)
             .await?;
+
+        if initial_state.synced {
+            self.finish_progress_bars();
+            return Ok(Some(self.ctx));
+        }
 
         self.check_exit_conditions();
 
@@ -558,25 +564,33 @@ where
             last_query_height,
         );
 
+        let synced = self.ctx.synced_height == start_height
+            && start_height == last_query_height;
+
         let initial_state = InitialState {
+            synced,
             last_query_height,
             start_height,
         };
 
-        self.height_to_sync = initial_state.last_query_height;
-        self.spawn_initial_set_of_tasks(&initial_state);
+        if !synced {
+            self.height_to_sync = initial_state.last_query_height;
+            self.spawn_initial_set_of_tasks(&initial_state);
 
-        self.config
-            .scanned_tracker
-            .set_upper_limit(self.cache.fetched.len() as u64);
-        self.config.applied_tracker.set_upper_limit(
-            self.cache.trial_decrypted.successful_decryptions() as u64,
-        );
+            self.client.hint(
+                initial_state.start_height,
+                initial_state.last_query_height,
+            );
+
+            self.config
+                .scanned_tracker
+                .set_upper_limit(self.cache.fetched.len() as u64);
+            self.config.applied_tracker.set_upper_limit(
+                self.cache.trial_decrypted.successful_decryptions() as u64,
+            );
+        }
 
         self.force_redraw_progress_bars();
-
-        self.client
-            .hint(initial_state.start_height, initial_state.last_query_height);
 
         Ok(initial_state)
     }
@@ -843,6 +857,7 @@ mod dispatcher_tests {
 
                 dispatcher
                     .apply_cache_to_shielded_context(&InitialState {
+                        synced: false,
                         start_height: BlockHeight::first(),
                         last_query_height: 9.into(),
                     })
@@ -1340,6 +1355,51 @@ mod dispatcher_tests {
 
                 dispatcher.birthdays.swap_remove(&vk);
                 assert!(dispatcher.vk_is_outdated(&vk, &itx(BlockHeight(300))));
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_no_blocks_to_sync() {
+        let temp_dir = tempdir().unwrap();
+        let utils = FsShieldedUtils {
+            context_dir: temp_dir.path().to_path_buf(),
+        };
+        let (client, _masp_tx_sender) = TestingMaspClient::new(3.into());
+        let (_send, shutdown_sig) = shutdown_signal();
+        let config = ShieldedSyncConfig::builder()
+            .fetched_tracker(DevNullProgressBar)
+            .scanned_tracker(DevNullProgressBar)
+            .applied_tracker(DevNullProgressBar)
+            .shutdown_signal(shutdown_sig)
+            .client(client)
+            .retry_strategy(RetryStrategy::Times(0))
+            .block_batch_size(1)
+            .build();
+
+        MaspLocalTaskEnv::new(2)
+            .expect("Test failed")
+            .run(|s| async {
+                let mut dispatcher = config.clone().dispatcher(s, &utils).await;
+                dispatcher.ctx.synced_height = BlockHeight(3);
+                let initial_state = dispatcher
+                    .perform_initial_setup(None, &[], &[dated_arbitrary_vk()])
+                    .await
+                    .unwrap();
+                assert!(initial_state.synced);
+            })
+            .await;
+
+        MaspLocalTaskEnv::new(2)
+            .expect("Test failed")
+            .run(|s| async {
+                let mut dispatcher = config.clone().dispatcher(s, &utils).await;
+                dispatcher.ctx.synced_height = BlockHeight(2);
+                let initial_state = dispatcher
+                    .perform_initial_setup(None, &[], &[dated_arbitrary_vk()])
+                    .await
+                    .unwrap();
+                assert!(!initial_state.synced);
             })
             .await;
     }

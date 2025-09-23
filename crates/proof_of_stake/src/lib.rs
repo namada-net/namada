@@ -2558,6 +2558,22 @@ where
         params.pipeline_len,
     )?;
 
+    // Remove the validator's stake from active total
+    let stake =
+        read_validator_stake(storage, &params, validator, pipeline_epoch)?;
+    if stake.is_positive() {
+        update_total_active_deltas::<S, Gov>(
+            storage,
+            &params,
+            stake
+                .change()
+                .negate()
+                .expect("Negative stake cannot overflow"),
+            current_epoch,
+            Some(params.pipeline_len),
+        )?;
+    }
+
     Ok(())
 }
 

@@ -421,8 +421,8 @@ where
             }
         }
 
-        // Then make sure that the number of public keys used exceeds the
-        // threshold
+        // Then make sure that the number of public keys used is greater than or
+        // equal to the threshold
         let used_pubkeys_len = used_pubkeys
             .len()
             .try_into()

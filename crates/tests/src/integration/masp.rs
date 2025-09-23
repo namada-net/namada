@@ -5189,8 +5189,6 @@ fn cross_epoch_unshield() -> Result<()> {
                 NAM,
                 "--amount",
                 "100",
-                "--gas-payer",
-                ALBERT_KEY,
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-tx",

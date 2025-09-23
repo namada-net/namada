@@ -2181,7 +2181,8 @@ where
     }
 
     // Re-insert the validator into the validator set and update its state
-    let pipeline_epoch = checked!(current_epoch + params.pipeline_len)?;
+    let offset = params.pipeline_len;
+    let pipeline_epoch = checked!(current_epoch + offset)?;
     let stake =
         read_validator_stake(storage, &params, validator, pipeline_epoch)?;
 
@@ -2191,8 +2192,20 @@ where
         validator,
         stake,
         current_epoch,
-        params.pipeline_len,
+        offset,
     )?;
+
+    // Add the validator's stake to active total
+    let stake =
+        read_validator_stake(storage, &params, validator, pipeline_epoch)?;
+    update_total_active_deltas::<S, Gov>(
+        storage,
+        &params,
+        stake.change(),
+        current_epoch,
+        Some(offset),
+    )?;
+
     Ok(())
 }
 

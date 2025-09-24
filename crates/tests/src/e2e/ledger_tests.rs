@@ -1815,8 +1815,12 @@ fn test_invalid_validator_txs() -> Result<()> {
         run_as!(test, Who::Validator(0), Bin::Client, tx_args, Some(40))?;
     client.exp_string(TX_REJECTED)?;
     client.assert_success();
+    // FIXME: also need to rebase on main again
 
-    // Try to deactivate validator-1 as validator-0
+    // FIXME: all of these are broken because the owner is joined with the
+    // signing keys se we attach the right signature. Either I remove this test
+    // or I revert the logic (in this case I should also bring back the unit
+    // test I removed) Try to deactivate validator-1 as validator-0
     let tx_args = vec![
         "deactivate-validator",
         "--validator",
@@ -2620,7 +2624,7 @@ fn masp_txs_and_queries() -> Result<()> {
                     || tx_args[0] == "shield"
                     || tx_args[0] == "unshield")
             {
-                [tx_args.clone(), vec!["--dry-run"]].concat()
+                [tx_args.clone(), vec!["--dry-run-wrapper"]].concat()
             } else {
                 tx_args.clone()
             };

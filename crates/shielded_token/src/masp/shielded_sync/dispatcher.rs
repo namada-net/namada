@@ -273,6 +273,7 @@ where
     /// We are syncing up to this height
     height_to_sync: BlockHeight,
     interrupt_flag: AtomicFlag,
+    orphaned_flag: AtomicFlag,
     fetch_state: FetchState,
 }
 
@@ -326,6 +327,7 @@ where
         config,
         cache,
         interrupt_flag: Default::default(),
+        orphaned_flag: Default::default(),
         fetch_state: Default::default(),
     }
 }
@@ -511,12 +513,17 @@ where
             }
         }
 
+        self.abandon_orphaned();
         self.try_load_optional_masp_data()?;
 
         // NB: at this point, the wallet has been synced
         self.ctx.synced_height = *last_query_height;
 
         Ok(())
+    }
+
+    fn abandon_orphaned(&self) {
+        self.orphaned_flag.set();
     }
 
     async fn perform_initial_setup(
@@ -995,12 +1002,15 @@ where
         F: Future<Output = Message> + Unpin + 'static,
     {
         let sender = self.tasks.message_sender.clone();
-        let guard = self.tasks.panic_flag.clone();
-        let interrupt = self.interrupt_flag.clone();
+        let guard = (
+            self.tasks.panic_flag.clone(),
+            self.orphaned_flag.clone(),
+            self.interrupt_flag.clone(),
+        );
         self.tasks.spawner.spawn_async(async move {
-            let _guard = guard;
+            let (_panic_flag, orphaned, interrupt) = guard;
             let wrapped_fut = std::future::poll_fn(move |cx| {
-                if interrupt.get() {
+                if interrupt.get() || orphaned.get() {
                     Poll::Ready(None)
                 } else {
                     Pin::new(&mut fut).poll(cx).map(Some)

@@ -1258,7 +1258,7 @@ fn ibc_unlimited_channel() -> Result<()> {
 
     // Start relaying
     let hermes = run_hermes(&hermes_dir)?;
-    let _bg_hermes = hermes.background();
+    let bg_hermes = hermes.background();
 
     let ibc_denom_on_namada =
         format!("{port_id_namada}/{channel_id_namada}/{COSMOS_COIN}");
@@ -1377,6 +1377,69 @@ fn ibc_unlimited_channel() -> Result<()> {
         &ibc_denom_on_gaia,
         1_000_000,
     )?;
+
+    // Transfer to an invalid address from Namada
+    transfer(
+        &test,
+        ALBERT,
+        "invalid_receiver",
+        &ibc_denom_on_namada,
+        1,
+        Some(ALBERT_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        None,
+        None,
+        None,
+        None,
+        false,
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+
+    // Check if the token has been refunded by an ack with an error
+    check_balance(&test, ALBERT, &ibc_denom_on_namada, 1)?;
+
+    // Stop Hermes for timeout test
+    let mut hermes = bg_hermes.foreground();
+    hermes.interrupt()?;
+
+    // Timeout transfer from Namada
+    transfer(
+        &test,
+        ALBERT,
+        &gaia_receiver,
+        &ibc_denom_on_namada,
+        1,
+        Some(ALBERT_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        Some(Duration::new(10, 0)),
+        None,
+        None,
+        None,
+        false,
+    )?;
+    // wait for the timeout
+    sleep(10);
+
+    // Restart relaying
+    let hermes = run_hermes(&hermes_dir)?;
+    let _bg_hermes = hermes.background();
+
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+
+    // Check if the token has been refunded
+    check_balance(&test, ALBERT, &ibc_denom_on_namada, 1)?;
 
     Ok(())
 }

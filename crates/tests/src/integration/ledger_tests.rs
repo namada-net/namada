@@ -460,7 +460,7 @@ fn test_dry_run_transaction() -> Result<()> {
         NAM,
         "--amount",
         "10.1",
-        "--dry-run",
+        "--dry-run-wrapper",
         "--signing-keys",
         HARDWARE_WALLET_PK,
         "--gas-payer",

@@ -50,6 +50,24 @@ impl BridgeTree {
         Self(bridgetree::BridgeTree::new())
     }
 
+    /// Instantiate a [`BridgeTree`] from a [`CommitmentTree`].
+    pub fn from_commitment_tree(
+        tree: CommitmentTree<Node>,
+    ) -> eyre::Result<Self> {
+        if let Some(frontier) =
+            tree.into_incrementalmerkletree().to_frontier().take()
+        {
+            Ok(InnerBridgeTree::from_frontier(frontier)
+                .context(
+                    "Failed to create InnerBridgeTree from the provided \
+                     CommitmentTree",
+                )?
+                .into())
+        } else {
+            Ok(Self::empty())
+        }
+    }
+
     /// Instantiate a [`BridgeTree`] from a [`CommitmentTree`] and
     /// [`WitnessMap`].
     ///

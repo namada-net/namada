@@ -152,15 +152,23 @@ struct TaskError<C> {
     context: C,
 }
 
-#[allow(clippy::large_enum_variant)]
+#[allow(clippy::large_enum_variant, clippy::type_complexity)]
 enum Message {
-    UpdateCommitmentTree(Result<CommitmentTree<Node>, TaskError<BlockHeight>>),
+    FirstCommitmentTree(
+        Result<(BlockHeight, CommitmentTree<Node>), TaskError<BlockHeight>>,
+    ),
+    UpdateCommitmentTree(
+        Result<(BlockHeight, CommitmentTree<Node>), TaskError<BlockHeight>>,
+    ),
     UpdateNoteIndex(
-        Result<BTreeMap<MaspIndexedTx, NotePosition>, TaskError<BlockHeight>>,
+        Result<
+            (BlockHeight, BTreeMap<MaspIndexedTx, NotePosition>),
+            TaskError<BlockHeight>,
+        >,
     ),
     UpdateWitnessMap(
         Result<
-            HashMap<NotePosition, IncrementalWitness<Node>>,
+            (BlockHeight, HashMap<NotePosition, IncrementalWitness<Node>>),
             TaskError<BlockHeight>,
         >,
     ),
@@ -215,6 +223,8 @@ impl<Spawner> DispatcherTasks<Spawner> {
 /// Shielded sync cache.
 #[derive(Default, BorshSerialize, BorshDeserialize)]
 pub struct DispatcherCache {
+    pub(crate) first_commitment_tree:
+        Option<(BlockHeight, CommitmentTree<Node>)>,
     pub(crate) commitment_tree: Option<(BlockHeight, CommitmentTree<Node>)>,
     pub(crate) witness_map: Option<(BlockHeight, WitnessMap)>,
     pub(crate) note_index: Option<(BlockHeight, NoteIndex)>,
@@ -270,8 +280,6 @@ where
     ctx: ShieldedWallet<U>,
     config: Config<T, I>,
     cache: DispatcherCache,
-    /// We are syncing up to this height
-    height_to_sync: BlockHeight,
     interrupt_flag: AtomicFlag,
     orphaned_flag: AtomicFlag,
     fetch_state: FetchState,
@@ -318,7 +326,6 @@ where
     let cache = ctx.utils.cache_load().await.unwrap_or_default();
 
     Dispatcher {
-        height_to_sync: BlockHeight(0),
         birthdays: HashMap::new(),
         state,
         ctx,
@@ -412,6 +419,11 @@ where
             last_query_height, ..
         }: &InitialState,
     ) -> Result<(), eyre::Error> {
+        // NB: Load the first commitment tree from cache
+        if let Some((_, ct)) = self.cache.first_commitment_tree.take() {
+            self.ctx.tree = BridgeTree::from_commitment_tree(ct)?;
+        }
+
         for (masp_indexed_tx, stx_batch) in self.cache.fetched.take() {
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -534,6 +546,8 @@ where
     ) -> Result<InitialState, eyre::Error> {
         debug_assert!(self.birthdays.is_empty());
 
+        let mut min_birthday = BlockHeight(u64::MAX);
+
         for vk in sks
             .iter()
             .map(|esk| {
@@ -560,6 +574,25 @@ where
             // NB: store the birthday in order to potentially
             // save some work during trial decryptions
             self.birthdays.insert(vk.key, vk.birthday);
+
+            // NB: the min birthday will allow skipping a bunch
+            // of blocks if we are syncing from scratch
+            if vk.birthday < min_birthday {
+                min_birthday = vk.birthday
+            }
+        }
+
+        // NB: Optimize syncing from scratch when the
+        // user supplied key birthdays
+        const THRESHOLD_MIN_BIRTHDAY_LOCK: u64 = 1000;
+
+        if self.ctx.synced_height == BlockHeight(0)
+            && min_birthday.0 > THRESHOLD_MIN_BIRTHDAY_LOCK
+            && self.client.capabilities().may_fetch_pre_built_tree()
+            && !self.birthdays.is_empty()
+        {
+            self.ctx.synced_height = min_birthday;
+            self.spawn_first_commitment_tree(min_birthday);
         }
 
         let shutdown_signal = RefCell::new(&mut self.config.shutdown_signal);
@@ -631,7 +664,6 @@ where
         };
 
         if !synced {
-            self.height_to_sync = initial_state.last_query_height;
             self.spawn_initial_set_of_tasks(&initial_state);
 
             self.client.hint(
@@ -719,11 +751,19 @@ where
 
     fn handle_incoming_message(&mut self, message: Message) {
         match message {
-            Message::UpdateCommitmentTree(Ok(ct)) => {
-                _ = self
-                    .cache
-                    .commitment_tree
-                    .insert((self.height_to_sync, ct));
+            Message::FirstCommitmentTree(Ok((h, ct))) => {
+                _ = self.cache.first_commitment_tree.insert((h, ct));
+            }
+            Message::FirstCommitmentTree(Err(TaskError {
+                error,
+                context: height,
+            })) => {
+                if self.can_launch_new_fetch_retry(error) {
+                    self.spawn_first_commitment_tree(height);
+                }
+            }
+            Message::UpdateCommitmentTree(Ok((h, ct))) => {
+                _ = self.cache.commitment_tree.insert((h, ct));
 
                 self.must_decrement_left_fetching();
             }
@@ -735,8 +775,8 @@ where
                     self.spawn_update_commitment_tree(height);
                 }
             }
-            Message::UpdateNoteIndex(Ok(nm)) => {
-                _ = self.cache.note_index.insert((self.height_to_sync, nm));
+            Message::UpdateNoteIndex(Ok((h, nm))) => {
+                _ = self.cache.note_index.insert((h, nm));
 
                 self.must_decrement_left_fetching();
             }
@@ -748,8 +788,8 @@ where
                     self.spawn_update_note_index(height);
                 }
             }
-            Message::UpdateWitnessMap(Ok(wm)) => {
-                _ = self.cache.witness_map.insert((self.height_to_sync, wm));
+            Message::UpdateWitnessMap(Ok((h, wm))) => {
+                _ = self.cache.witness_map.insert((h, wm));
 
                 self.must_decrement_left_fetching();
             }
@@ -906,6 +946,28 @@ where
                     .fetch_witness_map(height)
                     .await
                     .wrap_err("Failed to fetch witness map")
+                    .map(|wm| (height, wm))
+                    .map_err(|error| TaskError {
+                        error,
+                        context: height,
+                    }),
+            )
+        }));
+    }
+
+    fn spawn_first_commitment_tree(&mut self, height: BlockHeight) {
+        if pre_built_in_cache(self.cache.first_commitment_tree.as_ref(), height)
+        {
+            return;
+        }
+        let client = self.client.clone();
+        self.spawn_async(Box::pin(async move {
+            Message::FirstCommitmentTree(
+                client
+                    .fetch_commitment_tree(height)
+                    .await
+                    .wrap_err("Failed to fetch first commitment tree")
+                    .map(|ct| (height, ct))
                     .map_err(|error| TaskError {
                         error,
                         context: height,
@@ -925,6 +987,7 @@ where
                     .fetch_commitment_tree(height)
                     .await
                     .wrap_err("Failed to fetch commitment tree")
+                    .map(|ct| (height, ct))
                     .map_err(|error| TaskError {
                         error,
                         context: height,
@@ -944,6 +1007,7 @@ where
                     .fetch_note_index(height)
                     .await
                     .wrap_err("Failed to fetch note index")
+                    .map(|ni| (height, ni))
                     .map_err(|error| TaskError {
                         error,
                         context: height,
@@ -1583,12 +1647,14 @@ mod dispatcher_tests {
                 assert!(res.is_none());
 
                 let DispatcherCache {
+                    first_commitment_tree,
                     commitment_tree,
                     witness_map,
                     note_index,
                     fetched,
                     trial_decrypted,
                 } = utils.cache_load().await.expect("Test failed");
+                assert!(first_commitment_tree.is_none());
                 assert!(commitment_tree.is_none());
                 assert!(witness_map.is_none());
                 assert!(note_index.is_none());

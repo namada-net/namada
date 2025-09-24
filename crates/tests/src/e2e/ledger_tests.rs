@@ -863,6 +863,7 @@ fn pos_init_validator() -> Result<()> {
     let bg_non_validator = non_validator.background();
 
     let non_validator_rpc = get_actor_rpc(&test, Who::NonValidator);
+    let validator_0_rpc = get_actor_rpc(&test, Who::Validator(0));
 
     // 2. Initialize a new validator account with the non-validator node
     let new_validator = "new-validator";
@@ -934,7 +935,7 @@ fn pos_init_validator() -> Result<()> {
         "--signing-keys",
         BERTHA_KEY,
         "--node",
-        &non_validator_rpc,
+        &validator_0_rpc,
     ]);
     let mut client = run!(test, Bin::Client, tx_args, Some(40))?;
     client.exp_string(TX_APPLIED_SUCCESS)?;
@@ -953,7 +954,7 @@ fn pos_init_validator() -> Result<()> {
         "--signing-keys",
         BERTHA_KEY,
         "--node",
-        &non_validator_rpc,
+        &validator_0_rpc,
     ]);
     let mut client = run!(test, Bin::Client, tx_args, Some(40))?;
     client.exp_string(TX_APPLIED_SUCCESS)?;
@@ -974,7 +975,7 @@ fn pos_init_validator() -> Result<()> {
         "--signing-keys",
         BERTHA_KEY,
         "--node",
-        &non_validator_rpc,
+        &validator_0_rpc,
     ]);
     let mut client = run!(test, Bin::Client, tx_args, Some(40))?;
     client.exp_string(TX_APPLIED_SUCCESS)?;
@@ -988,7 +989,7 @@ fn pos_init_validator() -> Result<()> {
         "--amount",
         validator_stake_str,
         "--node",
-        &non_validator_rpc,
+        &validator_0_rpc,
     ]);
     let mut client = run!(test, Bin::Client, tx_args, Some(40))?;
     client.exp_string(TX_APPLIED_SUCCESS)?;

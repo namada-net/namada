@@ -24,7 +24,9 @@ use namada_tx::{IndexedTx, Tx};
 use tokio::sync::{OnceCell, Semaphore};
 
 use crate::error::{Error, QueryError};
-use crate::masp::{extract_masp_tx, get_indexed_masp_events_at_height};
+use crate::masp::{
+    NotePosition, extract_masp_tx, get_indexed_masp_events_at_height,
+};
 
 /// Middleware MASP client implementation that introduces
 /// linear backoff sleeps between failed requests.
@@ -117,7 +119,7 @@ impl<M: MaspClient> MaspClient for LinearBackoffSleepMaspClient<M> {
     async fn fetch_note_index(
         &self,
         height: BlockHeight,
-    ) -> Result<BTreeMap<MaspIndexedTx, usize>, Self::Error> {
+    ) -> Result<BTreeMap<MaspIndexedTx, NotePosition>, Self::Error> {
         with_linear_backoff(
             &self.shared.backoff,
             &self.shared.sleep,
@@ -129,7 +131,8 @@ impl<M: MaspClient> MaspClient for LinearBackoffSleepMaspClient<M> {
     async fn fetch_witness_map(
         &self,
         height: BlockHeight,
-    ) -> Result<HashMap<usize, IncrementalWitness<Node>>, Self::Error> {
+    ) -> Result<HashMap<NotePosition, IncrementalWitness<Node>>, Self::Error>
+    {
         with_linear_backoff(
             &self.shared.backoff,
             &self.shared.sleep,
@@ -284,7 +287,7 @@ impl<C: Client + Send + Sync> MaspClient for LedgerMaspClient<C> {
     async fn fetch_note_index(
         &self,
         _: BlockHeight,
-    ) -> Result<BTreeMap<MaspIndexedTx, usize>, Error> {
+    ) -> Result<BTreeMap<MaspIndexedTx, NotePosition>, Error> {
         Err(Error::Other(
             "Transaction notes map fetching is not implemented by this client"
                 .to_string(),
@@ -294,7 +297,7 @@ impl<C: Client + Send + Sync> MaspClient for LedgerMaspClient<C> {
     async fn fetch_witness_map(
         &self,
         _: BlockHeight,
-    ) -> Result<HashMap<usize, IncrementalWitness<Node>>, Error> {
+    ) -> Result<HashMap<NotePosition, IncrementalWitness<Node>>, Error> {
         Err(Error::Other(
             "Witness map fetching is not implemented by this client"
                 .to_string(),
@@ -661,7 +664,7 @@ impl MaspClient for IndexerMaspClient {
     fn capabilities(&self) -> MaspClientCapabilities {
         const {
             MaspClientCapabilities::MAY_FETCH_PRE_BUILT_TREE
-                .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_NOTES_INDEX)
+                .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_NOTE_INDEX)
                 .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_WITNESS_MAP)
         }
     }
@@ -717,12 +720,12 @@ impl MaspClient for IndexerMaspClient {
     async fn fetch_note_index(
         &self,
         BlockHeight(height): BlockHeight,
-    ) -> Result<BTreeMap<MaspIndexedTx, usize>, Error> {
+    ) -> Result<BTreeMap<MaspIndexedTx, NotePosition>, Error> {
         use serde::Deserialize;
 
         #[derive(Deserialize)]
         struct Note {
-            note_position: usize,
+            note_position: NotePosition,
             #[serde(rename = "masp_tx_index")]
             batch_index: u32,
             block_index: u32,
@@ -805,13 +808,13 @@ impl MaspClient for IndexerMaspClient {
     async fn fetch_witness_map(
         &self,
         BlockHeight(height): BlockHeight,
-    ) -> Result<HashMap<usize, IncrementalWitness<Node>>, Error> {
+    ) -> Result<HashMap<NotePosition, IncrementalWitness<Node>>, Error> {
         use serde::Deserialize;
 
         #[derive(Deserialize)]
         struct Witness {
             bytes: Vec<u8>,
-            index: usize,
+            index: NotePosition,
         }
 
         #[derive(Deserialize)]

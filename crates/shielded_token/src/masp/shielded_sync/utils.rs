@@ -15,6 +15,8 @@ use namada_tx::IndexedTx;
 use namada_tx::event::MaspEventKind;
 use serde::{Deserialize, Serialize};
 
+use crate::masp::NotePosition;
+
 /// The type of a MASP transaction
 #[derive(
     Debug,
@@ -346,7 +348,7 @@ pub struct MaspClientCapabilities(u8);
 
 impl MaspClientCapabilities {
     #[allow(missing_docs)]
-    pub const MAY_FETCH_PRE_BUILT_NOTES_INDEX: Self = Self(0b00000010);
+    pub const MAY_FETCH_PRE_BUILT_NOTE_INDEX: Self = Self(0b00000010);
     #[allow(missing_docs)]
     pub const MAY_FETCH_PRE_BUILT_TREE: Self = Self(0b00000001);
     #[allow(missing_docs)]
@@ -354,9 +356,25 @@ impl MaspClientCapabilities {
     #[allow(missing_docs)]
     pub const NONE: Self = Self(0);
 
-    /// Combine these two [`MaspClientCapabilities`].
+    /// Add `other` to the current set of capabilities.
     pub const fn plus(self, other: Self) -> Self {
         Self(self.0 | other.0)
+    }
+
+    /// Subtract `other` from the current set of capabilities.
+    pub const fn minus(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
+    }
+
+    /// Check if `other` has a subset of the [`MaspClientCapabilities`] of
+    /// `self`.
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// Check whether there are no [`MaspClientCapabilities`].
+    pub const fn are_none(self) -> bool {
+        self.0 == 0
     }
 
     /// Check if the masp client is able to fetch a pre-built
@@ -366,9 +384,9 @@ impl MaspClientCapabilities {
     }
 
     /// Check if the masp client is able to fetch a pre-built
-    /// notes index.
-    pub const fn may_fetch_pre_built_notes_index(&self) -> bool {
-        self.0 & Self::MAY_FETCH_PRE_BUILT_NOTES_INDEX.0 != 0
+    /// note index.
+    pub const fn may_fetch_pre_built_note_index(&self) -> bool {
+        self.0 & Self::MAY_FETCH_PRE_BUILT_NOTE_INDEX.0 != 0
     }
 
     /// Check if the masp client is able to fetch a pre-built
@@ -426,14 +444,14 @@ pub trait MaspClient: Clone {
     async fn fetch_note_index(
         &self,
         height: BlockHeight,
-    ) -> Result<BTreeMap<MaspIndexedTx, usize>, Self::Error>;
+    ) -> Result<BTreeMap<MaspIndexedTx, NotePosition>, Self::Error>;
 
     /// Fetch the witness map of height `height`.
     #[allow(async_fn_in_trait)]
     async fn fetch_witness_map(
         &self,
         height: BlockHeight,
-    ) -> Result<HashMap<usize, IncrementalWitness<Node>>, Self::Error>;
+    ) -> Result<HashMap<NotePosition, IncrementalWitness<Node>>, Self::Error>;
 
     /// Check whether the given commitment anchor exists
     #[allow(async_fn_in_trait)]

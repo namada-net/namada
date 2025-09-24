@@ -50,6 +50,7 @@ use namada_tx::IndexedTx;
 use namada_wallet::{DatedKeypair, DatedSpendingKey};
 use rand::prelude::StdRng;
 use rand_core::{OsRng, SeedableRng};
+use serde::{Deserialize, Serialize};
 
 use super::utils::{MaspIndexedTx, TrialDecrypted};
 use crate::masp::bridge_tree::BridgeTree;
@@ -123,6 +124,8 @@ pub struct EpochedConversions {
 #[derive(
     BorshSerialize,
     BorshDeserialize,
+    Serialize,
+    Deserialize,
     Debug,
     Default,
     Copy,
@@ -133,6 +136,7 @@ pub struct EpochedConversions {
     PartialOrd,
     Hash,
 )]
+#[repr(transparent)]
 pub struct NotePosition(pub u64);
 
 impl From<u64> for NotePosition {

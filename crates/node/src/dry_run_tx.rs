@@ -30,7 +30,6 @@ where
     CA: 'static + WasmCacheAccess + Sync,
 {
     let tx = Tx::try_from_bytes(&request.data[..]).into_storage_result()?;
-    tx.validate_tx().into_storage_result()?;
 
     let gas_scale = parameters::get_gas_scale(&state)?;
     let height = state.in_mem().get_block_height().0;
@@ -59,6 +58,7 @@ where
                 &tx_gas_meter,
                 &mut shell_params,
                 None,
+                true,
             )
             .into_storage_result()?;
 
@@ -107,6 +107,7 @@ where
         &mut vp_wasm_cache,
         &mut tx_wasm_cache,
         protocol::GasMeterKind::MutGlobal,
+        true,
     )
     .map_err(|err| err.error)
     .into_storage_result()?;

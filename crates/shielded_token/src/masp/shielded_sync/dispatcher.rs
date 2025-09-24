@@ -11,10 +11,11 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use eyre::{ContextCompat, WrapErr, eyre};
 use futures::future::{Either, select};
 use futures::task::AtomicWaker;
-use masp_primitives::sapling::ViewingKey;
+use masp_primitives::merkle_tree::{CommitmentTree, IncrementalWitness};
+use masp_primitives::sapling::{Node, ViewingKey};
 use masp_primitives::transaction::Transaction;
 use namada_core::chain::BlockHeight;
-use namada_core::collections::HashMap;
+use namada_core::collections::{HashMap, HashSet};
 use namada_core::control_flow::ShutdownSignal;
 use namada_core::control_flow::time::{Duration, LinearBackoff, Sleep};
 use namada_core::hints;
@@ -22,13 +23,17 @@ use namada_core::task_env::TaskSpawner;
 use namada_io::{MaybeSend, MaybeSync, ProgressBar};
 use namada_wallet::{DatedKeypair, DatedSpendingKey};
 
-use super::utils::{IndexedNoteEntry, MaspClient, MaspIndexedTx};
+use super::utils::{
+    IndexedNoteEntry, MaspClient, MaspClientCapabilities, MaspIndexedTx,
+};
+use crate::masp::bridge_tree::BridgeTree;
 use crate::masp::shielded_sync::trial_decrypt;
 use crate::masp::utils::{
     DecryptedData, Fetched, RetryStrategy, TrialDecrypted, blocks_left_to_fetch,
 };
 use crate::masp::{
-    MaspExtendedSpendingKey, ShieldedUtils, ShieldedWallet, to_viewing_key,
+    MaspExtendedSpendingKey, NoteIndex, NotePosition, ShieldedUtils,
+    ShieldedWallet, WitnessMap, to_viewing_key,
 };
 
 struct AsyncCounterInner {
@@ -149,6 +154,16 @@ struct TaskError<C> {
 
 #[allow(clippy::large_enum_variant)]
 enum Message {
+    UpdateCommitmentTree(Result<CommitmentTree<Node>, TaskError<BlockHeight>>),
+    UpdateNoteIndex(
+        Result<BTreeMap<MaspIndexedTx, NotePosition>, TaskError<BlockHeight>>,
+    ),
+    UpdateWitnessMap(
+        Result<
+            HashMap<NotePosition, IncrementalWitness<Node>>,
+            TaskError<BlockHeight>,
+        >,
+    ),
     FetchTxs(
         Result<
             (BlockHeight, BlockHeight, Vec<IndexedNoteEntry>),
@@ -190,11 +205,19 @@ impl<Spawner> DispatcherTasks<Spawner> {
             self.message_receiver.try_recv().ok()
         }
     }
+
+    #[inline(always)]
+    fn try_recv_orphaned_message(&self) -> Option<Message> {
+        self.message_receiver.try_recv().ok()
+    }
 }
 
 /// Shielded sync cache.
 #[derive(Default, BorshSerialize, BorshDeserialize)]
 pub struct DispatcherCache {
+    pub(crate) commitment_tree: Option<(BlockHeight, CommitmentTree<Node>)>,
+    pub(crate) witness_map: Option<(BlockHeight, WitnessMap)>,
+    pub(crate) note_index: Option<(BlockHeight, NoteIndex)>,
     pub(crate) fetched: Fetched,
     pub(crate) trial_decrypted: TrialDecrypted,
 }
@@ -224,6 +247,17 @@ pub struct Config<T, I> {
     pub shutdown_signal: I,
 }
 
+/// State of different fetch jobs.
+#[derive(Default)]
+enum FetchState {
+    #[default]
+    NothingToFetch,
+    Fetching {
+        left: usize,
+    },
+    Complete,
+}
+
 /// Shielded sync message dispatcher.
 pub struct Dispatcher<S, M, U, T, I>
 where
@@ -239,6 +273,7 @@ where
     /// We are syncing up to this height
     height_to_sync: BlockHeight,
     interrupt_flag: AtomicFlag,
+    fetch_state: FetchState,
 }
 
 /// Create a new dispatcher in the initial state.
@@ -291,6 +326,7 @@ where
         config,
         cache,
         interrupt_flag: Default::default(),
+        fetch_state: Default::default(),
     }
 }
 
@@ -378,6 +414,7 @@ where
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             let needs_witness_map_update =
                 self.client.capabilities().needs_witness_map_update();
             self.ctx
@@ -405,6 +442,19 @@ where
                     &stx_batch,
                     &self.cache.trial_decrypted,
                 )?;
+=======
+            self.try_get_optional_masp_data();
+
+            if masp_indexed_tx.indexed_tx.block_height > self.ctx.synced_height
+            {
+                if !self.has_optional_masp_data() {
+                    self.ctx.update_witnesses(
+                        masp_indexed_tx,
+                        &stx_batch,
+                        &self.cache.trial_decrypted,
+                    )?;
+                }
+>>>>>>> 01970ac6c (Restore ability to fetch witness map from indexer)
                 self.ctx.save_shielded_spends(
                     &stx_batch,
                     #[cfg(feature = "historic")]
@@ -461,7 +511,7 @@ where
             }
         }
 
-        self.ctx.tree.as_mut().garbage_collect_ommers();
+        self.try_load_optional_masp_data()?;
 
         // NB: at this point, the wallet has been synced
         self.ctx.synced_height = *last_query_height;
@@ -617,6 +667,20 @@ where
     }
 
     fn spawn_initial_set_of_tasks(&mut self, initial_state: &InitialState) {
+        let needed_caps = const {
+            MaspClientCapabilities::MAY_FETCH_PRE_BUILT_TREE
+                .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_NOTE_INDEX)
+                .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_WITNESS_MAP)
+        };
+
+        if self.client.capabilities().contains(needed_caps) {
+            self.spawn_update_commitment_tree(initial_state.last_query_height);
+            self.spawn_update_notes_map(initial_state.last_query_height);
+            self.spawn_update_witness_map(initial_state.last_query_height);
+
+            self.fetch_state = FetchState::Fetching { left: 3usize };
+        }
+
         let mut number_of_fetches = 0;
         let batch_size = self.config.block_batch_size;
         for from in (initial_state.start_height.0
@@ -640,6 +704,48 @@ where
 
     fn handle_incoming_message(&mut self, message: Message) {
         match message {
+            Message::UpdateCommitmentTree(Ok(ct)) => {
+                _ = self
+                    .cache
+                    .commitment_tree
+                    .insert((self.height_to_sync, ct));
+
+                self.must_decrement_left_fetching();
+            }
+            Message::UpdateCommitmentTree(Err(TaskError {
+                error,
+                context: height,
+            })) => {
+                if self.can_launch_new_fetch_retry(error) {
+                    self.spawn_update_commitment_tree(height);
+                }
+            }
+            Message::UpdateNoteIndex(Ok(nm)) => {
+                _ = self.cache.note_index.insert((self.height_to_sync, nm));
+
+                self.must_decrement_left_fetching();
+            }
+            Message::UpdateNoteIndex(Err(TaskError {
+                error,
+                context: height,
+            })) => {
+                if self.can_launch_new_fetch_retry(error) {
+                    self.spawn_update_notes_map(height);
+                }
+            }
+            Message::UpdateWitnessMap(Ok(wm)) => {
+                _ = self.cache.witness_map.insert((self.height_to_sync, wm));
+
+                self.must_decrement_left_fetching();
+            }
+            Message::UpdateWitnessMap(Err(TaskError {
+                error,
+                context: height,
+            })) => {
+                if self.can_launch_new_fetch_retry(error) {
+                    self.spawn_update_witness_map(height);
+                }
+            }
             Message::FetchTxs(Ok((from, to, tx_batch))) => {
                 for (itx, tx) in &tx_batch {
                     self.spawn_trial_decryptions(*itx, tx);
@@ -701,6 +807,136 @@ where
         self.vk_synced_height(vk) < itx.indexed_tx.block_height
     }
 
+    fn try_load_optional_masp_data(&mut self) -> Result<(), eyre::Error> {
+        if !self.has_optional_masp_data() {
+            self.ctx.tree.as_mut().garbage_collect_ommers();
+            return Ok(());
+        }
+
+        let mut witness_map = self.cache.witness_map.take().unwrap().1;
+        let commitment_tree = self.cache.commitment_tree.take().unwrap().1;
+
+        let set_of_unspent_note_pos: HashSet<_> = self
+            .ctx
+            .pos_map
+            .values()
+            .flat_map(|vk_owned_note_set| {
+                vk_owned_note_set.iter().filter_map(|owned_note| {
+                    if !self.ctx.spents.contains(owned_note) {
+                        Some(*owned_note)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+
+        // NB: Prune witnesses we don't care about
+        witness_map
+            .retain(|note_pos, _| set_of_unspent_note_pos.contains(note_pos));
+
+        self.ctx.tree = BridgeTree::from_tree_and_witness_map(
+            commitment_tree,
+            witness_map,
+        )?;
+
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn has_optional_masp_data(&self) -> bool {
+        matches!(&self.fetch_state, FetchState::Complete)
+    }
+
+    fn try_get_optional_masp_data(&mut self) {
+        if !matches!(&self.fetch_state, FetchState::Fetching { .. }) {
+            return;
+        }
+        if let Some(message) = self.tasks.try_recv_orphaned_message() {
+            self.handle_incoming_message(message);
+        }
+        // NB: Load note index as soon as we can, to avoid running
+        // into errors related with unknown note positions
+        if let Some((_, note_index)) = self.cache.note_index.take() {
+            self.ctx.note_index = note_index;
+        }
+    }
+
+    fn must_decrement_left_fetching(&mut self) {
+        let left = self.must_get_left_fetching();
+
+        *left = left.checked_sub(1).unwrap();
+
+        if *left == 0 {
+            self.fetch_state = FetchState::Complete;
+        }
+    }
+
+    fn must_get_left_fetching(&mut self) -> &mut usize {
+        if let FetchState::Fetching { left } = &mut self.fetch_state {
+            left
+        } else {
+            unreachable!("Must get `left_fetching` as `FetchState::Fetching`")
+        }
+    }
+
+    fn spawn_update_witness_map(&mut self, height: BlockHeight) {
+        if pre_built_in_cache(self.cache.witness_map.as_ref(), height) {
+            return;
+        }
+        let client = self.client.clone();
+        self.spawn_async_orphaned(Box::pin(async move {
+            Message::UpdateWitnessMap(
+                client
+                    .fetch_witness_map(height)
+                    .await
+                    .wrap_err("Failed to fetch witness map")
+                    .map_err(|error| TaskError {
+                        error,
+                        context: height,
+                    }),
+            )
+        }));
+    }
+
+    fn spawn_update_commitment_tree(&mut self, height: BlockHeight) {
+        if pre_built_in_cache(self.cache.commitment_tree.as_ref(), height) {
+            return;
+        }
+        let client = self.client.clone();
+        self.spawn_async_orphaned(Box::pin(async move {
+            Message::UpdateCommitmentTree(
+                client
+                    .fetch_commitment_tree(height)
+                    .await
+                    .wrap_err("Failed to fetch commitment tree")
+                    .map_err(|error| TaskError {
+                        error,
+                        context: height,
+                    }),
+            )
+        }));
+    }
+
+    fn spawn_update_notes_map(&mut self, height: BlockHeight) {
+        if pre_built_in_cache(self.cache.note_index.as_ref(), height) {
+            return;
+        }
+        let client = self.client.clone();
+        self.spawn_async_orphaned(Box::pin(async move {
+            Message::UpdateNoteIndex(
+                client
+                    .fetch_note_index(height)
+                    .await
+                    .wrap_err("Failed to fetch note index")
+                    .map_err(|error| TaskError {
+                        error,
+                        context: height,
+                    }),
+            )
+        }));
+    }
+
     fn spawn_fetch_txs(&self, from: BlockHeight, to: BlockHeight) -> u64 {
         let mut spawned_tasks = 0;
 
@@ -746,6 +982,28 @@ where
         }
     }
 
+    fn spawn_async_orphaned<F>(&self, mut fut: F)
+    where
+        F: Future<Output = Message> + Unpin + 'static,
+    {
+        let sender = self.tasks.message_sender.clone();
+        let guard = self.tasks.panic_flag.clone();
+        let interrupt = self.interrupt_flag.clone();
+        self.tasks.spawner.spawn_async(async move {
+            let _guard = guard;
+            let wrapped_fut = std::future::poll_fn(move |cx| {
+                if interrupt.get() {
+                    Poll::Ready(None)
+                } else {
+                    Pin::new(&mut fut).poll(cx).map(Some)
+                }
+            });
+            if let Some(msg) = wrapped_fut.await {
+                sender.send_async(msg).await.unwrap()
+            }
+        });
+    }
+
     fn spawn_async<F>(&self, mut fut: F)
     where
         F: Future<Output = Message> + Unpin + 'static,
@@ -788,6 +1046,14 @@ where
     }
 }
 
+#[inline(always)]
+fn pre_built_in_cache<T>(
+    pre_built_data: Option<&(BlockHeight, T)>,
+    desired_height: BlockHeight,
+) -> bool {
+    matches!(pre_built_data, Some((h, _)) if *h == desired_height)
+}
+
 #[cfg(test)]
 mod dispatcher_tests {
     use std::collections::{BTreeMap, BTreeSet};
@@ -811,7 +1077,7 @@ mod dispatcher_tests {
         dated_arbitrary_vk,
     };
     use crate::masp::utils::MaspIndexedTx;
-    use crate::masp::{MaspLocalTaskEnv, NotePosition, ShieldedSyncConfig};
+    use crate::masp::{MaspLocalTaskEnv, ShieldedSyncConfig};
 
     #[tokio::test]
     async fn test_applying_cache_drains_decrypted_data() {
@@ -1299,9 +1565,15 @@ mod dispatcher_tests {
                 assert!(res.is_none());
 
                 let DispatcherCache {
+                    commitment_tree,
+                    witness_map,
+                    note_index,
                     fetched,
                     trial_decrypted,
                 } = utils.cache_load().await.expect("Test failed");
+                assert!(commitment_tree.is_none());
+                assert!(witness_map.is_none());
+                assert!(note_index.is_none());
                 assert!(fetched.is_empty());
                 assert!(trial_decrypted.is_empty());
             })

@@ -673,7 +673,15 @@ where
                 .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_WITNESS_MAP)
         };
 
-        if self.client.capabilities().contains(needed_caps) {
+        const THRESHOLD_START_OPT_MASP_DATA_FETCHES: u64 = 100;
+
+        let meets_opt_masp_data_block_threshold =
+            initial_state.last_query_height.0 - initial_state.start_height.0
+                > THRESHOLD_START_OPT_MASP_DATA_FETCHES;
+
+        if self.client.capabilities().contains(needed_caps)
+            && meets_opt_masp_data_block_threshold
+        {
             self.spawn_update_commitment_tree(initial_state.last_query_height);
             self.spawn_update_notes_map(initial_state.last_query_height);
             self.spawn_update_witness_map(initial_state.last_query_height);

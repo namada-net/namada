@@ -67,7 +67,7 @@ use crate::wallet::{Wallet, WalletIo};
 use crate::{Namada, args, rpc};
 
 /// A structure holding the signing data to craft a transaction
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SigningTxData {
     /// The address owning the transaction
     pub owner: Option<Address>,
@@ -84,7 +84,7 @@ pub struct SigningTxData {
 }
 
 /// The fee's authorization
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum FeeAuthorization {
     /// A wrapper signer
     Signer {
@@ -98,7 +98,7 @@ pub enum FeeAuthorization {
 }
 
 /// A structure holding the signing data for a wrapper transaction
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SigningWrapperData {
     /// The signing data for each one of the inner transactions of this batch
     pub signing_data: Vec<SigningTxData>,
@@ -131,7 +131,7 @@ impl SigningWrapperData {
 }
 
 #[allow(missing_docs)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum SigningData {
     Inner(SigningTxData),
     Wrapper(SigningWrapperData),
@@ -334,7 +334,7 @@ where
         let mut used_pubkeys = HashSet::new();
 
         // First try to sign the raw header with the supplied signatures
-        let signatures = signing_tx_data
+        let signatures: Vec<_> = signing_tx_data
             .signatures
             .iter()
             .map(|bytes| {
@@ -344,7 +344,9 @@ where
                 sigidx
             })
             .collect();
-        tx.add_signatures(signatures);
+        if !signatures.is_empty() {
+            tx.add_signatures(signatures);
+        }
 
         // Then try to sign the raw header with private keys in the software
         // wallet

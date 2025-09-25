@@ -310,10 +310,10 @@ jobs:
         run: sccache --stop-server || true
 
   test-integration:
-    runs-on: [self-hosted, 8vcpu-16ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 16vcpu-32ram-ubuntu22-namada-x86]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
-    # timeout-minutes: 60
+    timeout-minutes: 120
     needs: [build-wasm]
 
     steps:

@@ -589,7 +589,8 @@ where
             conversion_state,
             ethereum_height,
             eth_events_queue,
-            commit_only_data,
+            commit_only_data: _, /* Ignore the last tx gas map - we clear it
+                                  * out after commit */
         }) = self
             .0
             .db
@@ -609,7 +610,6 @@ where
                 in_mem.next_epoch_min_start_time = next_epoch_min_start_time;
                 in_mem.update_epoch_blocks_delay = update_epoch_blocks_delay;
                 in_mem.address_gen = address_gen;
-                in_mem.commit_only_data = commit_only_data;
             }
 
             // Rebuild Merkle tree - requires the values above to be set first

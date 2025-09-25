@@ -230,21 +230,29 @@ pub fn find_key_by_pk<U: WalletIo>(
 /// Given CLI arguments and some defaults, determine the rightful transaction
 /// signer.
 ///
-/// Return the given signing key or public key of the given signer if
-/// possible. If no explicit signer given, use the `default`. If no `default`
-/// is given, an `Error` is returned.
+/// When `signing_keys` are provided, these will be returned. Otherwise, if a
+/// `default_signer` is provided, its key will be returned (provided that it can
+/// be found in the wallet). Finally, if neither of the previous cases, an empty
+/// set of signers will be returned.
 async fn inner_tx_signers(
     context: &impl Namada,
-    mut signing_keys: Vec<common::PublicKey>,
+    signing_keys: Vec<common::PublicKey>,
     default_signer: Option<&Address>,
 ) -> Result<HashSet<common::PublicKey>, Error> {
-    if let Some(signer) = default_signer {
-        // Use the signer determined by the caller, fetch the signing key and
-        // apply it
-        signing_keys.push(find_pk(context, signer).await?)
-    }
+    let keys = if signing_keys.is_empty() {
+        match default_signer {
+            // When provided, use the signer determined by the caller, fetch the
+            // public key and apply it
+            Some(signer) => vec![find_pk(context, signer).await?],
+            // In this case return no signer
+            None => Default::default(),
+        }
+    } else {
+        // Otherwise just use the provided public keys
+        signing_keys
+    };
 
-    Ok(signing_keys.into_iter().collect())
+    Ok(keys.into_iter().collect())
 }
 
 /// The different parts of a transaction that can be signed. Note that it's

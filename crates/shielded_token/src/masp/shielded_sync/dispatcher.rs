@@ -690,7 +690,7 @@ where
             && meets_opt_masp_data_block_threshold
         {
             self.spawn_update_commitment_tree(initial_state.last_query_height);
-            self.spawn_update_notes_map(initial_state.last_query_height);
+            self.spawn_update_note_index(initial_state.last_query_height);
             self.spawn_update_witness_map(initial_state.last_query_height);
 
             self.fetch_state = FetchState::Fetching { left: 3usize };
@@ -745,7 +745,7 @@ where
                 context: height,
             })) => {
                 if self.can_launch_new_fetch_retry(error) {
-                    self.spawn_update_notes_map(height);
+                    self.spawn_update_note_index(height);
                 }
             }
             Message::UpdateWitnessMap(Ok(wm)) => {
@@ -933,7 +933,7 @@ where
         }));
     }
 
-    fn spawn_update_notes_map(&mut self, height: BlockHeight) {
+    fn spawn_update_note_index(&mut self, height: BlockHeight) {
         if pre_built_in_cache(self.cache.note_index.as_ref(), height) {
             return;
         }

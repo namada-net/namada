@@ -152,13 +152,12 @@ impl SigningData {
         }
     }
 
-    /// Returns a reference to the inner [`SigningTxData`]. In case of multiple
-    /// instances it returns the first one (if any)
-    pub fn signing_tx_data(&self) -> Option<&SigningTxData> {
+    /// Returns a reference to the inner [`SigningTxData`]
+    pub fn signing_tx_data(&self) -> Vec<&SigningTxData> {
         match self {
-            SigningData::Inner(signing_tx_data) => Some(signing_tx_data),
+            SigningData::Inner(signing_tx_data) => vec![signing_tx_data],
             SigningData::Wrapper(signing_wrapper_data) => {
-                signing_wrapper_data.signing_data.first()
+                signing_wrapper_data.signing_data.iter().collect()
             }
         }
     }

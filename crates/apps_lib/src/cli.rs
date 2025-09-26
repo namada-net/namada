@@ -7954,15 +7954,10 @@ pub mod args {
                     ))
                     .conflicts_with(DRY_RUN_TX.name),
             )
-            .arg(
-                DEVICE_TRANSPORT
-                    .def()
-                    .help(wrap!(
-                        "Select transport for hardware wallet from \"hid\" \
-                         (default) or \"tcp\"."
-                    ))
-                    .conflicts_with(DRY_RUN_TX.name),
-            )
+            .arg(DEVICE_TRANSPORT.def().help(wrap!(
+                "Select transport for hardware wallet from \"hid\" (default) \
+                 or \"tcp\"."
+            )))
             .arg(
                 MEMO_OPT
                     .def()

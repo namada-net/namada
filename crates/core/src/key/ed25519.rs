@@ -402,6 +402,10 @@ impl super::SigScheme for SigScheme {
             Ok(())
         }
     }
+
+    fn mock(_: &Self::SecretKey) -> Self::Signature {
+        Signature(ed25519_consensus::Signature::from([0; 64]))
+    }
 }
 
 #[cfg(feature = "arbitrary")]

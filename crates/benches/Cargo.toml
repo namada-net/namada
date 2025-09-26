@@ -50,7 +50,7 @@ namada_vm = { workspace = true, default-features = true }
 namada_vp.workspace = true
 
 masp_primitives.workspace = true
-masp_proofs = { workspace = true, features = ["benchmarks", "multicore"] }
+masp_proofs = { workspace = true, features = ["benchmarks"] }
 borsh.workspace = true
 criterion.workspace = true
 lazy_static.workspace = true

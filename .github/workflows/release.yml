@@ -26,7 +26,7 @@ jobs:
   wasm:
     runs-on: [ubuntu-latest]
     container: 
-      image:  ghcr.io/heliaxdev/namada-ci:wasm-v2.0.0
+      image:  ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4

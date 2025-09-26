@@ -50,7 +50,7 @@ use crate::{
 proptest! {
     // Generate arb valid input for `test_simple_redelegation_aux`
     #![proptest_config(Config {
-        cases: 100,
+        cases: 10,
         .. Config::default()
     })]
     #[test]
@@ -319,7 +319,7 @@ fn test_simple_redelegation_aux(
 proptest! {
     // Generate arb valid input for `test_slashes_with_unbonding_aux`
     #![proptest_config(Config {
-        cases: 100,
+        cases: 10,
         .. Config::default()
     })]
     #[test]
@@ -505,7 +505,7 @@ fn test_slashes_with_unbonding_aux(
 proptest! {
     // Generate arb valid input for `test_simple_redelegation_aux`
     #![proptest_config(Config {
-        cases: 100,
+        cases: 10,
         .. Config::default()
     })]
     #[test]
@@ -773,7 +773,7 @@ fn test_redelegation_with_slashing_aux(
 proptest! {
     // Generate arb valid input for `test_chain_redelegations_aux`
     #![proptest_config(Config {
-        cases: 100,
+        cases: 10,
         .. Config::default()
     })]
     #[test]

@@ -1239,6 +1239,7 @@ pub async fn submit_shielded_transfer(
         &args.tx,
         signing_data
             .signing_tx_data()
+            .first()
             .expect("Missing expected signing data"),
         shielded_hw_keys,
     )
@@ -1412,6 +1413,7 @@ pub async fn submit_unshielding_transfer(
         &args.tx,
         signing_data
             .signing_tx_data()
+            .first()
             .expect("Missing signing data"),
         shielded_hw_keys,
     )
@@ -1511,6 +1513,7 @@ where
         &args.tx,
         signing_data
             .signing_tx_data()
+            .first()
             .expect("Missing expected signing data"),
         shielded_hw_keys,
     )

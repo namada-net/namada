@@ -3239,28 +3239,15 @@ pub fn build_batch(
     };
 
     for (tx, sig_data) in txs {
-        if tx.commitments().len() != 1 {
-            return Err(Error::Other(format!(
-                "Inner tx did not contain exactly one transaction, \
-                 transaction length: {}",
-                tx.commitments().len()
-            )));
-        }
-
-        let cmt = tx.first_commitments().unwrap().to_owned();
-        if !batched_tx.add_inner_tx(tx, cmt.clone()) {
-            return Err(Error::Other(format!(
-                "The transaction batch already contains inner tx: {}",
-                cmt.get_hash()
-            )));
-        }
+        batched_tx = Tx::merge_transactions(batched_tx, tx).map_err(|_| {
+            Error::Other(
+                "Found duplicated tx commitments when building the batch"
+                    .to_string(),
+            )
+        })?;
         // Avoid redundant signing data
-        if let Some(signing_tx_data) = sig_data.signing_tx_data() {
-            if !signing_wrapper_data
-                .signing_data
-                .iter()
-                .any(|sig| sig == signing_tx_data)
-            {
+        for signing_tx_data in sig_data.signing_tx_data() {
+            if !signing_wrapper_data.signing_data.contains(signing_tx_data) {
                 signing_wrapper_data
                     .signing_data
                     .push(signing_tx_data.to_owned());

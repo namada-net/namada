@@ -57,7 +57,7 @@ jobs:
 
   rust-docs:
     container:
-      image: ghcr.io/heliaxdev/namada-ci:namada-v2.0.0
+      image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
     timeout-minutes: 20
 
@@ -91,7 +91,7 @@ jobs:
 
   lints:
     container:
-      image: ghcr.io/heliaxdev/namada-ci:namada-v2.0.0
+      image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     runs-on: [self-hosted, 8vcpu-16ram-ubuntu22-namada-x86]
     timeout-minutes: 15
 
@@ -129,7 +129,7 @@ jobs:
     timeout-minutes: 10
     runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
     container:
-      image: ghcr.io/heliaxdev/namada-ci:wasm-v2.0.0
+      image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     strategy:
       fail-fast: true
       matrix:
@@ -176,7 +176,7 @@ jobs:
   test-wasm:
     timeout-minutes: 30
     container:
-      image: ghcr.io/heliaxdev/namada-ci:namada-v2.0.0
+      image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
     needs: [build-wasm]
 
@@ -223,8 +223,8 @@ jobs:
   test-unit:
     runs-on: [self-hosted, 8vcpu-16ram-ubuntu22-namada-x86]
     container:
-      image: ghcr.io/heliaxdev/namada-ci:namada-v2.0.0
-    timeout-minutes: 20
+      image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
+    timeout-minutes: 30
     needs: [build-wasm]
 
     steps:
@@ -276,7 +276,7 @@ jobs:
   check-packages:
     runs-on: [self-hosted, 8vcpu-16ram-ubuntu22-namada-x86]
     container:
-      image: ghcr.io/heliaxdev/namada-ci:namada-v2.0.0
+      image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     timeout-minutes: 15
 
     steps:
@@ -310,10 +310,10 @@ jobs:
         run: sccache --stop-server || true
 
   test-integration:
-    runs-on: [self-hosted, 8vcpu-16ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 16vcpu-32ram-ubuntu22-namada-x86]
     container:
-      image: ghcr.io/heliaxdev/namada-ci:namada-v2.0.0
-    timeout-minutes: 35
+      image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
+    timeout-minutes: 120
     needs: [build-wasm]
 
     steps:
@@ -365,7 +365,7 @@ jobs:
   check-benchmarks:
     runs-on: [self-hosted, 16vcpu-32ram-ubuntu22-namada-x86]
     container:
-      image: ghcr.io/heliaxdev/namada-ci:namada-v2.0.0
+      image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     if: github.event.pull_request.draft == false || contains(github.head_ref, 'mergify/merge-queue') || contains(github.ref_name, 'mergify/merge-queue')
     timeout-minutes: 35
     needs: [build-wasm]
@@ -413,7 +413,7 @@ jobs:
   build-binaries:
     runs-on: [self-hosted, 16vcpu-32ram-ubuntu22-namada-x86]
     container:
-      image: ghcr.io/heliaxdev/namada-ci:namada-v2.0.0
+      image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     timeout-minutes: 25
 
     steps:
@@ -464,7 +464,7 @@ jobs:
   test-e2e:
     runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
     container:
-      image: ghcr.io/heliaxdev/namada-ci:namada-v2.0.0
+      image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     if: github.event.pull_request.draft == false || contains(github.head_ref, 'mergify/merge-queue') || contains(github.ref_name, 'mergify/merge-queue')
     needs: [build-wasm, build-binaries]
     timeout-minutes: 50
@@ -635,7 +635,7 @@ jobs:
   test-e2e-with-device-automation:
     runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
     container:
-      image: ghcr.io/heliaxdev/namada-ci:namada-v2.0.0
+      image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     if: github.event.pull_request.draft == false || contains(github.head_ref, 'mergify/merge-queue') || contains(github.ref_name, 'mergify/merge-queue')
     needs: [build-wasm, build-binaries]
     timeout-minutes: 50

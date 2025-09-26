@@ -100,6 +100,9 @@ where
     pub memory: MEM,
     /// The tx context contains references to host structures.
     pub ctx: TxCtx<D, H, CA>,
+    /// Indicates whether the transaction executed in this environment
+    /// is a dry-run or not.
+    pub dry_run: bool,
 }
 
 /// A transaction's host context
@@ -165,6 +168,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         memory: MEM,
+        dry_run: bool,
         write_log: &mut WriteLog,
         in_mem: &InMemory<H>,
         db: &D,
@@ -220,7 +224,11 @@ where
             cache_access: std::marker::PhantomData,
         };
 
-        Self { memory, ctx }
+        Self {
+            memory,
+            ctx,
+            dry_run,
+        }
     }
 
     /// Access state from within a tx
@@ -240,6 +248,7 @@ where
         Self {
             memory: self.memory.clone(),
             ctx: self.ctx.clone(),
+            dry_run: self.dry_run,
         }
     }
 }
@@ -320,6 +329,9 @@ where
     pub memory: MEM,
     /// The VP context contains references to host structures.
     pub ctx: VpCtx<D, H, EVAL, CA>,
+    /// Indicates whether we are executing VPs as part of a
+    /// dry-run of a transaction or not.
+    pub dry_run: bool,
 }
 
 /// A validity predicate's host context
@@ -407,6 +419,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         memory: MEM,
+        dry_run: bool,
         address: &Address,
         write_log: &WriteLog,
         in_mem: &InMemory<H>,
@@ -442,7 +455,11 @@ where
             vp_wasm_cache,
         );
 
-        Self { memory, ctx }
+        Self {
+            memory,
+            ctx,
+            dry_run,
+        }
     }
 
     /// Access state from within a VP
@@ -463,6 +480,7 @@ where
         Self {
             memory: self.memory.clone(),
             ctx: self.ctx.clone(),
+            dry_run: self.dry_run,
         }
     }
 }
@@ -1964,17 +1982,31 @@ where
 
     let tx = unsafe { env.ctx.tx.get() };
 
-    match tx.verify_signatures(
-        &HashSet::from_iter(hashes),
-        public_keys_map,
-        &Some(signer),
-        threshold,
-        || {
-            gas_meter
-                .borrow_mut()
-                .consume(gas::VERIFY_TX_SIG_GAS.into())
-        },
-    ) {
+    match if !env.dry_run {
+        tx.verify_signatures(
+            &HashSet::from_iter(hashes),
+            public_keys_map,
+            &Some(signer),
+            threshold,
+            || {
+                gas_meter
+                    .borrow_mut()
+                    .consume(gas::VERIFY_TX_SIG_GAS.into())
+            },
+        )
+    } else {
+        tx.dry_run_signatures(
+            &HashSet::from_iter(hashes),
+            public_keys_map,
+            &Some(signer),
+            threshold,
+            || {
+                gas_meter
+                    .borrow_mut()
+                    .consume(gas::VERIFY_TX_SIG_GAS.into())
+            },
+        )
+    } {
         Ok(_) => Ok(()),
         Err(err) => match err {
             namada_tx::VerifySigError::Gas(inner) => {
@@ -2120,17 +2152,31 @@ where
     let tx = unsafe { env.ctx.tx.get() };
 
     let (gas_meter, sentinel) = env.ctx.gas_meter_and_sentinel();
-    match tx.verify_signatures(
-        &HashSet::from_iter(hashes),
-        public_keys_map,
-        &None,
-        threshold,
-        || {
-            gas_meter
-                .borrow_mut()
-                .consume(gas::VERIFY_TX_SIG_GAS.into())
-        },
-    ) {
+    match if !env.dry_run {
+        tx.verify_signatures(
+            &HashSet::from_iter(hashes),
+            public_keys_map,
+            &None,
+            threshold,
+            || {
+                gas_meter
+                    .borrow_mut()
+                    .consume(gas::VERIFY_TX_SIG_GAS.into())
+            },
+        )
+    } else {
+        tx.dry_run_signatures(
+            &HashSet::from_iter(hashes),
+            public_keys_map,
+            &None,
+            threshold,
+            || {
+                gas_meter
+                    .borrow_mut()
+                    .consume(gas::VERIFY_TX_SIG_GAS.into())
+            },
+        )
+    } {
         Ok(_) => Ok(HostEnvResult::Success.to_i64()),
         Err(err) => match err {
             namada_tx::VerifySigError::Gas(inner) => {
@@ -2386,6 +2432,7 @@ pub mod testing {
         let (write_log, in_mem, db) = state.split_borrow();
         TxVmEnv::new(
             NativeMemory,
+            false,
             write_log,
             in_mem,
             db,
@@ -2436,6 +2483,7 @@ pub mod testing {
         let (write_log, in_mem, db) = state.split_borrow();
         let mut env = TxVmEnv::new(
             WasmMemory::new(Rc::downgrade(&store)),
+            false,
             write_log,
             in_mem,
             db,
@@ -2483,6 +2531,7 @@ pub mod testing {
     {
         VpVmEnv::new(
             NativeMemory,
+            false,
             address,
             state.write_log(),
             state.in_mem(),

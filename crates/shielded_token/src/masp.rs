@@ -314,6 +314,7 @@ pub enum ContextSyncStatus {
 
 #[cfg(test)]
 mod tests {
+    use masp_primitives::ff::Field;
     use masp_proofs::bls12_381::Bls12;
 
     use super::*;
@@ -384,7 +385,7 @@ mod tests {
             }
         }
 
-        let dummy_circuit = FakeCircuit { x: Scalar::zero() };
+        let dummy_circuit = FakeCircuit { x: Scalar::ZERO };
         let mut rng = rand::thread_rng();
         let fake_params: Parameters<Bls12> =
             generate_random_parameters(dummy_circuit, &mut rng)
@@ -437,10 +438,11 @@ pub mod testing {
     use masp_primitives::consensus::BranchId;
     use masp_primitives::consensus::testing::arb_height;
     use masp_primitives::constants::{
-        SPENDING_KEY_GENERATOR, VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
+        spending_key_generator, value_commitment_randomness_generator,
     };
     use masp_primitives::ff::PrimeField;
     use masp_primitives::group::GroupEncoding;
+    use masp_primitives::group::prime::PrimeCurveAffine;
     use masp_primitives::jubjub;
     use masp_primitives::keys::OutgoingViewingKey;
     use masp_primitives::memo::MemoBytes;
@@ -559,7 +561,7 @@ pub mod testing {
             // This is the result of the re-randomization, we compute it for the
             // caller
             let rk = PublicKey(proof_generation_key.ak.into())
-                .randomize(ar, SPENDING_KEY_GENERATOR);
+                .randomize(ar, spending_key_generator());
 
             // Compute value commitment
             let value_commitment: jubjub::ExtendedPoint =
@@ -681,7 +683,7 @@ pub mod testing {
             // Grab the `bvk` using DerivePublic.
             let bvk = PublicKey::from_private(
                 &bsk,
-                VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
+                value_commitment_randomness_generator(),
             );
 
             // In order to check internal consistency, let's use the accumulated
@@ -716,7 +718,7 @@ pub mod testing {
             Ok(bsk.sign(
                 &data_to_be_signed,
                 &mut *rng,
-                VALUE_COMMITMENT_RANDOMNESS_GENERATOR,
+                value_commitment_randomness_generator(),
             ))
         }
     }

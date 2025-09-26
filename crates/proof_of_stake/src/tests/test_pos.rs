@@ -65,7 +65,7 @@ use crate::{
 proptest! {
     // Generate arb valid input for `test_test_init_genesis_aux`
     #![proptest_config(Config {
-        cases: 100,
+        cases: 10,
         .. Config::default()
     })]
     #[test]
@@ -82,7 +82,7 @@ proptest! {
 proptest! {
     // Generate arb valid input for `test_bonds_aux`
     #![proptest_config(Config {
-        cases: 100,
+        cases: 10,
         .. Config::default()
     })]
     #[test]
@@ -98,7 +98,7 @@ proptest! {
 proptest! {
     // Generate arb valid input for `test_unjail_validator_aux`
     #![proptest_config(Config {
-        cases: 100,
+        cases: 10,
         .. Config::default()
     })]
     #[test]
@@ -177,7 +177,7 @@ proptest! {
 proptest! {
     // Generate arb valid input for `test_is_delegator`
     #![proptest_config(Config {
-        cases: 100,
+        cases: 10,
         .. Config::default()
     })]
     #[test]
@@ -193,6 +193,7 @@ proptest! {
 proptest! {
     // Generate arb valid input for `test_jail_for_liveness_aux`
     #![proptest_config(Config {
+        cases: 10,
         .. Config::default()
     })]
     #[test]

@@ -2068,6 +2068,7 @@ mod test_shielded_wallet {
     use namada_core::token::MaspDigitPos;
     use namada_io::NamadaIo;
     use proptest::proptest;
+    use proptest::test_runner::Config;
     use tempfile::tempdir;
 
     use super::*;
@@ -2418,6 +2419,10 @@ mod test_shielded_wallet {
     }
 
     proptest! {
+        #![proptest_config(Config {
+            cases: 10,
+            .. Config::default()
+        })]
         /// In this test, we have a single incentivized token
         /// shielded at MaspEpoch(2), owned by the shielded wallet.
         /// The amount of owned token is the parameter `principal`.

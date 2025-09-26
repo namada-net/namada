@@ -190,6 +190,7 @@ test-integration:
 	$(cargo) +$(nightly) test --lib $(jobs) integration::$(TEST_FILTER) \
 	--features historic-masp \
 	-Z unstable-options \
+	--release \
 	-- \
 	--test-threads=1 \
 	-Z unstable-options --report-time
@@ -218,6 +219,7 @@ test-unit-with-coverage:
 test-integration-with-coverage:
 	$(cargo) +$(nightly) llvm-cov --lib --output-path lcov.info \
 		--lcov \
+		--release \
 		--features historic-masp \
 		-- integration \
 		--test-threads=1 \

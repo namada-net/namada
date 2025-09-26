@@ -1816,7 +1816,6 @@ fn test_invalid_validator_txs() -> Result<()> {
     client.exp_string(TX_REJECTED)?;
     client.assert_success();
 
-    // Try to deactivate validator-1 as validator-0
     let tx_args = vec![
         "deactivate-validator",
         "--validator",
@@ -2620,7 +2619,7 @@ fn masp_txs_and_queries() -> Result<()> {
                     || tx_args[0] == "shield"
                     || tx_args[0] == "unshield")
             {
-                [tx_args.clone(), vec!["--dry-run"]].concat()
+                [tx_args.clone(), vec!["--dry-run-wrapper"]].concat()
             } else {
                 tx_args.clone()
             };

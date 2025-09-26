@@ -25,6 +25,7 @@ use namada_io::{Client, Io, display, display_line, edisplay_line};
 use namada_token::Amount;
 use namada_token::storage_key::balance_key;
 use namada_tx::Tx;
+use namada_tx::data::Fee;
 use owo_colors::OwoColorize;
 use serde::Serialize;
 
@@ -41,9 +42,9 @@ use crate::queries::{
     TransferToEthereumStatus,
 };
 use crate::rpc::{query_storage_value, query_wasm_code_hash, validate_amount};
-use crate::signing::{aux_signing_data, validate_transparent_fee};
-use crate::tx::prepare_tx;
-use crate::{MaybeSync, Namada, SigningTxData, args};
+use crate::signing::SigningData;
+use crate::tx::{ExtendedWrapperArgs, WrapArgs, derive_build_data};
+use crate::{MaybeSync, Namada, args};
 
 /// Craft a transaction that adds a transfer to the Ethereum bridge pool.
 pub async fn build_bridge_pool_tx(
@@ -60,43 +61,42 @@ pub async fn build_bridge_pool_tx(
         fee_token,
         code_path,
     }: args::EthereumBridgePool,
-) -> Result<(Tx, SigningTxData), Error> {
+) -> Result<(Tx, SigningData), Error> {
     let sender_ = sender.clone();
-    let (transfer, tx_code_hash, signing_data) = futures::try_join!(
-        validate_bridge_pool_tx(
-            context,
-            tx_args.force,
-            nut,
-            asset,
-            recipient,
-            sender,
-            amount,
-            fee_amount,
-            fee_payer,
-            fee_token,
-        ),
-        query_wasm_code_hash(context, code_path.to_string_lossy()),
-        aux_signing_data(
-            context,
-            &tx_args,
-            // token owner
-            Some(sender_.clone()),
-            // tx signer
-            Some(sender_),
-            vec![],
-            false,
-            vec![],
-            None
-        ),
-    )?;
-    let fee_payer = signing_data
-        .fee_payer
-        .clone()
-        .left()
-        .ok_or_else(|| Error::Other("Missing gas payer argument".to_string()))?
-        .0;
-    let (fee_amount, _) =
-        validate_transparent_fee(context, &tx_args, &fee_payer).await?;
+    let (signing_data, wrap_args, transfer, tx_code_hash) = {
+        let (transfer, tx_code_hash, (signing_data, wrap_args, _)) = futures::try_join!(
+            validate_bridge_pool_tx(
+                context,
+                tx_args.force,
+                nut,
+                asset,
+                recipient,
+                sender,
+                amount,
+                fee_amount,
+                fee_payer,
+                fee_token,
+            ),
+            query_wasm_code_hash(context, code_path.to_string_lossy()),
+            derive_build_data(
+                context,
+                tx_args
+                    .wrap_tx
+                    .as_ref()
+                    .map(|wrap_args| ExtendedWrapperArgs {
+                        wrap_args,
+                        disposable_gas_payer: false
+                    }),
+                tx_args.force,
+                // tx signer
+                Some(sender_),
+                vec![],
+                vec![],
+            ),
+        )?;
+
+        (signing_data, wrap_args, transfer, tx_code_hash)
+    };
 
     let chain_id = tx_args
         .chain_id
@@ -113,7 +113,22 @@ pub async fn build_bridge_pool_tx(
     )
     .add_data(transfer);
 
-    prepare_tx(&tx_args, &mut tx, fee_amount, fee_payer).await?;
+    if let Some(WrapArgs {
+        fee_amount,
+        fee_payer,
+        fee_token,
+        gas_limit,
+    }) = wrap_args
+    {
+        tx.add_wrapper(
+            Fee {
+                amount_per_gas_unit: fee_amount,
+                token: fee_token,
+            },
+            fee_payer,
+            gas_limit,
+        );
+    }
 
     Ok((tx, signing_data))
 }

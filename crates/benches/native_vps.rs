@@ -66,6 +66,7 @@ use namada_node::bench_utils::{
 use namada_vm::wasm::VpCache;
 use namada_vm::wasm::run::VpEvalWasm;
 use namada_vp::native_vp::{self, NativeVp};
+use rand::thread_rng;
 use rand_core::OsRng;
 
 type Ctx<'ctx, S, D, H, CA> =
@@ -1067,6 +1068,7 @@ fn masp_batch_signature_verification(c: &mut Criterion) {
 // cost for every proofs. Charge the full cost for the first note and then
 // charge the variable cost multiplied by the number of remaining notes
 fn masp_batch_spend_proofs_validate(c: &mut Criterion) {
+    let mut rng = thread_rng();
     let mut group = c.benchmark_group("masp_batch_spend_proofs_validate");
     let PVKs { spend_vk, .. } = preload_verifying_keys();
 
@@ -1099,7 +1101,9 @@ fn masp_batch_spend_proofs_validate(c: &mut Criterion) {
 
                     ctx
                 },
-                |ctx| assert!(ctx.verify_spend_proofs(spend_vk).is_ok()),
+                |ctx| {
+                    assert!(ctx.verify_spend_proofs(spend_vk, &mut rng).is_ok())
+                },
                 BatchSize::SmallInput,
             )
         });
@@ -1112,6 +1116,7 @@ fn masp_batch_spend_proofs_validate(c: &mut Criterion) {
 // cost for every proofs. Charge the full cost for the first note and then
 // charge the variable cost multiplied by the number of remaining notes
 fn masp_batch_convert_proofs_validate(c: &mut Criterion) {
+    let mut rng = thread_rng();
     let mut group = c.benchmark_group("masp_batch_convert_proofs_validate");
     let PVKs { convert_vk, .. } = preload_verifying_keys();
 
@@ -1144,7 +1149,11 @@ fn masp_batch_convert_proofs_validate(c: &mut Criterion) {
 
                     ctx
                 },
-                |ctx| assert!(ctx.verify_convert_proofs(convert_vk).is_ok()),
+                |ctx| {
+                    assert!(
+                        ctx.verify_convert_proofs(convert_vk, &mut rng).is_ok()
+                    )
+                },
                 BatchSize::SmallInput,
             )
         });
@@ -1159,6 +1168,7 @@ fn masp_batch_convert_proofs_validate(c: &mut Criterion) {
 fn masp_batch_output_proofs_validate(c: &mut Criterion) {
     let mut group = c.benchmark_group("masp_batch_output_proofs_validate");
     let PVKs { output_vk, .. } = preload_verifying_keys();
+    let mut rng = thread_rng();
 
     for double in [true, false] {
         let (tx_data, transaction) =
@@ -1189,7 +1199,11 @@ fn masp_batch_output_proofs_validate(c: &mut Criterion) {
 
                     ctx
                 },
-                |ctx| assert!(ctx.verify_output_proofs(output_vk).is_ok()),
+                |ctx| {
+                    assert!(
+                        ctx.verify_output_proofs(output_vk, &mut rng).is_ok()
+                    )
+                },
                 BatchSize::SmallInput,
             )
         });

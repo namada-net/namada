@@ -870,24 +870,23 @@ where
         if !matches!(&self.fetch_state, FetchState::Fetching { .. }) {
             return;
         }
-        if let Some(message) = self.tasks.try_recv_orphaned_message() {
+        while let Some(message) = self.tasks.try_recv_orphaned_message() {
             self.handle_incoming_message(message);
+            std::hint::spin_loop();
         }
         // NB: Load note index as soon as we can, to avoid running
         // into errors related with unknown note positions
-        if let Some((_, note_index)) = self.cache.note_index.take() {
-            self.ctx.note_index = note_index;
+        if matches!(&self.fetch_state, FetchState::Fetching { left: 0usize }) {
+            self.fetch_state = FetchState::Complete;
+            self.ctx.note_index = self.cache.note_index.take().unwrap().1;
         }
     }
 
     fn must_decrement_left_fetching(&mut self) {
         let left = self.must_get_left_fetching();
-
-        *left = left.checked_sub(1).unwrap();
-
-        if *left == 0 {
-            self.fetch_state = FetchState::Complete;
-        }
+        *left = left
+            .checked_sub(1)
+            .expect("Should not have underflowed in `must_get_left_fetching`");
     }
 
     fn must_get_left_fetching(&mut self) -> &mut usize {

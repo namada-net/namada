@@ -1,5 +1,6 @@
 //! MASP native VP
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
@@ -13,20 +14,24 @@ use masp_primitives::transaction::components::{
     I128Sum, TxIn, TxOut, ValueSum,
 };
 use masp_primitives::transaction::{Transaction, TransparentAddress};
-use namada_core::address::{self, Address};
+use namada_core::address::{self, Address, PGF};
 use namada_core::arith::{CheckedAdd, CheckedSub, checked};
 use namada_core::booleans::BoolResultUnitExt;
 use namada_core::collections::HashSet;
-use namada_core::masp::{MaspEpoch, TAddrData, addr_taddr, encode_asset_type};
+use namada_core::key::common;
+use namada_core::masp::{
+    MaspEpoch, MaspTxId, TAddrData, addr_taddr, encode_asset_type,
+};
 use namada_core::storage::Key;
 use namada_core::token;
-use namada_core::token::{Amount, MaspDigitPos};
+use namada_core::token::{Amount, DenominatedAmount, MaspDigitPos};
 use namada_core::uint::I320;
 use namada_state::{
     ConversionState, OptionExt, ReadConversionState, ResultExt,
 };
+use namada_systems::ibc::IbcShieldingData;
 use namada_systems::{governance, ibc, parameters, trans_token};
-use namada_tx::BatchedTxRef;
+use namada_tx::{BatchedTxRef, Signer};
 use namada_vp_env::{Error, Result, VpEnv};
 
 use crate::storage_key::{
@@ -36,6 +41,58 @@ use crate::storage_key::{
     masp_undated_balance_key,
 };
 use crate::validation::verify_shielded_tx;
+
+/// Determines how to validate the MASP sustainability fee
+pub enum MaspFeeType {
+    /// MASP tx from Namada transparent address
+    Normal(Transaction),
+    /// MASP shielding over IBC
+    IBC(IbcShieldingData),
+}
+
+impl MaspFeeType {
+    fn masp_tx(&self) -> &Transaction {
+        match self {
+            MaspFeeType::Normal(tx) => tx,
+            MaspFeeType::IBC(IbcShieldingData { masp_tx, .. }) => masp_tx,
+        }
+    }
+
+    fn tx_id(&self) -> MaspTxId {
+        self.masp_tx().txid().into()
+    }
+
+    /// Get the payer and token for the MASP sustainability fee if possible
+    fn get_masp_sus_fee_data<'a>(
+        &'a self,
+        batched_tx: &'a BatchedTxRef<'_>,
+    ) -> Option<(&'a common::PublicKey, &'a Address)> {
+        let masp_tx_id = self.tx_id();
+        match self {
+            MaspFeeType::Normal(_) => {
+                batched_tx.tx.get_masp_sus_fee_section(&masp_tx_id)
+            }
+            MaspFeeType::IBC(data) => {
+                // Check the authorization is for the given MASP tx
+                if data
+                    .shielding_fee_authorization
+                    .targets
+                    .first()
+                    .copied()
+                    .map(MaspTxId::from)
+                    .is_none_or(|id| id != masp_tx_id)
+                {
+                    return None;
+                }
+                let signer = match &data.shielding_fee_authorization.signer {
+                    Signer::Address(_) => None,
+                    Signer::PubKeys(pks) => pks.first(),
+                }?;
+                Some((signer, &data.shielding_fee_token))
+            }
+        }
+    }
+}
 
 /// MASP VP
 pub struct MaspVp<'ctx, CTX, Params, Gov, Ibc, TransToken, Transfer> {
@@ -416,6 +473,88 @@ where
         })
     }
 
+    /// Check that the tx has a MASP sustainability fee section. The signer in
+    /// that section is checked to be in the `actions_authorizers` set and
+    /// `verifiers` set.
+    fn check_masp_sus_fees(
+        ctx: &'ctx CTX,
+        shielded_tx: &MaspFeeType,
+        batched_tx: &BatchedTxRef<'_>,
+        actions_authorizers: &mut HashSet<Cow<'_, Address>>,
+    ) -> Result<()> {
+        let has_trans_inputs = shielded_tx
+            .masp_tx()
+            .transparent_bundle()
+            .is_some_and(|b| !b.vin.is_empty());
+        let (fee_authorizer, fee_token) =
+            shielded_tx.get_masp_sus_fee_data(batched_tx).unzip();
+        if has_trans_inputs {
+            match fee_authorizer {
+                None => {
+                    let error = Error::new_const(
+                        "Found a shielding transaction without a shielding \
+                         fee section",
+                    );
+                    tracing::debug!("{error}");
+                    return Err(error);
+                }
+                Some(pk) => {
+                    let signer = Address::from(pk);
+                    if !actions_authorizers.swap_remove(&signer) {
+                        let error = Error::new_const(
+                            "Shielding fee payer is not in the authorizer set",
+                        );
+                        tracing::debug!("{error}");
+                        return Err(error);
+                    };
+                }
+            }
+            let fee_token = fee_token.expect("This cannot fail");
+            let Some(denom) = TransToken::read_denom(&ctx.pre(), fee_token)
+                .expect("Could not read storage")
+            else {
+                let error = Error::new_alloc(format!(
+                    "Cannot pay shielding fees with token {fee_token}: No \
+                     denomination known."
+                ));
+                tracing::debug!("{error}");
+                return Err(error);
+            };
+            let balance_key = TransToken::balance_key(fee_token, &PGF);
+            let pre_balance = DenominatedAmount::new(
+                ctx.read_pre::<Amount>(&balance_key)
+                    .expect("Could not read storage")
+                    .unwrap_or_default(),
+                denom,
+            );
+            let post_balance = DenominatedAmount::new(
+                ctx.read_post::<Amount>(&balance_key)
+                    .expect("Could not read storage")
+                    .unwrap_or_default(),
+                denom,
+            );
+            let delta = checked!(post_balance - pre_balance)?;
+            let Some(fee_amount) =
+                Params::masp_shielding_fee_amount(&ctx.pre(), fee_token)
+                    .expect("Could not read storage")
+            else {
+                let error = Error::new_alloc(format!(
+                    "Cannot pay shielding fees with token {fee_token}"
+                ));
+                tracing::debug!("{error}");
+                return Err(error);
+            };
+            if fee_amount != delta {
+                let error = Error::new_const(
+                    "The fee for shielding was not correctly paid.",
+                );
+                tracing::debug!("{error}");
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
     // Check that MASP Transaction and state changes are valid
     fn is_valid_masp_transfer(
         ctx: &'ctx CTX,
@@ -440,7 +579,7 @@ where
         let shielded_tx = if let Some(tx) =
             Ibc::try_extract_masp_tx_from_envelope::<Transfer>(&tx_data)?
         {
-            tx
+            MaspFeeType::IBC(tx)
         } else {
             let masp_section_ref =
                 namada_tx::action::get_masp_section_ref(&actions)
@@ -451,17 +590,19 @@ where
                         )
                     })?;
 
-            batched_tx
-                .tx
-                .get_masp_section(&masp_section_ref)
-                .cloned()
-                .ok_or_else(|| {
-                    Error::new_const("Missing MASP section in transaction")
-                })?
+            MaspFeeType::Normal(
+                batched_tx
+                    .tx
+                    .get_masp_section(&masp_section_ref)
+                    .cloned()
+                    .ok_or_else(|| {
+                        Error::new_const("Missing MASP section in transaction")
+                    })?,
+            )
         };
 
         if u64::from(ctx.get_block_height()?)
-            > u64::from(shielded_tx.expiry_height())
+            > u64::from(shielded_tx.masp_tx().expiry_height())
         {
             let error = Error::new_const("MASP transaction is expired");
             tracing::debug!("{error}");
@@ -489,7 +630,7 @@ where
                 .unwrap_or(&zero),
             &changed_balances.undated_pre,
             &changed_balances.undated_post,
-            &shielded_tx.sapling_value_balance(),
+            &shielded_tx.masp_tx().sapling_value_balance(),
             masp_epoch,
             &changed_balances.undated_tokens,
             conversion_state,
@@ -506,15 +647,19 @@ where
         // nullifier is being revealed by the tx
         // 4. The transaction must correctly update the note commitment tree
         // in storage with the new output descriptions
-        Self::valid_spend_descriptions_anchor(ctx, &shielded_tx)?;
-        Self::valid_convert_descriptions_anchor(ctx, &shielded_tx)?;
-        Self::valid_nullifiers_reveal(ctx, keys_changed, &shielded_tx)?;
-        Self::valid_note_commitment_update(ctx, &shielded_tx)?;
+        Self::valid_spend_descriptions_anchor(ctx, shielded_tx.masp_tx())?;
+        Self::valid_convert_descriptions_anchor(ctx, shielded_tx.masp_tx())?;
+        Self::valid_nullifiers_reveal(
+            ctx,
+            keys_changed,
+            shielded_tx.masp_tx(),
+        )?;
+        Self::valid_note_commitment_update(ctx, shielded_tx.masp_tx())?;
 
         // Checks on the transparent bundle, if present
         let mut changed_bals_minus_txn = changed_balances.clone();
         validate_transparent_bundle(
-            &shielded_tx,
+            shielded_tx.masp_tx(),
             &mut changed_bals_minus_txn,
             masp_epoch,
             conversion_state,
@@ -545,19 +690,31 @@ where
             }
         }
 
-        let mut actions_authorizers: HashSet<&Address> = actions
+        let mut actions_authorizers: HashSet<Cow<'_, Address>> = actions
             .iter()
             .filter_map(|action| {
                 if let namada_tx::action::Action::Masp(
                     namada_tx::action::MaspAction::MaspAuthorizer(addr),
                 ) = action
                 {
-                    Some(addr)
+                    Some(Cow::Borrowed(addr))
+                } else if let namada_tx::action::Action::IbcShielding(data) =
+                    action
+                {
+                    data.get_signer().map(|s| Cow::Owned(Address::from(s)))
                 } else {
                     None
                 }
             })
             .collect();
+
+        Self::check_masp_sus_fees(
+            ctx,
+            &shielded_tx,
+            batched_tx,
+            &mut actions_authorizers,
+        )?;
+
         // Ensure that this transaction is authorized by all involved parties
         for authorizer in authorizers {
             if let Some(TAddrData::Addr(address::IBC)) =
@@ -575,7 +732,9 @@ where
                 // Transactions inside this Tx. We achieve this by not allowing
                 // the IBC to be in the transparent output of any of the
                 // Transaction(s).
-                if let Some(transp_bundle) = shielded_tx.transparent_bundle() {
+                if let Some(transp_bundle) =
+                    shielded_tx.masp_tx().transparent_bundle()
+                {
                     for vout in transp_bundle.vout.iter() {
                         if let Some(TAddrData::Ibc(_)) =
                             changed_bals_minus_txn.decoder.get(&vout.address)
@@ -602,7 +761,7 @@ where
                     return Err(error);
                 }
 
-                // The action is required becuse the target vp might have been
+                // The action is required because the target vp might have been
                 // triggered for other reasons but we need to signal it that it
                 // is required to validate a discrepancy in its balance change
                 // because of a masp transaction, which might require a
@@ -624,8 +783,9 @@ where
                 return Err(error);
             }
         }
+
         // The transaction shall not push masp authorizer actions that are not
-        // needed cause this might lead vps to run a wrong validation logic
+        // needed because this might lead vps to run a wrong validation logic
         if !actions_authorizers.is_empty() {
             let error = Error::new_const(
                 "Found masp authorizer actions that are not required",
@@ -635,7 +795,7 @@ where
         }
 
         // Verify the proofs
-        verify_shielded_tx(&shielded_tx, |gas| ctx.charge_gas(gas))
+        verify_shielded_tx(shielded_tx.masp_tx(), |gas| ctx.charge_gas(gas))
     }
 }
 

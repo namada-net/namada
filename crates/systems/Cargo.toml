@@ -17,7 +17,9 @@ rust-version.workspace = true
 namada_core.workspace = true
 namada_events.workspace = true
 namada_storage.workspace = true
+namada_tx.workspace = true
 
+borsh.workspace = true
 [dev-dependencies]
 cargo_metadata.workspace = true
 lazy_static.workspace = true

@@ -48,6 +48,8 @@ pub const MASP_KD_GAIN_KEY: &str = "derivative_gain";
 pub const MASP_LOCKED_AMOUNT_TARGET_KEY: &str = "locked_amount_target";
 /// The key for the max reward rate for a given asset
 pub const MASP_MAX_REWARD_RATE_KEY: &str = "max_reward_rate";
+/// The key for looking up the shielding fee amount in a given token
+pub const MASP_SHIELDING_FEE_PREFIX: &str = "shielding_fee";
 /// The key for the total inflation rewards minted by MASP
 pub const MASP_TOTAL_REWARDS: &str = "max_total_rewards";
 /// The key for the reward precision for a given asset

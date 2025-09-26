@@ -3226,6 +3226,7 @@ pub mod test_utils {
     use namada_core::hash::Hash;
     use namada_core::parameters::{EpochDuration, ProposalBytes};
     use namada_core::time::DurationSecs;
+    use namada_core::token::Amount;
 
     use super::*;
     use crate::types::GenesisValidator;
@@ -3328,6 +3329,7 @@ pub mod test_utils {
             epochs_per_year: 10000000,
             masp_epoch_multiplier: 2,
             masp_fee_payment_gas_limit: 10000,
+            masp_nam_shielding_fee: Amount::zero(),
             gas_scale: 100_000_000,
             minimum_gas_price: BTreeMap::new(),
             is_native_token_transferable: true,

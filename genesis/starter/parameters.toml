@@ -22,6 +22,8 @@ masp_epoch_multiplier = 2
 max_block_gas = 3_000_000
 # Masp fee payment gas limit
 masp_fee_payment_gas_limit = 100_000
+# Fee for shieling MASP txs in NAM
+masp_nam_shielding_fee = "0.000000"
 # Gas scale
 gas_scale = 50_000
 

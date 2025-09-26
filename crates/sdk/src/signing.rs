@@ -17,6 +17,7 @@ use namada_core::address::{Address, ImplicitAddress, InternalAddress, MASP};
 use namada_core::arith::checked;
 use namada_core::collections::{HashMap, HashSet};
 use namada_core::ibc::primitives::IntoHostTime;
+use namada_core::key::common::{CommonPublicKey, CommonSignature};
 use namada_core::key::*;
 use namada_core::masp::{AssetData, MaspTxId, PaymentAddress};
 use namada_core::tendermint::Time as TmTime;
@@ -37,7 +38,9 @@ use namada_token::storage_key::balance_key;
 use namada_tx::data::pgf::UpdateStewardCommission;
 use namada_tx::data::pos::BecomeValidator;
 use namada_tx::data::{Fee, pos};
-use namada_tx::{Authorization, MaspBuilder, Section, SignatureIndex, Tx};
+use namada_tx::{
+    Authorization, MaspBuilder, Section, SignatureIndex, Signer, Tx,
+};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -218,6 +221,43 @@ pub async fn default_sign(
     )))
 }
 
+/// When mocking signatures, if a key is in a hardware wallet,
+/// use this function instead to mock the signature
+fn mock_hw_sig(tx: &mut Tx, pk: common::PublicKey, signable: Signable) {
+    let targets = match signable {
+        Signable::FeeRawHeader => {
+            vec![tx.sechashes(), vec![tx.raw_header_hash()]]
+        }
+        Signable::RawHeader => vec![vec![tx.raw_header_hash()]],
+    };
+    tx.protocol_filter();
+    let sig = match pk {
+        CommonPublicKey::Ed25519(_) => {
+            // this key has no effect other than to satisfy api constraints
+            let kp = ed25519::SigScheme::from_bytes([0; 32]);
+            CommonSignature::Ed25519(ed25519::SigScheme::mock(&kp))
+        }
+        CommonPublicKey::Secp256k1(_) => {
+            // this key has no effect other than to satisfy api constraints
+            const SECRET_KEY_HEX: &str =
+                "c2c72dfbff11dfb4e9d5b0a20c620c58b15bb7552753601f043db91331b0db15";
+            let sk_bytes = HEXLOWER.decode(SECRET_KEY_HEX.as_bytes()).unwrap();
+            let kp =
+                secp256k1::SecretKey::try_from_slice(&sk_bytes[..]).unwrap();
+            CommonSignature::Secp256k1(secp256k1::SigScheme::mock(&kp))
+        }
+    };
+    for t in targets {
+        let mut signatures = BTreeMap::new();
+        signatures.insert(0, sig.clone());
+        tx.add_section(Section::Authorization(Authorization {
+            targets: t,
+            signer: Signer::PubKeys(vec![pk.clone()]),
+            signatures,
+        }));
+    }
+}
+
 /// Sign a transaction with a given signing key or public key of a given signer.
 /// If no explicit signer given, use the `default`. If no `default` is given,
 /// Error.
@@ -280,11 +320,19 @@ where
         }
 
         if !signing_tx_keypairs.is_empty() {
-            tx.sign_raw(
-                signing_tx_keypairs,
-                account_public_keys_map,
-                signing_data.owner,
-            );
+            if args.dry_run || args.dry_run_wrapper {
+                tx.mock(
+                    signing_tx_keypairs,
+                    account_public_keys_map,
+                    signing_data.owner,
+                )
+            } else {
+                tx.sign_raw(
+                    signing_tx_keypairs,
+                    account_public_keys_map,
+                    signing_data.owner,
+                )
+            };
         }
     }
 
@@ -295,7 +343,10 @@ where
                 either::Either::Left((fee_payer, _)) if pubkey == fee_payer => {
                 }
                 _ => {
-                    if let Ok(ntx) = sign(
+                    if args.dry_run || args.dry_run_wrapper {
+                        mock_hw_sig(tx, pubkey.clone(), Signable::RawHeader);
+                        used_pubkeys.insert(pubkey.clone());
+                    } else if let Ok(ntx) = sign(
                         tx.clone(),
                         pubkey.clone(),
                         Signable::RawHeader,
@@ -329,16 +380,28 @@ where
             };
             match key {
                 Ok(fee_payer_keypair) => {
-                    tx.sign_wrapper(fee_payer_keypair);
+                    if args.dry_run || args.dry_run_wrapper {
+                        tx.mock_sign_wrapper(fee_payer_keypair);
+                    } else {
+                        tx.sign_wrapper(fee_payer_keypair);
+                    }
                 }
                 Err(_) => {
-                    *tx = sign(
-                        tx.clone(),
-                        fee_payer.clone(),
-                        Signable::FeeRawHeader,
-                        user_data,
-                    )
-                    .await?;
+                    if args.dry_run || args.dry_run_wrapper {
+                        mock_hw_sig(
+                            tx,
+                            fee_payer.clone(),
+                            Signable::FeeRawHeader,
+                        );
+                    } else {
+                        *tx = sign(
+                            tx.clone(),
+                            fee_payer.clone(),
+                            Signable::FeeRawHeader,
+                            user_data,
+                        )
+                        .await?;
+                    }
                     if signing_data.public_keys.contains(fee_payer) {
                         used_pubkeys.insert(fee_payer.clone());
                     }

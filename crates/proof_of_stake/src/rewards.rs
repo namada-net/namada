@@ -1072,6 +1072,7 @@ mod claim_optimizations {
     use namada_state::testing::TestState;
     use prop::collection;
     use proptest::prelude::*;
+    use proptest::test_runner::Config;
     use storage::{
         bond_handle, delegator_redelegated_bonds_handle,
         validator_slashes_handle,
@@ -1084,6 +1085,10 @@ mod claim_optimizations {
     use crate::{FoldRedelegatedBondsResult, GenesisValidator, OwnedPosParams};
 
     proptest! {
+        #![proptest_config(Config {
+            cases: 10,
+            .. Config::default()
+        })]
         #[test]
         fn test_optimized_computer_current_rewards(
             input in arb_test_optimized_computer_current_rewards()

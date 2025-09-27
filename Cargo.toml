@@ -120,6 +120,7 @@ bimap = {version = "0.6", features = ["serde"]}
 bit-set = "0.8"
 bitflags = { version = "2.5", features = ["serde"] }
 blake2b-rs = "0.2"
+bridgetree = { package = "leanbridgetree", version = "0.3.0", features = ["borsh"] }
 byte-unit = "5.1"
 byteorder = "1.4"
 bytes = "1.1"
@@ -160,6 +161,7 @@ fs_extra = "1.2"
 futures = "0.3"
 getrandom = "0.3"
 git2 = { version = "0.20", default-features = false }
+group = { version = "0.13.0", default-features = false }
 hyper = { version = "1.6", features = ["full"] }
 ibc = { version = "0.57.0", features = ["serde"] }
 ibc-derive = "0.10.1"
@@ -172,7 +174,6 @@ ics23 = "0.12"
 usize-set = { version = "0.10", features = ["serialize-borsh", "serialize-serde"] }
 impl-num-traits = "0.2"
 indexmap = { package = "nam-indexmap", version = "2.7.1-nam.0", features = ["borsh-schema", "serde"] }
-init-once = "0.6"
 itertools = "0.14"
 jubjub = { package = "nam-jubjub", version = "1.10.1-nam.1" }
 k256 = { version = "0.13", default-features = false, features = ["ecdsa", "pkcs8", "precomputed-tables", "serde", "std"]}

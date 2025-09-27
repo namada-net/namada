@@ -55,21 +55,23 @@ namada_wallet = { workspace = true, optional = true }
 
 async-trait.workspace = true
 borsh.workspace = true
+bridgetree.workspace = true
 eyre.workspace = true
-futures.workspace = true
 flume = { workspace = true, optional = true }
+futures.workspace = true
+group.workspace = true
 itertools.workspace = true
 lazy_static.workspace = true
 linkme = { workspace = true, optional = true }
 masp_primitives.workspace = true
 masp_proofs.workspace = true
 proptest = { workspace = true, optional = true }
-rand.workspace = true
 rand_core.workspace = true
+rand.workspace = true
 rayon = { workspace = true, optional = true }
 ripemd.workspace = true
-serde.workspace = true
 serde_json.workspace = true
+serde.workspace = true
 sha2.workspace = true
 smooth-operator.workspace = true
 tempfile.workspace = true
@@ -77,7 +79,6 @@ thiserror.workspace = true
 tracing.workspace = true
 typed-builder.workspace = true
 xorf.workspace = true
-
 
 [dev-dependencies]
 namada_gas.path = "../gas"

@@ -21,10 +21,12 @@ use namada_token::masp::utils::{
 };
 use namada_tx::event::MaspEvent;
 use namada_tx::{IndexedTx, Tx};
-use tokio::sync::Semaphore;
+use tokio::sync::{OnceCell, Semaphore};
 
 use crate::error::{Error, QueryError};
-use crate::masp::{extract_masp_tx, get_indexed_masp_events_at_height};
+use crate::masp::{
+    NotePosition, extract_masp_tx, get_indexed_masp_events_at_height,
+};
 
 /// Middleware MASP client implementation that introduces
 /// linear backoff sleeps between failed requests.
@@ -69,6 +71,11 @@ impl<M: Clone> Clone for LinearBackoffSleepMaspClient<M> {
 impl<M: MaspClient> MaspClient for LinearBackoffSleepMaspClient<M> {
     type Error = <M as MaspClient>::Error;
 
+    #[inline]
+    fn hint(&mut self, from: BlockHeight, to: BlockHeight) {
+        self.middleware_client.hint(from, to);
+    }
+
     async fn last_block_height(
         &self,
     ) -> Result<Option<BlockHeight>, Self::Error> {
@@ -112,7 +119,7 @@ impl<M: MaspClient> MaspClient for LinearBackoffSleepMaspClient<M> {
     async fn fetch_note_index(
         &self,
         height: BlockHeight,
-    ) -> Result<BTreeMap<MaspIndexedTx, usize>, Self::Error> {
+    ) -> Result<BTreeMap<MaspIndexedTx, NotePosition>, Self::Error> {
         with_linear_backoff(
             &self.shared.backoff,
             &self.shared.sleep,
@@ -124,7 +131,8 @@ impl<M: MaspClient> MaspClient for LinearBackoffSleepMaspClient<M> {
     async fn fetch_witness_map(
         &self,
         height: BlockHeight,
-    ) -> Result<HashMap<usize, IncrementalWitness<Node>>, Self::Error> {
+    ) -> Result<HashMap<NotePosition, IncrementalWitness<Node>>, Self::Error>
+    {
         with_linear_backoff(
             &self.shared.backoff,
             &self.shared.sleep,
@@ -180,6 +188,8 @@ impl<C> LedgerMaspClient<C> {
 
 impl<C: Client + Send + Sync> MaspClient for LedgerMaspClient<C> {
     type Error = Error;
+
+    fn hint(&mut self, _from: BlockHeight, _to: BlockHeight) {}
 
     async fn last_block_height(&self) -> Result<Option<BlockHeight>, Error> {
         let maybe_block = crate::rpc::query_block(&self.inner.client).await?;
@@ -261,7 +271,7 @@ impl<C: Client + Send + Sync> MaspClient for LedgerMaspClient<C> {
 
     #[inline(always)]
     fn capabilities(&self) -> MaspClientCapabilities {
-        MaspClientCapabilities::OnlyTransfers
+        MaspClientCapabilities::NONE
     }
 
     async fn fetch_commitment_tree(
@@ -277,7 +287,7 @@ impl<C: Client + Send + Sync> MaspClient for LedgerMaspClient<C> {
     async fn fetch_note_index(
         &self,
         _: BlockHeight,
-    ) -> Result<BTreeMap<MaspIndexedTx, usize>, Error> {
+    ) -> Result<BTreeMap<MaspIndexedTx, NotePosition>, Error> {
         Err(Error::Other(
             "Transaction notes map fetching is not implemented by this client"
                 .to_string(),
@@ -287,7 +297,7 @@ impl<C: Client + Send + Sync> MaspClient for LedgerMaspClient<C> {
     async fn fetch_witness_map(
         &self,
         _: BlockHeight,
-    ) -> Result<HashMap<usize, IncrementalWitness<Node>>, Error> {
+    ) -> Result<HashMap<NotePosition, IncrementalWitness<Node>>, Error> {
         Err(Error::Other(
             "Witness map fetching is not implemented by this client"
                 .to_string(),
@@ -313,7 +323,7 @@ struct IndexerMaspClientShared {
     indexer_api: reqwest::Url,
     /// Bloom filter to help avoid fetching block heights
     /// with no MASP notes.
-    block_index: init_once::InitOnce<Option<(BlockHeight, xorf::BinaryFuse16)>>,
+    block_index: OnceCell<Option<(BlockHeight, xorf::BinaryFuse16)>>,
     /// Maximum number of concurrent fetches.
     max_concurrent_fetches: usize,
 }
@@ -352,13 +362,9 @@ impl IndexerMaspClient {
             indexer_api,
             max_concurrent_fetches,
             semaphore: Semaphore::new(max_concurrent_fetches),
-            block_index: {
-                let mut index = init_once::InitOnce::new();
-                if !using_block_index {
-                    index.init(|| None);
-                }
-                index
-            },
+            block_index: OnceCell::new_with(
+                (!using_block_index).then_some(None),
+            ),
         });
         Self { client, shared }
     }
@@ -429,6 +435,12 @@ impl IndexerMaspClient {
 
 impl MaspClient for IndexerMaspClient {
     type Error = Error;
+
+    fn hint(&mut self, from: BlockHeight, to: BlockHeight) {
+        if to.0 - from.0 + 1 < self.shared.max_concurrent_fetches as _ {
+            _ = self.shared.block_index.set(None);
+        }
+    }
 
     async fn last_block_height(&self) -> Result<Option<BlockHeight>, Error> {
         use serde::Deserialize;
@@ -507,15 +519,11 @@ impl MaspClient for IndexerMaspClient {
             )));
         }
 
-        let maybe_block_index = self
+        let maybe_block_index: &Option<_> = self
             .shared
             .block_index
-            .try_init_async(async {
-                let _permit = self.shared.semaphore.acquire().await.unwrap();
-                self.last_block_index().await.ok()
-            })
-            .await
-            .and_then(Option::as_ref);
+            .get_or_init(|| async { self.last_block_index().await.ok() })
+            .await;
 
         let mut fetches = vec![];
         loop {
@@ -654,7 +662,11 @@ impl MaspClient for IndexerMaspClient {
 
     #[inline(always)]
     fn capabilities(&self) -> MaspClientCapabilities {
-        MaspClientCapabilities::AllData
+        const {
+            MaspClientCapabilities::MAY_FETCH_PRE_BUILT_TREE
+                .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_NOTE_INDEX)
+                .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_WITNESS_MAP)
+        }
     }
 
     async fn fetch_commitment_tree(
@@ -708,12 +720,12 @@ impl MaspClient for IndexerMaspClient {
     async fn fetch_note_index(
         &self,
         BlockHeight(height): BlockHeight,
-    ) -> Result<BTreeMap<MaspIndexedTx, usize>, Error> {
+    ) -> Result<BTreeMap<MaspIndexedTx, NotePosition>, Error> {
         use serde::Deserialize;
 
         #[derive(Deserialize)]
         struct Note {
-            note_position: usize,
+            note_position: NotePosition,
             #[serde(rename = "masp_tx_index")]
             batch_index: u32,
             block_index: u32,
@@ -796,13 +808,13 @@ impl MaspClient for IndexerMaspClient {
     async fn fetch_witness_map(
         &self,
         BlockHeight(height): BlockHeight,
-    ) -> Result<HashMap<usize, IncrementalWitness<Node>>, Error> {
+    ) -> Result<HashMap<NotePosition, IncrementalWitness<Node>>, Error> {
         use serde::Deserialize;
 
         #[derive(Deserialize)]
         struct Witness {
             bytes: Vec<u8>,
-            index: usize,
+            index: NotePosition,
         }
 
         #[derive(Deserialize)]

@@ -4,6 +4,7 @@ use std::future::Future;
 use std::ops::ControlFlow;
 
 #[cfg(not(target_family = "wasm"))]
+#[cfg(feature = "std")]
 use eyre::eyre;
 use masp_primitives::sapling::ViewingKey;
 use masp_primitives::sapling::note_encryption::{

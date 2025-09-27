@@ -299,6 +299,24 @@ where
         Ok(())
     }
 
+    /// Pre-commit the current block's write log to the pre-commit merkle tree.
+    pub fn pre_commit_block(&mut self) -> Result<()> {
+        if self.in_mem.last_epoch != self.in_mem.block.epoch {
+            self.in_mem_mut()
+                .update_epoch_in_pre_commit_merkle_tree()
+                .into_storage_result()?;
+        }
+
+        self.pre_commit_write_log_block().into_storage_result()?;
+        let data = self.in_mem().commit_only_data.serialize();
+        self.in_mem_mut()
+            .block
+            .pre_commit_tree
+            .update_commit_data(data)?;
+
+        Ok(())
+    }
+
     /// Commit the current block's write log to the storage. Starts a new block
     /// write log.
     pub fn commit_write_log_block(
@@ -349,6 +367,63 @@ where
         if let Some(address_gen) = self.0.write_log.block_address_gen.take() {
             self.0.in_mem.address_gen = address_gen
         }
+        Ok(())
+    }
+
+    /// Pre-commit the current block's write log to the pre-commit merkle tree
+    pub fn pre_commit_write_log_block(&mut self) -> Result<()> {
+        let block_height = self.in_mem.block.height;
+        for (key, entry) in self.0.write_log.block_write_log.iter() {
+            let persist_diffs = (self.diff_key_filter)(key);
+            match entry {
+                StorageModification::Write { value } => {
+                    Self::pre_commit_write_subspace_val(
+                        &mut self.0.in_mem.block.pre_commit_tree,
+                        block_height,
+                        key,
+                        value,
+                        persist_diffs,
+                    )?;
+                }
+                StorageModification::Delete => {
+                    Self::pre_commit_delete_subspace_val(
+                        &mut self.0.in_mem.block.pre_commit_tree,
+                        key,
+                        persist_diffs,
+                    )?;
+                }
+                StorageModification::InitAccount { vp_code_hash } => {
+                    Self::pre_commit_write_subspace_val(
+                        &mut self.0.in_mem.block.pre_commit_tree,
+                        block_height,
+                        key,
+                        vp_code_hash,
+                        persist_diffs,
+                    )?;
+                }
+            }
+        }
+
+        let replay_prot_key = replay_protection::commitment_key();
+        let commitment: Hash = self
+            .read(&replay_prot_key)
+            .expect("Could not read db")
+            .unwrap_or_default();
+        let new_commitment = self
+            .0
+            .write_log
+            .replay_protection
+            .iter()
+            .fold(commitment, |acc, hash| acc.concat(hash));
+        let persist_diffs = (self.diff_key_filter)(&replay_prot_key);
+        Self::pre_commit_write_subspace_val(
+            &mut self.0.in_mem.block.pre_commit_tree,
+            self.0.in_mem.block.height,
+            &replay_prot_key,
+            new_commitment,
+            persist_diffs,
+        )?;
+
         Ok(())
     }
 
@@ -420,6 +495,52 @@ where
             key,
             persist_diffs,
         )?)
+    }
+
+    /// Pre-commit write the value with the given height and account subspace
+    /// key to the pre-commit merkle tree.
+    pub fn pre_commit_write_subspace_val(
+        pre_commit_tree: &mut MerkleTree<H>,
+        block_height: BlockHeight,
+        key: &Key,
+        value: impl AsRef<[u8]>,
+        persist_diffs: bool,
+    ) -> Result<()> {
+        let value = value.as_ref();
+
+        if is_pending_transfer_key(key) {
+            // The tree of the bridge pool stores the current height for the
+            // pending transfer
+            let height = block_height.serialize_to_vec();
+            pre_commit_tree.update(key, height)?;
+        } else {
+            // Update the merkle tree
+            if !persist_diffs {
+                let prefix =
+                    Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
+                pre_commit_tree.update(&prefix.join(key), value)?;
+            } else {
+                pre_commit_tree.update(key, value)?;
+            };
+        }
+        Ok(())
+    }
+
+    /// Pre-commit delete the value with the given height and account subspace
+    /// key from the pre-commit merkle tree.
+    pub fn pre_commit_delete_subspace_val(
+        pre_commit_tree: &mut MerkleTree<H>,
+        key: &Key,
+        persist_diffs: bool,
+    ) -> Result<()> {
+        // Update the merkle tree
+        if !persist_diffs {
+            let prefix = Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
+            pre_commit_tree.delete(&prefix.join(key))?;
+        } else {
+            pre_commit_tree.delete(key)?;
+        }
+        Ok(())
     }
 
     // Prune merkle tree stores. Use after updating self.block.height in the

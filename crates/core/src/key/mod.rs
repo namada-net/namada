@@ -268,6 +268,9 @@ pub trait SigScheme: Eq + Ord + Debug + Serialize + Default {
     ) -> Result<(), VerifySigError> {
         Self::verify_signature_with_hasher::<Sha256Hasher>(pk, data, sig)
     }
+
+    /// Provide a dummy signature
+    fn mock(keypair: &Self::SecretKey) -> Self::Signature;
 }
 
 /// Public key hash derived from `common::Key` borsh encoded bytes (hex string

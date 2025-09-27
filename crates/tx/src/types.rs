@@ -464,17 +464,69 @@ impl Tx {
     }
 
     /// Verify that the sections with the given hashes have been signed by the
-    /// given public keys
+    /// given public keys signatures
     pub fn verify_signatures<F>(
         &self,
         hashes: &HashSet<namada_core::hash::Hash>,
         public_keys_index_map: AccountPublicKeysMap,
         signer: &Option<Address>,
         threshold: u8,
-        mut consume_verify_sig_gas: F,
+        consume_verify_sig_gas: F,
     ) -> std::result::Result<Vec<&Authorization>, VerifySigError>
     where
         F: FnMut() -> std::result::Result<(), namada_gas::Error>,
+    {
+        self.verify_signatures_aux(
+            hashes,
+            public_keys_index_map,
+            signer,
+            threshold,
+            consume_verify_sig_gas,
+            Authorization::verify_signature::<F>,
+        )
+    }
+
+    /// Same checks as [`Self::verify_signatures`] without performing the actual
+    /// signature checks. Used for dry-running txs.
+    pub fn dry_run_signatures<F>(
+        &self,
+        hashes: &HashSet<namada_core::hash::Hash>,
+        public_keys_index_map: AccountPublicKeysMap,
+        signer: &Option<Address>,
+        threshold: u8,
+        consume_verify_sig_gas: F,
+    ) -> std::result::Result<Vec<&Authorization>, VerifySigError>
+    where
+        F: FnMut() -> std::result::Result<(), namada_gas::Error>,
+    {
+        self.verify_signatures_aux(
+            hashes,
+            public_keys_index_map,
+            signer,
+            threshold,
+            consume_verify_sig_gas,
+            Authorization::dry_run_signature::<F>,
+        )
+    }
+
+    fn verify_signatures_aux<F, G>(
+        &self,
+        hashes: &HashSet<namada_core::hash::Hash>,
+        public_keys_index_map: AccountPublicKeysMap,
+        signer: &Option<Address>,
+        threshold: u8,
+        mut consume_verify_sig_gas: F,
+        mut verifying_func: G,
+    ) -> std::result::Result<Vec<&Authorization>, VerifySigError>
+    where
+        F: FnMut() -> std::result::Result<(), namada_gas::Error>,
+        G: FnMut(
+            &Authorization,
+            &mut HashSet<u8>,
+            &AccountPublicKeysMap,
+            &Option<Address>,
+            &mut F,
+        ) -> std::result::Result<u8, VerifySigError>,
     {
         // Records the public key indices used in successful signatures
         let mut verified_pks = HashSet::new();
@@ -527,18 +579,18 @@ impl Tx {
 
                 if matching_hashes {
                     // Finally verify that the signature itself is valid
-                    let amt_verifieds = signatures
-                        .verify_signature(
-                            &mut verified_pks,
-                            &public_keys_index_map,
-                            signer,
-                            &mut consume_verify_sig_gas,
+                    let amt_verifieds = verifying_func(
+                        signatures,
+                        &mut verified_pks,
+                        &public_keys_index_map,
+                        signer,
+                        &mut consume_verify_sig_gas,
+                    )
+                    .map_err(|_e| {
+                        VerifySigError::InvalidSectionSignature(
+                            "found invalid signature.".to_string(),
                         )
-                        .map_err(|_e| {
-                            VerifySigError::InvalidSectionSignature(
-                                "found invalid signature.".to_string(),
-                            )
-                        });
+                    });
                     // Record the section witnessing these signatures
                     if amt_verifieds? > 0 {
                         witnesses.push(signatures);
@@ -771,8 +823,31 @@ impl Tx {
 
     /// Add fee payer keypair to the tx builder
     pub fn sign_wrapper(&mut self, keypair: common::SecretKey) -> &mut Self {
+        self.create_wrapper_sig(keypair, Authorization::new)
+    }
+
+    /// Mock adding fee payer keypair to the tx builder
+    pub fn mock_sign_wrapper(
+        &mut self,
+        keypair: common::SecretKey,
+    ) -> &mut Self {
+        self.create_wrapper_sig(keypair, Authorization::mock)
+    }
+
+    fn create_wrapper_sig<F>(
+        &mut self,
+        keypair: common::SecretKey,
+        create_sig: F,
+    ) -> &mut Self
+    where
+        F: Fn(
+            Vec<namada_core::hash::Hash>,
+            BTreeMap<u8, common::SecretKey>,
+            Option<Address>,
+        ) -> Authorization,
+    {
         self.protocol_filter();
-        self.add_section(Section::Authorization(Authorization::new(
+        self.add_section(Section::Authorization(create_sig(
             self.sechashes(),
             [(0, keypair)].into_iter().collect(),
             None,
@@ -787,6 +862,44 @@ impl Tx {
         account_public_keys_map: AccountPublicKeysMap,
         signer: Option<Address>,
     ) -> &mut Self {
+        self.create_sig_raw(
+            keypairs,
+            account_public_keys_map,
+            signer,
+            Authorization::new,
+        )
+    }
+
+    /// Add signing keys to the tx builder with mock
+    /// signatures
+    pub fn mock(
+        &mut self,
+        keypairs: Vec<common::SecretKey>,
+        account_public_keys_map: AccountPublicKeysMap,
+        signer: Option<Address>,
+    ) -> &mut Self {
+        self.create_sig_raw(
+            keypairs,
+            account_public_keys_map,
+            signer,
+            Authorization::mock,
+        )
+    }
+
+    fn create_sig_raw<F>(
+        &mut self,
+        keypairs: Vec<common::SecretKey>,
+        account_public_keys_map: AccountPublicKeysMap,
+        signer: Option<Address>,
+        create_sig: F,
+    ) -> &mut Self
+    where
+        F: Fn(
+            Vec<namada_core::hash::Hash>,
+            BTreeMap<u8, common::SecretKey>,
+            Option<Address>,
+        ) -> Authorization,
+    {
         // The inner tx signer signs the Raw version of the Header
         let hashes = vec![self.raw_header_hash()];
         self.protocol_filter();
@@ -797,7 +910,7 @@ impl Tx {
             (0..).zip(keypairs).collect()
         };
 
-        self.add_section(Section::Authorization(Authorization::new(
+        self.add_section(Section::Authorization(create_sig(
             hashes,
             secret_keys,
             signer,

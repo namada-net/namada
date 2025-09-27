@@ -510,6 +510,35 @@ impl Authorization {
         secret_keys: BTreeMap<u8, common::SecretKey>,
         signer: Option<Address>,
     ) -> Self {
+        Self::create_signatures(
+            targets,
+            secret_keys,
+            signer,
+            common::SigScheme::sign,
+        )
+    }
+
+    /// Place mock signatures over the given section hash with
+    /// the given key and return a section
+    pub fn mock(
+        targets: Vec<namada_core::hash::Hash>,
+        secret_keys: BTreeMap<u8, common::SecretKey>,
+        signer: Option<Address>,
+    ) -> Self {
+        Self::create_signatures(targets, secret_keys, signer, |kp, _| {
+            common::SigScheme::mock(kp)
+        })
+    }
+
+    fn create_signatures<F>(
+        targets: Vec<namada_core::hash::Hash>,
+        secret_keys: BTreeMap<u8, common::SecretKey>,
+        signer: Option<Address>,
+        create_sig: F,
+    ) -> Self
+    where
+        F: Fn(&common::SecretKey, namada_core::hash::Hash) -> common::Signature,
+    {
         // If no signer address is given, then derive the signer's public keys
         // from the given secret keys.
         let signer = if let Some(addr) = signer {
@@ -539,9 +568,7 @@ impl Authorization {
         // commitment made above
         let signatures = secret_keys
             .iter()
-            .map(|(index, secret_key)| {
-                (*index, common::SigScheme::sign(secret_key, target))
-            })
+            .map(|(index, secret_key)| (*index, create_sig(secret_key, target)))
             .collect();
         Self {
             signatures,
@@ -659,6 +686,81 @@ impl Authorization {
         #[cfg(fuzzing)]
         {
             verifications = 1;
+        }
+
+        Ok(verifications)
+    }
+
+    /// Mock a signature verification while still consuming gas. Used
+    /// for dry-running txs.
+    pub fn dry_run_signature<F>(
+        &self,
+        verified_pks: &mut HashSet<u8>,
+        public_keys_index_map: &AccountPublicKeysMap,
+        signer: &Option<Address>,
+        consume_verify_sig_gas: &mut F,
+    ) -> std::result::Result<u8, VerifySigError>
+    where
+        F: FnMut() -> std::result::Result<(), namada_gas::Error>,
+    {
+        // Records whether there are any successful verifications
+        let mut verifications = 0;
+        match &self.signer {
+            // Verify the signatures against the given public keys if the
+            // account addresses match
+            Signer::Address(addr) if Some(addr) == signer.as_ref() => {
+                for idx in self.signatures.keys() {
+                    if public_keys_index_map
+                        .get_public_key_from_index(*idx)
+                        .is_some()
+                    {
+                        consume_verify_sig_gas()?;
+                        verified_pks.insert(*idx);
+                        // Cannot overflow
+                        #[allow(clippy::arithmetic_side_effects)]
+                        {
+                            verifications += 1;
+                        }
+                    }
+                }
+            }
+            // If the account addresses do not match, then there is no efficient
+            // way to map signatures to the given public keys
+            Signer::Address(_) => {}
+            // Verify the signatures against the subset of this section's public
+            // keys that are also in the given map
+            Signer::PubKeys(pks) => {
+                if pks.len() > usize::from(u8::MAX) {
+                    return Err(VerifySigError::PksOverflow);
+                }
+                #[allow(clippy::disallowed_types)] // ordering doesn't matter
+                let unique_pks: std::collections::HashSet<
+                    &common::PublicKey,
+                > = std::collections::HashSet::from_iter(pks.iter());
+                if unique_pks.len() != pks.len() {
+                    return Err(VerifySigError::RepeatedPks);
+                }
+                for (idx, pk) in pks.iter().enumerate() {
+                    let map_idx =
+                        public_keys_index_map.get_index_from_public_key(pk);
+
+                    if let Some(map_idx) = map_idx {
+                        let sig_idx = u8::try_from(idx)
+                            .map_err(|_| VerifySigError::PksOverflow)?;
+                        consume_verify_sig_gas()?;
+                        _ = self
+                            .signatures
+                            .get(&sig_idx)
+                            .ok_or(VerifySigError::MissingSignature)?;
+                        verified_pks.insert(map_idx);
+                        // Cannot overflow
+                        #[allow(clippy::arithmetic_side_effects)]
+                        {
+                            verifications += 1;
+                        }
+                    }
+                }
+            }
         }
 
         Ok(verifications)

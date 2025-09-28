@@ -2922,9 +2922,11 @@ dependencies = [
 name = "namada_systems"
 version = "0.251.0"
 dependencies = [
+ "borsh",
  "namada_core",
  "namada_events",
  "namada_storage",
+ "namada_tx",
 ]
 
 [[package]]

@@ -22,6 +22,7 @@ use masp_proofs::prover::LocalTxProver;
 use namada_apps_lib::cli;
 use namada_apps_lib::cli::Context;
 use namada_apps_lib::cli::context::FromContext;
+use namada_apps_lib::key::SchemeType;
 use namada_apps_lib::wallet::{CliWalletUtils, defaults};
 use namada_sdk::address::{self, Address, InternalAddress, MASP};
 use namada_sdk::args::ShieldedSync;
@@ -133,6 +134,7 @@ pub const WASM_DIR: &str = "../../wasm";
 
 pub const ALBERT_PAYMENT_ADDRESS: &str = "albert_payment";
 pub const ALBERT_SPENDING_KEY: &str = "albert_spending";
+pub const ALBERT_KEY: &str = "albert_key";
 pub const BERTHA_PAYMENT_ADDRESS: &str = "bertha_payment";
 const BERTHA_SPENDING_KEY: &str = "bertha_spending";
 
@@ -187,9 +189,7 @@ impl BenchShellInner {
 
         if let Some(sections) = extra_sections {
             for section in sections {
-                if let Section::ExtraData(_) = section {
-                    tx.add_section(section);
-                }
+                tx.add_section(section);
             }
         }
 
@@ -1206,6 +1206,13 @@ impl Default for BenchShieldedCtx {
                 )
                 .unwrap();
         }
+        _ = chain_ctx.wallet.gen_store_secret_key(
+            SchemeType::Ed25519,
+            Some(ALBERT_KEY.to_string()),
+            true,
+            None,
+            &mut OsRng,
+        );
 
         namada_apps_lib::wallet::save(&chain_ctx.wallet).unwrap();
 
@@ -1234,6 +1241,8 @@ impl BenchShieldedCtx {
             spending_key,
             self.wallet.find_birthday(ALBERT_SPENDING_KEY).copied(),
         );
+        let shielding_fee_key =
+            self.wallet.find_public_key(ALBERT_KEY).unwrap();
         self.shielded = async_runtime
             .block_on(namada_apps_lib::client::masp::syncing(
                 self.shielded,
@@ -1260,7 +1269,7 @@ impl BenchShieldedCtx {
             self.wallet,
             self.shielded.into(),
             StdIo,
-            native_token,
+            native_token.clone(),
         );
         let masp_transfer_data = MaspTransferData {
             sources: vec![(
@@ -1323,7 +1332,11 @@ impl BenchShieldedCtx {
                     )
                     .unwrap(),
                 Some(shielded),
-                None,
+                Some(vec![Section::MaspSustainabilityFee {
+                    payer: shielding_fee_key,
+                    token: native_token,
+                    cmt: shielded_section_hash,
+                }]),
                 vec![&defaults::albert_keypair()],
             )
         } else {
@@ -1342,6 +1355,7 @@ impl BenchShieldedCtx {
                 vec![&defaults::albert_keypair()],
             )
         };
+
         let NamadaImpl {
             client,
             wallet,

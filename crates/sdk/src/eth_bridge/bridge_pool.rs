@@ -84,6 +84,7 @@ pub async fn build_bridge_pool_tx(
             // tx signer
             Some(sender_),
             vec![],
+            None,
             false,
             vec![],
             None

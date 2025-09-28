@@ -41,6 +41,7 @@ use crate::rpc::{
     query_ibc_denom, query_osmosis_route_and_min_out,
 };
 use crate::signing::{SigningTxData, gen_disposable_signing_key};
+use crate::tx::convert_masp_tx_to_ibc_memo_data;
 use crate::wallet::{DatedSpendingKey, DatedViewingKey};
 use crate::{Namada, rpc, tx};
 
@@ -389,6 +390,10 @@ pub struct TxShieldingTransfer<C: NamadaTypes = SdkTypes> {
     pub targets: Vec<TxShieldedTarget<C>>,
     /// Transfer-specific data
     pub sources: Vec<TxTransparentSource<C>>,
+    /// The account which will pay the fees for shielding
+    pub shielding_fee_payer: C::PublicKey,
+    /// The token in which the fees for shielding will be paid
+    pub shielding_fee_token: C::Address,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }
@@ -518,6 +523,18 @@ pub enum Slippage {
     },
 }
 
+/// Data needed for an Osmosis swap to shield the output of a swap
+/// on Namada
+#[derive(Debug, Clone)]
+pub struct ShieldedSwapRecipient<C: NamadaTypes = SdkTypes> {
+    /// The recipient
+    pub recipient: C::PaymentAddress,
+    /// The account paying the shielding fee
+    pub shielding_fee_payer: C::PublicKey,
+    /// The token the shielding fee is being paid in
+    pub shielding_fee_token: C::Address,
+}
+
 /// An token swap on Osmosis
 #[derive(Debug, Clone)]
 pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
@@ -526,7 +543,7 @@ pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
     /// The token we wish to receive (on Namada)
     pub output_denom: String,
     /// Address of the recipient on Namada
-    pub recipient: Either<C::Address, C::PaymentAddress>,
+    pub recipient: Either<C::Address, ShieldedSwapRecipient<C>>,
     /// Address to receive funds exceeding the minimum amount,
     /// in case of IBC shieldings
     ///
@@ -696,7 +713,7 @@ impl TxOsmosisSwap<SdkTypes> {
                 (transparent_recipient.encode_compat(), None)
             }
             Either::Right(fut) => {
-                let (payment_addr, overflow_receiver) = fut.await;
+                let (shielded_recipient, overflow_receiver) = fut.await;
 
                 let amount_to_shield = trade_min_output_amount;
                 let shielding_tx = tx::gen_ibc_shielding_transfer(
@@ -708,7 +725,7 @@ impl TxOsmosisSwap<SdkTypes> {
                         output_folder: None,
                         target:
                             namada_core::masp::TransferTarget::PaymentAddress(
-                                payment_addr,
+                                shielded_recipient.recipient,
                             ),
                         asset: IbcShieldingTransferAsset::Address(
                             namada_output_addr,
@@ -720,6 +737,12 @@ impl TxOsmosisSwap<SdkTypes> {
                             ),
                         ),
                         expiration: transfer.tx.expiration.clone(),
+                        shielding_fee_payer: shielded_recipient
+                            .shielding_fee_payer
+                            .clone(),
+                        shielding_fee_token: shielded_recipient
+                            .shielding_fee_token
+                            .clone(),
                     },
                 )
                 .await?
@@ -728,13 +751,17 @@ impl TxOsmosisSwap<SdkTypes> {
                         "Failed to generate IBC shielding transfer".to_owned(),
                     )
                 })?;
-
+                let ibc_memo_data = convert_masp_tx_to_ibc_memo_data(
+                    ctx,
+                    &shielding_tx,
+                    shielded_recipient.shielding_fee_payer,
+                    shielded_recipient.shielding_fee_token,
+                )
+                .await?;
                 let memo = assert_json_obj(
                     serde_json::to_value(&NamadaMemo {
                         namada: NamadaMemoData::OsmosisSwap {
-                            shielding_data: StringEncoded::new(
-                                IbcShieldingData(shielding_tx),
-                            ),
+                            shielding_data: StringEncoded::new(ibc_memo_data),
                             shielded_amount: amount_to_shield,
                             overflow_receiver,
                         },
@@ -3240,6 +3267,10 @@ pub struct GenIbcShieldingTransfer<C: NamadaTypes = SdkTypes> {
     pub expiration: TxExpiration,
     /// Asset to shield over IBC to Namada
     pub asset: IbcShieldingTransferAsset<C>,
+    /// Account to pay the shielding fee.
+    pub shielding_fee_payer: C::PublicKey,
+    /// Token which will be used to pay shielding fee
+    pub shielding_fee_token: C::Address,
 }
 
 /// IBC shielding transfer asset, to be used by [`GenIbcShieldingTransfer`]

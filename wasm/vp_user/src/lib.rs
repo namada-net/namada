@@ -113,7 +113,20 @@ fn validate_tx(
                     &addr,
                 )?,
             Action::Masp(MaspAction::MaspSectionRef(_)) => (),
-            Action::IbcShielding => (),
+            Action::IbcShielding(ibc_shielding_action) => gadget
+                .verify_masp_sus_fee_signatures_when(
+                    || {
+                        if let Some(signer) = ibc_shielding_action.get_signer()
+                        {
+                            Address::from(signer) == addr
+                        } else {
+                            false
+                        }
+                    },
+                    &tx,
+                    cmt,
+                    &ibc_shielding_action,
+                )?,
         }
     }
 

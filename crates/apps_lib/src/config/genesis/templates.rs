@@ -290,6 +290,8 @@ pub struct ChainParams<T: TemplateValidation> {
     pub max_block_gas: u64,
     /// Gas limit of a masp transaction paying fees
     pub masp_fee_payment_gas_limit: u64,
+    /// The amount of NAM the MASP shielding fee costs
+    pub masp_nam_shielding_fee: DenominatedAmount,
     /// Gas scale
     pub gas_scale: u64,
     /// Map of the cost per gas unit for every token allowed for fee payment
@@ -314,6 +316,7 @@ impl ChainParams<Unvalidated> {
             masp_epoch_multiplier,
             max_block_gas,
             masp_fee_payment_gas_limit,
+            masp_nam_shielding_fee,
             gas_scale,
             minimum_gas_price,
         } = self;
@@ -345,6 +348,16 @@ impl ChainParams<Unvalidated> {
             })?;
             min_gas_prices.insert(token, amount);
         }
+        let masp_nam_shielding_fee = masp_nam_shielding_fee
+            .increase_precision(NATIVE_MAX_DECIMAL_PLACES.into())
+            .map_err(|e| {
+                eprintln!(
+                    "A MASP shielding fee (in NAM) in the parameters.toml \
+                     file was incorrectly denominated:\n{}",
+                    e
+                );
+                e
+            })?;
 
         Ok(ChainParams {
             max_tx_bytes,
@@ -359,6 +372,7 @@ impl ChainParams<Unvalidated> {
             masp_epoch_multiplier,
             max_block_gas,
             masp_fee_payment_gas_limit,
+            masp_nam_shielding_fee,
             gas_scale,
             minimum_gas_price: min_gas_prices,
         })

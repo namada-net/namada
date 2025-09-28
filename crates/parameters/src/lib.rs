@@ -28,12 +28,15 @@ use namada_core::arith::checked;
 use namada_core::chain::BlockHeight;
 pub use namada_core::parameters::ProposalBytes;
 use namada_core::time::DurationSecs;
+use namada_core::token::{DenominatedAmount, NATIVE_MAX_DECIMAL_PLACES};
 use namada_core::{hints, token};
 use namada_state::{Error, Key, ResultExt, StorageRead, StorageWrite};
 pub use namada_systems::parameters::*;
 pub use storage::{get_gas_scale, get_max_block_gas};
 use thiserror::Error;
 pub use wasm_allowlist::{is_tx_allowed, is_vp_allowed};
+
+use crate::storage::masp_shielding_fee_amount;
 
 /// Parameters storage `Keys/Read/Write` implementation
 #[derive(Debug)]
@@ -79,6 +82,14 @@ where
             last_block_height,
             num_blocks_to_read,
         )
+    }
+
+    fn masp_shielding_fee_amount(
+        storage: &S,
+        token: &Address,
+    ) -> Result<Option<DenominatedAmount>> {
+        let key = masp_shielding_fee_amount(token);
+        storage.read(&key)
     }
 }
 
@@ -131,6 +142,7 @@ where
         epochs_per_year,
         masp_epoch_multiplier,
         minimum_gas_price,
+        masp_nam_shielding_fee,
         masp_fee_payment_gas_limit,
         gas_scale,
         is_native_token_transferable,
@@ -157,6 +169,14 @@ where
         storage::get_masp_fee_payment_gas_limit_key();
     storage
         .write(&masp_fee_payment_gas_limit_key, masp_fee_payment_gas_limit)?;
+
+    let native_token = &storage.get_native_token()?;
+    let masp_nam_shielding_fee_key =
+        storage::masp_shielding_fee_amount(native_token);
+    let masp_nam_shielding_fee =
+        DenominatedAmount::native(*masp_nam_shielding_fee)
+            .redenominate(NATIVE_MAX_DECIMAL_PLACES);
+    storage.write(&masp_nam_shielding_fee_key, masp_nam_shielding_fee)?;
 
     // write the gas scale
     let gas_scale_key = storage::get_gas_scale_key();
@@ -409,6 +429,15 @@ where
         .ok_or(ReadError::ParametersMissing)
         .into_storage_result()?;
 
+    let masp_nam_shielding_fee_key =
+        storage::masp_shielding_fee_amount(&storage.get_native_token()?);
+    let value =
+        storage.read::<DenominatedAmount>(&masp_nam_shielding_fee_key)?;
+    let masp_nam_shielding_fee = value
+        .ok_or(ReadError::ParametersMissing)
+        .into_storage_result()?
+        .amount();
+
     // read gas scale
     let gas_scale_key = storage::get_gas_scale_key();
     let value = storage.read(&gas_scale_key)?;
@@ -459,6 +488,7 @@ where
         masp_epoch_multiplier,
         minimum_gas_price,
         masp_fee_payment_gas_limit,
+        masp_nam_shielding_fee,
         gas_scale,
         is_native_token_transferable,
     })
@@ -500,6 +530,7 @@ where
         epochs_per_year: 365,
         masp_epoch_multiplier: 2,
         masp_fee_payment_gas_limit: 0,
+        masp_nam_shielding_fee: namada_core::token::Amount::zero(),
         gas_scale: 10_000_000,
         minimum_gas_price: Default::default(),
         is_native_token_transferable: true,

@@ -6377,11 +6377,13 @@ dependencies = [
 name = "namada_systems"
 version = "0.251.0"
 dependencies = [
+ "borsh",
  "cargo_metadata 0.19.1",
  "lazy_static",
  "namada_core",
  "namada_events",
  "namada_storage",
+ "namada_tx",
 ]
 
 [[package]]

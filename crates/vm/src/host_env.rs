@@ -38,7 +38,7 @@ use namada_token::storage_key::{
     is_any_token_parameter_key,
 };
 use namada_tx::data::{InnerTxId, TxSentinel};
-use namada_tx::{BatchedTx, BatchedTxRef, Tx, TxCommitments};
+use namada_tx::{Authorization, BatchedTx, BatchedTxRef, Tx, TxCommitments};
 use namada_vp::vp_host_fns;
 use thiserror::Error;
 
@@ -2007,6 +2007,63 @@ where
             },
         )
     } {
+        Ok(_) => Ok(()),
+        Err(err) => match err {
+            namada_tx::VerifySigError::Gas(inner) => {
+                Err(vp_host_fns::RuntimeError::OutOfGas(inner))
+                    .into_storage_result()
+            }
+            namada_tx::VerifySigError::InvalidSectionSignature(inner) => {
+                Err(vp_host_fns::RuntimeError::InvalidSectionSignature(inner))
+                    .into_storage_result()
+            }
+            err => Err(Error::new_alloc(err.to_string())),
+        },
+    }
+}
+
+/// Verify a signature over an [`Authorization`] in the host environment for
+/// better performance
+#[allow(clippy::too_many_arguments)]
+pub fn vp_verify_signature<MEM, D, H, EVAL, CA>(
+    env: &mut VpVmEnv<MEM, D, H, EVAL, CA>,
+    public_keys_map_ptr: u64,
+    public_keys_map_len: u64,
+    auth_ptr: u64,
+    auth_len: u64,
+) -> Result<()>
+where
+    MEM: VmMemory,
+    D: 'static + DB + for<'iter> DBIter<'iter>,
+    H: 'static + StorageHasher,
+    EVAL: VpEvaluator,
+    CA: WasmCacheAccess,
+{
+    let (public_keys_map, gas) = env
+        .memory
+        .read_bytes(public_keys_map_ptr, public_keys_map_len.try_into()?)
+        .map_err(Into::into)?;
+    let gas_meter = env.ctx.gas_meter();
+    vp_host_fns::add_gas(gas_meter, gas)?;
+    let public_keys_map: AccountPublicKeysMap = decode(public_keys_map)?;
+
+    let (auth, gas) = env
+        .memory
+        .read_bytes(auth_ptr, auth_len.try_into()?)
+        .map_err(Into::into)?;
+    vp_host_fns::add_gas(gas_meter, gas)?;
+    let auth: Authorization = decode(auth)?;
+
+    match auth.verify_signature(
+        &mut Default::default(),
+        &public_keys_map,
+        &None,
+        &mut || {
+            gas_meter
+                .borrow_mut()
+                .consume(gas::VERIFY_TX_SIG_GAS.into())
+        },
+    ) {
         Ok(_) => Ok(()),
         Err(err) => match err {
             namada_tx::VerifySigError::Gas(inner) => {

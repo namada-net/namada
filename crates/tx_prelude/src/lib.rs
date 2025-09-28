@@ -37,6 +37,7 @@ pub use namada_core::ethereum_events::EthAddress;
 use namada_core::internal::HostEnvResult;
 use namada_core::key::common;
 use namada_core::storage::TxIndex;
+use namada_core::token::DenominatedAmount;
 pub use namada_core::{address, encode, eth_bridge_pool, storage, *};
 pub use namada_events::extend::Log;
 pub use namada_events::{
@@ -45,6 +46,7 @@ pub use namada_events::{
 pub use namada_governance::storage as gov_storage;
 pub use namada_macros::transaction;
 pub use namada_parameters::storage as parameters_storage;
+use namada_parameters::storage::masp_shielding_fee_amount;
 pub use namada_state::{
     Error, OptionExt, Result, ResultExt, StorageRead, StorageWrite,
     collections, iter_prefix, iter_prefix_bytes,
@@ -411,6 +413,13 @@ impl TxEnv for Ctx {
         transaction: &MaspTransaction,
     ) -> Result<bool> {
         update_masp_note_commitment_tree(transaction)
+    }
+
+    fn get_masp_shielding_fee_amount(
+        &self,
+        token: &Address,
+    ) -> Result<Option<DenominatedAmount>> {
+        self.read(&masp_shielding_fee_amount(token))
     }
 }
 

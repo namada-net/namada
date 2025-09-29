@@ -561,9 +561,13 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         &mut self,
         transaction: &Transaction,
 <<<<<<< HEAD
+<<<<<<< HEAD
         update_witness_map: bool,
     ) {
 =======
+=======
+        update_tree: bool,
+>>>>>>> 43e264071 (Fix racy cmt tree updates)
         #[cfg(feature = "historic")] update_history: Option<IndexedTx>,
     ) -> Result<(), eyre::Error> {
         #[cfg(feature = "historic")]
@@ -598,6 +602,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
                 self.note_map.swap_remove(&note_pos);
 >>>>>>> 8348a34d2 (Remove unnecessary data from shielded wallet)
                 self.spents.insert(note_pos);
+<<<<<<< HEAD
                 self.tree
                     .as_mut()
                     .remove_mark(note_pos.into())
@@ -656,6 +661,17 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
                 }
 =======
 >>>>>>> 4147507c9 (Move shielded history to their own meths)
+=======
+
+                if update_tree {
+                    self.tree
+                        .as_mut()
+                        .remove_mark(note_pos.into())
+                        .unwrap_or_else(|err| {
+                            panic!("Failed to remove marked leaf: {err}")
+                        });
+                }
+>>>>>>> 43e264071 (Fix racy cmt tree updates)
             }
         }
     }
@@ -819,6 +835,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
 =======
         self.save_shielded_spends(
             masp_tx,
+            true,
             #[cfg(feature = "historic")]
             None,
         )?;

@@ -514,6 +514,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
     pub fn save_shielded_spends(
         &mut self,
         transaction: &Transaction,
+        update_tree: bool,
         #[cfg(feature = "historic")] update_history: Option<IndexedTx>,
     ) -> Result<(), eyre::Error> {
         #[cfg(feature = "historic")]
@@ -537,12 +538,15 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
 
                 self.note_map.swap_remove(&note_pos);
                 self.spents.insert(note_pos);
-                self.tree
-                    .as_mut()
-                    .remove_mark(note_pos.into())
-                    .unwrap_or_else(|err| {
-                        panic!("Failed to remove marked leaf: {err}")
-                    });
+
+                if update_tree {
+                    self.tree
+                        .as_mut()
+                        .remove_mark(note_pos.into())
+                        .unwrap_or_else(|err| {
+                            panic!("Failed to remove marked leaf: {err}")
+                        });
+                }
             }
         }
 
@@ -705,6 +709,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
     ) -> Result<(), eyre::Error> {
         self.save_shielded_spends(
             masp_tx,
+            true,
             #[cfg(feature = "historic")]
             None,
         )?;

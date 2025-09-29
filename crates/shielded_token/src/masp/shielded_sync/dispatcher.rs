@@ -429,15 +429,19 @@ where
 
             if masp_indexed_tx.indexed_tx.block_height > self.ctx.synced_height
             {
-                if !self.has_optional_masp_data() {
+                let cmt_tree_still_fetching = !self.has_optional_masp_data();
+
+                if cmt_tree_still_fetching {
                     self.ctx.update_witnesses(
                         masp_indexed_tx,
                         &stx_batch,
                         &self.cache.trial_decrypted,
                     )?;
                 }
+
                 self.ctx.save_shielded_spends(
                     &stx_batch,
+                    cmt_tree_still_fetching,
                     #[cfg(feature = "historic")]
                     Some(masp_indexed_tx.indexed_tx),
                 )?;

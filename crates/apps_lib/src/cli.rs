@@ -7708,21 +7708,24 @@ pub mod args {
             ctx: &mut Context,
         ) -> Result<Tx<SdkTypes>, Self::Error> {
             let ctx = ctx.borrow_mut_chain_or_exit();
+            let wrapper = self.wrap_tx.map(|wrapper| Wrapper {
+                broadcast_only: wrapper.broadcast_only,
+                fee_amount: wrapper.fee_amount,
+                fee_token: ctx.get(&wrapper.fee_token).into(),
+                gas_limit: wrapper.gas_limit,
+                wrapper_fee_payer: wrapper
+                    .wrapper_fee_payer
+                    .map(|x| ctx.get(&x)),
+            });
 
             Ok(Tx::<SdkTypes> {
                 dry_run: self.dry_run,
-                dry_run_wrapper: self.dry_run_wrapper,
                 dump_tx: self.dump_tx,
-                dump_wrapper_tx: self.dump_wrapper_tx,
                 output_folder: self.output_folder,
                 force: self.force,
-                broadcast_only: self.broadcast_only,
                 ledger_address: ctx.get(&self.ledger_address),
                 initialized_account_alias: self.initialized_account_alias,
                 wallet_alias_force: self.wallet_alias_force,
-                fee_amount: self.fee_amount,
-                fee_token: ctx.get(&self.fee_token).into(),
-                gas_limit: self.gas_limit,
                 signing_keys: self
                     .signing_keys
                     .iter()
@@ -7734,7 +7737,7 @@ pub mod args {
                 chain_id: self
                     .chain_id
                     .or_else(|| Some(ctx.config.ledger.chain_id.clone())),
-                wrapper_fee_payer: self.wrapper_fee_payer.map(|x| ctx.get(&x)),
+                wrap_tx: wrapper,
                 memo: self.memo,
                 use_device: self.use_device,
                 device_transport: self.device_transport,
@@ -7861,10 +7864,20 @@ pub mod args {
         }
 
         fn parse(matches: &ArgMatches) -> Self {
-            let dry_run = DRY_RUN_TX.parse(matches);
-            let dry_run_wrapper = DRY_RUN_WRAPPER_TX.parse(matches);
-            let dump_tx = DUMP_TX.parse(matches);
-            let dump_wrapper_tx = DUMP_WRAPPER_TX.parse(matches);
+            let dry_run = if DRY_RUN_TX.parse(matches) {
+                Some(DryRun::Inner)
+            } else if DRY_RUN_WRAPPER_TX.parse(matches) {
+                Some(DryRun::Wrapper)
+            } else {
+                None
+            };
+            let dump_tx = if DUMP_TX.parse(matches) {
+                Some(DumpTx::Inner)
+            } else if DUMP_WRAPPER_TX.parse(matches) {
+                Some(DumpTx::Wrapper)
+            } else {
+                None
+            };
             let force = FORCE.parse(matches);
             let broadcast_only = BROADCAST_ONLY.parse(matches);
             let ledger_address = CONFIG_RPC_LEDGER_ADDRESS.parse(matches);
@@ -7893,25 +7906,30 @@ pub mod args {
                 }
             };
             let device_transport = DEVICE_TRANSPORT.parse(matches);
+            // Wrap the transaction unless we want to dump or dry-run the raw tx
+            let wrap_tx = match (&dump_tx, &dry_run) {
+                (_, Some(DryRun::Inner)) | (Some(DumpTx::Inner), _) => None,
+                _ => Some(Wrapper {
+                    broadcast_only,
+                    fee_amount,
+                    wrapper_fee_payer,
+                    fee_token,
+                    gas_limit,
+                }),
+            };
             Self {
                 dry_run,
-                dry_run_wrapper,
                 dump_tx,
-                dump_wrapper_tx,
                 force,
-                broadcast_only,
                 ledger_address,
                 initialized_account_alias,
                 wallet_alias_force,
-                fee_amount,
-                fee_token,
-                gas_limit,
                 expiration,
                 signing_keys,
                 tx_reveal_code_path,
                 password,
                 chain_id,
-                wrapper_fee_payer,
+                wrap_tx,
                 output_folder,
                 memo,
                 use_device,

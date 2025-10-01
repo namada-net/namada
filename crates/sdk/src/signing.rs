@@ -41,7 +41,6 @@ use namada_tx::data::pos::BecomeValidator;
 use namada_tx::{
     Authorization, MaspBuilder, Section, SignatureIndex, Signer, Tx,
 };
-use namada_tx::{Authorization, MaspBuilder, Section, SignatureIndex, Tx};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;

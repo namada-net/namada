@@ -1,7 +1,10 @@
 //! The shielded wallet implementation
-use std::collections::{BTreeMap, BTreeSet, btree_map};
 
-use eyre::{Context, eyre};
+use std::collections::{BTreeMap, BTreeSet, btree_map};
+use std::fmt;
+use std::io::{Read, Write};
+
+use eyre::{ContextCompat, WrapErr, eyre};
 use masp_primitives::asset_type::AssetType;
 #[cfg(feature = "mainnet")]
 use masp_primitives::consensus::MainNetwork as Network;
@@ -10,9 +13,7 @@ use masp_primitives::consensus::TestNetwork as Network;
 use masp_primitives::convert::AllowedConversion;
 use masp_primitives::ff::PrimeField;
 use masp_primitives::memo::MemoBytes;
-use masp_primitives::merkle_tree::{
-    CommitmentTree, IncrementalWitness, MerklePath,
-};
+use masp_primitives::merkle_tree::MerklePath;
 use masp_primitives::sapling::{
     Diversifier, Node, Note, Nullifier, ViewingKey,
 };
@@ -49,15 +50,17 @@ use namada_tx::IndexedTx;
 use namada_wallet::{DatedKeypair, DatedSpendingKey};
 use rand::prelude::StdRng;
 use rand_core::{OsRng, SeedableRng};
+use serde::{Deserialize, Serialize};
 
 use super::utils::{MaspIndexedTx, TrialDecrypted};
+use crate::masp::bridge_tree::BridgeTree;
 use crate::masp::utils::MaspClient;
 use crate::masp::wallet_migrations::VersionedWalletRef;
 use crate::masp::{
     ContextSyncStatus, Conversions, MaspAmount, MaspDataLogEntry, MaspFeeData,
     MaspTransferData, MaspTxCombinedData, NETWORK, NoteIndex,
     ShieldedSyncConfig, ShieldedTransfer, ShieldedUtils, SpentNotesTracker,
-    TransferErr, WalletMap, WitnessMap,
+    TransferErr, WalletMap,
 };
 #[cfg(any(test, feature = "testing"))]
 use crate::masp::{ENV_VAR_MASP_TEST_SEED, testing};
@@ -114,48 +117,211 @@ pub struct EpochedConversions {
     pub epoch: MaspEpoch,
 }
 
+/// Position of a note in the commitment tree.
+///
+/// This value corresponds to the number of leaf nodes in the
+/// tree before the current note.
+#[derive(
+    BorshSerialize,
+    BorshDeserialize,
+    Serialize,
+    Deserialize,
+    Debug,
+    Default,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+)]
+#[repr(transparent)]
+pub struct NotePosition(pub u64);
+
+impl From<u64> for NotePosition {
+    #[inline]
+    fn from(pos: u64) -> Self {
+        Self(pos)
+    }
+}
+
+impl From<NotePosition> for u64 {
+    #[inline]
+    fn from(NotePosition(pos): NotePosition) -> u64 {
+        pos
+    }
+}
+
+impl From<NotePosition> for crate::masp::bridge_tree::pkg::Position {
+    #[inline]
+    fn from(NotePosition(pos): NotePosition) -> Self {
+        Self::from(pos)
+    }
+}
+
+impl NotePosition {
+    #[allow(missing_docs)]
+    pub fn checked_add<T: TryInto<u64>>(self, other: T) -> Option<Self> {
+        let other = other.try_into().ok()?;
+        Some(Self(self.0.checked_add(other)?))
+    }
+
+    #[allow(missing_docs)]
+    pub fn checked_sub<T: TryInto<u64>>(self, other: T) -> Option<Self> {
+        let other = other.try_into().ok()?;
+        Some(Self(self.0.checked_sub(other)?))
+    }
+}
+
+impl fmt::Display for NotePosition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Compact representation of a [`Note`].
+#[derive(Debug, Clone, Copy)]
+#[allow(missing_docs)]
+pub struct CompactNote {
+    pub asset_type: AssetType,
+    pub value: u64,
+    pub diversifier: Diversifier,
+    pub pk_d: masp_primitives::jubjub::SubgroupPoint,
+    pub rseed: masp_primitives::sapling::Rseed,
+}
+
+impl BorshSerialize for CompactNote {
+    fn serialize<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        use group::GroupEncoding;
+
+        BorshSerialize::serialize(&self.asset_type, writer)?;
+        BorshSerialize::serialize(&self.value, writer)?;
+        BorshSerialize::serialize(&self.diversifier, writer)?;
+        BorshSerialize::serialize(&self.pk_d.to_bytes(), writer)?;
+        BorshSerialize::serialize(&self.rseed, writer)
+    }
+}
+
+impl BorshDeserialize for CompactNote {
+    fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
+        use group::GroupEncoding;
+
+        let asset_type =
+            <AssetType as BorshDeserialize>::deserialize_reader(reader)?;
+        let value = <u64 as BorshDeserialize>::deserialize_reader(reader)?;
+        let diversifier =
+            <Diversifier as BorshDeserialize>::deserialize_reader(reader)?;
+        let pk_d = masp_primitives::jubjub::SubgroupPoint::from_bytes(
+            &<[u8; 32] as BorshDeserialize>::deserialize_reader(reader)?,
+        )
+        .into_option()
+        .ok_or_else(|| std::io::Error::other("Invalid pk_d in CompactNote"))?;
+        let rseed = <masp_primitives::sapling::Rseed as BorshDeserialize>::deserialize_reader(reader)?;
+
+        Ok(Self {
+            asset_type,
+            value,
+            diversifier,
+            pk_d,
+            rseed,
+        })
+    }
+}
+
+impl CompactNote {
+    /// Create a compact version of a [`Note`].
+    pub fn new(
+        note: Note,
+        pa: masp_primitives::sapling::PaymentAddress,
+    ) -> Option<Self> {
+        let g_d = pa.g_d()?;
+        let pk_d = *pa.pk_d();
+
+        if g_d != note.g_d || pk_d != note.pk_d {
+            return None;
+        }
+
+        let diversifier = *pa.diversifier();
+        let Note {
+            asset_type,
+            value,
+            pk_d,
+            rseed,
+            ..
+        } = note;
+
+        Some(Self {
+            asset_type,
+            value,
+            diversifier,
+            pk_d,
+            rseed,
+        })
+    }
+
+    /// Convert this [`CompactNote`] back into a [`Note`].
+    pub fn into_note(self) -> Option<Note> {
+        let g_d = self.diversifier.g_d()?;
+
+        let Self {
+            asset_type,
+            value,
+            pk_d,
+            rseed,
+            ..
+        } = self;
+
+        Some(Note {
+            asset_type,
+            value,
+            g_d,
+            pk_d,
+            rseed,
+        })
+    }
+}
+
 /// Represents the current state of the shielded pool from the perspective of
 /// the chosen viewing keys.
-#[derive(BorshSerialize, BorshDeserialize, Debug)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, Default)]
 pub struct ShieldedWallet<U: ShieldedUtils> {
     /// Location where this shielded context is saved
     #[borsh(skip)]
     pub utils: U,
-    /// The commitment tree produced by scanning all transactions up to tx_pos
-    pub tree: CommitmentTree<Node>,
-    /// Maps viewing keys to the block height to which they are synced.
-    /// In particular, the height given by the value *has been scanned*.
-    pub vk_heights: BTreeMap<ViewingKey, Option<MaspIndexedTx>>,
-    /// Maps viewing keys to applicable note positions
-    pub pos_map: HashMap<ViewingKey, BTreeSet<usize>>,
-    /// Maps a nullifier to the note position to which it applies
-    pub nf_map: HashMap<Nullifier, usize>,
-    /// Maps note positions to their corresponding notes
-    pub note_map: HashMap<usize, Note>,
-    /// Maps note positions to their corresponding memos
-    pub memo_map: HashMap<usize, MemoBytes>,
-    /// Maps note positions to the diversifier of their payment address
-    pub div_map: HashMap<usize, Diversifier>,
-    /// Maps note positions to their witness (used to make merkle paths)
-    pub witness_map: WitnessMap,
+    /// The commitment tree produced by scanning all transactions in the MASP
+    pub tree: BridgeTree,
+    /// Block height to which the wallet has been synced to
+    pub synced_height: BlockHeight,
     /// The set of note positions that have been spent
-    pub spents: HashSet<usize>,
+    pub spents: HashSet<NotePosition>,
+    /// Maps viewing keys to applicable note positions
+    ///
+    /// The inner set includes notes that have already been spent
+    pub pos_map: HashMap<ViewingKey, BTreeSet<NotePosition>>,
+    /// Maps a nullifier to the note position to which it applies
+    pub nf_map: HashMap<Nullifier, NotePosition>,
+    /// Maps note positions to their corresponding notes
+    pub note_map: HashMap<NotePosition, CompactNote>,
+    /// Maps note positions to their corresponding memos
+    pub memo_map: HashMap<NotePosition, MemoBytes>,
     /// Maps asset types to their decodings
     pub asset_types: HashMap<AssetType, AssetData>,
     /// A conversions cache
     pub conversions: EpochedConversions,
-    /// Maps note positions to their corresponding viewing keys
-    pub vk_map: HashMap<usize, ViewingKey>,
     /// Maps a shielded tx to the index of its first output note.
     pub note_index: NoteIndex,
+    /// The sync state of the context
+    pub sync_status: ContextSyncStatus,
+    /// Maps note positions to their corresponding viewing keys
+    #[cfg(feature = "historic")]
+    pub vk_map: HashMap<NotePosition, ViewingKey>,
     /// The history of the applied shielded transactions (the failed ones won't
     /// show up in here). Only the sapling bundle data is cached here, for the
     /// transparent bundle data one should rely on querying a node or an
     /// indexer
     #[cfg(feature = "historic")]
     pub history: HashMap<ViewingKey, HashMap<IndexedTx, TxHistoryEntry>>,
-    /// The sync state of the context
-    pub sync_status: ContextSyncStatus,
 }
 
 /// The data for an indexed masp transaction
@@ -167,32 +333,6 @@ pub struct TxHistoryEntry {
     pub outputs: HashMap<Address, Amount>,
     /// A flag to mark the presence of conversions in the transaction
     pub conversions: bool,
-}
-
-/// Default implementation to ease construction of TxContexts. Derive cannot be
-/// used here due to CommitmentTree not implementing Default.
-impl<U: ShieldedUtils + Default> Default for ShieldedWallet<U> {
-    fn default() -> ShieldedWallet<U> {
-        ShieldedWallet::<U> {
-            utils: U::default(),
-            vk_heights: BTreeMap::new(),
-            note_index: BTreeMap::default(),
-            tree: CommitmentTree::empty(),
-            pos_map: HashMap::default(),
-            nf_map: HashMap::default(),
-            note_map: HashMap::default(),
-            memo_map: HashMap::default(),
-            div_map: HashMap::default(),
-            witness_map: HashMap::default(),
-            spents: HashSet::default(),
-            conversions: Default::default(),
-            asset_types: HashMap::default(),
-            vk_map: HashMap::default(),
-            #[cfg(feature = "historic")]
-            history: Default::default(),
-            sync_status: ContextSyncStatus::Confirmed,
-        }
-    }
 }
 
 impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
@@ -230,19 +370,20 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
     /// available)
     pub async fn save(&self) -> std::io::Result<()> {
         self.utils
-            .save(VersionedWalletRef::V1(self), self.sync_status)
+            .save(VersionedWalletRef::V2(self), self.sync_status)
             .await
     }
 
     /// Update the merkle tree of witnesses the first time we
     /// scan new MASP transactions.
-    pub(crate) fn update_witness_map(
+    pub(crate) fn update_witnesses(
         &mut self,
         masp_indexed_tx: MaspIndexedTx,
         shielded: &Transaction,
         trial_decrypted: &TrialDecrypted,
     ) -> Result<(), eyre::Error> {
-        let mut note_pos = self.tree.size();
+        let mut note_pos = NotePosition(self.tree.as_ref().tree_size());
+
         self.note_index.insert(masp_indexed_tx, note_pos);
 
         for so in shielded
@@ -251,25 +392,25 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         {
             // Create merkle tree leaf node from note commitment
             let node = Node::new(so.cmu.to_repr());
-            // Update each merkle tree in the witness map with the latest
-            // addition
-            for (_, witness) in self.witness_map.iter_mut() {
-                witness.append(node).map_err(|()| {
-                    eyre!("note commitment tree is full".to_string())
-                })?;
-            }
-            self.tree.append(node).map_err(|()| {
-                eyre!("note commitment tree is full".to_string())
-            })?;
 
-            if trial_decrypted.has_indexed_tx(&masp_indexed_tx) {
+            // Append the node to the tree
+            self.tree
+                .as_mut()
+                .append(node)
+                .wrap_err("failed to append to note commitment tree")?;
+
+            if trial_decrypted.decrypted_by_any_vk(&masp_indexed_tx) {
                 // Finally, make it easier to construct merkle paths to this new
-                // notes that we own
-                let witness = IncrementalWitness::<Node>::from_tree(&self.tree);
-                self.witness_map.insert(note_pos, witness);
+                // note that we own
+                eyre::ensure!(
+                    self.tree.as_mut().mark().is_some(),
+                    "could not mark node as a witness"
+                );
             }
-            note_pos = checked!(note_pos + 1).unwrap();
+
+            checked!(note_pos += 1u64).unwrap();
         }
+
         Ok(())
     }
 
@@ -292,7 +433,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
             let dispatcher = config.dispatcher(spawner, &self.utils).await;
 
             if let Some(updated_ctx) =
-                dispatcher.run(None, last_query_height, sks, fvks).await?
+                dispatcher.run(last_query_height, sks, fvks).await?
             {
                 *self = updated_ctx;
             }
@@ -302,28 +443,12 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         .await
     }
 
-    pub(crate) fn min_height_to_sync_from(
-        &self,
-    ) -> Result<BlockHeight, eyre::Error> {
-        let Some(maybe_least_synced_vk_height) =
-            self.vk_heights.values().min().cloned()
-        else {
-            return Err(eyre!(
-                "No viewing keys are available in the shielded context to \
-                 decrypt notes with"
-                    .to_string(),
-            ));
-        };
-        Ok(maybe_least_synced_vk_height
-            .map_or_else(BlockHeight::first, |itx| itx.indexed_tx.block_height))
-    }
-
     #[allow(missing_docs)]
     pub fn save_decrypted_shielded_outputs(
         &mut self,
         #[cfg(feature = "historic")] indexed_tx: IndexedTx,
         vk: &ViewingKey,
-        note_pos: usize,
+        note_pos: NotePosition,
         note: Note,
         pa: masp_primitives::sapling::PaymentAddress,
         memo: MemoBytes,
@@ -332,44 +457,55 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         // viewing key
         self.pos_map.entry(*vk).or_default().insert(note_pos);
         // Compute the nullifier now to quickly recognize when spent
-        let nf = note.nf(
-            &vk.nk,
-            note_pos
-                .try_into()
-                .map_err(|_| eyre!("Can not get nullifier".to_string()))?,
-        );
-        self.note_map.insert(note_pos, note);
-        self.memo_map.insert(note_pos, memo);
-        // The payment address' diversifier is required to spend
-        // note
-        self.div_map.insert(note_pos, *pa.diversifier());
-        self.nf_map.insert(nf, note_pos);
-        self.vk_map.insert(note_pos, *vk);
-        #[cfg(feature = "historic")]
-        {
-            // Update the history
-            let asset_data = self
-                .asset_types
-                .get(&note.asset_type)
-                .ok_or_else(|| eyre!("Can not get the asset data"))?
-                .to_owned();
-            let output_entry = self
-                .history
-                .entry(vk.to_owned())
-                .or_default()
-                .entry(indexed_tx)
-                .or_default()
-                .outputs
-                .entry(asset_data.token)
-                .or_insert(Amount::zero());
-            // No need to take care of the denomination as that should already
-            // be the default one for the given token
-            let note_amount =
-                Amount::from_masp_denominated(note.value, asset_data.position);
-
-            *output_entry = checked!(output_entry + note_amount)
-                .wrap_err("Overflow in shielded history outputs")?;
+        let nf = note.nf(&vk.nk, note_pos.into());
+        let compact_note = CompactNote::new(note, pa)
+            .context("Invalid diversifier in decrypted note")?;
+        self.note_map.insert(note_pos, compact_note);
+        if !is_empty_memo(&memo) {
+            self.memo_map.insert(note_pos, memo);
         }
+        self.nf_map.insert(nf, note_pos);
+
+        #[cfg(feature = "historic")]
+        self.save_decrypted_shielded_outputs_history(
+            indexed_tx, vk, note_pos, &note,
+        )?;
+
+        Ok(())
+    }
+
+    #[cfg(feature = "historic")]
+    fn save_decrypted_shielded_outputs_history(
+        &mut self,
+        indexed_tx: IndexedTx,
+        vk: &ViewingKey,
+        note_pos: NotePosition,
+        note: &Note,
+    ) -> Result<(), eyre::Error> {
+        self.vk_map.insert(note_pos, *vk);
+
+        // Update the history
+        let asset_data = self
+            .asset_types
+            .get(&note.asset_type)
+            .ok_or_else(|| eyre!("Can not get the asset data"))?
+            .to_owned();
+        let output_entry = self
+            .history
+            .entry(vk.to_owned())
+            .or_default()
+            .entry(indexed_tx)
+            .or_default()
+            .outputs
+            .entry(asset_data.token)
+            .or_insert(Amount::zero());
+        // No need to take care of the denomination as that should already
+        // be the default one for the given token
+        let note_amount =
+            Amount::from_masp_denominated(note.value, asset_data.position);
+
+        *output_entry = checked!(output_entry + note_amount)
+            .wrap_err("Overflow in shielded history outputs")?;
 
         Ok(())
     }
@@ -378,13 +514,13 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
     pub fn save_shielded_spends(
         &mut self,
         transaction: &Transaction,
-        update_witness_map: bool,
+        update_tree: bool,
         #[cfg(feature = "historic")] update_history: Option<IndexedTx>,
     ) -> Result<(), eyre::Error> {
         #[cfg(feature = "historic")]
         let used_conversions = transaction
             .sapling_bundle()
-            .map_or(false, |bundle| !bundle.shielded_converts.is_empty());
+            .is_some_and(|bundle| !bundle.shielded_converts.is_empty());
 
         for ss in transaction
             .sapling_bundle()
@@ -392,60 +528,75 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         {
             // If the shielded spend's nullifier is in our map, then target
             // note is rendered unusable
-            if let Some(note_pos) = self.nf_map.get(&ss.nullifier) {
-                self.spents.insert(*note_pos);
-                if update_witness_map {
-                    self.witness_map.swap_remove(note_pos);
-                }
+            if let Some(note_pos) = self.nf_map.swap_remove(&ss.nullifier) {
                 #[cfg(feature = "historic")]
-                {
-                    // Update the history if required
-                    if let Some(indexed_tx) = update_history {
-                        let vk =
-                            self.vk_map.get(note_pos).ok_or_else(|| {
-                                eyre!(
-                                    "Missing viewing key for the provided \
-                                     note position"
-                                )
-                            })?;
-                        let note =
-                            self.note_map.get(note_pos).ok_or_else(|| {
-                                eyre!(
-                                    "Missing note for the provided note \
-                                     position"
-                                )
-                            })?;
-                        let asset_data = self
-                            .asset_types
-                            .get(&note.asset_type)
-                            .ok_or_else(|| eyre!("Can not get the asset data"))?
-                            .to_owned();
+                self.save_shielded_spends_history(
+                    &note_pos,
+                    used_conversions,
+                    update_history,
+                )?;
 
-                        let history_entry = self
-                            .history
-                            .entry(vk.to_owned())
-                            .or_default()
-                            .entry(indexed_tx)
-                            .or_default();
-                        history_entry.conversions = used_conversions;
+                self.note_map.swap_remove(&note_pos);
+                self.spents.insert(note_pos);
 
-                        let input_entry = history_entry
-                            .inputs
-                            .entry(asset_data.token)
-                            .or_insert(Amount::zero());
-                        // No need to take care of the denomination as that
-                        // should already be the default
-                        // one for the given token
-                        let note_amount = Amount::from_masp_denominated(
-                            note.value,
-                            asset_data.position,
-                        );
-                        *input_entry = checked!(input_entry + note_amount)
-                            .wrap_err("Overflow in shielded history inputs")?;
-                    }
+                if update_tree {
+                    self.tree
+                        .as_mut()
+                        .remove_mark(note_pos.into())
+                        .unwrap_or_else(|err| {
+                            panic!("Failed to remove marked leaf: {err}")
+                        });
                 }
             }
         }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "historic")]
+    fn save_shielded_spends_history(
+        &mut self,
+        note_pos: &NotePosition,
+        used_conversions: bool,
+        update_history: Option<IndexedTx>,
+    ) -> Result<(), eyre::Error> {
+        // Update the history if required
+        let Some(indexed_tx) = update_history else {
+            return Ok(());
+        };
+
+        let vk = self.vk_map.get(note_pos).ok_or_else(|| {
+            eyre!("Missing viewing key for the provided note position")
+        })?;
+        let note = self.note_map.get(note_pos).ok_or_else(|| {
+            eyre!("Missing note for the provided note position")
+        })?;
+        let asset_data = self
+            .asset_types
+            .get(&note.asset_type)
+            .ok_or_else(|| eyre!("Can not get the asset data"))?
+            .to_owned();
+
+        let history_entry = self
+            .history
+            .entry(vk.to_owned())
+            .or_default()
+            .entry(indexed_tx)
+            .or_default();
+        history_entry.conversions = used_conversions;
+
+        let input_entry = history_entry
+            .inputs
+            .entry(asset_data.token)
+            .or_insert(Amount::zero());
+        // No need to take care of the denomination as that
+        // should already be the default
+        // one for the given token
+        let note_amount =
+            Amount::from_masp_denominated(note.value, asset_data.position);
+
+        *input_entry = checked!(input_entry + note_amount)
+            .wrap_err("Overflow in shielded history inputs")?;
 
         Ok(())
     }
@@ -558,7 +709,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
     ) -> Result<(), eyre::Error> {
         self.save_shielded_spends(
             masp_tx,
-            false,
+            true,
             #[cfg(feature = "historic")]
             None,
         )?;
@@ -1087,7 +1238,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
     #[allow(clippy::type_complexity)]
     fn select_note_naive(
         exchanged_notes: &BTreeMap<
-            usize,
+            NotePosition,
             (
                 Note,
                 I128Sum,
@@ -1097,7 +1248,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         >,
         namada_acc: &ValueSum<(MaspDigitPos, Address), i128>,
         target: ValueSum<(MaspDigitPos, Address), i128>,
-    ) -> Option<usize> {
+    ) -> Option<NotePosition> {
         // How much do we still need in order to arrive at target?
         let gap = ValueSum::zero().sup(&(target - namada_acc));
 
@@ -1121,9 +1272,9 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
     #[allow(clippy::type_complexity)]
     fn select_note_greedy(
         exchanged_notes: &BTreeMap<
-            usize,
+            NotePosition,
             (
-                Note,
+                CompactNote,
                 I128Sum,
                 I128Sum,
                 ValueSum<(MaspDigitPos, Address), i128>,
@@ -1131,7 +1282,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         >,
         namada_acc: &ValueSum<(MaspDigitPos, Address), i128>,
         target: ValueSum<(MaspDigitPos, Address), i128>,
-    ) -> Option<usize> {
+    ) -> Option<NotePosition> {
         let mut max_coverage = I256::zero();
         let mut min_projection =
             ValueSum::<(MaspDigitPos, Address), i128>::zero();
@@ -1197,9 +1348,9 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         conversions: &mut Conversions,
     ) -> Result<
         BTreeMap<
-            usize,
+            NotePosition,
             (
-                Note,
+                CompactNote,
                 I128Sum,
                 I128Sum,
                 ValueSum<(MaspDigitPos, Address), i128>,
@@ -1279,10 +1430,8 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         target: ValueSum<(MaspDigitPos, Address), i128>,
         conversions: &mut Conversions,
         usages: &mut I128Sum,
-    ) -> Result<
-        (I128Sum, Vec<(Diversifier, Note, MerklePath<Node>)>),
-        eyre::Error,
-    > {
+    ) -> Result<(I128Sum, Vec<(CompactNote, MerklePath<Node>)>), eyre::Error>
+    {
         let vk = &sk.to_viewing_key().fvk.vk;
         let mut namada_acc = ValueSum::zero();
         let mut masp_acc = I128Sum::zero();
@@ -1313,18 +1462,12 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
 
             // Commit the conversions that were used to exchange
             *usages += proposed_usages;
-            let merkle_path = self
-                .witness_map
-                .get(&note_idx)
-                .ok_or_else(|| eyre!("Unable to get note {note_idx}"))?
-                .path()
-                .ok_or_else(|| eyre!("Unable to get path: {}", line!()))?;
-            let diversifier = self
-                .div_map
-                .get(&note_idx)
-                .ok_or_else(|| eyre!("Unable to get note {note_idx}"))?;
+            let merkle_path =
+                self.tree.witness(note_idx).wrap_err_with(|| {
+                    format!("Unable to get merkle path to note {note_idx}")
+                })?;
             // Commit this note to our transaction
-            notes.push((*diversifier, note, merkle_path));
+            notes.push((note, merkle_path));
             // Append the note the list of used ones
             spent_notes
                 .entry(vk.to_owned())
@@ -1941,7 +2084,16 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             }
 
             // Commit the notes found to our transaction
-            for (diversifier, note, merkle_path) in unspent_notes {
+            for (compact_note, merkle_path) in unspent_notes {
+                let diversifier = compact_note.diversifier;
+                let note = compact_note.into_note().ok_or_else(|| {
+                    TransferErr::General(
+                        "Invalid diversifier in decrypted note was stored in \
+                         shielded wallet"
+                            .into(),
+                    )
+                })?;
+
                 builder
                     .add_sapling_spend(sk, diversifier, note, merkle_path)
                     .map_err(|e| TransferErr::Build {
@@ -2165,6 +2317,14 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
 impl<U: ShieldedUtils + MaybeSend + MaybeSync, T: ShieldedQueries<U>>
     ShieldedApi<U> for T
 {
+}
+
+/// Check whether the given utxo memo is empty (i.e. equal to
+/// [`MemoBytes::empty`]).
+#[inline]
+pub fn is_empty_memo(memo: &MemoBytes) -> bool {
+    let memo_bytes = memo.as_array();
+    memo_bytes[0] == 0xf6 && memo_bytes[1..].iter().all(|&byte| byte == 0)
 }
 
 #[cfg(test)]

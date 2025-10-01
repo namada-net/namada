@@ -8,30 +8,32 @@ use std::sync::atomic::{self, AtomicBool, AtomicUsize};
 use std::task::{Context, Poll};
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use eyre::{WrapErr, eyre};
+use eyre::{ContextCompat, WrapErr, eyre};
 use futures::future::{Either, select};
 use futures::task::AtomicWaker;
 use masp_primitives::merkle_tree::{CommitmentTree, IncrementalWitness};
 use masp_primitives::sapling::{Node, ViewingKey};
 use masp_primitives::transaction::Transaction;
 use namada_core::chain::BlockHeight;
-use namada_core::collections::HashMap;
+use namada_core::collections::{HashMap, HashSet};
 use namada_core::control_flow::ShutdownSignal;
 use namada_core::control_flow::time::{Duration, LinearBackoff, Sleep};
 use namada_core::hints;
 use namada_core::task_env::TaskSpawner;
 use namada_io::{MaybeSend, MaybeSync, ProgressBar};
-use namada_tx::IndexedTx;
 use namada_wallet::{DatedKeypair, DatedSpendingKey};
 
-use super::utils::{IndexedNoteEntry, MaspClient, MaspIndexedTx, MaspTxKind};
+use super::utils::{
+    IndexedNoteEntry, MaspClient, MaspClientCapabilities, MaspIndexedTx,
+};
+use crate::masp::bridge_tree::BridgeTree;
 use crate::masp::shielded_sync::trial_decrypt;
 use crate::masp::utils::{
     DecryptedData, Fetched, RetryStrategy, TrialDecrypted, blocks_left_to_fetch,
 };
 use crate::masp::{
-    MaspExtendedSpendingKey, NoteIndex, ShieldedUtils, ShieldedWallet,
-    WitnessMap, to_viewing_key,
+    MaspExtendedSpendingKey, NoteIndex, NotePosition, ShieldedUtils,
+    ShieldedWallet, WitnessMap, to_viewing_key,
 };
 
 struct AsyncCounterInner {
@@ -150,15 +152,23 @@ struct TaskError<C> {
     context: C,
 }
 
-#[allow(clippy::large_enum_variant)]
+#[allow(clippy::large_enum_variant, clippy::type_complexity)]
 enum Message {
-    UpdateCommitmentTree(Result<CommitmentTree<Node>, TaskError<BlockHeight>>),
-    UpdateNotesMap(
-        Result<BTreeMap<MaspIndexedTx, usize>, TaskError<BlockHeight>>,
+    FirstCommitmentTree(
+        Result<(BlockHeight, CommitmentTree<Node>), TaskError<BlockHeight>>,
+    ),
+    UpdateCommitmentTree(
+        Result<(BlockHeight, CommitmentTree<Node>), TaskError<BlockHeight>>,
+    ),
+    UpdateNoteIndex(
+        Result<
+            (BlockHeight, BTreeMap<MaspIndexedTx, NotePosition>),
+            TaskError<BlockHeight>,
+        >,
     ),
     UpdateWitnessMap(
         Result<
-            HashMap<usize, IncrementalWitness<Node>>,
+            (BlockHeight, HashMap<NotePosition, IncrementalWitness<Node>>),
             TaskError<BlockHeight>,
         >,
     ),
@@ -203,11 +213,18 @@ impl<Spawner> DispatcherTasks<Spawner> {
             self.message_receiver.try_recv().ok()
         }
     }
+
+    #[inline(always)]
+    fn try_recv_orphaned_message(&self) -> Option<Message> {
+        self.message_receiver.try_recv().ok()
+    }
 }
 
 /// Shielded sync cache.
 #[derive(Default, BorshSerialize, BorshDeserialize)]
 pub struct DispatcherCache {
+    pub(crate) first_commitment_tree:
+        Option<(BlockHeight, CommitmentTree<Node>)>,
     pub(crate) commitment_tree: Option<(BlockHeight, CommitmentTree<Node>)>,
     pub(crate) witness_map: Option<(BlockHeight, WitnessMap)>,
     pub(crate) note_index: Option<(BlockHeight, NoteIndex)>,
@@ -224,7 +241,7 @@ enum DispatcherState {
 
 #[derive(Default, Debug)]
 struct InitialState {
-    last_witnessed_tx: Option<MaspIndexedTx>,
+    synced: bool,
     start_height: BlockHeight,
     last_query_height: BlockHeight,
 }
@@ -240,20 +257,32 @@ pub struct Config<T, I> {
     pub shutdown_signal: I,
 }
 
+/// State of different fetch jobs.
+#[derive(Default)]
+enum FetchState {
+    #[default]
+    NothingToFetch,
+    Fetching {
+        left: usize,
+    },
+    Complete,
+}
+
 /// Shielded sync message dispatcher.
 pub struct Dispatcher<S, M, U, T, I>
 where
     U: ShieldedUtils,
 {
     client: M,
+    birthdays: HashMap<ViewingKey, BlockHeight>,
     state: DispatcherState,
     tasks: DispatcherTasks<S>,
     ctx: ShieldedWallet<U>,
     config: Config<T, I>,
     cache: DispatcherCache,
-    /// We are syncing up to this height
-    height_to_sync: BlockHeight,
     interrupt_flag: AtomicFlag,
+    orphaned_flag: AtomicFlag,
+    fetch_state: FetchState,
 }
 
 /// Create a new dispatcher in the initial state.
@@ -297,7 +326,7 @@ where
     let cache = ctx.utils.cache_load().await.unwrap_or_default();
 
     Dispatcher {
-        height_to_sync: BlockHeight(0),
+        birthdays: HashMap::new(),
         state,
         ctx,
         tasks,
@@ -305,6 +334,8 @@ where
         config,
         cache,
         interrupt_flag: Default::default(),
+        orphaned_flag: Default::default(),
+        fetch_state: Default::default(),
     }
 }
 
@@ -319,19 +350,18 @@ where
     /// Run the dispatcher
     pub async fn run(
         mut self,
-        start_query_height: Option<BlockHeight>,
         last_query_height: Option<BlockHeight>,
         sks: &[DatedSpendingKey],
         fvks: &[DatedKeypair<ViewingKey>],
     ) -> Result<Option<ShieldedWallet<U>>, eyre::Error> {
         let initial_state = self
-            .perform_initial_setup(
-                start_query_height,
-                last_query_height,
-                sks,
-                fvks,
-            )
+            .perform_initial_setup(last_query_height, sks, fvks)
             .await?;
+
+        if initial_state.synced {
+            self.finish_progress_bars();
+            return Ok(Some(self.ctx));
+        }
 
         self.check_exit_conditions();
 
@@ -352,7 +382,7 @@ where
                 Ok(None)
             }
             DispatcherState::Normal => {
-                self.apply_cache_to_shielded_context(&initial_state).await?;
+                self.apply_cache_to_shielded_context(&initial_state)?;
                 self.finish_progress_bars();
                 self.ctx.save().await.map_err(|err| {
                     eyre!("Failed to save the shielded context: {err}")
@@ -383,61 +413,76 @@ where
         }
     }
 
-    async fn apply_cache_to_shielded_context(
+    fn apply_cache_to_shielded_context(
         &mut self,
         InitialState {
-            last_witnessed_tx,
-            last_query_height,
-            ..
+            last_query_height, ..
         }: &InitialState,
     ) -> Result<(), eyre::Error> {
-        if let Some((_, cmt)) = self.cache.commitment_tree.take() {
-            self.ctx.tree = cmt;
-        }
-        if let Some((_, wm)) = self.cache.witness_map.take() {
-            self.ctx.witness_map = wm;
-        }
-        if let Some((_, nm)) = self.cache.note_index.take() {
-            self.ctx.note_index = nm;
+        // NB: Load the first commitment tree from cache
+        if let Some((_, ct)) = self.cache.first_commitment_tree.take() {
+            self.ctx.tree = BridgeTree::from_commitment_tree(ct)?;
         }
 
         for (masp_indexed_tx, stx_batch) in self.cache.fetched.take() {
-            let needs_witness_map_update =
-                self.client.capabilities().needs_witness_map_update();
-            self.ctx.save_shielded_spends(
-                &stx_batch,
-                needs_witness_map_update,
-                #[cfg(feature = "historic")]
-                Some(masp_indexed_tx.indexed_tx),
-            )?;
-            if needs_witness_map_update
-                && Some(&masp_indexed_tx) > last_witnessed_tx.as_ref()
+            self.try_get_optional_masp_data();
+
+            if masp_indexed_tx.indexed_tx.block_height > self.ctx.synced_height
             {
-                self.ctx.update_witness_map(
-                    masp_indexed_tx,
+                let cmt_tree_still_fetching = !self.has_optional_masp_data();
+
+                if cmt_tree_still_fetching {
+                    self.ctx.update_witnesses(
+                        masp_indexed_tx,
+                        &stx_batch,
+                        &self.cache.trial_decrypted,
+                    )?;
+                }
+
+                self.ctx.save_shielded_spends(
                     &stx_batch,
-                    &self.cache.trial_decrypted,
+                    cmt_tree_still_fetching,
+                    #[cfg(feature = "historic")]
+                    Some(masp_indexed_tx.indexed_tx),
                 )?;
             }
-            let first_note_pos = self.ctx.note_index[&masp_indexed_tx];
-            let mut vk_heights = BTreeMap::new();
-            std::mem::swap(&mut vk_heights, &mut self.ctx.vk_heights);
-            for (vk, _) in vk_heights
-                .iter()
-                // NB: skip keys that are synced past the given `indexed_tx`
-                .filter(|(_vk, h)| h.as_ref() < Some(&masp_indexed_tx))
-            {
+
+            let first_note_pos = self
+                .ctx
+                .note_index
+                .get(&masp_indexed_tx)
+                .copied()
+                .with_context(|| {
+                    format!(
+                        "Could not locate the first note position of the MASP \
+                         tx at {masp_indexed_tx:?}"
+                    )
+                })?;
+
+            for vk_index in 0..self.ctx.pos_map.len() {
+                let vk = self.ctx.pos_map.get_index(vk_index).unwrap().0;
+
+                if !self.vk_is_outdated(vk, &masp_indexed_tx) {
+                    // NB: skip keys that are synced past the given
+                    // `masp_indexed_tx`
+                    continue;
+                }
+
+                // NB: copy the viewing key onto the stack, to remove
+                // the borrow and allow mutating through `self.ctx`
+                let vk = *vk;
+
                 for (note_pos_offset, (note, pa, memo)) in self
                     .cache
                     .trial_decrypted
-                    .take(&masp_indexed_tx, vk)
+                    .take(&masp_indexed_tx, &vk)
                     .unwrap_or_default()
                 {
                     self.ctx.save_decrypted_shielded_outputs(
                         #[cfg(feature = "historic")]
                         masp_indexed_tx.indexed_tx,
-                        vk,
-                        first_note_pos + note_pos_offset,
+                        &vk,
+                        first_note_pos.checked_add(note_pos_offset).unwrap(),
                         note,
                         pa,
                         memo,
@@ -445,43 +490,30 @@ where
                     self.config.applied_tracker.increment_by(1);
                 }
             }
-            std::mem::swap(&mut vk_heights, &mut self.ctx.vk_heights);
         }
 
-        for (_, h) in self
-            .ctx
-            .vk_heights
-            .iter_mut()
-            // NB: skip keys that are synced past the last input height
-            .filter(|(_vk, h)| {
-                h.as_ref().map(|itx| &itx.indexed_tx.block_height)
-                    < Some(last_query_height)
-            })
-        {
-            // NB: the entire block is synced
-            *h = Some(MaspIndexedTx {
-                indexed_tx: IndexedTx::entire_block(*last_query_height),
-                kind: MaspTxKind::Transfer,
-            });
-        }
+        self.abandon_orphaned();
+        self.try_load_optional_masp_data()?;
+
+        // NB: at this point, the wallet has been synced
+        self.ctx.synced_height = *last_query_height;
 
         Ok(())
     }
 
+    fn abandon_orphaned(&self) {
+        self.orphaned_flag.set();
+    }
+
     async fn perform_initial_setup(
         &mut self,
-        start_query_height: Option<BlockHeight>,
         last_query_height: Option<BlockHeight>,
         sks: &[DatedSpendingKey],
         fvks: &[DatedKeypair<ViewingKey>],
     ) -> Result<InitialState, eyre::Error> {
-        if start_query_height > last_query_height {
-            return Err(eyre!(
-                "The start height {start_query_height:?} cannot be higher \
-                 than the ending height {last_query_height:?} in the shielded \
-                 sync"
-            ));
-        }
+        debug_assert!(self.birthdays.is_empty());
+
+        let mut min_birthday = BlockHeight(u64::MAX);
 
         for vk in sks
             .iter()
@@ -492,25 +524,43 @@ where
             })
             .chain(fvks.iter().copied())
         {
-            if let Some(h) = self.ctx.vk_heights.entry(vk.key).or_default() {
-                let birthday = IndexedTx::entire_block(vk.birthday);
-                if birthday > h.indexed_tx {
-                    h.indexed_tx = birthday;
-                }
-            } else if vk.birthday >= BlockHeight::first() {
-                self.ctx.vk_heights.insert(
-                    vk.key,
-                    Some(MaspIndexedTx {
-                        indexed_tx: IndexedTx::entire_block(vk.birthday),
-                        kind: MaspTxKind::Transfer,
-                    }),
+            // NB: store the viewing keys in the wallet
+            let decrypted_notes = self.ctx.pos_map.entry(vk.key).or_default();
+
+            // NB: sanity check to confirm we haven't decrypted notes
+            // before the supplied birthday
+            if vk.birthday > self.ctx.synced_height
+                && !decrypted_notes.is_empty()
+            {
+                eyre::bail!(
+                    "Invalid viewing key birthday, set after notes have \
+                     already been decrypted"
                 );
+            }
+
+            // NB: store the birthday in order to potentially
+            // save some work during trial decryptions
+            self.birthdays.insert(vk.key, vk.birthday);
+
+            // NB: the min birthday will allow skipping a bunch
+            // of blocks if we are syncing from scratch
+            if vk.birthday < min_birthday {
+                min_birthday = vk.birthday
             }
         }
 
-        // the latest block height which has been added to the witness Merkle
-        // tree
-        let last_witnessed_tx = self.ctx.note_index.keys().max().cloned();
+        // NB: Optimize syncing from scratch when the
+        // user supplied key birthdays
+        const THRESHOLD_MIN_BIRTHDAY_LOCK: u64 = 1000;
+
+        if self.ctx.synced_height == BlockHeight(0)
+            && min_birthday.0 > THRESHOLD_MIN_BIRTHDAY_LOCK
+            && self.client.capabilities().may_fetch_pre_built_tree()
+            && !self.birthdays.is_empty()
+        {
+            self.ctx.synced_height = min_birthday;
+            self.spawn_first_commitment_tree(min_birthday);
+        }
 
         let shutdown_signal = RefCell::new(&mut self.config.shutdown_signal);
 
@@ -533,7 +583,7 @@ where
                 .client
                 .last_block_height()
                 .await
-                .wrap_err("Failed to fetch last  block height")
+                .wrap_err("Failed to fetch last block height")
             {
                 Ok(Some(last_block_height)) => last_block_height,
                 Ok(None) => {
@@ -563,27 +613,38 @@ where
             // NB: limit fetching until the last committed height
             .min(last_block_height);
 
-        let start_height = start_query_height
-            .map_or_else(|| self.ctx.min_height_to_sync_from(), Ok)?
-            // NB: the start height cannot be greater than
-            // `last_query_height`
-            .min(last_query_height);
+        let start_height = self.ctx.synced_height.clamp(
+            // NB: the wallet is initialized with height 0
+            // if it hasn't synced any note, so we must clamp
+            // the first height to 1 explicitly
+            BlockHeight::first(),
+            last_query_height,
+        );
+
+        let synced = self.ctx.synced_height == start_height
+            && start_height == last_query_height;
 
         let initial_state = InitialState {
-            last_witnessed_tx,
+            synced,
             last_query_height,
             start_height,
         };
 
-        self.height_to_sync = initial_state.last_query_height;
-        self.spawn_initial_set_of_tasks(&initial_state);
+        if !synced {
+            self.spawn_initial_set_of_tasks(&initial_state);
 
-        self.config
-            .scanned_tracker
-            .set_upper_limit(self.cache.fetched.len() as u64);
-        self.config.applied_tracker.set_upper_limit(
-            self.cache.trial_decrypted.successful_decryptions() as u64,
-        );
+            self.client.hint(
+                initial_state.start_height,
+                initial_state.last_query_height,
+            );
+
+            self.config
+                .scanned_tracker
+                .set_upper_limit(self.cache.fetched.len() as u64);
+            self.config.applied_tracker.set_upper_limit(
+                self.cache.trial_decrypted.successful_decryptions() as u64,
+            );
+        }
 
         self.force_redraw_progress_bars();
 
@@ -612,16 +673,26 @@ where
     }
 
     fn spawn_initial_set_of_tasks(&mut self, initial_state: &InitialState) {
-        if self.client.capabilities().may_fetch_pre_built_notes_index() {
-            self.spawn_update_note_index(initial_state.last_query_height);
-        }
+        let needed_caps = const {
+            MaspClientCapabilities::MAY_FETCH_PRE_BUILT_TREE
+                .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_NOTE_INDEX)
+                .plus(MaspClientCapabilities::MAY_FETCH_PRE_BUILT_WITNESS_MAP)
+        };
 
-        if self.client.capabilities().may_fetch_pre_built_tree() {
+        const THRESHOLD_START_OPT_MASP_DATA_FETCHES: u64 = 100;
+
+        let meets_opt_masp_data_block_threshold =
+            initial_state.last_query_height.0 - initial_state.start_height.0
+                > THRESHOLD_START_OPT_MASP_DATA_FETCHES;
+
+        if self.client.capabilities().contains(needed_caps)
+            && meets_opt_masp_data_block_threshold
+        {
             self.spawn_update_commitment_tree(initial_state.last_query_height);
-        }
-
-        if self.client.capabilities().may_fetch_pre_built_witness_map() {
+            self.spawn_update_note_index(initial_state.last_query_height);
             self.spawn_update_witness_map(initial_state.last_query_height);
+
+            self.fetch_state = FetchState::Fetching { left: 3usize };
         }
 
         let mut number_of_fetches = 0;
@@ -647,11 +718,21 @@ where
 
     fn handle_incoming_message(&mut self, message: Message) {
         match message {
-            Message::UpdateCommitmentTree(Ok(ct)) => {
-                _ = self
-                    .cache
-                    .commitment_tree
-                    .insert((self.height_to_sync, ct));
+            Message::FirstCommitmentTree(Ok((h, ct))) => {
+                _ = self.cache.first_commitment_tree.insert((h, ct));
+            }
+            Message::FirstCommitmentTree(Err(TaskError {
+                error,
+                context: height,
+            })) => {
+                if self.can_launch_new_fetch_retry(error) {
+                    self.spawn_first_commitment_tree(height);
+                }
+            }
+            Message::UpdateCommitmentTree(Ok((h, ct))) => {
+                _ = self.cache.commitment_tree.insert((h, ct));
+
+                self.must_decrement_left_fetching();
             }
             Message::UpdateCommitmentTree(Err(TaskError {
                 error,
@@ -661,10 +742,12 @@ where
                     self.spawn_update_commitment_tree(height);
                 }
             }
-            Message::UpdateNotesMap(Ok(nm)) => {
-                _ = self.cache.note_index.insert((self.height_to_sync, nm));
+            Message::UpdateNoteIndex(Ok((h, nm))) => {
+                _ = self.cache.note_index.insert((h, nm));
+
+                self.must_decrement_left_fetching();
             }
-            Message::UpdateNotesMap(Err(TaskError {
+            Message::UpdateNoteIndex(Err(TaskError {
                 error,
                 context: height,
             })) => {
@@ -672,8 +755,10 @@ where
                     self.spawn_update_note_index(height);
                 }
             }
-            Message::UpdateWitnessMap(Ok(wm)) => {
-                _ = self.cache.witness_map.insert((self.height_to_sync, wm));
+            Message::UpdateWitnessMap(Ok((h, wm))) => {
+                _ = self.cache.witness_map.insert((h, wm));
+
+                self.must_decrement_left_fetching();
             }
             Message::UpdateWitnessMap(Err(TaskError {
                 error,
@@ -733,17 +818,122 @@ where
         }
     }
 
+    fn vk_synced_height(&self, vk: &ViewingKey) -> BlockHeight {
+        self.birthdays
+            .get(vk)
+            .copied()
+            .unwrap_or(self.ctx.synced_height)
+    }
+
+    fn vk_is_outdated(&self, vk: &ViewingKey, itx: &MaspIndexedTx) -> bool {
+        self.vk_synced_height(vk) < itx.indexed_tx.block_height
+    }
+
+    fn try_load_optional_masp_data(&mut self) -> Result<(), eyre::Error> {
+        if !self.has_optional_masp_data() {
+            self.ctx.tree.as_mut().garbage_collect_ommers();
+            return Ok(());
+        }
+
+        let mut witness_map = self.cache.witness_map.take().unwrap().1;
+        let commitment_tree = self.cache.commitment_tree.take().unwrap().1;
+
+        let set_of_unspent_note_pos: HashSet<_> = self
+            .ctx
+            .pos_map
+            .values()
+            .flat_map(|vk_owned_note_set| {
+                vk_owned_note_set.iter().filter_map(|owned_note| {
+                    if !self.ctx.spents.contains(owned_note) {
+                        Some(*owned_note)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+
+        // NB: Prune witnesses we don't care about
+        witness_map
+            .retain(|note_pos, _| set_of_unspent_note_pos.contains(note_pos));
+
+        self.ctx.tree = BridgeTree::from_tree_and_witness_map(
+            commitment_tree,
+            witness_map,
+        )?;
+
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn has_optional_masp_data(&self) -> bool {
+        matches!(&self.fetch_state, FetchState::Complete)
+    }
+
+    fn try_get_optional_masp_data(&mut self) {
+        if !matches!(&self.fetch_state, FetchState::Fetching { .. }) {
+            return;
+        }
+        while let Some(message) = self.tasks.try_recv_orphaned_message() {
+            self.handle_incoming_message(message);
+            std::hint::spin_loop();
+        }
+        // NB: Load note index as soon as we can, to avoid running
+        // into errors related with unknown note positions
+        if matches!(&self.fetch_state, FetchState::Fetching { left: 0usize }) {
+            self.fetch_state = FetchState::Complete;
+            self.ctx.note_index = self.cache.note_index.take().unwrap().1;
+        }
+    }
+
+    fn must_decrement_left_fetching(&mut self) {
+        let left = self.must_get_left_fetching();
+        *left = left
+            .checked_sub(1)
+            .expect("Should not have underflowed in `must_get_left_fetching`");
+    }
+
+    fn must_get_left_fetching(&mut self) -> &mut usize {
+        if let FetchState::Fetching { left } = &mut self.fetch_state {
+            left
+        } else {
+            unreachable!("Must get `left_fetching` as `FetchState::Fetching`")
+        }
+    }
+
     fn spawn_update_witness_map(&mut self, height: BlockHeight) {
         if pre_built_in_cache(self.cache.witness_map.as_ref(), height) {
             return;
         }
         let client = self.client.clone();
-        self.spawn_async(Box::pin(async move {
+        self.spawn_async_orphaned(Box::pin(async move {
             Message::UpdateWitnessMap(
                 client
                     .fetch_witness_map(height)
                     .await
                     .wrap_err("Failed to fetch witness map")
+                    .map(|wm| (height, wm))
+                    .map_err(|error| TaskError {
+                        error,
+                        context: height,
+                    }),
+            )
+        }));
+    }
+
+    fn spawn_first_commitment_tree(&mut self, height: BlockHeight) {
+        if pre_built_in_cache(self.cache.first_commitment_tree.as_ref(), height)
+        {
+            return;
+        }
+        let client = self.client.clone();
+        self.spawn_async(Box::pin(async move {
+            Message::FirstCommitmentTree(
+                client
+                    .fetch_commitment_tree(height)
+                    .await
+                    .wrap_err("Failed to fetch first commitment tree")
+                    .map(|ct| (height, ct))
                     .map_err(|error| TaskError {
                         error,
                         context: height,
@@ -757,12 +947,13 @@ where
             return;
         }
         let client = self.client.clone();
-        self.spawn_async(Box::pin(async move {
+        self.spawn_async_orphaned(Box::pin(async move {
             Message::UpdateCommitmentTree(
                 client
                     .fetch_commitment_tree(height)
                     .await
                     .wrap_err("Failed to fetch commitment tree")
+                    .map(|ct| (height, ct))
                     .map_err(|error| TaskError {
                         error,
                         context: height,
@@ -776,12 +967,13 @@ where
             return;
         }
         let client = self.client.clone();
-        self.spawn_async(Box::pin(async move {
-            Message::UpdateNotesMap(
+        self.spawn_async_orphaned(Box::pin(async move {
+            Message::UpdateNoteIndex(
                 client
                     .fetch_note_index(height)
                     .await
                     .wrap_err("Failed to fetch note index")
+                    .map(|ni| (height, ni))
                     .map_err(|error| TaskError {
                         error,
                         context: height,
@@ -815,11 +1007,12 @@ where
     }
 
     fn spawn_trial_decryptions(&self, itx: MaspIndexedTx, tx: &Transaction) {
-        for (vk, vk_height) in self.ctx.vk_heights.iter() {
-            let key_is_outdated = vk_height.as_ref() < Some(&itx);
-            let cached = self.cache.trial_decrypted.get(&itx, vk).is_some();
+        for vk in self.ctx.pos_map.keys() {
+            let vk_is_outdated = self.vk_is_outdated(vk, &itx);
+            let tx_decrypted_in_cache =
+                self.cache.trial_decrypted.get(&itx, vk).is_some();
 
-            if key_is_outdated && !cached {
+            if vk_is_outdated && !tx_decrypted_in_cache {
                 let tx = tx.clone();
                 let vk = *vk;
 
@@ -832,6 +1025,31 @@ where
                 })
             }
         }
+    }
+
+    fn spawn_async_orphaned<F>(&self, mut fut: F)
+    where
+        F: Future<Output = Message> + Unpin + 'static,
+    {
+        let sender = self.tasks.message_sender.clone();
+        let guard = (
+            self.tasks.panic_flag.clone(),
+            self.orphaned_flag.clone(),
+            self.interrupt_flag.clone(),
+        );
+        self.tasks.spawner.spawn_async(async move {
+            let (_panic_flag, orphaned, interrupt) = guard;
+            let wrapped_fut = std::future::poll_fn(move |cx| {
+                if interrupt.get() || orphaned.get() {
+                    Poll::Ready(None)
+                } else {
+                    Pin::new(&mut fut).poll(cx).map(Some)
+                }
+            });
+            if let Some(msg) = wrapped_fut.await {
+                sender.send_async(msg).await.unwrap()
+            }
+        });
     }
 
     fn spawn_async<F>(&self, mut fut: F)
@@ -896,9 +1114,9 @@ mod dispatcher_tests {
     use namada_core::task_env::TaskEnvironment;
     use namada_io::DevNullProgressBar;
     use namada_tx::IndexedTx;
-    use namada_wallet::StoredKeypair;
     use tempfile::tempdir;
 
+    use super::super::utils::MaspTxKind;
     use super::*;
     use crate::masp::fs::FsShieldedUtils;
     use crate::masp::test_utils::{
@@ -928,10 +1146,12 @@ mod dispatcher_tests {
             .expect("Test failed")
             .run(|s| async {
                 let mut dispatcher = config.dispatcher(s, &utils).await;
-                dispatcher.ctx.vk_heights =
-                    BTreeMap::from([(arbitrary_vk(), None)]);
+                dispatcher
+                    .ctx
+                    .pos_map
+                    .insert(arbitrary_vk(), BTreeSet::new());
                 // fill up the dispatcher's cache
-                for h in 0u64..10 {
+                for h in 1u64..10 {
                     let itx = MaspIndexedTx {
                         indexed_tx: IndexedTx {
                             block_height: h.into(),
@@ -941,7 +1161,7 @@ mod dispatcher_tests {
                         kind: MaspTxKind::Transfer,
                     };
                     dispatcher.cache.fetched.insert((itx, arbitrary_masp_tx()));
-                    dispatcher.ctx.note_index.insert(itx, h as usize);
+                    dispatcher.ctx.note_index.insert(itx, NotePosition(h));
                     dispatcher.cache.trial_decrypted.insert(
                         itx,
                         arbitrary_vk(),
@@ -951,22 +1171,18 @@ mod dispatcher_tests {
 
                 dispatcher
                     .apply_cache_to_shielded_context(&InitialState {
-                        last_witnessed_tx: None,
-                        start_height: Default::default(),
+                        synced: false,
+                        start_height: BlockHeight::first(),
                         last_query_height: 9.into(),
                     })
-                    .await
                     .expect("Test failed");
                 assert!(dispatcher.cache.fetched.is_empty());
                 assert!(dispatcher.cache.trial_decrypted.is_empty());
-                let expected = BTreeMap::from([(
-                    arbitrary_vk(),
-                    Some(MaspIndexedTx {
-                        indexed_tx: IndexedTx::entire_block(9.into()),
-                        kind: MaspTxKind::Transfer,
-                    }),
-                )]);
-                assert_eq!(expected, dispatcher.ctx.vk_heights);
+                assert_eq!(
+                    HashMap::from([(arbitrary_vk(), BTreeSet::new())]),
+                    dispatcher.ctx.pos_map
+                );
+                assert_eq!(BlockHeight(9), dispatcher.ctx.synced_height);
             })
             .await;
     }
@@ -1052,9 +1268,12 @@ mod dispatcher_tests {
                     let barrier = barrier.clone();
                     dispatcher.spawn_async(Box::pin(async move {
                         barrier.wait().await;
-                        Message::UpdateWitnessMap(Err(TaskError {
+                        Message::FetchTxs(Err(TaskError {
                             error: eyre!("Test"),
-                            context: BlockHeight::first(),
+                            context: [
+                                BlockHeight::first(),
+                                BlockHeight::first(),
+                            ],
                         }))
                     }));
                 }
@@ -1069,12 +1288,12 @@ mod dispatcher_tests {
 
                 // run the dispatcher
                 let flag = dispatcher.tasks.panic_flag.clone();
-                let dispatcher_fut = dispatcher.run(
-                    Some(BlockHeight::first()),
-                    Some(BlockHeight(10)),
-                    &[],
-                    &[],
-                );
+                let esks = [DatedSpendingKey::new(
+                    MaspExtendedSpendingKey::master(b"bing bong").into(),
+                    None,
+                )];
+                let dispatcher_fut =
+                    dispatcher.run(Some(BlockHeight(10)), &esks, &[]);
 
                 // we poll the dispatcher future until the panic thread has
                 // panicked.
@@ -1100,17 +1319,17 @@ mod dispatcher_tests {
 
                 // we assert that the panic thread panicked and retrieve the
                 // dispatcher future
-                let Either::Right((_, fut)) =
-                    select(Box::pin(dispatcher_fut), Box::pin(panicked_fut))
-                        .await
-                else {
-                    panic!("Test failed")
+                let fut = match select(
+                    Box::pin(dispatcher_fut),
+                    Box::pin(panicked_fut),
+                )
+                .await
+                {
+                    Either::Right((_, fut)) => fut,
+                    Either::Left((res, _)) => panic!("Test failed: {res:?}"),
                 };
 
-                let (_, res) = join! {
-                    barrier.wait(),
-                    fut,
-                };
+                let (_, res) = join!(barrier.wait(), fut);
 
                 let Err(msg) = res else { panic!("Test failed") };
 
@@ -1120,43 +1339,6 @@ mod dispatcher_tests {
                 );
             })
             .await;
-    }
-
-    /// Test that upon each retry, we either resume from the
-    /// latest height that had been previously stored in the
-    /// `vk_heights`.
-    #[test]
-    fn test_min_height_to_sync_from() {
-        let temp_dir = tempdir().unwrap();
-        let mut shielded_ctx =
-            FsShieldedUtils::new(temp_dir.path().to_path_buf());
-
-        let vk = arbitrary_vk();
-
-        // Test that this function errors if not keys are
-        // present in the shielded context
-        assert!(shielded_ctx.min_height_to_sync_from().is_err());
-
-        // the min height here should be 1, since
-        // this vk hasn't decrypted any note yet
-        shielded_ctx.vk_heights.insert(vk, None);
-
-        let height = shielded_ctx.min_height_to_sync_from().unwrap();
-        assert_eq!(height, BlockHeight(1));
-
-        // let's bump the vk height
-        *shielded_ctx.vk_heights.get_mut(&vk).unwrap() = Some(MaspIndexedTx {
-            indexed_tx: IndexedTx {
-                block_height: 6.into(),
-                block_index: TxIndex(0),
-                batch_index: None,
-            },
-            kind: MaspTxKind::Transfer,
-        });
-
-        // the min height should now be 6
-        let height = shielded_ctx.min_height_to_sync_from().unwrap();
-        assert_eq!(height, BlockHeight(6));
     }
 
     /// We test that if a masp transaction is only partially trial-decrypted
@@ -1206,7 +1388,7 @@ mod dispatcher_tests {
                 masp_tx_sender.send(None).expect("Test failed");
                 let dispatcher = config.clone().dispatcher(s, &utils).await;
 
-                let result = dispatcher.run(None, None, &[], &[vk]).await;
+                let result = dispatcher.run(None, &[], &[vk]).await;
                 match result {
                     Err(msg) => assert_eq!(
                         msg.to_string(),
@@ -1256,7 +1438,7 @@ mod dispatcher_tests {
                 let dispatcher = config.dispatcher(s, &utils).await;
                 // This should complete successfully
                 let ctx = dispatcher
-                    .run(None, None, &[], &[vk])
+                    .run(None, &[], &[vk])
                     .await
                     .expect("Test failed")
                     .expect("Test failed");
@@ -1282,13 +1464,7 @@ mod dispatcher_tests {
                 ]);
 
                 assert_eq!(keys, expected);
-                assert_eq!(
-                    *ctx.vk_heights[&vk.key].as_ref().unwrap(),
-                    MaspIndexedTx {
-                        indexed_tx: IndexedTx::entire_block(2.into(),),
-                        kind: MaspTxKind::Transfer
-                    }
-                );
+                assert_eq!(ctx.synced_height, BlockHeight(2));
                 assert_eq!(ctx.note_map.len(), 2);
             })
             .await;
@@ -1348,7 +1524,7 @@ mod dispatcher_tests {
                     )))
                     .expect("Test failed");
                 masp_tx_sender.send(None).expect("Test failed");
-                let result = dispatcher.run(None, None, &[], &[vk]).await;
+                let result = dispatcher.run(None, &[], &[vk]).await;
                 match result {
                     Err(msg) => assert_eq!(
                         msg.to_string(),
@@ -1431,18 +1607,20 @@ mod dispatcher_tests {
 
                 send.send_replace(true);
                 let res = dispatcher
-                    .run(None, None, &[], &[dated_arbitrary_vk()])
+                    .run(None, &[], &[dated_arbitrary_vk()])
                     .await
                     .expect("Test failed");
                 assert!(res.is_none());
 
                 let DispatcherCache {
+                    first_commitment_tree,
                     commitment_tree,
                     witness_map,
                     note_index,
                     fetched,
                     trial_decrypted,
                 } = utils.cache_load().await.expect("Test failed");
+                assert!(first_commitment_tree.is_none());
                 assert!(commitment_tree.is_none());
                 assert!(witness_map.is_none());
                 assert!(note_index.is_none());
@@ -1451,116 +1629,100 @@ mod dispatcher_tests {
             })
             .await;
     }
-    /// Test the the birthdays of keys are properly reflected in the key
-    /// sync heights when starting shielded sync.
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_key_birthdays() {
         let temp_dir = tempdir().unwrap();
-        let mut shielded_ctx =
-            FsShieldedUtils::new(temp_dir.path().to_path_buf());
-        let (client, masp_tx_sender) = TestingMaspClient::new(2.into());
-        // First test the case where no keys have been seen yet
-        let mut vk = DatedKeypair::new(arbitrary_vk(), Some(10.into()));
-        let StoredKeypair::Raw(mut sk) = serde_json::from_str::<'_, StoredKeypair::<DatedSpendingKey>>(r#""unencrypted:zsknam1q02rgh4mqqqqpqqm68m2lmd0xe9k5vf4fscmdxuvewqhdhwl0h492fj40tzl5f6gwfk6kgnaxpgct7mx9cw2he4724858jdfhrzdh3e4hu3us463gphqyl6k5hvkjwkv9r7rx3jtcueurgflgj6dx9qn4rg0caf0t9zawfcdwt3ramxlrs4jyan4wyp4nh9hj8s806ru0smk3437ejy56ewtw9ljz8rc3vkyznxdf3l5c70skcw6aatpv5de9zhxuxs5k6l6jz6zktgg0udvl<<30""#).expect("Test failed") else {
-            panic!("Test failed")
+        let utils = FsShieldedUtils {
+            context_dir: temp_dir.path().to_path_buf(),
         };
-        let masp_tx = arbitrary_masp_tx();
-        masp_tx_sender
-            .send(Some((
-                MaspIndexedTx {
-                    indexed_tx: IndexedTx {
-                        block_height: 1.into(),
-                        block_index: TxIndex(1),
-                        batch_index: None,
-                    },
-                    kind: MaspTxKind::Transfer,
-                },
-                masp_tx.clone(),
-            )))
-            .expect("Test failed");
-        let (_shutdown_send, shutdown_sig) = shutdown_signal();
+        let (client, _masp_tx_sender) = TestingMaspClient::new(3.into());
+        let (_send, shutdown_sig) = shutdown_signal();
         let config = ShieldedSyncConfig::builder()
-            .client(client)
             .fetched_tracker(DevNullProgressBar)
             .scanned_tracker(DevNullProgressBar)
             .applied_tracker(DevNullProgressBar)
-            .retry_strategy(RetryStrategy::Times(0))
             .shutdown_signal(shutdown_sig)
+            .client(client)
+            .retry_strategy(RetryStrategy::Times(0))
+            .block_batch_size(1)
             .build();
-        shielded_ctx
-            .sync(
-                MaspLocalTaskEnv::new(4).unwrap(),
-                config.clone(),
-                None,
-                &[sk],
-                &[vk],
-            )
-            .await
-            .expect("Test failed");
-        let birthdays = shielded_ctx
-            .vk_heights
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        assert_eq!(
-            birthdays,
-            vec![
-                Some(MaspIndexedTx {
-                    indexed_tx: IndexedTx::entire_block(BlockHeight(30)),
-                    kind: MaspTxKind::Transfer
-                }),
-                Some(MaspIndexedTx {
-                    indexed_tx: IndexedTx::entire_block(BlockHeight(10)),
-                    kind: MaspTxKind::Transfer
-                })
-            ]
-        );
 
-        // Test two cases:
-        // * A birthday is less than the synced height of key
-        // * A birthday is greater than the synced height of key
-        vk.birthday = 5.into();
-        sk.birthday = 60.into();
-        masp_tx_sender
-            .send(Some((
-                MaspIndexedTx {
-                    indexed_tx: IndexedTx {
-                        block_height: 1.into(),
-                        block_index: TxIndex(1),
-                        batch_index: None,
-                    },
-                    kind: MaspTxKind::Transfer,
-                },
-                masp_tx.clone(),
-            )))
-            .expect("Test failed");
-        shielded_ctx
-            .sync(
-                MaspLocalTaskEnv::new(4).unwrap(),
-                config,
-                None,
-                &[sk],
-                &[vk],
-            )
-            .await
-            .expect("Test failed");
-        let birthdays = shielded_ctx
-            .vk_heights
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        assert_eq!(
-            birthdays,
-            vec![
-                Some(MaspIndexedTx {
-                    indexed_tx: IndexedTx::entire_block(BlockHeight(60)),
-                    kind: MaspTxKind::Transfer
-                }),
-                Some(MaspIndexedTx {
-                    indexed_tx: IndexedTx::entire_block(BlockHeight(10)),
-                    kind: MaspTxKind::Transfer
-                })
-            ]
-        )
+        MaspLocalTaskEnv::new(4)
+            .expect("Test failed")
+            .run(|s| async {
+                let mut dispatcher = config.clone().dispatcher(s, &utils).await;
+
+                let vk = arbitrary_vk();
+
+                fn itx(block_height: BlockHeight) -> MaspIndexedTx {
+                    MaspIndexedTx {
+                        kind: MaspTxKind::Transfer,
+                        indexed_tx: IndexedTx {
+                            block_height,
+                            block_index: TxIndex(0),
+                            batch_index: None,
+                        },
+                    }
+                }
+
+                dispatcher.ctx.synced_height = BlockHeight(123);
+                dispatcher.birthdays.insert(vk, BlockHeight(456));
+                assert!(
+                    !dispatcher.vk_is_outdated(&vk, &itx(BlockHeight(300)))
+                );
+
+                dispatcher.birthdays.insert(vk, BlockHeight(6));
+                assert!(dispatcher.vk_is_outdated(&vk, &itx(BlockHeight(300))));
+
+                dispatcher.birthdays.swap_remove(&vk);
+                assert!(dispatcher.vk_is_outdated(&vk, &itx(BlockHeight(300))));
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_no_blocks_to_sync() {
+        let temp_dir = tempdir().unwrap();
+        let utils = FsShieldedUtils {
+            context_dir: temp_dir.path().to_path_buf(),
+        };
+        let (client, _masp_tx_sender) = TestingMaspClient::new(3.into());
+        let (_send, shutdown_sig) = shutdown_signal();
+        let config = ShieldedSyncConfig::builder()
+            .fetched_tracker(DevNullProgressBar)
+            .scanned_tracker(DevNullProgressBar)
+            .applied_tracker(DevNullProgressBar)
+            .shutdown_signal(shutdown_sig)
+            .client(client)
+            .retry_strategy(RetryStrategy::Times(0))
+            .block_batch_size(1)
+            .build();
+
+        MaspLocalTaskEnv::new(2)
+            .expect("Test failed")
+            .run(|s| async {
+                let mut dispatcher = config.clone().dispatcher(s, &utils).await;
+                dispatcher.ctx.synced_height = BlockHeight(3);
+                let initial_state = dispatcher
+                    .perform_initial_setup(None, &[], &[dated_arbitrary_vk()])
+                    .await
+                    .unwrap();
+                assert!(initial_state.synced);
+            })
+            .await;
+
+        MaspLocalTaskEnv::new(2)
+            .expect("Test failed")
+            .run(|s| async {
+                let mut dispatcher = config.clone().dispatcher(s, &utils).await;
+                dispatcher.ctx.synced_height = BlockHeight(2);
+                let initial_state = dispatcher
+                    .perform_initial_setup(None, &[], &[dated_arbitrary_vk()])
+                    .await
+                    .unwrap();
+                assert!(!initial_state.synced);
+            })
+            .await;
     }
 }

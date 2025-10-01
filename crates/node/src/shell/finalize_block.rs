@@ -482,37 +482,20 @@ where
         let mut temp_log = TempTxLogs::new_from_tx_logs(tx_logs);
 
         let ValidityFlags {
-            commit_batch_hash,
-            is_any_tx_invalid,
+            commit_batch_hash, ..
         } = temp_log.check_inner_results(&mut tx_result, tx_data.height);
 
-        if tx_data.is_atomic_batch && is_any_tx_invalid {
-            // Atomic batches need custom handling when even a single tx fails,
-            // since we need to drop everything
-            let unrun_txs = tx_data
-                .commitments_len
-                .checked_sub(
-                    u64::try_from(tx_result.len())
-                        .expect("Should be able to convert to u64"),
-                )
-                .expect("Shouldn't underflow");
-            temp_log.stats.set_failing_atomic_batch(unrun_txs);
-            temp_log.commit_stats_only(tx_logs);
-            self.state.write_log_mut().drop_batch();
-            tx_logs.tx_event.extend(Code(ResultCode::WasmRuntimeError));
-        } else {
-            self.state.write_log_mut().commit_batch_and_current_tx();
-            self.state
-                .in_mem_mut()
-                .block
-                .results
-                .accept(tx_data.tx_index);
-            temp_log.commit(tx_logs, response);
+        self.state.write_log_mut().commit_batch_and_current_tx();
+        self.state
+            .in_mem_mut()
+            .block
+            .results
+            .accept(tx_data.tx_index);
+        temp_log.commit(tx_logs, response);
 
-            // Atomic successful batches or non-atomic batches (even if the
-            // inner txs failed) are marked as Ok
-            tx_logs.tx_event.extend(Code(ResultCode::Ok));
-        }
+        // Atomic successful batches or non-atomic batches (even if the
+        // inner txs failed) are marked as Ok
+        tx_logs.tx_event.extend(Code(ResultCode::Ok));
 
         if commit_batch_hash {
             // If at least one of the inner txs of the batch requires its hash

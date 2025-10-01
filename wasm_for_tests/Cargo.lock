@@ -2400,9 +2400,9 @@ dependencies = [
 
 [[package]]
 name = "masp_primitives"
-version = "3.0.5"
+version = "3.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "961a3494f0cbd5ab32042b4f5ce4bdeb1dba148b79f60a1cfe15b121e59f1de5"
+checksum = "3011930a4f7857e360349ef8eea3f255e128af7b18c448ad9b9f6e4caa32703d"
 dependencies = [
  "aes",
  "bip0039",
@@ -2432,9 +2432,9 @@ dependencies = [
 
 [[package]]
 name = "masp_proofs"
-version = "3.0.5"
+version = "3.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68de02b0e1370b9070da23ce237a240cc35a7b5928f699aa4a49363734f7eecc"
+checksum = "012f92bc64f5a2dc7587b3917d135de44dad1d2bbb2a0c2e0cc380eb79d0e094"
 dependencies = [
  "blake2b_simd",
  "directories",
@@ -2494,9 +2494,9 @@ checksum = "defc4c55412d89136f966bbb339008b474350e5e6e78d2714439c386b3137a03"
 
 [[package]]
 name = "nam-bellperson"
-version = "0.26.2-nam.2"
+version = "0.26.5-nam.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "130c55b8c2814e06aeb0d919e2aaaf8c7ef0a80cd6bdeca2d5d680e1cc382258"
+checksum = "2518744be8c4c7899e55f22df7f96e4ed02fd90d900e6df22eb13a9b239876a3"
 dependencies = [
  "bellpepper-core",
  "bincode",

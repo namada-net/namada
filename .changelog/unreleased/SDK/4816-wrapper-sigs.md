@@ -1,4 +1,4 @@
-- Reworked SDK wrapping and signatures, including some braking changes.
+- Reworked SDK wrapping and signatures, including some breaking changes.
   More specifically:
   - The wrapper arguments have been extracted into a separate type and their
     presence signals the need to wrap the tx

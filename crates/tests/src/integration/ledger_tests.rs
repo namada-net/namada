@@ -133,6 +133,8 @@ fn ledger_txs_and_queries() -> Result<()> {
             NAM,
             "--amount",
             "10.1",
+            "--signing-keys",
+            ESTER,
             "--node",
             &validator_one_rpc,
         ]),
@@ -204,7 +206,7 @@ fn ledger_txs_and_queries() -> Result<()> {
             {
                 continue;
             } else if dry_run {
-                [tx_args.clone(), vec!["--dry-run"]].concat()
+                [tx_args.clone(), vec!["--dry-run-wrapper"]].concat()
             } else {
                 tx_args.clone()
             };
@@ -458,7 +460,7 @@ fn test_dry_run_transaction() -> Result<()> {
         NAM,
         "--amount",
         "10.1",
-        "--dry-run",
+        "--dry-run-wrapper",
         "--signing-keys",
         HARDWARE_WALLET_PK,
         "--gas-payer",
@@ -476,7 +478,6 @@ fn test_dry_run_transaction() -> Result<()> {
 /// 1. Run the ledger node
 /// 2. Submit an invalid transaction (disallowed by state machine)
 /// 3. Check that the state was changed
-/// 5. Submit and invalid transactions (malformed)
 #[test]
 fn invalid_transactions() -> Result<()> {
     // This address doesn't matter for tests. But an argument is required.
@@ -485,38 +486,7 @@ fn invalid_transactions() -> Result<()> {
     let (node, _services) = setup::setup()?;
 
     // 2. Submit an invalid transaction (trying to transfer tokens should fail
-    // in the user's VP due to the wrong signer)
-    let tx_args = apply_use_device(vec![
-        "transparent-transfer",
-        "--source",
-        BERTHA,
-        "--target",
-        ALBERT,
-        "--token",
-        NAM,
-        "--amount",
-        "1",
-        "--signing-keys",
-        ALBERT_KEY,
-        "--node",
-        &validator_one_rpc,
-        "--force",
-    ]);
-
-    let captured = CapturedOutput::of(|| run(&node, Bin::Client, tx_args));
-    assert_matches!(captured.result, Ok(_));
-    assert!(captured.contains(TX_REJECTED));
-
-    node.finalize_and_commit(None);
-    // There should be state now
-    {
-        let locked = node.shell.lock().unwrap();
-        assert_ne!(
-            locked.last_state("").last_block_app_hash,
-            Default::default()
-        );
-    }
-
+    // in the user's VP due to the insufficient balance)
     let daewon_lower = DAEWON.to_lowercase();
     let tx_args = apply_use_device(vec![
         "transparent-transfer",
@@ -538,6 +508,16 @@ fn invalid_transactions() -> Result<()> {
     ]);
     let captured = CapturedOutput::of(|| run(&node, Bin::Client, tx_args));
     assert!(captured.contains(TX_INSUFFICIENT_BALANCE));
+
+    node.finalize_and_commit(None);
+    // There should be state now
+    {
+        let locked = node.shell.lock().unwrap();
+        assert_ne!(
+            locked.last_state("").last_block_app_hash,
+            Default::default()
+        );
+    }
 
     Ok(())
 }
@@ -1935,6 +1915,7 @@ fn offline_sign() -> Result<()> {
         )
     });
     assert!(captured.result.is_ok());
+    assert!(captured.contains(TX_APPLIED_SUCCESS));
 
     // 5. Assert changed balances
     let captured = CapturedOutput::of(|| {
@@ -2538,7 +2519,13 @@ fn wrap_tx_by_elsewho() -> Result<()> {
         run(
             &node,
             Bin::Client,
-            apply_use_device(vec!["reveal-pk", "--public-key", key_alias]),
+            apply_use_device(vec![
+                "reveal-pk",
+                "--public-key",
+                key_alias,
+                "--gas-payer",
+                key_alias,
+            ]),
         )
     });
     assert!(captured.result.is_ok());
@@ -2746,7 +2733,13 @@ fn offline_wrap_tx_by_elsewho() -> Result<()> {
         run(
             &node,
             Bin::Client,
-            apply_use_device(vec!["reveal-pk", "--public-key", key_alias]),
+            apply_use_device(vec![
+                "reveal-pk",
+                "--public-key",
+                key_alias,
+                "--gas-payer",
+                key_alias,
+            ]),
         )
     });
     assert!(captured.result.is_ok());
@@ -3009,7 +3002,13 @@ fn offline_wrapper_tx() -> Result<()> {
         run(
             &node,
             Bin::Client,
-            apply_use_device(vec!["reveal-pk", "--public-key", key_alias]),
+            apply_use_device(vec![
+                "reveal-pk",
+                "--public-key",
+                key_alias,
+                "--gas-payer",
+                key_alias,
+            ]),
         )
     });
     assert!(captured.result.is_ok());

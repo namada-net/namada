@@ -663,14 +663,12 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         }
         // If conversion is possible, accumulate the exchanged amount
         let conv: I128Sum = I128Sum::from_sum(conv.into());
-        let delta =
-            conv.clone()
-                .into_components()
-                .fold(0i128, |acc, (_, value)| {
-                    // FIXME: checked operation here?
-                    acc + value
-                });
-        if delta == 0 {
+        if conv
+            .clone()
+            .into_components()
+            .try_fold(0i128, |acc, (_, value)| checked!(acc + value))?
+            == 0
+        {
             // If the sum of the conversions's values is zero it means we only
             // have a conversion of an asset to a later epoch without an actual
             // rewards being dispensed. In this case we can avoid using the

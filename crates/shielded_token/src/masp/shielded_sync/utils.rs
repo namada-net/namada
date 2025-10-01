@@ -380,19 +380,19 @@ impl MaspClientCapabilities {
     /// Check if the masp client is able to fetch a pre-built
     /// commitment tree.
     pub const fn may_fetch_pre_built_tree(&self) -> bool {
-        self.0 & Self::MAY_FETCH_PRE_BUILT_TREE.0 != 0
+        self.contains(Self::MAY_FETCH_PRE_BUILT_TREE)
     }
 
     /// Check if the masp client is able to fetch a pre-built
     /// note index.
     pub const fn may_fetch_pre_built_note_index(&self) -> bool {
-        self.0 & Self::MAY_FETCH_PRE_BUILT_NOTE_INDEX.0 != 0
+        self.contains(Self::MAY_FETCH_PRE_BUILT_NOTE_INDEX)
     }
 
     /// Check if the masp client is able to fetch a pre-built
     /// witness map.
     pub const fn may_fetch_pre_built_witness_map(&self) -> bool {
-        self.0 & Self::MAY_FETCH_PRE_BUILT_WITNESS_MAP.0 != 0
+        self.contains(Self::MAY_FETCH_PRE_BUILT_WITNESS_MAP)
     }
 }
 

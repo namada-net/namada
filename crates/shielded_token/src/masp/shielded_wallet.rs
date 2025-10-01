@@ -2703,9 +2703,9 @@ mod test_shielded_wallet {
         assert_eq!(rewards_est, DenominatedAmount::native(0.into()));
     }
 
-    #[tokio::test]
     // Test that conversions carrying no rewards are not included in a
     // transaction
+    #[tokio::test]
     async fn skip_no_reward_conversions() {
         let (channel, mut context) = MockNamadaIo::new();
         // the response to the current masp epoch query
@@ -2764,7 +2764,7 @@ mod test_shielded_wallet {
                 token: native_token.clone(),
                 denom: native_token_denom,
                 position: MaspDigitPos::Zero,
-                epoch: Some(MaspEpoch::new(1)),
+                epoch: Some(MaspEpoch::new(0)),
             }
             .encode()
             .unwrap(),
@@ -2773,8 +2773,6 @@ mod test_shielded_wallet {
         let mut output = I128Sum::zero();
         let mut usage = I128Sum::zero();
         let reference_input = input.clone();
-        let reference_output = output.clone();
-        let reference_usage = usage.clone();
 
         wallet
             .apply_conversion(
@@ -2788,11 +2786,61 @@ mod test_shielded_wallet {
             )
             .await
             .unwrap();
-        // Verify that no changes were applied to the trackers
+        // Verify that no changes were applied to the trackers, especially the
+        // usage
         assert_eq!(input, reference_input);
-        assert_eq!(output, reference_output);
-        assert_eq!(usage, reference_usage);
-        // FIXME: also test that a conversion with rewards is used
+        assert_eq!(output, I128Sum::zero());
+        assert_eq!(usage, I128Sum::zero());
+
+        // Test that a conversion carrying rewards is correctly used
+
+        // Overwrite the previous conversion to generate some rewards
+        let mut conv = I128Sum::from_pair(asset_data0.encode().unwrap(), -1);
+        conv += I128Sum::from_pair(asset_data1.encode().unwrap(), 2);
+        context.add_conversions(
+            asset_data0.clone(),
+            (
+                native_token.clone(),
+                native_token_denom,
+                MaspDigitPos::Zero,
+                MaspEpoch::new(0),
+                conv.clone(),
+                MerklePath::from_path(vec![], 0),
+            ),
+        );
+        let allowed_conversion = AllowedConversion::from(conv);
+        let mut input = I128Sum::from_pair(
+            AssetData {
+                token: native_token.clone(),
+                denom: native_token_denom,
+                position: MaspDigitPos::Zero,
+                epoch: Some(MaspEpoch::new(0)),
+            }
+            .encode()
+            .unwrap(),
+            100,
+        );
+        let mut output = I128Sum::zero();
+        let mut usage = I128Sum::zero();
+        let reference_input = input.clone();
+
+        wallet
+            .apply_conversion(
+                context.io(),
+                allowed_conversion,
+                asset_type,
+                100,
+                &mut usage,
+                &mut input,
+                &mut output,
+            )
+            .await
+            .unwrap();
+        assert_ne!(input, reference_input);
+        // No output since the input amount can be fully converted with no
+        // leftover
+        assert_eq!(output, I128Sum::zero());
+        assert_ne!(usage, I128Sum::zero());
     }
 
     proptest! {

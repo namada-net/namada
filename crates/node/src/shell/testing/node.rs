@@ -11,7 +11,7 @@ use data_encoding::HEXUPPER;
 use itertools::Either;
 use lazy_static::lazy_static;
 use namada_sdk::address::Address;
-use namada_sdk::chain::{BlockHeader, BlockHeight, Epoch};
+use namada_sdk::chain::{BlockHeight, Epoch};
 use namada_sdk::collections::HashMap;
 use namada_sdk::control_flow::time::Duration;
 use namada_sdk::eth_bridge::oracle::config::Config as OracleConfig;
@@ -49,13 +49,10 @@ use crate::ethereum_oracle::test_tools::mock_web3_client::{
 use crate::ethereum_oracle::{
     control, last_processed_block, try_process_eth_events,
 };
+use crate::shell::abci::{ProcessedTx, TxResult};
 use crate::shell::testing::utils::TestDir;
 use crate::shell::token::MaspEpoch;
-use crate::shell::{EthereumOracleChannels, Shell};
-use crate::shims::abcipp_shim_types::shim::request::{
-    FinalizeBlock, ProcessedTx,
-};
-use crate::shims::abcipp_shim_types::shim::response::TxResult;
+use crate::shell::{EthereumOracleChannels, Shell, finalize_block};
 use crate::tendermint_proto::abci::{
     RequestPrepareProposal, RequestProcessProposal,
 };
@@ -516,18 +513,18 @@ impl MockNode {
                 .collect()
         };
         // build finalize block abci request
-        let req = FinalizeBlock {
-            header: BlockHeader {
-                hash: Hash([0; 32]),
-                #[allow(clippy::disallowed_methods)]
-                time: header_time.unwrap_or_else(DateTimeUtc::now),
-                next_validators_hash: Hash([0; 32]),
-            },
-            block_hash: Hash([0; 32]),
-            byzantine_validators: vec![],
+        let req = finalize_block::Request {
+            hash: Hash([0; 32]),
+            #[allow(clippy::disallowed_methods)]
+            time: header_time.unwrap_or_else(DateTimeUtc::now),
+            next_validators_hash: Hash([0; 32]),
+            misbehavior: vec![],
             txs: txs.clone(),
-            proposer_address,
-            height: height.try_into().unwrap(),
+            proposer_address: tendermint::account::Id::try_from(
+                proposer_address,
+            )
+            .unwrap(),
+            height,
             decided_last_commit: tendermint::abci::types::CommitInfo {
                 round: 0u8.into(),
                 votes,
@@ -642,6 +639,24 @@ impl MockNode {
         }
 
         // process proposal succeeded, now run finalize block
+        let processed_txs: Vec<ProcessedTx> = {
+            let req = RequestPrepareProposal {
+                proposer_address: proposer_address.clone().into(),
+                txs: txs.clone().into_iter().map(|tx| tx.into()).collect(),
+                ..Default::default()
+            };
+            let txs = locked.prepare_proposal(req).txs;
+
+            txs.into_iter()
+                .map(|tx| ProcessedTx {
+                    tx,
+                    result: TxResult {
+                        code: 0,
+                        info: String::new(),
+                    },
+                })
+                .collect()
+        };
 
         let time = {
             #[allow(clippy::disallowed_methods)]
@@ -651,26 +666,17 @@ impl MockNode {
             let dur = namada_sdk::time::Duration::minutes(10);
             time - dur
         };
-        let req = FinalizeBlock {
-            header: BlockHeader {
-                hash: Hash([0; 32]),
-                #[allow(clippy::disallowed_methods)]
-                time,
-                next_validators_hash: Hash([0; 32]),
-            },
-            block_hash: Hash([0; 32]),
-            byzantine_validators: vec![],
-            txs: txs
-                .clone()
-                .into_iter()
-                .zip(tx_results)
-                .map(|(tx, result)| ProcessedTx {
-                    tx: tx.into(),
-                    result,
-                })
-                .collect(),
-            proposer_address,
-            height: height.try_into().unwrap(),
+        let req = finalize_block::Request {
+            hash: Hash([0; 32]),
+            time,
+            next_validators_hash: Hash([0; 32]),
+            misbehavior: vec![],
+            txs: processed_txs.clone(),
+            proposer_address: tendermint::account::Id::try_from(
+                proposer_address,
+            )
+            .unwrap(),
+            height,
             decided_last_commit: tendermint::abci::types::CommitInfo {
                 round: 0u8.into(),
                 votes,

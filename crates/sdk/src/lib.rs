@@ -60,9 +60,7 @@ use namada_io::{Client, Io, NamadaIo};
 pub use namada_io::{MaybeSend, MaybeSync};
 pub use namada_token::masp::{ShieldedUtils, ShieldedWallet};
 use namada_tx::Tx;
-use namada_tx::data::wrapper::GasLimit;
 use rpc::{denominate_amount, format_denominated_amount, query_native_token};
-use signing::SigningTxData;
 use token::{DenominatedAmount, NATIVE_MAX_DECIMAL_PLACES};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tx::{
@@ -125,23 +123,17 @@ pub trait Namada: NamadaIo {
     /// Make a tx builder using no arguments
     fn tx_builder(&self) -> args::Tx {
         args::Tx {
-            dry_run: false,
-            dry_run_wrapper: false,
-            dump_tx: false,
-            dump_wrapper_tx: false,
+            dry_run: None,
+            dump_tx: None,
             output_folder: None,
             force: false,
-            broadcast_only: false,
             ledger_address: tendermint_rpc::Url::from_str(
                 "http://127.0.0.1:26657",
             )
             .unwrap(),
             initialized_account_alias: None,
             wallet_alias_force: false,
-            fee_amount: None,
-            wrapper_fee_payer: None,
-            fee_token: self.native_token(),
-            gas_limit: GasLimit::from(DEFAULT_GAS_LIMIT),
+            wrap_tx: None,
             expiration: Default::default(),
             chain_id: None,
             signing_keys: vec![],
@@ -611,7 +603,7 @@ pub trait Namada: NamadaIo {
         &self,
         tx: &mut Tx,
         args: &args::Tx,
-        signing_data: SigningTxData,
+        signing_data: signing::SigningData,
         with: impl Fn(Tx, common::PublicKey, signing::Signable, D) -> F
         + MaybeSend
         + MaybeSync,
@@ -708,23 +700,17 @@ where
             io,
             native_token: native_token.clone(),
             prototype: args::Tx {
-                dry_run: false,
-                dry_run_wrapper: false,
-                dump_tx: false,
-                dump_wrapper_tx: false,
+                dry_run: None,
+                dump_tx: None,
                 output_folder: None,
                 force: false,
-                broadcast_only: false,
                 ledger_address: tendermint_rpc::Url::from_str(
                     "http://127.0.0.1:26657",
                 )
                 .unwrap(),
                 initialized_account_alias: None,
                 wallet_alias_force: false,
-                fee_amount: None,
-                wrapper_fee_payer: None,
-                fee_token: native_token,
-                gas_limit: GasLimit::from(DEFAULT_GAS_LIMIT),
+                wrap_tx: None,
                 expiration: Default::default(),
                 chain_id: None,
                 signing_keys: vec![],
@@ -881,6 +867,7 @@ pub mod testing {
         BecomeValidator, Bond, CommissionChange, ConsensusKeyChange,
         MetaDataChange, Redelegation, Unbond, Withdraw,
     };
+    use namada_tx::data::wrapper::GasLimit;
     use namada_tx::data::{Fee, TxType, WrapperTx};
     use proptest::prelude::{Just, Strategy};
     use proptest::sample::SizeRange;

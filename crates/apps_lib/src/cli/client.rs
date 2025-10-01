@@ -37,8 +37,7 @@ impl CliApi {
                         client.wait_until_node_is_synced(&io).await?;
                         let args = args.to_sdk(&mut ctx)?;
                         let namada = ctx.to_sdk(client, io);
-                        let dry_run =
-                            args.tx.dry_run || args.tx.dry_run_wrapper;
+                        let dry_run = args.tx.dry_run.is_some();
                         tx::submit_custom(&namada, args).await?;
                         if !dry_run {
                             namada
@@ -193,8 +192,7 @@ impl CliApi {
                         client.wait_until_node_is_synced(&io).await?;
                         let args = args.to_sdk(&mut ctx)?;
                         let namada = ctx.to_sdk(client, io);
-                        let dry_run =
-                            args.tx.dry_run || args.tx.dry_run_wrapper;
+                        let dry_run = args.tx.dry_run.is_some();
                         tx::submit_init_account(&namada, args).await?;
                         if !dry_run {
                             namada

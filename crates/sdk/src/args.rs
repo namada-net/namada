@@ -40,7 +40,7 @@ use crate::rpc::{
     get_registry_from_xcs_osmosis_contract, osmosis_denom_from_namada_denom,
     query_ibc_denom, query_osmosis_route_and_min_out,
 };
-use crate::signing::{SigningTxData, gen_disposable_signing_key};
+use crate::signing::{SigningData, gen_disposable_signing_key};
 use crate::wallet::{DatedSpendingKey, DatedViewingKey};
 use crate::{Namada, rpc, tx};
 
@@ -231,7 +231,7 @@ impl TxCustom {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, Option<SigningTxData>)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_custom(context, self).await
     }
 }
@@ -302,7 +302,7 @@ impl TxTransparentTransfer {
     pub async fn build(
         &mut self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_transparent_transfer(context, self).await
     }
 }
@@ -362,10 +362,8 @@ impl TxShieldedTransfer {
         &mut self,
         context: &impl Namada,
         bparams: &mut impl BuildParams,
-        skip_fee_handling: bool,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
-        tx::build_shielded_transfer(context, self, bparams, skip_fee_handling)
-            .await
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
+        tx::build_shielded_transfer(context, self, bparams).await
     }
 }
 
@@ -413,7 +411,7 @@ impl TxShieldingTransfer {
         &mut self,
         context: &impl Namada,
         bparams: &mut impl BuildParams,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData, MaspEpoch)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData, MaspEpoch)> {
         tx::build_shielding_transfer(context, self, bparams).await
     }
 }
@@ -464,15 +462,8 @@ impl TxUnshieldingTransfer {
         &mut self,
         context: &impl Namada,
         bparams: &mut impl BuildParams,
-        skip_fee_handling: bool,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
-        tx::build_unshielding_transfer(
-            context,
-            self,
-            bparams,
-            skip_fee_handling,
-        )
-        .await
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
+        tx::build_unshielding_transfer(context, self, bparams).await
     }
 }
 
@@ -938,10 +929,9 @@ impl TxIbcTransfer {
         &self,
         context: &impl Namada,
         bparams: &mut impl BuildParams,
-        skip_fee_handling: bool,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData, Option<MaspEpoch>)>
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData, Option<MaspEpoch>)>
     {
-        tx::build_ibc_transfer(context, self, bparams, skip_fee_handling).await
+        tx::build_ibc_transfer(context, self, bparams).await
     }
 }
 
@@ -1011,7 +1001,7 @@ impl InitProposal {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         let current_epoch = rpc::query_epoch(context.client()).await?;
         let governance_parameters =
             rpc::query_governance_parameters(context.client()).await;
@@ -1155,7 +1145,7 @@ impl VoteProposal {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         let current_epoch = rpc::query_epoch(context.client()).await?;
         tx::build_vote_proposal(context, self, current_epoch).await
     }
@@ -1227,7 +1217,7 @@ impl TxInitAccount {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_init_account(context, self).await
     }
 }
@@ -1327,7 +1317,7 @@ impl TxBecomeValidator {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_become_validator(context, self).await
     }
 }
@@ -1450,7 +1440,7 @@ impl TxUpdateAccount {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_update_account(context, self).await
     }
 }
@@ -1517,7 +1507,7 @@ impl Bond {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_bond(context, self).await
     }
 }
@@ -1545,7 +1535,7 @@ impl Unbond {
         context: &impl Namada,
     ) -> crate::error::Result<(
         namada_tx::Tx,
-        SigningTxData,
+        SigningData,
         Option<(Epoch, token::Amount)>,
     )> {
         tx::build_unbond(context, self).await
@@ -1615,7 +1605,7 @@ impl Redelegate {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_redelegation(context, self).await
     }
 }
@@ -1696,7 +1686,7 @@ impl RevealPk {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_reveal_pk(context, &self.tx, &self.public_key).await
     }
 }
@@ -1861,7 +1851,7 @@ impl Withdraw {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_withdraw(context, self).await
     }
 }
@@ -1897,7 +1887,7 @@ impl ClaimRewards {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_claim_rewards(context, self).await
     }
 }
@@ -2043,7 +2033,7 @@ impl CommissionRateChange {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_validator_commission_change(context, self).await
     }
 }
@@ -2103,7 +2093,7 @@ impl ConsensusKeyChange {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_change_consensus_key(context, self).await
     }
 }
@@ -2221,7 +2211,7 @@ impl MetaDataChange {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_validator_metadata_change(context, self).await
     }
 }
@@ -2276,7 +2266,7 @@ impl UpdateStewardCommission {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_update_steward_commission(context, self).await
     }
 }
@@ -2324,7 +2314,7 @@ impl ResignSteward {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_resign_steward(context, self).await
     }
 }
@@ -2372,7 +2362,7 @@ impl TxUnjailValidator {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_unjail_validator(context, self).await
     }
 }
@@ -2420,7 +2410,7 @@ impl TxDeactivateValidator {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_deactivate_validator(context, self).await
     }
 }
@@ -2468,7 +2458,7 @@ impl TxReactivateValidator {
     pub async fn build(
         &self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         tx::build_reactivate_validator(context, self).await
     }
 }
@@ -2632,31 +2622,29 @@ impl TxExpiration {
     }
 }
 
-/// Common transaction arguments
+/// Argument for dry-runs
 #[derive(Clone, Debug)]
-pub struct Tx<C: NamadaTypes = SdkTypes> {
-    /// Simulate applying the transaction
-    pub dry_run: bool,
-    /// Simulate applying both the wrapper and inner transactions
-    pub dry_run_wrapper: bool,
-    /// Dump the raw transaction bytes to file
-    pub dump_tx: bool,
-    /// Dump the wrapper transaction bytes to file
-    pub dump_wrapper_tx: bool,
-    /// The output directory path to where serialize the data
-    pub output_folder: Option<PathBuf>,
-    /// Submit the transaction even if it doesn't pass client checks
-    pub force: bool,
+pub enum DryRun {
+    /// Request a dry run of the inner transaction(s) only
+    Inner,
+    /// Request a dry run of both the inner transaction(s) and the wrapper
+    Wrapper,
+}
+
+/// Argument for dumping transactions
+#[derive(Clone, Debug)]
+pub enum DumpTx {
+    /// Dump the raw transaction
+    Inner,
+    /// Dump the wrapper transaction
+    Wrapper,
+}
+
+/// Arguments to request wrapping a transaction
+#[derive(Clone, Debug)]
+pub struct Wrapper<C: NamadaTypes = SdkTypes> {
     /// Do not wait for the transaction to be added to the blockchain
     pub broadcast_only: bool,
-    /// The address of the ledger node as host:port
-    pub ledger_address: C::ConfigRpcTendermintAddress,
-    /// If any new account is initialized by the tx, use the given alias to
-    /// save it in the wallet.
-    pub initialized_account_alias: Option<String>,
-    /// Whether to force overwrite the above alias, if it is provided, in the
-    /// wallet.
-    pub wallet_alias_force: bool,
     /// The amount being paid (for gas unit) to include the transaction
     pub fee_amount: Option<InputAmount>,
     /// The fee payer signing key
@@ -2665,6 +2653,31 @@ pub struct Tx<C: NamadaTypes = SdkTypes> {
     pub fee_token: C::AddrOrNativeToken,
     /// The max amount of gas used to process tx
     pub gas_limit: GasLimit,
+}
+
+/// Common transaction arguments
+#[derive(Clone, Debug)]
+pub struct Tx<C: NamadaTypes = SdkTypes> {
+    /// Simulate applying the transaction (possibly the wrapper too)
+    pub dry_run: Option<DryRun>,
+    /// Dump the transaction bytes to file, either the raw or the whole wrapper
+    /// transaction
+    pub dump_tx: Option<DumpTx>,
+    /// The output directory path to where serialize the data
+    pub output_folder: Option<PathBuf>,
+    /// Build the transaction even if it doesn't pass client checks
+    pub force: bool,
+    /// The address of the ledger node as host:port
+    pub ledger_address: C::ConfigRpcTendermintAddress,
+    /// If any new account is initialized by the tx, use the given alias to
+    /// save it in the wallet.
+    pub initialized_account_alias: Option<String>,
+    /// Whether to force overwrite the above alias, if it is provided, in the
+    /// wallet.
+    pub wallet_alias_force: bool,
+    /// Requests wrapping the transaction, optional in case only the raw tx
+    /// should be built
+    pub wrap_tx: Option<Wrapper<C>>,
     /// The optional expiration of the transaction
     pub expiration: TxExpiration,
     /// The chain id for which the transaction is intended
@@ -2715,18 +2728,11 @@ pub trait TxBuilder<C: NamadaTypes>: Sized {
     where
         F: FnOnce(Tx<C>) -> Tx<C>;
     /// Simulate applying the transaction
-    fn dry_run(self, dry_run: bool) -> Self {
+    fn dry_run(self, dry_run: Option<DryRun>) -> Self {
         self.tx(|x| Tx { dry_run, ..x })
     }
-    /// Simulate applying both the wrapper and inner transactions
-    fn dry_run_wrapper(self, dry_run_wrapper: bool) -> Self {
-        self.tx(|x| Tx {
-            dry_run_wrapper,
-            ..x
-        })
-    }
     /// Dump the transaction bytes to file
-    fn dump_tx(self, dump_tx: bool) -> Self {
+    fn dump_tx(self, dump_tx: Option<DumpTx>) -> Self {
         self.tx(|x| Tx { dump_tx, ..x })
     }
     /// The output directory path to where serialize the data
@@ -2740,10 +2746,10 @@ pub trait TxBuilder<C: NamadaTypes>: Sized {
     fn force(self, force: bool) -> Self {
         self.tx(|x| Tx { force, ..x })
     }
-    /// Do not wait for the transaction to be added to the blockchain
-    fn broadcast_only(self, broadcast_only: bool) -> Self {
+    /// Wrap the transaction
+    fn wrap_it(self, wrapper: Option<Wrapper<C>>) -> Self {
         self.tx(|x| Tx {
-            broadcast_only,
+            wrap_tx: wrapper,
             ..x
         })
     }
@@ -2772,35 +2778,6 @@ pub trait TxBuilder<C: NamadaTypes>: Sized {
             wallet_alias_force,
             ..x
         })
-    }
-    /// The amount being paid (for gas unit) to include the transaction
-    fn fee_amount(self, fee_amount: InputAmount) -> Self {
-        self.tx(|x| Tx {
-            fee_amount: Some(fee_amount),
-            ..x
-        })
-    }
-    /// The fee payer signing key
-    fn wrapper_fee_payer(self, wrapper_fee_payer: C::PublicKey) -> Self {
-        self.tx(|x| Tx {
-            wrapper_fee_payer: Some(wrapper_fee_payer),
-            ..x
-        })
-    }
-    /// The token in which the fee is being paid
-    fn fee_token(self, fee_token: C::Address) -> Self {
-        self.tx(|x| Tx {
-            fee_token: fee_token.into(),
-            ..x
-        })
-    }
-    /// The max amount of gas used to process tx
-    fn gas_limit(self, gas_limit: GasLimit) -> Self {
-        self.tx(|x| Tx { gas_limit, ..x })
-    }
-    /// The optional expiration of the transaction
-    fn expiration(self, expiration: TxExpiration) -> Self {
-        self.tx(|x| Tx { expiration, ..x })
     }
     /// The chain id for which the transaction is intended
     fn chain_id(self, chain_id: ChainId) -> Self {
@@ -3124,7 +3101,7 @@ impl EthereumBridgePool {
     pub async fn build(
         self,
         context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningTxData)> {
+    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
         bridge_pool::build_bridge_pool_tx(context, self).await
     }
 }

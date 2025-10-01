@@ -8,7 +8,7 @@ check_changelog_added_in_subfolders() {
     fi
     echo "Using sha: $head_commit"
 
-    subfolders=("ci" "bug-fixes" "improvements" "miscellaneous" "features" "testing" "docs")
+    subfolders=("ci" "bug-fixes" "improvements" "miscellaneous" "features" "testing" "docs" "SDK")
 
     subfolder_pattern=$(printf "|%s" "${subfolders[@]}")
     subfolder_pattern=${subfolder_pattern:1} # Remove the leading '|'

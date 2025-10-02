@@ -35,21 +35,24 @@ fn apply_tx(ctx: &mut Ctx, tx_data: BatchedTx) -> TxResult {
 
     token_addrs.extend(data.ibc_tokens);
 
-    let shielded = if let Some(masp_section_ref) = masp_section_ref {
-        Some(
-            tx_data
-                .tx
-                .get_masp_section(&masp_section_ref)
-                .cloned()
-                .ok_or_err_msg(
-                    "Unable to find required shielded section in tx data",
-                )
-                .inspect_err(|_| {
-                    ctx.set_commitment_sentinel();
-                })?,
+    let (shielded, seq) = if let Some(masp_section_ref) = masp_section_ref {
+        (
+            Some(
+                tx_data
+                    .tx
+                    .get_masp_section(&masp_section_ref)
+                    .cloned()
+                    .ok_or_err_msg(
+                        "Unable to find required shielded section in tx data",
+                    )
+                    .inspect_err(|_| {
+                        ctx.set_commitment_sentinel();
+                    })?,
+            ),
+            None,
         )
     } else {
-        data.shielded
+        data.shielded.unzip()
     };
     if let Some(shielded) = shielded {
         token::utils::handle_masp_tx(ctx, &shielded)
@@ -61,7 +64,22 @@ fn apply_tx(ctx: &mut Ctx, tx_data: BatchedTx) -> TxResult {
                 masp_section_ref,
             )))?;
         } else {
-            ctx.push_action(Action::IbcShielding)?;
+            match shielded {
+                ShieldingData::Tx(_) => {
+                    ctx.push_action(Action::IbcShielding)?
+                }
+                ShiedlingData::Note(notes) => {
+                    ctx.push_action(Action::IbcMinedNotes(
+                        notes
+                            .iter()
+                            .map(|note| IbcMinedNote {
+                                asset_type: note.asset_type,
+                                seq: seq.unwrap(),
+                            })
+                            .collect(),
+                    ))
+                }
+            }
         }
         token::update_undated_balances(ctx, &shielded, token_addrs)?;
     }

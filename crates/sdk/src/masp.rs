@@ -7,20 +7,25 @@ use std::str::FromStr;
 use masp_primitives::asset_type::AssetType;
 use masp_primitives::merkle_tree::MerklePath;
 use masp_primitives::sapling::Node;
-use masp_primitives::transaction::Transaction;
 use masp_primitives::transaction::components::I128Sum;
 use namada_core::address::Address;
 use namada_core::chain::BlockHeight;
-use namada_core::masp::MaspEpoch;
+use namada_core::ibc::core::channel::types::msgs::PacketMsg;
+use namada_core::ibc::core::handler::types::msgs::MsgEnvelope;
+use namada_core::masp::{MaspEpoch, PaymentAddress, ShieldingData};
 use namada_core::time::DurationSecs;
-use namada_core::token::{Denomination, MaspDigitPos};
+use namada_core::token::{Amount, Denomination, MaspDigitPos};
 use namada_events::extend::ReadFromEventAttributes;
-use namada_ibc::{IbcMessage, decode_message, extract_masp_tx_from_envelope};
+use namada_ibc::{
+    IbcMessage, decode_message, extract_data_from_packet,
+    extract_masp_tx_from_envelope, extract_rng_from_packet,
+};
 use namada_io::client::Client;
 use namada_token::masp::shielded_wallet::ShieldedQueries;
 pub use namada_token::masp::{utils, *};
 use namada_tx::event::{MaspEvent, MaspEventKind, MaspTxRef};
 use namada_tx::{IndexedTx, Tx};
+use rand_core::{CryptoRng, RngCore, SeedableRng};
 pub use utilities::{
     IndexerMaspClient, LedgerMaspClient, LinearBackoffSleepMaspClient,
 };
@@ -38,7 +43,7 @@ use crate::{MaybeSend, MaybeSync, token};
 fn extract_masp_tx(
     tx: &Tx,
     masp_ref: &MaspTxRef,
-) -> Result<Transaction, Error> {
+) -> Result<ShieldingData, Error> {
     match masp_ref {
         MaspTxRef::MaspSection(id) => {
             // Simply looking for masp sections attached to the tx
@@ -54,6 +59,7 @@ fn extract_masp_tx(
                     ))
                 })?
                 .clone())
+            .map(ShieldingData::Tx)
         }
         MaspTxRef::IbcData(hash) => {
             // Dereference the masp ref to the first instance that
@@ -81,16 +87,79 @@ fn extract_masp_tx(
                 ));
             };
 
-            if let Some(transaction) = extract_masp_tx_from_envelope(&envelope)
-            {
-                Ok(transaction)
-            } else {
-                Err(Error::Other(
+            extract_masp_tx_from_envelope(&envelope).ok_or_else(|| {
+                Error::Other(
                     "Failed to retrieve MASP over IBC transaction".to_string(),
-                ))
+                )
+            })
+        }
+        MaspTxRef::IbcMinedNotes { hash, assets, seq } => {
+            let masp_ibc_tx = tx
+                .commitments()
+                .iter()
+                .find(|cmt| cmt.data_sechash() == hash)
+                .ok_or_else(|| {
+                    Error::Other(format!(
+                        "Couldn't find data section with hash {hash}"
+                    ))
+                })?;
+            let tx_data = tx.data(masp_ibc_tx).ok_or_else(|| {
+                Error::Other("Missing expected data section".to_string())
+            })?;
+
+            let IbcMessage::Envelope(envelope) =
+                decode_message::<token::Transfer>(&tx_data)
+                    .map_err(|e| Error::Other(e.to_string()))?
+            else {
+                return Err(Error::Other(
+                    "Expected IBC packet to be an envelope".to_string(),
+                ));
+            };
+            match *envelope {
+                MsgEnvelope::Packet(PacketMsg::Recv(msg)) => {
+                    let Some((_, recv, amount)) = extract_data_from_packet(
+                        &msg.packet,
+                        &msg.packet.port_id_on_b,
+                    ) else {
+                        return Err(Error::Other(
+                            "Unexpected port from IBC packet data".to_string(),
+                        ));
+                    };
+                    let pa = PaymentAddress::from_str(recv.as_ref())
+                        .map_err(|e| Error::Other(e.to_string()))?;
+                    let mut csprng = extract_rng_from_packet(&msg, *seq)
+                        .map_err(|e| Error::Other(e))?;
+                    Ok(mine(pa, assets.into_iter().map(|a| a.raw), amount, &mut csprng))
+                }
+                _ => Err(Error::Other(
+                    "Failed to retrieve MASP over IBC transaction".to_string(),
+                )),
             }
         }
     }
+}
+
+/// If the shielding data is a payment address,
+/// mine a MASP note.
+pub fn mine<RNG>(
+    pa: PaymentAddress,
+    assets: impl Iterator<Item = AssetType>,
+    value: Amount,
+    mut csprng: &mut RNG,
+) -> ShieldingData
+where
+    RNG: RngCore + CryptoRng + SeedableRng,
+{
+    let mut notes = vec![];
+    for asset in assets {
+        let mut new_notes = value
+            .iter_words()
+            .filter(|v| *v > 0)
+            .map(|v| pa.create_note(asset, v, &mut csprng).unwrap())
+            .collect();
+        notes.append(&mut new_notes);
+    }
+    ShieldingData::Note(notes)
 }
 
 // Retrieves all the masp events at the specified height.

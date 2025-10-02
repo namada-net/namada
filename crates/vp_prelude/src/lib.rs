@@ -48,6 +48,7 @@ pub use namada_storage::{
     Error, OptionExt, ResultExt, StorageRead, iter_prefix, iter_prefix_bytes,
 };
 pub use namada_tx::{BatchedTx, Section, Tx};
+use namada_vm_env::tx::namada_tx_has_conversion;
 use namada_vm_env::vp::*;
 use namada_vm_env::{read_from_buffer, read_key_val_bytes_from_buffer};
 pub use namada_vp_env::{VpEnv, collection_validation};
@@ -58,6 +59,8 @@ pub use {
     namada_proof_of_stake as proof_of_stake, namada_token as token,
     namada_tx as tx,
 };
+
+use crate::masp_primitives::asset_type::AssetType;
 
 /// SHA-256 hash of given bytes
 pub fn sha256(bytes: &[u8]) -> Hash {
@@ -447,6 +450,20 @@ impl StorageRead for CtxPreStorageRead<'_> {
         Ok(HostEnvResult::is_success(found))
     }
 
+    fn has_conversion(
+        &self,
+        asset_type: &AssetType,
+    ) -> namada_storage::Result<bool> {
+        let asset_type = asset_type.serialize_to_vec();
+        let found = unsafe {
+            namada_tx_has_conversion(
+                asset_type.as_ptr() as _,
+                asset_type.len() as _,
+            )
+        };
+        Ok(HostEnvResult::is_success(found))
+    }
+
     fn iter_prefix<'iter>(
         &'iter self,
         prefix: &storage::Key,
@@ -516,6 +533,20 @@ impl StorageRead for CtxPostStorageRead<'_> {
         let key = key.to_string();
         let found = unsafe {
             namada_vp_has_key_post(key.as_ptr() as _, key.len() as _)
+        };
+        Ok(HostEnvResult::is_success(found))
+    }
+
+    fn has_conversion(
+        &self,
+        asset_type: &AssetType,
+    ) -> namada_storage::Result<bool> {
+        let asset_type = asset_type.serialize_to_vec();
+        let found = unsafe {
+            namada_tx_has_conversion(
+                asset_type.as_ptr() as _,
+                asset_type.len() as _,
+            )
         };
         Ok(HostEnvResult::is_success(found))
     }

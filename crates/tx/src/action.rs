@@ -8,8 +8,10 @@
 
 use std::fmt;
 
+use masp_primitives::asset_type::AssetType;
 use namada_core::address::Address;
 use namada_core::borsh::{BorshDeserialize, BorshSerialize};
+use namada_core::ibc::core::host::types::identifiers::Sequence;
 use namada_core::masp::MaspTxId;
 use namada_core::storage::KeySeg;
 use namada_core::{address, storage};
@@ -30,6 +32,10 @@ pub enum Action {
     Pgf(PgfAction),
     Masp(MaspAction),
     IbcShielding,
+    IbcMinedNotes {
+        assets: Vec<AssetType>,
+        seq: Sequence,
+    },
 }
 
 /// PoS tx actions.
@@ -146,14 +152,4 @@ pub fn get_masp_section_ref(
     } else {
         Ok(masp_sections.first().cloned())
     }
-}
-
-/// Helper function to check if the action is IBC shielding transfer
-pub fn is_ibc_shielding_transfer<T: Read>(
-    reader: &T,
-) -> Result<bool, <T as Read>::Err> {
-    Ok(reader
-        .read_actions()?
-        .iter()
-        .any(|action| matches!(action, Action::IbcShielding)))
 }

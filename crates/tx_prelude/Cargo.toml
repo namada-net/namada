@@ -28,6 +28,7 @@ namada_macros.workspace = true
 namada_parameters.workspace = true
 namada_proof_of_stake.workspace = true
 namada_state.workspace = true
+namada_systems.workspace = true
 namada_token.workspace = true
 namada_tx.workspace = true
 namada_tx_env.workspace = true

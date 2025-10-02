@@ -14,11 +14,12 @@ use masp_primitives::transaction::components::transparent::builder::TransparentB
 use masp_primitives::transaction::sighash::{SignableInput, signature_hash};
 use masp_primitives::transaction::txid::TxIdDigester;
 use masp_primitives::transaction::{
-    Authorization, Authorized, Transaction, TransactionData, Unauthorized,
+    Authorization, Authorized, TransactionData, Unauthorized,
 };
 use masp_primitives::zip32::ExtendedSpendingKey;
 use masp_proofs::bellman::groth16::VerifyingKey;
 use masp_proofs::sapling::BatchValidator;
+use namada_core::masp::MaspTxData;
 use namada_gas::Gas;
 use rand_core::OsRng;
 use smooth_operator::checked;
@@ -120,12 +121,16 @@ fn load_pvks() -> &'static PVKs {
 
 /// Verify a shielded transaction.
 pub fn verify_shielded_tx<F>(
-    transaction: &Transaction,
+    transaction: &impl MaspTxData,
     consume_verify_gas: F,
 ) -> Result<()>
 where
     F: Fn(Gas) -> Result<()>,
 {
+    let Some(transaction) = transaction.verifiable_tx() else {
+        return Ok(());
+    };
+
     tracing::debug!("entered verify_shielded_tx()");
 
     let sapling_bundle = if let Some(bundle) = transaction.sapling_bundle() {

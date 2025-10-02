@@ -59,6 +59,8 @@ pub use {
     namada_parameters as parameters,
 };
 
+use crate::masp_primitives::asset_type::AssetType;
+
 /// Log a string. The message will be printed at the `tracing::Level::Info`.
 pub fn log_string<T: AsRef<str>>(msg: T) {
     let msg = msg.as_ref();
@@ -175,6 +177,17 @@ impl StorageRead for Ctx {
 
     fn get_block_height(&self) -> Result<BlockHeight> {
         Ok(BlockHeight(unsafe { namada_tx_get_block_height() }))
+    }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        let asset_type = asset_type.serialize_to_vec();
+        let found = unsafe {
+            namada_tx_has_conversion(
+                asset_type.as_ptr() as _,
+                asset_type.len() as _,
+            )
+        };
+        Ok(HostEnvResult::is_success(found))
     }
 
     fn get_block_header(

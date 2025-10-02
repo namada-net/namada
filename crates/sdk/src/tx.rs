@@ -2790,7 +2790,7 @@ pub async fn build_ibc_transfer(
     args: &args::TxIbcTransfer,
     bparams: &mut impl BuildParams,
 ) -> Result<(Tx, SigningData, Option<MaspEpoch>)> {
-    if args.ibc_shielding_data.is_some() && args.ibc_memo.is_some() {
+    if args.ibc_shielding_memo.is_some() && args.ibc_memo.is_some() {
         return Err(Error::Other(
             "The memo field of the IBC packet can't be used for both \
              shielding transfer and another purpose at the same time"
@@ -3046,7 +3046,7 @@ pub async fn build_ibc_transfer(
     );
     // The memo is either IbcShieldingData or just a memo
     let memo = args
-        .ibc_shielding_data
+        .ibc_shielding_memo
         .as_ref()
         .map_or(args.ibc_memo.clone(), |shielding_data| {
             Some(shielding_data.clone().into())

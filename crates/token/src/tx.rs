@@ -5,8 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use namada_core::arith::CheckedSub;
 use namada_core::collections::HashSet;
-use namada_core::masp::encode_asset_type;
-use namada_core::masp_primitives::transaction::Transaction;
+use namada_core::masp::{MaspTxData, encode_asset_type};
 use namada_core::token::MaspDigitPos;
 use namada_core::uint::I320;
 use namada_core::{masp, token};
@@ -83,7 +82,7 @@ where
 /// in order to help it decode the asset types in its value balance.
 pub fn update_undated_balances<ENV>(
     env: &mut ENV,
-    shielded: &Transaction,
+    shielded: &impl MaspTxData,
     tokens: HashSet<Address>,
 ) -> Result<()>
 where
@@ -112,7 +111,7 @@ where
         }
     }
     // Update the undated balances with the Sapling value balance
-    for (asset_type, val) in shielded.sapling_value_balance().components() {
+    for (asset_type, val) in shielded.value_balance().components() {
         let Some((token, _denom, digit)) = undated_asset_types.get(asset_type)
         else {
             // Assume that token cannot be decoded because it's dated

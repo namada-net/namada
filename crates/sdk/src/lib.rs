@@ -309,7 +309,7 @@ pub trait Namada: NamadaIo {
             timeout_height: None,
             timeout_sec_offset: None,
             refund_target: None,
-            ibc_shielding_data: None,
+            ibc_shielding_memo: None,
             ibc_memo: None,
             gas_spending_key: Default::default(),
             tx: self.tx_builder(),

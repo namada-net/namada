@@ -21,17 +21,18 @@ use namada_sdk::state::{
     DB, DBIter, State, StorageHasher, StorageRead, TxWrites, WlState,
 };
 use namada_sdk::storage::TxIndex;
+use namada_sdk::string_encoding::StringEncoded;
 use namada_sdk::token::Amount;
 use namada_sdk::token::event::{TokenEvent, TokenOperation};
 use namada_sdk::token::utils::is_masp_transfer;
-use namada_sdk::tx::action::{self, Read};
+use namada_sdk::tx::action::{self, Action, Read};
 use namada_sdk::tx::data::protocol::{ProtocolTx, ProtocolTxType};
 use namada_sdk::tx::data::{
     BatchedTxResult, TxResult, VpStatusFlags, VpsResult, WrapperTx,
     compute_inner_tx_hash,
 };
 use namada_sdk::tx::event::{MaspEvent, MaspEventKind, MaspTxRef};
-use namada_sdk::tx::{BatchedTxRef, IndexedTx, Tx, TxCommitments};
+use namada_sdk::tx::{BatchedTxRef, IndexedTx, Tx, TxCommitments, event};
 use namada_sdk::validation::{
     EthBridgeNutVp, EthBridgePoolVp, EthBridgeVp, GovernanceVp, IbcVp, MaspVp,
     MultitokenVp, NativeVpCtx, ParametersVp, PgfVp, PosVp,
@@ -924,10 +925,29 @@ fn get_optional_masp_ref<S: Read<Err = state::Error>>(
         return Ok(None);
     }
 
-    let masp_ref = if action::is_ibc_shielding_transfer(state)
-        .map_err(Error::StateError)?
-    {
-        Some(MaspTxRef::IbcData(cmt.data_sechash().to_owned()))
+    let masp_ref = if let Some(action) =
+        state.read_actions()?.into_iter().find(|action| {
+            matches!(
+                action,
+                Action::IbcShielding | Action::IbcMinedNotes { .. }
+            )
+        }) {
+        match action {
+            Action::IbcShielding => {
+                Some(MaspTxRef::IbcData(cmt.data_sechash().to_owned()))
+            }
+            Action::IbcMinedNotes { assets, seq } => {
+                Some(MaspTxRef::IbcMinedNotes {
+                    hash: cmt.data_sechash().to_owned(),
+                    assets: assets
+                        .into_iter()
+                        .map(StringEncoded::new)
+                        .collect(),
+                    seq,
+                })
+            }
+            _ => unreachable!(),
+        }
     } else {
         let actions = state.read_actions().map_err(Error::StateError)?;
         action::get_masp_section_ref(&actions)

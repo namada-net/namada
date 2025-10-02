@@ -418,6 +418,7 @@ impl Display for Amount {
     Debug,
     Copy,
     Clone,
+    Default,
     Hash,
     PartialEq,
     Eq,

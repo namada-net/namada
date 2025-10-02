@@ -24,7 +24,7 @@ use namada_core::{storage, token};
 use namada_governance::cli::onchain::{
     DefaultProposal, PgfFundingProposal, PgfStewardProposal,
 };
-use namada_ibc::IbcShieldingData;
+use namada_ibc::IbcMemoData;
 use namada_io::{Io, display_line};
 use namada_token::masp::utils::RetryStrategy;
 use namada_tx::Memo;
@@ -730,9 +730,9 @@ impl TxOsmosisSwap<SdkTypes> {
                 let memo = assert_json_obj(
                     serde_json::to_value(&NamadaMemo {
                         namada: NamadaMemoData::OsmosisSwap {
-                            shielding_data: StringEncoded::new(
-                                IbcShieldingData(shielding_tx),
-                            ),
+                            shielding_data: StringEncoded::new(IbcMemoData(
+                                shielding_tx,
+                            )),
                             shielded_amount: amount_to_shield,
                             overflow_receiver,
                         },
@@ -812,7 +812,7 @@ pub struct TxIbcTransfer<C: NamadaTypes = SdkTypes> {
     /// Refund target address when the shielded transfer failure
     pub refund_target: Option<C::TransferTarget>,
     /// IBC shielding transfer data for the destination chain
-    pub ibc_shielding_data: Option<IbcShieldingData>,
+    pub ibc_shielding_memo: Option<IbcMemoData>,
     /// Memo for IBC transfer packet
     pub ibc_memo: Option<String>,
     /// Optional additional keys for gas payment
@@ -891,9 +891,9 @@ impl<C: NamadaTypes> TxIbcTransfer<C> {
     }
 
     /// IBC shielding transfer data
-    pub fn ibc_shielding_data(self, shielding_data: IbcShieldingData) -> Self {
+    pub fn ibc_shielding_data(self, shielding_data: IbcMemoData) -> Self {
         Self {
-            ibc_shielding_data: Some(shielding_data),
+            ibc_shielding_memo: Some(shielding_data),
             ..self
         }
     }

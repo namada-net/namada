@@ -10,6 +10,7 @@ use std::marker::PhantomData;
 use namada_core::borsh;
 use namada_core::borsh::BorshDeserialize;
 use namada_core::chain::{ChainId, Epochs};
+use namada_core::masp_primitives::asset_type::AssetType;
 use namada_gas::{Gas, GasMeterKind, GasMetering, VpGasMeter};
 use namada_state::{ConversionState, ReadConversionState};
 use namada_tx::{BatchedTxRef, Tx, TxCommitments};
@@ -240,6 +241,10 @@ where
     fn get_pred_epochs(&self) -> Result<Epochs> {
         self.ctx.get_pred_epochs()
     }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        self.ctx.post().has_conversion(asset_type)
+    }
 }
 
 impl<'view, 'a: 'view, S, CA, EVAL> StorageRead
@@ -317,6 +322,16 @@ where
 
     fn get_pred_epochs(&self) -> Result<Epochs> {
         self.ctx.get_pred_epochs()
+    }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        Ok(self
+            .ctx
+            .state
+            .in_mem()
+            .conversion_state
+            .assets
+            .contains_key(asset_type))
     }
 }
 

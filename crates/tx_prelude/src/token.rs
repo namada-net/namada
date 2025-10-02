@@ -1,7 +1,7 @@
 //! Shielded and transparent tokens related functions
 
 use namada_core::collections::HashSet;
-use namada_core::masp_primitives::transaction::Transaction;
+use namada_core::masp::MaspTxData;
 use namada_token::TransparentTransfersRef;
 #[cfg(any(test, feature = "testing"))]
 pub use namada_token::testing;
@@ -45,7 +45,7 @@ pub fn multi_transfer(
 /// in order to help it decode the asset types in its value balance.
 pub fn update_undated_balances(
     ctx: &mut Ctx,
-    shielded: &Transaction,
+    shielded: &impl MaspTxData,
     tokens: HashSet<Address>,
 ) -> Result<()> {
     namada_token::tx::update_undated_balances(ctx, shielded, tokens)

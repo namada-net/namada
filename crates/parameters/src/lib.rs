@@ -26,8 +26,12 @@ use std::marker::PhantomData;
 use namada_core::address::{Address, InternalAddress};
 use namada_core::arith::checked;
 use namada_core::chain::BlockHeight;
+use namada_core::masp::MaspEpoch;
+use namada_core::masp_primitives::asset_type::AssetType;
 pub use namada_core::parameters::ProposalBytes;
+use namada_core::storage::KeySeg;
 use namada_core::time::DurationSecs;
+use namada_core::token::Denomination;
 use namada_core::{hints, token};
 use namada_state::{Error, Key, ResultExt, StorageRead, StorageWrite};
 pub use namada_systems::parameters::*;
@@ -69,6 +73,18 @@ where
         read_epochs_per_year(storage)
     }
 
+    fn get_masp_epoch(storage: &S) -> Result<MaspEpoch> {
+        MaspEpoch::try_from_epoch(
+            storage.get_block_epoch()?,
+            Self::masp_epoch_multiplier(storage)?,
+        )
+        .map_err(Error::SimpleMessage)
+    }
+
+    fn has_conversions(storage: &S, asset_type: &AssetType) -> Result<bool> {
+        storage.has_conversion(asset_type)
+    }
+
     fn estimate_max_block_time_from_blocks_and_params(
         storage: &S,
         last_block_height: BlockHeight,
@@ -79,6 +95,46 @@ where
             last_block_height,
             num_blocks_to_read,
         )
+    }
+
+    fn read_denom(
+        storage: &S,
+        token: &Address,
+    ) -> Result<Option<Denomination>> {
+        const DENOM_STORAGE_KEY: &str = "denomination";
+        let denom_key = |token_addr: &Address| {
+            storage::Key::from(token_addr.to_db_key())
+                .push(&DENOM_STORAGE_KEY.to_owned())
+                .expect("Cannot obtain a storage key")
+        };
+
+        let (key, is_default_zero) = match token {
+            Address::Internal(InternalAddress::Nut(erc20)) => {
+                let token = Address::Internal(InternalAddress::Erc20(*erc20));
+                // NB: always use the equivalent ERC20's smallest
+                // denomination to specify amounts, if we cannot
+                // find a denom in storage
+                (denom_key(&token), true)
+            }
+            Address::Internal(InternalAddress::IbcToken(_)) => {
+                return Ok(Some(0u8.into()));
+            }
+            token => (denom_key(token), false),
+        };
+        storage.read(&key).map(|opt_denom| {
+            Some(opt_denom.unwrap_or_else(|| {
+                if is_default_zero {
+                    0u8.into()
+                } else {
+                    // FIXME: perhaps when we take this branch, we should
+                    // assume the same behavior as NUTs? maybe this branch
+                    // is unreachable, anyway. when would regular tokens
+                    // ever not be denominated?
+                    hints::cold();
+                    token::NATIVE_MAX_DECIMAL_PLACES.into()
+                }
+            }))
+        })
     }
 }
 

@@ -83,7 +83,6 @@ use ibc::core::router::types::error::RouterError;
 use ibc::primitives::proto::Any;
 pub use ibc::*;
 use ibc_middleware_packet_forward::PacketMetadata;
-use masp_primitives::transaction::Transaction as MaspTransaction;
 pub use msg::*;
 use namada_core::address::{self, Address};
 use namada_core::arith::{CheckedAdd, CheckedSub, checked};
@@ -92,7 +91,7 @@ use namada_core::ibc::core::channel::types::commitment::{
     AcknowledgementCommitment, PacketCommitment, compute_packet_commitment,
 };
 pub use namada_core::ibc::*;
-use namada_core::masp::{TAddrData, addr_taddr, ibc_taddr};
+use namada_core::masp::{ShieldingData, TAddrData, addr_taddr, ibc_taddr};
 use namada_core::masp_primitives::transaction::components::ValueSum;
 use namada_core::token::Amount;
 use namada_events::EmitEvents;
@@ -104,6 +103,8 @@ use namada_systems::ibc::ChangedBalances;
 use namada_systems::trans_token;
 pub use nft::*;
 use prost::Message;
+use rand_chacha::rand_core::SeedableRng;
+use sha2::Digest;
 use thiserror::Error;
 use trace::{
     convert_to_address, ibc_trace_for_nft,
@@ -111,6 +112,7 @@ use trace::{
     is_sender_chain_source,
 };
 
+use crate::context::common::read_sequence;
 use crate::storage::{
     channel_counter_key, client_counter_key, connection_counter_key,
     deposit_prefix, nft_class_key, nft_metadata_key, withdraw_prefix,
@@ -237,22 +239,70 @@ impl<S> namada_systems::ibc::Read<S> for Store<S>
 where
     S: StorageRead,
 {
-    fn try_extract_masp_tx_from_envelope<Transfer: BorshDeserialize>(
+    type ExtractedMaspTx = ShieldingData;
+
+    fn try_extract_masp_tx_from_envelope<Transfer, Params, R>(
+        ctx: &R,
         tx_data: &[u8],
-    ) -> StorageResult<Option<masp_primitives::transaction::Transaction>> {
+    ) -> StorageResult<Option<ShieldingData>>
+    where
+        Transfer: BorshDeserialize,
+        Params: namada_systems::parameters::Read<R>,
+        R: StorageRead,
+    {
         let msg = decode_message::<Transfer>(tx_data)
             .into_storage_result()
             .ok();
-        let tx = if let Some(IbcMessage::Envelope(envelope)) = msg {
-            Some(extract_masp_tx_from_envelope(&envelope).ok_or_else(|| {
-                StorageError::new_const(
-                    "Missing MASP transaction in IBC message",
-                )
-            })?)
+        if let Some(IbcMessage::Envelope(envelope)) = msg {
+            match &*envelope {
+                MsgEnvelope::Packet(PacketMsg::Recv(msg)) => {
+                    let seq = {
+                        let key = storage::next_sequence_recv_key(
+                            &msg.packet.port_id_on_b,
+                            &msg.packet.chan_id_on_b,
+                        );
+                        read_sequence(ctx, &key).map_err(HostError::from)
+                    }
+                    .expect("Reading storage failed");
+                    let ibc_traces = extract_traces_from_recv_msg(msg)
+                        .into_storage_result()?;
+                    let mut tokens = BTreeSet::new();
+
+                    for ibc_trace in ibc_traces {
+                        // Get the received token
+                        let token = received_ibc_token(
+                            ibc_trace,
+                            &msg.packet.port_id_on_a,
+                            &msg.packet.chan_id_on_a,
+                            &msg.packet.port_id_on_b,
+                            &msg.packet.chan_id_on_b,
+                        )
+                        .into_storage_result()?;
+
+                        tokens.insert(token);
+                    }
+                    let mut csprng = extract_rng_from_packet(msg, seq)
+                        .map_err(StorageError::AllocMessage)?;
+                    Some(
+                        extract_shielding_data_from_packet::<_, Params, _>(
+                            ctx,
+                            &msg.packet,
+                            &tokens,
+                            &mut csprng,
+                        )
+                        .ok_or_else(|| {
+                            StorageError::new_const(
+                                "Missing MASP shielding data in IBC message",
+                            )
+                        }),
+                    )
+                    .transpose()
+                }
+                _ => Ok(None),
+            }
         } else {
-            None
-        };
-        Ok(tx)
+            Ok(None)
+        }
     }
 
     fn apply_ibc_packet<Transfer: BorshDeserialize>(
@@ -578,7 +628,7 @@ pub struct InternalData<Transfer> {
     /// The transparent transfer that happens in parallel to IBC processes
     pub transparent: Option<Transfer>,
     /// The shielded transaction that happens in parallel to IBC processes
-    pub shielded: Option<MaspTransaction>,
+    pub shielded: Option<(ShieldingData, Sequence)>,
     /// IBC tokens that are credited/debited to internal accounts
     pub ibc_tokens: BTreeSet<Address>,
 }
@@ -747,6 +797,7 @@ where
                             .map_err(StorageError::new)
                             .map_err(Error::Storage)?;
                         let mut tokens = BTreeSet::new();
+
                         for ibc_trace in ibc_traces {
                             // Get the received token
                             let token = received_ibc_token(
@@ -760,13 +811,49 @@ where
                             .map_err(Error::Storage)?;
                             tokens.insert(token);
                         }
-                        (extract_masp_tx_from_packet(&msg.packet), tokens)
+                        let seq = self
+                            .ctx
+                            .inner
+                            .borrow()
+                            .get_next_sequence_recv(
+                                &msg.packet.port_id_on_b,
+                                &msg.packet.chan_id_on_b,
+                            )
+                            .expect("Reading storage failed");
+                        let mut csprng = {
+                            let mut hasher = sha2::Sha256::default();
+                            hasher.update(msg.packet.port_id_on_b.as_str());
+                            hasher.update(msg.packet.chan_id_on_b.as_str());
+                            hasher.update(seq.value().to_le_bytes());
+                            let seed: [u8; 32] = hasher.finalize().into();
+                            rand_chacha::ChaCha20Rng::from_seed(seed)
+                        };
+
+                        (
+                            extract_shielding_data_from_packet::<_, Params, _>(
+                                self.ctx.inner.borrow().storage(),
+                                &msg.packet,
+                                &tokens,
+                                &mut csprng,
+                            )
+                            .map(|n| (n, seq)),
+                            tokens,
+                        )
                     }
                     #[cfg(is_apple_silicon)]
                     MsgEnvelope::Packet(PacketMsg::Ack(msg)) => {
                         // NOTE: This is unneeded but wasm compilation error
                         // happened if deleted on macOS with Apple Silicon
-                        let _ = extract_masp_tx_from_packet(&msg.packet);
+                        let mut csprng =
+                            rand_chacha::ChaCha20Rng::seed_from_u64(666);
+
+                        let _ =
+                            extract_shielding_data_from_packet::<_, Params, _>(
+                                self.ctx.inner.borrow().storage(),
+                                &msg.packet,
+                                &Default::default(),
+                                &mut csprng,
+                            );
                         (None, BTreeSet::new())
                     }
                     _ => (None, BTreeSet::new()),

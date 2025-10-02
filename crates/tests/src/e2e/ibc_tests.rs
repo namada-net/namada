@@ -29,7 +29,7 @@ use namada_sdk::chain::Epoch;
 use namada_sdk::governance::cli::onchain::PgfFunding;
 use namada_sdk::governance::pgf::ADDRESS as PGF_ADDRESS;
 use namada_sdk::governance::storage::proposal::{PGFIbcTarget, PGFTarget};
-use namada_sdk::ibc::IbcShieldingData;
+use namada_sdk::ibc::ShieldingData;
 use namada_sdk::ibc::apps::nft_transfer::types::{
     PORT_ID_STR as NFT_PORT_ID, VERSION as NFT_CHANNEL_VERSION,
 };
@@ -1537,7 +1537,7 @@ fn shielded_recv_memo_value(
     let transfer =
         std::fs::read_to_string(masp_transfer_path).expect("Test failed");
     let tx = StringEncoded::new(
-        IbcShieldingData::from_str(&transfer).expect("Test failed"),
+        ShieldingData::from_str(&transfer).expect("Test failed"),
     );
     let data = NamadaMemoData::OsmosisSwap {
         shielding_data: tx,

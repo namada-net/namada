@@ -7,8 +7,14 @@ use std::str::FromStr;
 
 use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
 use masp_primitives::asset_type::AssetType;
-use masp_primitives::sapling::ViewingKey;
-use masp_primitives::transaction::TransparentAddress;
+use masp_primitives::sapling::{Node, Note, Nullifier, Rseed, ViewingKey};
+use masp_primitives::transaction::components::sapling::{
+    Authorized, GrothProofBytes,
+};
+use masp_primitives::transaction::components::{
+    ConvertDescription, I128Sum, SpendDescription, TxIn, TxOut,
+};
+use masp_primitives::transaction::{Transaction, TransparentAddress};
 pub use masp_primitives::transaction::{
     Transaction as MaspTransaction, TxId as TxIdInner,
 };
@@ -16,14 +22,16 @@ use masp_primitives::zip32::{ExtendedKey, PseudoExtendedKey};
 use namada_macros::BorshDeserializer;
 #[cfg(feature = "migrations")]
 use namada_migrations::*;
+use rand_core::{CryptoRng, RngCore};
 use ripemd::Digest as RipemdDigest;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::Sha256;
 
 use crate::address::{Address, DecodeError, HASH_HEX_LEN, IBC, MASP};
 use crate::borsh::BorshSerializeExt;
-use crate::chain::Epoch;
+use crate::chain::{BlockHeight, Epoch};
 use crate::impl_display_and_from_str_via_format;
+use crate::masp_primitives::transaction::components::transparent::Authorized as TAuthorized;
 use crate::string_encoding::{
     self, MASP_EXT_FULL_VIEWING_KEY_HRP, MASP_EXT_SPENDING_KEY_HRP,
     MASP_PAYMENT_ADDRESS_HRP,
@@ -554,6 +562,27 @@ impl PaymentAddress {
         // hex of the first 40 chars of the hash
         format!("{:.width$X}", hasher.finalize(), width = HASH_HEX_LEN)
     }
+
+    /// Create a note owned by this payment address
+    pub fn create_note<RNG>(
+        &self,
+        asset_type: AssetType,
+        value: u64,
+        csprng: &mut RNG,
+    ) -> Option<masp_primitives::sapling::Note>
+    where
+        RNG: CryptoRng + RngCore,
+    {
+        self.0.create_note(
+            asset_type,
+            value,
+            Rseed::AfterZip212({
+                let mut buf = [0u8; 32];
+                csprng.fill_bytes(&mut buf);
+                buf
+            }),
+        )
+    }
 }
 
 impl From<PaymentAddress> for masp_primitives::sapling::PaymentAddress {
@@ -950,6 +979,177 @@ impl FromStr for MaspValue {
             .or_else(|_err| {
                 ExtendedViewingKey::from_str(s).map(Self::FullViewingKey)
             })
+    }
+}
+
+/// A set of shared behaviors for types representing
+/// a MASP change
+pub trait MaspTxData {
+    /// The amounts in the Masp transaction
+    fn value_balance(&self) -> I128Sum;
+
+    /// A list of nullifiers corresponding to notes spent by this tx
+    fn nullifiers(&self) -> Vec<Nullifier> {
+        self.shielded_spends()
+            .iter()
+            .map(|ss| ss.nullifier)
+            .collect()
+    }
+
+    /// Commitments to the notes in this transaction
+    fn note_commitments(&self) -> Option<Vec<Node>>;
+
+    /// Check if this data is expired
+    fn is_expired(&self, current_height: BlockHeight) -> bool;
+
+    /// Get the spend descriptions
+    fn shielded_spends(&self) -> Vec<SpendDescription<Authorized>>;
+
+    /// Get the used conversions
+    fn shielded_converts(&self) -> Vec<ConvertDescription<GrothProofBytes>>;
+
+    /// Get the transparent inputs
+    fn transparent_inputs(&self) -> Vec<TxIn<TAuthorized>>;
+
+    /// Get the transparent outputs
+    fn transparent_outputs(&self) -> Vec<TxOut>;
+
+    /// Get a full MASP tx for verifying if applicable
+    fn verifiable_tx(&self) -> Option<&Transaction>;
+}
+
+impl MaspTxData for Transaction {
+    fn value_balance(&self) -> I128Sum {
+        self.sapling_value_balance()
+    }
+
+    fn note_commitments(&self) -> Option<Vec<Node>> {
+        self.sapling_bundle().map(|bundle| {
+            bundle
+                .shielded_outputs
+                .iter()
+                .map(|d| Node::from_scalar(d.cmu))
+                .collect()
+        })
+    }
+
+    fn is_expired(&self, current_height: BlockHeight) -> bool {
+        u64::from(current_height) > u64::from(self.expiry_height())
+    }
+
+    fn shielded_spends(&self) -> Vec<SpendDescription<Authorized>> {
+        self.sapling_bundle()
+            .map(|bundle| bundle.shielded_spends.clone())
+            .unwrap_or_default()
+    }
+
+    fn shielded_converts(&self) -> Vec<ConvertDescription<GrothProofBytes>> {
+        self.sapling_bundle()
+            .map(|bundle| bundle.shielded_converts.clone())
+            .unwrap_or_default()
+    }
+
+    fn transparent_inputs(&self) -> Vec<TxIn<TAuthorized>> {
+        self.transparent_bundle()
+            .map(|b| b.vin.clone())
+            .unwrap_or_default()
+    }
+
+    fn transparent_outputs(&self) -> Vec<TxOut> {
+        self.transparent_bundle()
+            .map(|b| b.vout.clone())
+            .unwrap_or_default()
+    }
+
+    fn verifiable_tx(&self) -> Option<&Transaction> {
+        Some(self)
+    }
+}
+
+/// The type of shielding target specified by an IBC packet
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[allow(clippy::large_enum_variant)]
+pub enum ShieldingData {
+    ///  A full MASP transaction
+    Tx(MaspTransaction),
+    /// A newly mined Note
+    Note(Vec<Note>),
+}
+
+impl MaspTxData for ShieldingData {
+    fn value_balance(&self) -> I128Sum {
+        match self {
+            ShieldingData::Tx(tx) => tx.value_balance(),
+            ShieldingData::Note(notes) => notes
+                .iter()
+                .map(|n| I128Sum::from_pair(n.asset_type, i128::from(n.value)))
+                .sum(),
+        }
+    }
+
+    fn note_commitments(&self) -> Option<Vec<Node>> {
+        match self {
+            ShieldingData::Tx(tx) => tx.note_commitments(),
+            ShieldingData::Note(notes) => {
+                Some(notes.iter().map(|n| n.commitment()).collect())
+            }
+        }
+    }
+
+    fn is_expired(&self, current_height: BlockHeight) -> bool {
+        match self {
+            ShieldingData::Tx(tx) => tx.is_expired(current_height),
+            ShieldingData::Note(_) => false,
+        }
+    }
+
+    fn shielded_spends(&self) -> Vec<SpendDescription<Authorized>> {
+        match self {
+            ShieldingData::Tx(tx) => tx.shielded_spends(),
+            ShieldingData::Note(_) => vec![],
+        }
+    }
+
+    fn shielded_converts(&self) -> Vec<ConvertDescription<GrothProofBytes>> {
+        match self {
+            ShieldingData::Tx(tx) => tx.shielded_converts(),
+            ShieldingData::Note(_) => vec![],
+        }
+    }
+
+    fn transparent_inputs(&self) -> Vec<TxIn<TAuthorized>> {
+        match self {
+            ShieldingData::Tx(tx) => tx.transparent_inputs(),
+            ShieldingData::Note(notes) => {
+                let script = TransferSource::Address(IBC)
+                    .t_addr_data()
+                    .unwrap()
+                    .taddress();
+                notes
+                    .iter()
+                    .map(|note| TxIn {
+                        asset_type: note.asset_type,
+                        value: note.value,
+                        address: script,
+                        transparent_sig: (),
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    fn transparent_outputs(&self) -> Vec<TxOut> {
+        match self {
+            ShieldingData::Tx(tx) => tx.transparent_outputs(),
+            ShieldingData::Note(_) => vec![],
+        }
+    }
+
+    fn verifiable_tx(&self) -> Option<&MaspTransaction> {
+        match self {
+            ShieldingData::Tx(tx) => Some(tx),
+            ShieldingData::Note(_) => None,
+        }
     }
 }
 

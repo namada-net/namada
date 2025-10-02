@@ -12,6 +12,7 @@ use ibc::apps::transfer::types::msgs::transfer::MsgTransfer as IbcMsgTransfer;
 use ibc::apps::transfer::types::packet::PacketData;
 use ibc::core::channel::types::timeout::{TimeoutHeight, TimeoutTimestamp};
 use ibc::primitives::IntoTimestamp;
+use masp_primitives::asset_type::AssetType;
 use namada_core::address::Address;
 use namada_core::borsh::{BorshSerialize, BorshSerializeExt};
 use namada_core::chain::ChainId;
@@ -54,6 +55,10 @@ where
 
     fn has_key(&self, key: &Key) -> Result<bool> {
         self.state.has_key(key)
+    }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        self.state.has_conversion(asset_type)
     }
 
     fn iter_prefix<'iter>(

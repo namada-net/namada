@@ -214,6 +214,7 @@ prost = "0.13"
 prost-types = "0.13"
 quote = "1.0"
 rand = {version = "0.8", default-features = false}
+rand_chacha = "0.3.1"
 rand_core = {version = "0.6", default-features = false}
 rayon = "1.5"
 regex = "1.10"

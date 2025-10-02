@@ -8,16 +8,19 @@ use borsh::BorshDeserialize;
 use masp_primitives::asset_type::AssetType;
 use masp_primitives::merkle_tree::CommitmentTree;
 use masp_primitives::sapling::Node;
+use masp_primitives::transaction::TransparentAddress;
 use masp_primitives::transaction::components::transparent::Authorization;
 use masp_primitives::transaction::components::{
     I128Sum, TxIn, TxOut, ValueSum,
 };
-use masp_primitives::transaction::{Transaction, TransparentAddress};
 use namada_core::address::{self, Address};
 use namada_core::arith::{CheckedAdd, CheckedSub, checked};
 use namada_core::booleans::BoolResultUnitExt;
 use namada_core::collections::HashSet;
-use namada_core::masp::{MaspEpoch, TAddrData, addr_taddr, encode_asset_type};
+use namada_core::masp::{
+    MaspEpoch, MaspTxData, ShieldingData, TAddrData, addr_taddr,
+    encode_asset_type,
+};
 use namada_core::storage::Key;
 use namada_core::token;
 use namada_core::token::{Amount, MaspDigitPos};
@@ -84,7 +87,7 @@ where
         + ReadConversionState,
     Params: parameters::Read<<CTX as VpEnv<'ctx>>::Pre>,
     Gov: governance::Read<<CTX as VpEnv<'ctx>>::Pre>,
-    Ibc: ibc::Read<<CTX as VpEnv<'ctx>>::Post>,
+    Ibc: ibc::Read<<CTX as VpEnv<'ctx>>::Post, ExtractedMaspTx = ShieldingData>,
     TransToken:
         trans_token::Keys + trans_token::Read<<CTX as VpEnv<'ctx>>::Pre>,
     Transfer: BorshDeserialize,
@@ -128,24 +131,21 @@ where
     fn valid_nullifiers_reveal(
         ctx: &'ctx CTX,
         keys_changed: &BTreeSet<Key>,
-        transaction: &Transaction,
+        transaction: &impl MaspTxData,
     ) -> Result<()> {
         // Support set to check that a nullifier was not revealed more
         // than once in the same tx
         let mut revealed_nullifiers = HashSet::new();
 
-        for description in transaction
-            .sapling_bundle()
-            .map_or(&vec![], |bundle| &bundle.shielded_spends)
-        {
-            let nullifier_key = masp_nullifier_key(&description.nullifier);
+        for nullifier in transaction.nullifiers() {
+            let nullifier_key = masp_nullifier_key(&nullifier);
             if ctx.has_key_pre(&nullifier_key)?
                 || revealed_nullifiers.contains(&nullifier_key)
             {
                 let error = Error::new_alloc(format!(
                     "MASP double spending attempt, the nullifier {:?} has \
                      already been revealed previously",
-                    description.nullifier.0,
+                    nullifier.0,
                 ));
                 tracing::debug!("{error}");
                 return Err(error);
@@ -223,7 +223,7 @@ where
     // the tree and anchor in storage
     fn valid_note_commitment_update(
         ctx: &'ctx CTX,
-        transaction: &Transaction,
+        transaction: &impl MaspTxData,
     ) -> Result<()> {
         // Check that the merkle tree in storage has been correctly updated with
         // the output descriptions cmu
@@ -237,15 +237,12 @@ where
 
         // Based on the output descriptions of the transaction, update the
         // previous tree in storage
-        for description in transaction
-            .sapling_bundle()
-            .map_or(&vec![], |bundle| &bundle.shielded_outputs)
-        {
-            previous_tree
-                .append(Node::from_scalar(description.cmu))
-                .map_err(|()| {
+        if let Some(commitments) = transaction.note_commitments() {
+            for commitment in commitments {
+                previous_tree.append(commitment).map_err(|()| {
                     Error::new_const("Failed to update the commitment tree")
                 })?;
+            }
         }
         // Check that the updated previous tree matches the actual post tree.
         // This verifies that all and only the necessary notes have been
@@ -264,12 +261,9 @@ where
     // Check that the spend descriptions anchors of a transaction are valid
     fn valid_spend_descriptions_anchor(
         ctx: &'ctx CTX,
-        transaction: &Transaction,
+        transaction: &impl MaspTxData,
     ) -> Result<()> {
-        for description in transaction
-            .sapling_bundle()
-            .map_or(&vec![], |bundle| &bundle.shielded_spends)
-        {
+        for description in transaction.shielded_spends() {
             let anchor_key = masp_commitment_anchor_key(description.anchor);
 
             // Check if the provided anchor was published before
@@ -288,27 +282,27 @@ where
     // Check that the convert descriptions anchors of a transaction are valid
     fn valid_convert_descriptions_anchor(
         ctx: &'ctx CTX,
-        transaction: &Transaction,
+        transaction: &impl MaspTxData,
     ) -> Result<()> {
-        if let Some(bundle) = transaction.sapling_bundle() {
-            if !bundle.shielded_converts.is_empty() {
-                let anchor_key = masp_convert_anchor_key();
-                let expected_anchor = ctx
-                    .read_pre::<namada_core::hash::Hash>(&anchor_key)?
-                    .ok_or(Error::new_const("Cannot read storage"))?;
+        let shielded_converts = transaction.shielded_converts();
 
-                for description in &bundle.shielded_converts {
-                    // Check if the provided anchor matches the current
-                    // conversion tree's one
-                    if namada_core::hash::Hash(description.anchor.to_bytes_le())
-                        != expected_anchor
-                    {
-                        let error = Error::new_const(
-                            "Convert description refers to an invalid anchor",
-                        );
-                        tracing::debug!("{error}");
-                        return Err(error);
-                    }
+        if !shielded_converts.is_empty() {
+            let anchor_key = masp_convert_anchor_key();
+            let expected_anchor = ctx
+                .read_pre::<namada_core::hash::Hash>(&anchor_key)?
+                .ok_or(Error::new_const("Cannot read storage"))?;
+
+            for description in &shielded_converts {
+                // Check if the provided anchor matches the current
+                // conversion tree's one
+                if namada_core::hash::Hash(description.anchor.to_bytes_le())
+                    != expected_anchor
+                {
+                    let error = Error::new_const(
+                        "Convert description refers to an invalid anchor",
+                    );
+                    tracing::debug!("{error}");
+                    return Err(error);
                 }
             }
         }
@@ -438,8 +432,10 @@ where
         // Try to get the Transaction object from the tx first (IBC) and from
         // the actions afterwards
         let shielded_tx = if let Some(tx) =
-            Ibc::try_extract_masp_tx_from_envelope::<Transfer>(&tx_data)?
-        {
+            Ibc::try_extract_masp_tx_from_envelope::<Transfer, Params, _>(
+                &ctx.pre(),
+                &tx_data,
+            )? {
             tx
         } else {
             let masp_section_ref =
@@ -451,18 +447,18 @@ where
                         )
                     })?;
 
-            batched_tx
-                .tx
-                .get_masp_section(&masp_section_ref)
-                .cloned()
-                .ok_or_else(|| {
-                    Error::new_const("Missing MASP section in transaction")
-                })?
+            ShieldingData::Tx(
+                batched_tx
+                    .tx
+                    .get_masp_section(&masp_section_ref)
+                    .cloned()
+                    .ok_or_else(|| {
+                        Error::new_const("Missing MASP section in transaction")
+                    })?,
+            )
         };
 
-        if u64::from(ctx.get_block_height()?)
-            > u64::from(shielded_tx.expiry_height())
-        {
+        if shielded_tx.is_expired(ctx.get_block_height()?) {
             let error = Error::new_const("MASP transaction is expired");
             tracing::debug!("{error}");
             return Err(error);
@@ -489,7 +485,7 @@ where
                 .unwrap_or(&zero),
             &changed_balances.undated_pre,
             &changed_balances.undated_post,
-            &shielded_tx.sapling_value_balance(),
+            &shielded_tx.value_balance(),
             masp_epoch,
             &changed_balances.undated_tokens,
             conversion_state,
@@ -575,18 +571,17 @@ where
                 // Transactions inside this Tx. We achieve this by not allowing
                 // the IBC to be in the transparent output of any of the
                 // Transaction(s).
-                if let Some(transp_bundle) = shielded_tx.transparent_bundle() {
-                    for vout in transp_bundle.vout.iter() {
-                        if let Some(TAddrData::Ibc(_)) =
-                            changed_bals_minus_txn.decoder.get(&vout.address)
-                        {
-                            let error = Error::new_const(
-                                "Simultaneous credit and debit of IBC account \
-                                 in a MASP transaction not allowed",
-                            );
-                            tracing::debug!("{error}");
-                            return Err(error);
-                        }
+
+                for vout in shielded_tx.transparent_outputs() {
+                    if let Some(TAddrData::Ibc(_)) =
+                        changed_bals_minus_txn.decoder.get(&vout.address)
+                    {
+                        let error = Error::new_const(
+                            "Simultaneous credit and debit of IBC account in \
+                             a MASP transaction not allowed",
+                        );
+                        tracing::debug!("{error}");
+                        return Err(error);
                     }
                 }
             } else if let Some(TAddrData::Addr(signer)) =
@@ -812,36 +807,34 @@ fn validate_transparent_output(
 // than the initial balances and that the transparent outputs are not more than
 // the final balances. Also ensure that the sapling value balance is exactly 0.
 fn validate_transparent_bundle(
-    shielded_tx: &Transaction,
+    shielded_tx: &impl MaspTxData,
     changed_balances: &mut ChangedBalances,
     epoch: MaspEpoch,
     conversion_state: &ConversionState,
     authorizers: &mut BTreeSet<TransparentAddress>,
 ) -> Result<()> {
     // The Sapling value balance adds to the transparent tx pool
-    let mut transparent_tx_pool = shielded_tx.sapling_value_balance();
+    let mut transparent_tx_pool = shielded_tx.value_balance();
 
-    if let Some(transp_bundle) = shielded_tx.transparent_bundle() {
-        for vin in transp_bundle.vin.iter() {
-            validate_transparent_input(
-                vin,
-                changed_balances,
-                &mut transparent_tx_pool,
-                epoch,
-                conversion_state,
-                authorizers,
-            )?;
-        }
+    for vin in shielded_tx.transparent_inputs() {
+        validate_transparent_input(
+            &vin,
+            changed_balances,
+            &mut transparent_tx_pool,
+            epoch,
+            conversion_state,
+            authorizers,
+        )?;
+    }
 
-        for out in transp_bundle.vout.iter() {
-            validate_transparent_output(
-                out,
-                changed_balances,
-                &mut transparent_tx_pool,
-                epoch,
-                conversion_state,
-            )?;
-        }
+    for out in shielded_tx.transparent_outputs() {
+        validate_transparent_output(
+            &out,
+            changed_balances,
+            &mut transparent_tx_pool,
+            epoch,
+            conversion_state,
+        )?;
     }
 
     // Ensure that the shielded transaction exactly balances

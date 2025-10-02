@@ -280,6 +280,10 @@ macro_rules! impl_storage_read {
                 Ok(iter)
             }
 
+            fn has_conversion(&self, asset_type: &namada_storage::conversion_state::AssetType) -> namada_storage::Result<bool> {
+                Ok(self.in_mem().conversion_state.assets.contains_key(asset_type))
+            }
+
             fn iter_next<'iter>(
                 &'iter self,
                 iter: &mut Self::PrefixIter<'iter>,

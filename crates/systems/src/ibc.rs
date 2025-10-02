@@ -6,16 +6,27 @@ use masp_primitives::transaction::TransparentAddress;
 use masp_primitives::transaction::components::ValueSum;
 use namada_core::address::Address;
 use namada_core::borsh::BorshDeserialize;
-use namada_core::masp::TAddrData;
+use namada_core::masp::{MaspTxData, TAddrData};
 use namada_core::{masp_primitives, storage, token};
 pub use namada_storage::Result;
+use namada_storage::StorageRead;
+
+use crate::parameters;
 
 /// Abstract IBC storage read interface
 pub trait Read<S> {
+    /// The extracted MASP tx type
+    type ExtractedMaspTx: MaspTxData;
+
     /// Extract MASP transaction from IBC envelope
-    fn try_extract_masp_tx_from_envelope<Transfer: BorshDeserialize>(
+    fn try_extract_masp_tx_from_envelope<Transfer, Params, R>(
+        ctx: &R,
         tx_data: &[u8],
-    ) -> Result<Option<masp_primitives::transaction::Transaction>>;
+    ) -> Result<Option<Self::ExtractedMaspTx>>
+    where
+        Transfer: BorshDeserialize,
+        Params: parameters::Read<R>,
+        R: StorageRead;
 
     /// Apply relevant IBC packets to the changed balances structure
     fn apply_ibc_packet<Transfer: BorshDeserialize>(

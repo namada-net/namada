@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 use std::marker::PhantomData;
 
+use masp_primitives::asset_type::AssetType;
 use namada_core::address::Address;
 use namada_core::arith::checked;
 use namada_core::chain::{BlockHeader, BlockHeight, ChainId, Epoch, Epochs};
@@ -173,6 +174,10 @@ where
 
     fn get_pred_epochs(&self) -> Result<Epochs> {
         self.ctx.get_pred_epochs()
+    }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        self.ctx.has_conversion(asset_type)
     }
 }
 
@@ -365,6 +370,10 @@ where
 
     fn get_pred_epochs(&self) -> Result<Epochs> {
         self.ctx.get_pred_epochs()
+    }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        self.ctx.has_conversion(asset_type)
     }
 }
 

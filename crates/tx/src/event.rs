@@ -3,9 +3,12 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
+use masp_primitives::asset_type::AssetType;
 use namada_core::borsh::{BorshDeserialize, BorshSerialize};
 use namada_core::ibc::IbcTxDataHash;
+use namada_core::ibc::core::host::types::identifiers::Sequence;
 use namada_core::masp::MaspTxId;
+use namada_core::string_encoding::StringEncoded;
 use namada_events::extend::{
     ComposeEvent, EventAttributeEntry, Height, Log, TxHash,
 };
@@ -161,6 +164,15 @@ pub enum MaspTxRef {
     MaspSection(MaspTxId),
     /// Reference to an ibc tx data section
     IbcData(IbcTxDataHash),
+    /// The data for a MASP note mined by IBC shielding
+    IbcMinedNotes {
+        /// Reference to an ibc tx data section
+        hash: IbcTxDataHash,
+        /// Assets contained in the IBC packet
+        assets: Vec<StringEncoded<AssetType>>,
+        /// Sequence number of this packet on the corresponding port/channel
+        seq: Sequence,
+    },
 }
 
 impl Display for MaspTxRef {

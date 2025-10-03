@@ -410,7 +410,6 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         }
         // If conversion is possible, accumulate the exchanged amount
         let conv: I128Sum = I128Sum::from_sum(conv.into());
-        //FIXME: can join this with the last part at this point?
         if conv
             .clone()
             .components()
@@ -707,9 +706,7 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         let mut usage = I128Sum::zero();
         // Where we will store our exchanged value
         let mut output = I128Sum::zero();
-        //FIXME: here
         // Repeatedly exchange assets until it is no longer possible
-        //FIXME: here we iterate on all the asset types of the input but it seems like we don't need a loop within a single asset type. This should only be possible if ithe conversions are direct, i.e. from any epoch to the target one, but it does not seem like so
         while let Some(asset_type) = input.asset_types().next().cloned() {
             self.query_allowed_conversion(client, asset_type, conversions)
                 .await?;
@@ -727,8 +724,6 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 // Not at the target asset type, not at the latest asset type.
                 // Apply conversion to get from current asset type to the latest
                 // asset type.
-                //FIXME: ah wait maybe we move the new asset to the inputs so that we keep iterating in the loop!
-                //FIXME: no the iterator is immutable so we can't mutate it during the loop
                 self.apply_conversion(
                     io,
                     conv.clone(),
@@ -1366,7 +1361,6 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         bparams: &mut impl BuildParams,
     ) -> Result<Option<ShieldedTransfer>, TransferErr> {
         // Determine epoch in which to submit potential shielded transaction
-        //FIXME: here we query the masp epoch and it's the old one
         let epoch = Self::query_masp_epoch(context.client())
             .await
             .map_err(|e| TransferErr::General(e.to_string()))?;
@@ -1567,7 +1561,6 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 }
             }
 
-            eprintln!("UNBALANCED"); //FIXME: remove
             return Err(TransferErr::InsufficientFunds(batch.into()));
         }
 
@@ -1751,7 +1744,6 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 }
             }
 
-            eprintln!("UNBALANCED IN CHANGE"); //FIXME: remove
             return Err(TransferErr::InsufficientFunds(batch.into()));
         }
         Ok(change)
@@ -1923,7 +1915,6 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         epoch: MaspEpoch,
         denoms: &mut HashMap<Address, Denomination>,
     ) -> Result<(), TransferErr> {
-        // eprintln!("MASP EPOCH IN ADD OUTPUTS: {}", epoch); //FIXME: remove
         // Anotate the asset type in the value balance with its decoding in
         // order to facilitate cross-epoch computations
         let (value_balance, rem_balance) = self
@@ -1937,7 +1928,6 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
         let payment_address = target.payment_address();
 
         for (token, amount) in amount.components() {
-            eprintln!("REMAINING TOKEN {} AMOUNT {}", token, amount); //FIXME: remove
             // This indicates how many more assets need to be sent to the
             // receiver in order to satisfy the requested transfer
             // amount.
@@ -1948,19 +1938,8 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
             // Now handle the outputs of this transaction
             // Loop through the value balance components and see which
             // ones can be given to the receiver
-            eprintln!("OUTPUT VALUE BALANCE: {:#?}", value_balance); //FIXME: remove
             for ((asset_type, decoded), val) in value_balance.components() {
                 let rem_amount = &mut rem_amount[decoded.position as usize];
-                eprintln!(
-                    "REM AMOUNT: {}, DECODED.TOKEN: {}, DECODED.DENOM: {}, DECODED EPOCH: {:#?}, EPOCH: {}",
-                    rem_amount,
-                    decoded.token == *token,
-                    decoded.denom == denom,
-                    decoded.epoch,
-                    epoch
-                ); //FIXME: remove
-                //FIXME: ok so the problem is that the asset's epoch is somehow greater than the current epoch!
-                //FIXME: the epoch though is correct, so we are somwhow passing the wrong epoch to this function
                 // Only asset types with the correct token can contribute. But
                 // there must be a demonstrated need for it.
                 if decoded.token == *token
@@ -1970,8 +1949,6 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                         .is_none_or(|vbal_epoch| vbal_epoch <= epoch)
                     && *rem_amount > 0
                 {
-                    //FIXME: seems like we don't enter here but we have value balance so there's an issue with the above condition
-                    eprintln!("IN CONTRIBUTION"); //FIXME: remove
                     let val = u128::try_from(*val).expect(
                         "value balance in absence of output descriptors \
                          should be non-negative",
@@ -2018,7 +1995,6 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                 }
             }
 
-            eprintln!("UNBALANCED IN OUTPUT"); //FIXME: remove
             // Nothing must remain to be included in output
             if rem_amount != [0; 4] {
                 return Result::Err(TransferErr::InsufficientFunds(
@@ -2545,7 +2521,8 @@ mod test_shielded_wallet {
             )
             .await
             .unwrap();
-        // Assert that input and output were updated while the usage of conversions is zero
+        // Assert that input and output were updated while the usage of
+        // conversions is zero
         assert_ne!(input, reference_input);
         assert_ne!(output, I128Sum::zero());
         assert_eq!(usage, I128Sum::zero());

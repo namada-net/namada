@@ -18,7 +18,7 @@ use namada_core::arith::{CheckedAdd, CheckedSub, checked};
 use namada_core::booleans::BoolResultUnitExt;
 use namada_core::collections::HashSet;
 use namada_core::masp::{
-    MaspEpoch, MaspTxData, ShieldingData, TAddrData, addr_taddr,
+    MaspEpoch, MaspTxData, ShieldedData, TAddrData, addr_taddr,
     encode_asset_type,
 };
 use namada_core::storage::Key;
@@ -87,7 +87,7 @@ where
         + ReadConversionState,
     Params: parameters::Read<<CTX as VpEnv<'ctx>>::Pre>,
     Gov: governance::Read<<CTX as VpEnv<'ctx>>::Pre>,
-    Ibc: ibc::Read<<CTX as VpEnv<'ctx>>::Post, ExtractedMaspTx = ShieldingData>,
+    Ibc: ibc::Read<<CTX as VpEnv<'ctx>>::Post, ExtractedMaspTx = ShieldedData>,
     TransToken:
         trans_token::Keys + trans_token::Read<<CTX as VpEnv<'ctx>>::Pre>,
     Transfer: BorshDeserialize,
@@ -447,7 +447,7 @@ where
                         )
                     })?;
 
-            ShieldingData::Tx(
+            ShieldedData::Tx(
                 batched_tx
                     .tx
                     .get_masp_section(&masp_section_ref)

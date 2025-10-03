@@ -113,7 +113,7 @@ fn validate_tx(
                     &addr,
                 )?,
             Action::Masp(MaspAction::MaspSectionRef(_)) => (),
-            Action::IbcShielding => (),
+            Action::IbcShielding | Action::IbcMinedNotes { .. } => (),
         }
     }
 

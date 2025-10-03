@@ -7,12 +7,13 @@ use std::str::FromStr;
 use masp_primitives::asset_type::AssetType;
 use masp_primitives::merkle_tree::MerklePath;
 use masp_primitives::sapling::Node;
+use masp_primitives::transaction::Transaction;
 use masp_primitives::transaction::components::I128Sum;
 use namada_core::address::Address;
 use namada_core::chain::BlockHeight;
 use namada_core::ibc::core::channel::types::msgs::PacketMsg;
 use namada_core::ibc::core::handler::types::msgs::MsgEnvelope;
-use namada_core::masp::{MaspEpoch, PaymentAddress, ShieldingData};
+use namada_core::masp::{MaspEpoch, PaymentAddress, ShieldedData};
 use namada_core::time::DurationSecs;
 use namada_core::token::{Amount, Denomination, MaspDigitPos};
 use namada_events::extend::ReadFromEventAttributes;
@@ -43,7 +44,7 @@ use crate::{MaybeSend, MaybeSync, token};
 fn extract_masp_tx(
     tx: &Tx,
     masp_ref: &MaspTxRef,
-) -> Result<ShieldingData, Error> {
+) -> Result<Transaction, Error> {
     match masp_ref {
         MaspTxRef::MaspSection(id) => {
             // Simply looking for masp sections attached to the tx
@@ -59,7 +60,6 @@ fn extract_masp_tx(
                     ))
                 })?
                 .clone())
-            .map(ShieldingData::Tx)
         }
         MaspTxRef::IbcData(hash) => {
             // Dereference the masp ref to the first instance that
@@ -87,11 +87,14 @@ fn extract_masp_tx(
                 ));
             };
 
-            extract_masp_tx_from_envelope(&envelope).ok_or_else(|| {
-                Error::Other(
-                    "Failed to retrieve MASP over IBC transaction".to_string(),
-                )
-            })
+            extract_masp_tx_from_envelope(&envelope)
+                .ok_or_else(|| {
+                    Error::Other(
+                        "Failed to retrieve MASP over IBC transaction"
+                            .to_string(),
+                    )
+                })
+                .map(|s| s.to_dummy_tx())
         }
         MaspTxRef::IbcMinedNotes { hash, assets, seq } => {
             let masp_ibc_tx = tx
@@ -128,8 +131,14 @@ fn extract_masp_tx(
                     let pa = PaymentAddress::from_str(recv.as_ref())
                         .map_err(|e| Error::Other(e.to_string()))?;
                     let mut csprng = extract_rng_from_packet(&msg, *seq)
-                        .map_err(|e| Error::Other(e))?;
-                    Ok(mine(pa, assets.into_iter().map(|a| a.raw), amount, &mut csprng))
+                        .map_err(Error::Other)?;
+                    Ok(mine(
+                        pa,
+                        assets.iter().map(|a| a.raw),
+                        amount,
+                        &mut csprng,
+                    )
+                    .to_dummy_tx())
                 }
                 _ => Err(Error::Other(
                     "Failed to retrieve MASP over IBC transaction".to_string(),
@@ -146,7 +155,7 @@ pub fn mine<RNG>(
     assets: impl Iterator<Item = AssetType>,
     value: Amount,
     mut csprng: &mut RNG,
-) -> ShieldingData
+) -> ShieldedData
 where
     RNG: RngCore + CryptoRng + SeedableRng,
 {
@@ -159,7 +168,7 @@ where
             .collect();
         notes.append(&mut new_notes);
     }
-    ShieldingData::Note(notes)
+    ShieldedData::Note(notes)
 }
 
 // Retrieves all the masp events at the specified height.

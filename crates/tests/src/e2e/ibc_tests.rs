@@ -29,7 +29,6 @@ use namada_sdk::chain::Epoch;
 use namada_sdk::governance::cli::onchain::PgfFunding;
 use namada_sdk::governance::pgf::ADDRESS as PGF_ADDRESS;
 use namada_sdk::governance::storage::proposal::{PGFIbcTarget, PGFTarget};
-use namada_sdk::ibc::ShieldingData;
 use namada_sdk::ibc::apps::nft_transfer::types::{
     PORT_ID_STR as NFT_PORT_ID, VERSION as NFT_CHANNEL_VERSION,
 };
@@ -65,6 +64,7 @@ use crate::e2e::setup::{
     run_cosmos_cmd_homeless, run_hermes_cmd, set_ethereum_bridge_mode,
     setup_cosmos, setup_hermes, sleep, working_dir,
 };
+use crate::ibc::IbcMemoData;
 use crate::ibc::primitives::Signer;
 use crate::strings::TX_APPLIED_SUCCESS;
 use crate::{run, run_as};
@@ -1537,7 +1537,7 @@ fn shielded_recv_memo_value(
     let transfer =
         std::fs::read_to_string(masp_transfer_path).expect("Test failed");
     let tx = StringEncoded::new(
-        ShieldingData::from_str(&transfer).expect("Test failed"),
+        IbcMemoData::from_str(&transfer).expect("Test failed"),
     );
     let data = NamadaMemoData::OsmosisSwap {
         shielding_data: tx,

@@ -23,13 +23,12 @@ use masp_primitives::transaction::Transaction as MaspTransaction;
 use namada_core::address::Address;
 use namada_core::arith::One;
 use namada_core::borsh::BorshSerializeExt;
-use namada_core::masp::{AssetData, PaymentAddress, ShieldingData};
+use namada_core::masp::{AssetData, PaymentAddress, ShieldedData};
 use namada_core::string_encoding::StringEncoded;
 use namada_core::token::{Amount, MaspDigitPos};
 use namada_state::StorageRead;
-use proptest::prelude::RngCore;
 use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::{CryptoRng, SeedableRng};
+use rand_chacha::rand_core::{CryptoRng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
@@ -258,7 +257,7 @@ pub fn mine<S, Params, RNG>(
     tokens: impl IntoIterator<Item = Address>,
     value: Amount,
     mut csprng: &mut RNG,
-) -> ShieldingData
+) -> ShieldedData
 where
     S: StorageRead,
     Params: namada_systems::parameters::Read<S>,
@@ -306,7 +305,7 @@ where
             .collect();
         notes.append(&mut new_notes);
     }
-    ShieldingData::Note(notes)
+    ShieldedData::Note(notes)
 }
 
 impl From<&IbcMemoData> for String {
@@ -341,7 +340,7 @@ impl FromStr for IbcMemoData {
 /// Extract MASP transaction from the memo of an IBC envelope
 pub fn extract_masp_tx_from_envelope(
     envelope: &MsgEnvelope,
-) -> Option<ShieldingData> {
+) -> Option<ShieldedData> {
     match envelope {
         MsgEnvelope::Packet(PacketMsg::Recv(msg)) => {
             let (maybe_memo, _, _) = extract_data_from_packet(
@@ -350,7 +349,7 @@ pub fn extract_masp_tx_from_envelope(
             )?;
             if let Some(memo) = maybe_memo {
                 if let Some(IbcMemoData(tx)) = decode_ibc_shielding_data(memo) {
-                    return Some(ShieldingData::Tx(tx));
+                    return Some(ShieldedData::Tx(tx));
                 }
             }
             None
@@ -380,7 +379,7 @@ pub fn extract_shielding_data_from_packet<S, Params, RNG>(
     packet: &Packet,
     tokens: &BTreeSet<Address>,
     csprng: &mut RNG,
-) -> Option<ShieldingData>
+) -> Option<ShieldedData>
 where
     S: StorageRead,
     Params: namada_systems::parameters::Read<S>,
@@ -390,7 +389,7 @@ where
         extract_data_from_packet(packet, &packet.port_id_on_b)?;
     if let Some(memo) = maybe_memo {
         if let Some(IbcMemoData(tx)) = decode_ibc_shielding_data(memo) {
-            return Some(ShieldingData::Tx(tx));
+            return Some(ShieldedData::Tx(tx));
         }
     }
 

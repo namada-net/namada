@@ -19,6 +19,7 @@ use namada_core::collections::HashSet;
 use namada_core::decode;
 use namada_core::hash::Hash;
 use namada_core::internal::{HostEnvResult, KeyVal};
+use namada_core::masp::ShieldedData;
 use namada_core::storage::{Key, TX_INDEX_LENGTH, TxIndex};
 use namada_events::{Event, EventTypeBuilder};
 use namada_gas::{
@@ -33,7 +34,6 @@ use namada_state::{
 };
 pub use namada_state::{Error, Result};
 use namada_storage::conversion_state::AssetType;
-use namada_token::MaspTransaction;
 use namada_token::storage_key::{
     is_any_minted_balance_key, is_any_minter_key, is_any_token_balance_key,
     is_any_token_parameter_key,
@@ -2211,7 +2211,7 @@ where
         .map_err(|e| TxRuntimeError::MemoryError(Box::new(e)))?;
 
     consume_tx_gas::<MEM, D, H, CA>(env, gas)?;
-    let transaction = MaspTransaction::try_from_slice(&serialized_transaction)
+    let transaction = ShieldedData::try_from_bytes(&serialized_transaction)
         .map_err(TxRuntimeError::EncodingError)?;
 
     match namada_token::utils::update_note_commitment_tree(

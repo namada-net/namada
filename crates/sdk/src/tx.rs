@@ -2901,7 +2901,7 @@ pub async fn build_ibc_transfer(
     };
 
     if let Some((target, percentage)) = &args.frontend_sus_fee {
-        match (&source, &args.ibc_shielding_data) {
+        match (&source, &args.ibc_shielding_memo) {
             (&MASP, None) => {
                 // NOTE: The frontend fee should NOT account for the masp fee
                 // payment amount

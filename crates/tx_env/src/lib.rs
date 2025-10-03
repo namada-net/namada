@@ -23,6 +23,7 @@ pub use namada_core::borsh::{
     BorshDeserialize, BorshSerialize, BorshSerializeExt,
 };
 pub use namada_core::masp::MaspTransaction;
+use namada_core::masp::MaspTxData;
 pub use namada_core::storage;
 pub use namada_events::{Event, EventToEmit, EventType};
 pub use namada_storage::{Result, ResultExt, StorageRead, StorageWrite};
@@ -107,6 +108,6 @@ pub trait TxEnv: StorageRead + StorageWrite {
 
     /// Update the masp note commitment tree in storage with the new notes
     fn update_masp_note_commitment_tree(
-        transaction: &MaspTransaction,
+        transaction: &impl MaspTxData,
     ) -> Result<bool>;
 }

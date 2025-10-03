@@ -4,7 +4,6 @@ use std::collections::BTreeSet;
 
 use masp_primitives::merkle_tree::CommitmentTree;
 use masp_primitives::sapling::Node;
-use masp_primitives::transaction::Transaction;
 use namada_core::masp::MaspTxData;
 
 use crate::storage_key::{
@@ -55,7 +54,7 @@ pub fn update_note_commitment_tree(
 /// Handle a MASP transaction.
 pub fn handle_masp_tx(
     ctx: &mut (impl StorageRead + StorageWrite),
-    shielded: &Transaction,
+    shielded: &impl MaspTxData,
 ) -> Result<()> {
     // TODO(masp#73): temporarily disabled because of the node aggregation issue
     // in WASM. Using the host env tx_update_masp_note_commitment_tree or

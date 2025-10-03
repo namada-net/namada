@@ -37,7 +37,7 @@ fn apply_tx(ctx: &mut Ctx, tx_data: BatchedTx) -> TxResult {
 
     let (shielded, seq) = if let Some(masp_section_ref) = masp_section_ref {
         (
-            Some(
+            Some(ShieldedData::Tx(
                 tx_data
                     .tx
                     .get_masp_section(&masp_section_ref)
@@ -48,7 +48,7 @@ fn apply_tx(ctx: &mut Ctx, tx_data: BatchedTx) -> TxResult {
                     .inspect_err(|_| {
                         ctx.set_commitment_sentinel();
                     })?,
-            ),
+            )),
             None,
         )
     } else {
@@ -65,19 +65,15 @@ fn apply_tx(ctx: &mut Ctx, tx_data: BatchedTx) -> TxResult {
             )))?;
         } else {
             match shielded {
-                ShieldingData::Tx(_) => {
-                    ctx.push_action(Action::IbcShielding)?
-                }
-                ShiedlingData::Note(notes) => {
-                    ctx.push_action(Action::IbcMinedNotes(
-                        notes
+                ShieldedData::Tx(_) => ctx.push_action(Action::IbcShielding)?,
+                ShieldedData::Note(ref notes) => {
+                    ctx.push_action(Action::IbcMinedNotes {
+                        assets: notes
                             .iter()
-                            .map(|note| IbcMinedNote {
-                                asset_type: note.asset_type,
-                                seq: seq.unwrap(),
-                            })
+                            .map(|note| note.asset_type)
                             .collect(),
-                    ))
+                        seq: seq.unwrap(),
+                    })?
                 }
             }
         }

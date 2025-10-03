@@ -25,7 +25,7 @@ testing = [
 arbitrary = ["dep:arbitrary", "namada_core/arbitrary", "namada_token/arbitrary"]
 
 [dependencies]
-namada_core.workspace = true
+namada_core = {workspace = true, features = ["rand"] }
 namada_events.workspace = true
 namada_gas.workspace = true
 namada_macros.workspace = true

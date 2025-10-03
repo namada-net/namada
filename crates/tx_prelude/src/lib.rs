@@ -36,6 +36,8 @@ pub use namada_core::chain::{
 pub use namada_core::ethereum_events::EthAddress;
 use namada_core::internal::HostEnvResult;
 use namada_core::key::common;
+use namada_core::masp::MaspTxData;
+pub use namada_core::masp::ShieldedData;
 use namada_core::storage::TxIndex;
 pub use namada_core::{address, encode, eth_bridge_pool, storage, *};
 pub use namada_events::extend::Log;
@@ -49,7 +51,6 @@ pub use namada_state::{
     Error, OptionExt, Result, ResultExt, StorageRead, StorageWrite,
     collections, iter_prefix, iter_prefix_bytes,
 };
-use namada_token::MaspTransaction;
 pub use namada_tx::{BatchedTx, Section, Tx, action, data as transaction};
 pub use namada_tx_env::TxEnv;
 use namada_vm_env::tx::*;
@@ -421,7 +422,7 @@ impl TxEnv for Ctx {
     }
 
     fn update_masp_note_commitment_tree(
-        transaction: &MaspTransaction,
+        transaction: &impl MaspTxData,
     ) -> Result<bool> {
         update_masp_note_commitment_tree(transaction)
     }
@@ -476,7 +477,7 @@ pub fn verify_signatures_of_pks(
 
 /// Update the masp note commitment tree in storage with the new notes
 pub fn update_masp_note_commitment_tree(
-    transaction: &MaspTransaction,
+    transaction: &impl MaspTxData,
 ) -> Result<bool> {
     // Serialize transaction
     let transaction = transaction.serialize_to_vec();

@@ -32,7 +32,7 @@ use namada_sdk::tx::data::{
     compute_inner_tx_hash,
 };
 use namada_sdk::tx::event::{MaspEvent, MaspEventKind, MaspTxRef};
-use namada_sdk::tx::{BatchedTxRef, IndexedTx, Tx, TxCommitments, event};
+use namada_sdk::tx::{BatchedTxRef, IndexedTx, Tx, TxCommitments};
 use namada_sdk::validation::{
     EthBridgeNutVp, EthBridgePoolVp, EthBridgeVp, GovernanceVp, IbcVp, MaspVp,
     MultitokenVp, NativeVpCtx, ParametersVp, PgfVp, PosVp,
@@ -925,8 +925,11 @@ fn get_optional_masp_ref<S: Read<Err = state::Error>>(
         return Ok(None);
     }
 
-    let masp_ref = if let Some(action) =
-        state.read_actions()?.into_iter().find(|action| {
+    let masp_ref = if let Some(action) = state
+        .read_actions()
+        .map_err(Error::StateError)?
+        .into_iter()
+        .find(|action| {
             matches!(
                 action,
                 Action::IbcShielding | Action::IbcMinedNotes { .. }

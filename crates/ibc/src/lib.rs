@@ -91,7 +91,7 @@ use namada_core::ibc::core::channel::types::commitment::{
     AcknowledgementCommitment, PacketCommitment, compute_packet_commitment,
 };
 pub use namada_core::ibc::*;
-use namada_core::masp::{ShieldingData, TAddrData, addr_taddr, ibc_taddr};
+use namada_core::masp::{ShieldedData, TAddrData, addr_taddr, ibc_taddr};
 use namada_core::masp_primitives::transaction::components::ValueSum;
 use namada_core::token::Amount;
 use namada_events::EmitEvents;
@@ -239,12 +239,12 @@ impl<S> namada_systems::ibc::Read<S> for Store<S>
 where
     S: StorageRead,
 {
-    type ExtractedMaspTx = ShieldingData;
+    type ExtractedMaspTx = ShieldedData;
 
     fn try_extract_masp_tx_from_envelope<Transfer, Params, R>(
         ctx: &R,
         tx_data: &[u8],
-    ) -> StorageResult<Option<ShieldingData>>
+    ) -> StorageResult<Option<ShieldedData>>
     where
         Transfer: BorshDeserialize,
         Params: namada_systems::parameters::Read<R>,
@@ -628,7 +628,7 @@ pub struct InternalData<Transfer> {
     /// The transparent transfer that happens in parallel to IBC processes
     pub transparent: Option<Transfer>,
     /// The shielded transaction that happens in parallel to IBC processes
-    pub shielded: Option<(ShieldingData, Sequence)>,
+    pub shielded: Option<(ShieldedData, Sequence)>,
     /// IBC tokens that are credited/debited to internal accounts
     pub ibc_tokens: BTreeSet<Address>,
 }

@@ -570,6 +570,20 @@ impl PaymentAddress {
         format!("{:.width$X}", hasher.finalize(), width = HASH_HEX_LEN)
     }
 
+    /// Encode a payment address in compatibility mode (i.e. with the legacy
+    /// Bech32 encoding)
+    pub fn encode_compat(&self) -> String {
+        use crate::string_encoding::Format;
+
+        bech32::encode::<bech32::Bech32>(Self::HRP, self.to_bytes().as_ref())
+            .unwrap_or_else(|_| {
+                panic!(
+                    "The human-readable part {} should never cause a failure",
+                    Self::HRP
+                )
+            })
+    }
+
     /// Create a note owned by this payment address
     #[cfg(feature = "rand")]
     pub fn create_note<RNG>(

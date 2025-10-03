@@ -5311,18 +5311,15 @@ pub mod args {
                 Either::Left(r) => Either::Left(chain_ctx.get(&r)),
                 Either::Right(r) => Either::Right(chain_ctx.get(&r)),
             };
-            let overflow = self.overflow.map(|r| chain_ctx.get(&r));
             Ok(TxOsmosisSwap {
                 transfer: self.transfer.to_sdk(ctx)?,
                 output_denom: self.output_denom,
                 recipient,
-                overflow,
                 slippage: self.slippage,
                 local_recovery_addr: self.local_recovery_addr,
                 route: self.route,
                 osmosis_lcd_rpc: self.osmosis_lcd_rpc,
                 osmosis_sqs_rpc: self.osmosis_sqs_rpc,
-                frontend_sus_fee: None,
             })
         }
     }
@@ -5336,7 +5333,6 @@ pub mod args {
             let maybe_trans_recipient = TARGET_OPT.parse(matches);
             let maybe_shielded_recipient =
                 PAYMENT_ADDRESS_TARGET_OPT.parse(matches);
-            let maybe_overflow = OVERFLOW_OPT.parse(matches);
             let slippage_percent = SLIPPAGE.parse(matches);
             if slippage_percent.is_some_and(|percent| {
                 let zero = Dec::zero();
@@ -5369,13 +5365,11 @@ pub mod args {
                 } else {
                     Either::Right(maybe_shielded_recipient.unwrap())
                 },
-                overflow: maybe_overflow,
                 slippage,
                 local_recovery_addr,
                 route,
                 osmosis_lcd_rpc,
                 osmosis_sqs_rpc,
-                frontend_sus_fee: None,
             }
         }
 
@@ -5425,15 +5419,6 @@ pub mod args {
                              minimum amount of tokens swapped on Osmosis."
                         )),
                 )
-                .arg(OVERFLOW_OPT.def().help(wrap!(
-                    "Transparent address that receives the amount of target \
-                     asset exceeding the minimum trade amount. Only \
-                     applicable when shielding assets that have been swapped \
-                     on Osmosis. This address should not be linkable to any \
-                     of the user's personal accounts, to maximize the privacy \
-                     of the trade. If unspecified, a disposable address is \
-                     generated."
-                )))
                 .arg(SLIPPAGE.def().help(wrap!(
                     "Slippage percentage, as a number between 0 and 100. \
                      Represents the maximum acceptable deviation from the \

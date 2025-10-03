@@ -65,9 +65,6 @@ pub struct OsmosisSwapMemoDataInner {
     /// The amount that is shielded onto the MASP. Corresponds to the
     /// minimum output amount from the swap.
     pub shielded_amount: namada_core::token::Amount,
-    /// The receiver of the difference between the transferred tokens and
-    /// the minimum output amount.
-    pub overflow_receiver: namada_core::address::Address,
 }
 
 impl From<NamadaMemo<OsmosisSwapMemoData>> for NamadaMemo<NamadaMemoData> {
@@ -83,13 +80,11 @@ impl From<OsmosisSwapMemoData> for NamadaMemo<NamadaMemoData> {
                 OsmosisSwapMemoDataInner {
                     shielding_data,
                     shielded_amount,
-                    overflow_receiver,
                 },
         }: OsmosisSwapMemoData,
     ) -> Self {
         Self {
             namada: NamadaMemoData::OsmosisSwap {
-                overflow_receiver,
                 shielded_amount,
                 shielding_data,
             },
@@ -127,9 +122,6 @@ pub enum NamadaMemoData {
         /// The amount that is shielded onto the MASP. Corresponds to the
         /// minimum output amount from the swap.
         shielded_amount: namada_core::token::Amount,
-        /// The receiver of the difference between the transferred tokens and
-        /// the minimum output amount.
-        overflow_receiver: namada_core::address::Address,
     },
 }
 

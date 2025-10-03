@@ -1529,7 +1529,6 @@ fn packet_forward_memo_value(
 fn shielded_recv_memo_value(
     masp_transfer_path: &Path,
     shielded_amount: Amount,
-    overflow_receiver: namada_core::address::Address,
 ) -> serde_json::Map<String, serde_json::Value> {
     use namada_core::string_encoding::StringEncoded;
     use namada_sdk::ibc::{NamadaMemo, NamadaMemoData};
@@ -1542,7 +1541,6 @@ fn shielded_recv_memo_value(
     let data = NamadaMemoData::OsmosisSwap {
         shielding_data: tx,
         shielded_amount,
-        overflow_receiver,
     };
 
     let value = serde_json::to_value(&NamadaMemo { namada: data })
@@ -2378,7 +2376,6 @@ fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
             Some(shielded_recv_memo_value(
                 &memo_path,
                 Amount::native_whole(8),
-                overflow_addr.parse().unwrap(),
             )),
         );
         transfer(
@@ -2473,7 +2470,6 @@ fn ibc_shielded_recv_middleware_unhappy_flow() -> Result<()> {
         Some(shielded_recv_memo_value(
             &memo_path,
             Amount::native_whole(8),
-            overflow_addr.parse().unwrap(),
         )),
     );
     transfer(

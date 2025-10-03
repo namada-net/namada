@@ -196,6 +196,76 @@ fn init_null_rewards() -> Result<()> {
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains("nam: 0"));
 
+    // Test that the conversion carrying no reward is not added to transactions
+    let tempdir = tempfile::tempdir().unwrap();
+
+    _ = node.next_epoch();
+    let captured = CapturedOutput::of(|| {
+        run(
+            &node,
+            Bin::Client,
+            apply_use_device(vec![
+                "transfer",
+                "--source",
+                A_SPENDING_KEY,
+                "--target",
+                AB_PAYMENT_ADDRESS,
+                "--token",
+                TEST_TOKEN_ADDR,
+                "--amount",
+                "70",
+                "--output-folder-path",
+                tempdir.path().to_str().unwrap(),
+                "--dump-tx",
+                "--node",
+                RPC,
+            ]),
+        )
+    });
+    assert!(captured.result.is_ok());
+
+    let file_path = tempdir
+        .path()
+        .read_dir()
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let tx_bytes = std::fs::read(&file_path).unwrap();
+    std::fs::remove_file(&file_path).unwrap();
+    let tx = Tx::try_from_json_bytes(&tx_bytes).unwrap();
+    let masp_bundle = tx
+        .sections
+        .iter()
+        .find_map(|section| {
+            if let Section::MaspTx(transaction) = section {
+                Some(transaction)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert!(
+        masp_bundle
+            .sapling_bundle()
+            .unwrap()
+            .shielded_converts
+            .is_empty()
+    );
+    // Invalidate the speculative shielded context
+    run(
+        &node,
+        Bin::Client,
+        vec![
+            "shielded-sync",
+            "--viewing-keys",
+            AA_VIEWING_KEY,
+            "--node",
+            RPC,
+        ],
+    )?;
+
     // Now, let us increase the max reward rate
     token::write_params(
         &Some(token::ShieldedParams {

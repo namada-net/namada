@@ -579,27 +579,26 @@ fn setup_storage_for_masp_verification(
         TransferTarget::PaymentAddress(albert_payment_addr),
     );
 
-    shielded_ctx.shell.write().execute_tx(&shield_tx.to_ref());
-    shielded_ctx.shell.write().commit_masp_tx(shield_tx.tx);
+    // Adjust the state of the MASP to reflect the transaction's changes
+    {
+        let mut write_lock = shielded_ctx.shell.write();
+        write_lock.execute_tx(&shield_tx.to_ref());
+        write_lock.commit_masp_tx(shield_tx.tx);
 
-    // Update the anchor in storage
-    let tree_key = token::storage_key::masp_commitment_tree_key();
-    let updated_tree: CommitmentTree<Node> = shielded_ctx
-        .shell
-        .read()
-        .state
-        .read(&tree_key)
-        .unwrap()
-        .unwrap();
-    let anchor_key =
-        token::storage_key::masp_commitment_anchor_key(updated_tree.root());
-    shielded_ctx
-        .shell
-        .write()
-        .state
-        .write(&anchor_key, ())
-        .unwrap();
-    shielded_ctx.shell.write().commit_block();
+        // Update the anchor in storage
+        let tree_key = token::storage_key::masp_commitment_tree_key();
+        let updated_tree: CommitmentTree<Node> =
+            write_lock.state.read(&tree_key).unwrap().unwrap();
+        let anchor_key =
+            token::storage_key::masp_commitment_anchor_key(updated_tree.root());
+        write_lock.state.write(&anchor_key, ()).unwrap();
+        write_lock.commit_block();
+
+        // Advance the masp epoch to generate rewards
+        for _ in 0..2 {
+            write_lock.advance_epoch();
+        }
+    }
 
     let (shielded_ctx, signed_tx) = match bench_name {
         "shielding" => shielded_ctx.generate_masp_tx(

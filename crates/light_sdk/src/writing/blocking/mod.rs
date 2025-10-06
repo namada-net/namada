@@ -22,7 +22,7 @@ pub fn broadcast_tx(tendermint_addr: &str, tx: Tx) -> Result<Response, Error> {
         TendermintAddress::from_str(tendermint_addr)
             .map_err(|e| Error::Other(e.to_string()))?,
     )
-    .compat_mode(CompatMode::V0_37)
+    .compat_mode(CompatMode::V0_38)
     .timeout(std::time::Duration::from_secs(30))
     .build()
     .map_err(|e| Error::Other(e.to_string()))?;

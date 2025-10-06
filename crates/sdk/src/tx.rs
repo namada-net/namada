@@ -607,6 +607,8 @@ pub fn display_batch_resp(context: &impl Namada, resp: &TxResponse) {
         );
     }
 
+    display_line!(context.io(), "CometBFT tx hash: {}", resp.comet_tx_hash);
+
     tracing::debug!(
         "Full result: {}",
         serde_json::to_string_pretty(&resp).unwrap()

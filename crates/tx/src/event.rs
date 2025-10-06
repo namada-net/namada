@@ -4,6 +4,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use namada_core::borsh::{BorshDeserialize, BorshSerialize};
+use namada_core::hash::Hash;
 use namada_core::ibc::IbcTxDataHash;
 use namada_core::masp::MaspTxId;
 use namada_events::extend::{
@@ -64,9 +65,11 @@ pub fn new_tx_event(tx: &Tx, height: u64) -> Event {
         }
         _ => unreachable!(),
     };
+    let comet_tx_hash = tx.comet_tx_hash();
     base_event
         .with(Height(height.into()))
         .with(Log(String::new()))
+        .with(CometTxHash(comet_tx_hash))
         .into()
 }
 
@@ -223,5 +226,19 @@ impl EventAttributeEntry<'static> for IndexedTx {
 
     fn into_value(self) -> Self::Value {
         self
+    }
+}
+
+/// Extend an [`Event`] with CometBFT tx hash.
+pub struct CometTxHash(pub Hash);
+
+impl EventAttributeEntry<'static> for CometTxHash {
+    type Value = Hash;
+    type ValueOwned = Self::Value;
+
+    const KEY: &'static str = "comet-tx-hash";
+
+    fn into_value(self) -> Self::Value {
+        self.0
     }
 }

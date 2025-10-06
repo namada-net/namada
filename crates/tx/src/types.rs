@@ -234,6 +234,12 @@ impl Tx {
         Section::Header(raw_header).get_hash()
     }
 
+    /// CometBFT matching tx hash (applicable for wrapper txs only)
+    pub fn comet_tx_hash(&self) -> namada_core::hash::Hash {
+        let bytes = self.to_bytes();
+        namada_core::hash::Hash::sha256(bytes)
+    }
+
     /// Get hashes of all the sections in this transaction
     pub fn sechashes(&self) -> Vec<namada_core::hash::Hash> {
         let mut hashes =

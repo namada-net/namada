@@ -3496,8 +3496,7 @@ mod test_shielded_wallet {
         }
 
         /// A more complicated test that checks asset estimations when multiple
-        /// different incentivized assets are present and multiple conversions need
-        /// to be applied to the same note.
+        /// different incentivized assets are present
         #[test]
         fn test_ests_with_mult_incentivized_assets(
            principal1 in 1u64..10_000,
@@ -3557,8 +3556,8 @@ mod test_shielded_wallet {
                     }
                 }
 
-                // add empty conversions for the native token
-                for epoch in 0..2 {
+                // add conversions for the native token
+                for epoch in 0..3 {
                     let mut conv = I128Sum::from_pair(
                         AssetData {
                             token: native_token.clone(),
@@ -3575,7 +3574,7 @@ mod test_shielded_wallet {
                             position: MaspDigitPos::Zero,
                             epoch: Some(MaspEpoch::new(epoch + 1)),
                         }.encode().unwrap(),
-                        1,
+                        2,
                     );
                     context.add_conversions(
                         AssetData {
@@ -3594,100 +3593,14 @@ mod test_shielded_wallet {
                         )
                     );
                 }
-                // add native conversion from epoch 2 -> 3
-                 let mut conv = I128Sum::from_pair(
-                        AssetData {
-                            token: native_token.clone(),
-                            denom: native_token_denom,
-                            position: MaspDigitPos::Zero,
-                            epoch: Some(MaspEpoch::new(2)),
-                        }.encode().unwrap(),
-                        -1,
-                    );
-                    conv += I128Sum::from_pair(
-                        AssetData {
-                            token: native_token.clone(),
-                            denom: native_token_denom,
-                            position: MaspDigitPos::Zero,
-                            epoch: Some(MaspEpoch::new(3)),
-                        }.encode().unwrap(),
-                        2,
-                    );
-                    context.add_conversions(
-                        AssetData {
-                            token: native_token.clone(),
-                            denom: native_token_denom,
-                            position: MaspDigitPos::Zero,
-                            epoch: Some(MaspEpoch::new(2)),
-                        },
-                        (
-                            native_token.clone(),
-                            native_token_denom,
-                            MaspDigitPos::Zero,
-                            MaspEpoch::new(2),
-                            conv,
-                            MerklePath::from_path(vec![], 0),
-                        )
-                    );
 
-                // add conversions from epoch 1 -> 2 for tok1
+                // add conversion from epoch 1 -> 3 for tok1
                 let mut conv = I128Sum::from_pair(
                     AssetData {
                         token: tok1.clone(),
                         denom: 0.into(),
                         position: MaspDigitPos::Zero,
                         epoch: Some(MaspEpoch::new(1)),
-                    }
-                        .encode()
-                        .unwrap(),
-                    -1,
-                );
-                conv += I128Sum::from_pair(
-                    AssetData {
-                        token: tok1.clone(),
-                        denom: 0.into(),
-                        position: MaspDigitPos::Zero,
-                        epoch: Some(MaspEpoch::new(2)),
-                    }
-                        .encode()
-                        .unwrap(),
-                    1,
-                );
-                conv += I128Sum::from_pair(
-                    AssetData {
-                        token: native_token.clone(),
-                        denom: native_token_denom,
-                        position: MaspDigitPos::Zero,
-                        epoch: Some(MaspEpoch::new(0)),
-                    }
-                        .encode()
-                        .unwrap(),
-                    tok1_reward_rate,
-                );
-                context.add_conversions(
-                    AssetData {
-                        token: tok1.clone(),
-                        denom: 0.into(),
-                        position: MaspDigitPos::Zero,
-                        epoch: Some(MaspEpoch::new(1)),
-                    },
-                    (
-                        tok1.clone(),
-                        0.into(),
-                        MaspDigitPos::Zero,
-                        MaspEpoch::new(1),
-                        conv,
-                        MerklePath::from_path(vec![], 0),
-                    ),
-                );
-
-                // add conversions from epoch 2 -> 3 for tok1
-                let mut conv = I128Sum::from_pair(
-                    AssetData {
-                        token: tok1.clone(),
-                        denom: 0.into(),
-                        position: MaspDigitPos::Zero,
-                        epoch: Some(MaspEpoch::new(2)),
                     }
                         .encode()
                         .unwrap(),
@@ -3713,7 +3626,59 @@ mod test_shielded_wallet {
                     }
                         .encode()
                         .unwrap(),
-                    1,
+                    2 * tok1_reward_rate,
+                );
+                context.add_conversions(
+                    AssetData {
+                        token: tok1.clone(),
+                        denom: 0.into(),
+                        position: MaspDigitPos::Zero,
+                        epoch: Some(MaspEpoch::new(1)),
+                    },
+                    (
+                        tok1.clone(),
+                        0.into(),
+                        MaspDigitPos::Zero,
+                        MaspEpoch::new(1),
+                        conv,
+                        MerklePath::from_path(vec![], 0),
+                    ),
+                );
+
+                // add conversion from epoch 2 -> 3 for tok1 (this is only
+                // needed to allow estimating the rewards for the next epoch)
+                let mut conv = I128Sum::from_pair(
+                    AssetData {
+                        token: tok1.clone(),
+                        denom: 0.into(),
+                        position: MaspDigitPos::Zero,
+                        epoch: Some(MaspEpoch::new(2)),
+                    }
+                        .encode()
+                        .unwrap(),
+                    -1,
+                );
+                conv += I128Sum::from_pair(
+                    AssetData {
+                        token: tok1.clone(),
+                        denom: 0.into(),
+                        position: MaspDigitPos::Zero,
+                        epoch: Some(MaspEpoch::new(3)),
+                    }
+                        .encode()
+                        .unwrap(),
+                    1
+                );
+                conv += I128Sum::from_pair(
+                    AssetData {
+                        token: native_token.clone(),
+                        denom: native_token_denom,
+                        position: MaspDigitPos::Zero,
+                        epoch: Some(MaspEpoch::new(0)),
+                    }
+                        .encode()
+                        .unwrap(),
+                    tok1_reward_rate,
                 );
                 context.add_conversions(
                     AssetData {
@@ -3731,7 +3696,7 @@ mod test_shielded_wallet {
                         MerklePath::from_path(vec![], 0),
                     ),
                 );
-                // add conversions from epoch 2 -> 3 for tok2
+                // add conversion from epoch 2 -> 3 for tok2
                 let mut conv = I128Sum::from_pair(
                     AssetData {
                         token: tok2.clone(),
@@ -3819,12 +3784,22 @@ mod test_shielded_wallet {
                     .estimate_next_epoch_rewards(&context, &balance)
                     .await
                     .expect("Test failed");
-                // The native token balances at epoch 3 and 4 are given by the shielded amounts times the rewards times the conversion for the native asset
-                let native_balance_at_3 = (i128::from(principal1) * (tok1_reward_rate + 1) + i128::from(principal2) * tok2_reward_rate) * 2;
-                let estimated_native_balance_at_4= (i128::from(principal1) * (tok1_reward_rate + 2) + 2 * i128::from(principal2) * tok2_reward_rate) * 4;
+                // The native token balances at epoch 3 and 4 are given by the
+                // accrued rewards (shielded amounts times the rewards) times
+                // the conversion for the native asset which is the product of
+                // these rewards (compund rewards)
+                let native_balance_at_3 = (
+                    i128::from(principal1) *
+                    (tok1_reward_rate * 2) + i128::from(principal2) * tok2_reward_rate
+                ) * 2i128.pow(3);
+                let estimated_native_balance_at_4 = (
+                    i128::from(principal1) * (tok1_reward_rate * 3) +
+                    (2 * i128::from(principal2) * tok2_reward_rate)
+                ) * 2i128.pow(4);
                 assert_eq!(
                     rewards_est,
-                    // The estimated rewards are just the difference between the two native token balances
+                    // The estimated rewards are just the difference between the
+                    // two native token balances
                     DenominatedAmount::native(
                         Amount::from_masp_denominated_i128(
                             estimated_native_balance_at_4 - native_balance_at_3,

@@ -50,7 +50,11 @@ pub mod v0 {
     use namada_core::borsh::{BorshDeserialize, BorshSerialize};
     use namada_core::collections::{HashMap, HashSet};
     use namada_core::masp::AssetData;
+    #[cfg(feature = "historic")]
+    use namada_tx::IndexedTx;
 
+    #[cfg(feature = "historic")]
+    use crate::masp::shielded_wallet::TxHistoryEntry;
     use crate::masp::utils::MaspIndexedTx;
     use crate::masp::{
         ContextSyncStatus, NoteIndex, ShieldedUtils, WitnessMap,
@@ -88,6 +92,12 @@ pub mod v0 {
         pub vk_map: HashMap<usize, ViewingKey>,
         /// Maps a shielded tx to the index of its first output note.
         pub note_index: NoteIndex,
+        /// The history of the applied shielded transactions (the failed ones
+        /// won't show up in here). Only the sapling bundle data is
+        /// cached here, for the transparent bundle data one should
+        /// rely on querying a node or an indexer
+        #[cfg(feature = "historic")]
+        pub history: HashMap<ViewingKey, HashMap<IndexedTx, TxHistoryEntry>>,
         /// The sync state of the context
         pub sync_status: ContextSyncStatus,
     }
@@ -107,6 +117,8 @@ pub mod v0 {
                 spents: HashSet::default(),
                 asset_types: HashMap::default(),
                 vk_map: HashMap::default(),
+                #[cfg(feature = "historic")]
+                history: Default::default(),
                 sync_status: ContextSyncStatus::Confirmed,
             }
         }
@@ -130,6 +142,8 @@ pub mod v0 {
                 vk_map: wallet.vk_map,
                 note_index: wallet.note_index,
                 sync_status: wallet.sync_status,
+                #[cfg(feature = "historic")]
+                history: wallet.history,
             }
         }
     }

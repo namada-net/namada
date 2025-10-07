@@ -36,6 +36,7 @@ masp = [
   "namada_core/task_env",
   "flume",
 ]
+historic = ["masp"]
 
 [dependencies]
 namada_account.workspace = true

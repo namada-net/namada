@@ -44,6 +44,8 @@ use namada_io::{
     Io, MaybeSend, MaybeSync, NamadaIo, ProgressBar, display_line,
     edisplay_line,
 };
+#[cfg(feature = "historic")]
+use namada_tx::IndexedTx;
 use namada_wallet::{DatedKeypair, DatedSpendingKey};
 use rand::prelude::StdRng;
 use rand_core::{OsRng, SeedableRng};
@@ -146,8 +148,25 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     pub vk_map: HashMap<usize, ViewingKey>,
     /// Maps a shielded tx to the index of its first output note.
     pub note_index: NoteIndex,
+    /// The history of the applied shielded transactions (the failed ones won't
+    /// show up in here). Only the sapling bundle data is cached here, for the
+    /// transparent bundle data one should rely on querying a node or an
+    /// indexer
+    #[cfg(feature = "historic")]
+    pub history: HashMap<ViewingKey, HashMap<IndexedTx, TxHistoryEntry>>,
     /// The sync state of the context
     pub sync_status: ContextSyncStatus,
+}
+
+/// The data for an indexed masp transaction
+#[derive(BorshSerialize, BorshDeserialize, Debug, Default)]
+pub struct TxHistoryEntry {
+    /// The inputs of the indexed transaction
+    pub inputs: HashMap<Address, Amount>,
+    /// The outputs of the indexed transaction
+    pub outputs: HashMap<Address, Amount>,
+    /// A flag to mark the presence of conversions in the transaction
+    pub conversions: bool,
 }
 
 /// Default implementation to ease construction of TxContexts. Derive cannot be
@@ -169,6 +188,8 @@ impl<U: ShieldedUtils + Default> Default for ShieldedWallet<U> {
             conversions: Default::default(),
             asset_types: HashMap::default(),
             vk_map: HashMap::default(),
+            #[cfg(feature = "historic")]
+            history: Default::default(),
             sync_status: ContextSyncStatus::Confirmed,
         }
     }
@@ -300,6 +321,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
     #[allow(missing_docs)]
     pub fn save_decrypted_shielded_outputs(
         &mut self,
+        #[cfg(feature = "historic")] indexed_tx: IndexedTx,
         vk: &ViewingKey,
         note_pos: usize,
         note: Note,
@@ -309,8 +331,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         // Add this note to list of notes decrypted by this
         // viewing key
         self.pos_map.entry(*vk).or_default().insert(note_pos);
-        // Compute the nullifier now to quickly recognize when
-        // spent
+        // Compute the nullifier now to quickly recognize when spent
         let nf = note.nf(
             &vk.nk,
             note_pos
@@ -324,6 +345,32 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         self.div_map.insert(note_pos, *pa.diversifier());
         self.nf_map.insert(nf, note_pos);
         self.vk_map.insert(note_pos, *vk);
+        #[cfg(feature = "historic")]
+        {
+            // Update the history
+            let asset_data = self
+                .asset_types
+                .get(&note.asset_type)
+                .ok_or_else(|| eyre!("Can not get the asset data"))?
+                .to_owned();
+            let output_entry = self
+                .history
+                .entry(vk.to_owned())
+                .or_default()
+                .entry(indexed_tx)
+                .or_default()
+                .outputs
+                .entry(asset_data.token)
+                .or_insert(Amount::zero());
+            // No need to take care of the denomination as that should already
+            // be the default one for the given token
+            let note_amount =
+                Amount::from_masp_denominated(note.value, asset_data.position);
+
+            *output_entry = checked!(output_entry + note_amount)
+                .wrap_err("Overflow in shielded history outputs")?;
+        }
+
         Ok(())
     }
 
@@ -332,7 +379,13 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         &mut self,
         transaction: &Transaction,
         update_witness_map: bool,
-    ) {
+        #[cfg(feature = "historic")] update_history: Option<IndexedTx>,
+    ) -> Result<(), eyre::Error> {
+        #[cfg(feature = "historic")]
+        let used_conversions = transaction
+            .sapling_bundle()
+            .map_or(false, |bundle| !bundle.shielded_converts.is_empty());
+
         for ss in transaction
             .sapling_bundle()
             .map_or(&vec![], |x| &x.shielded_spends)
@@ -344,8 +397,57 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
                 if update_witness_map {
                     self.witness_map.swap_remove(note_pos);
                 }
+                #[cfg(feature = "historic")]
+                {
+                    // Update the history if required
+                    if let Some(indexed_tx) = update_history {
+                        let vk =
+                            self.vk_map.get(note_pos).ok_or_else(|| {
+                                eyre!(
+                                    "Missing viewing key for the provided \
+                                     note position"
+                                )
+                            })?;
+                        let note =
+                            self.note_map.get(note_pos).ok_or_else(|| {
+                                eyre!(
+                                    "Missing note for the provided note \
+                                     position"
+                                )
+                            })?;
+                        let asset_data = self
+                            .asset_types
+                            .get(&note.asset_type)
+                            .ok_or_else(|| eyre!("Can not get the asset data"))?
+                            .to_owned();
+
+                        let history_entry = self
+                            .history
+                            .entry(vk.to_owned())
+                            .or_default()
+                            .entry(indexed_tx)
+                            .or_default();
+                        history_entry.conversions = used_conversions;
+
+                        let input_entry = history_entry
+                            .inputs
+                            .entry(asset_data.token)
+                            .or_insert(Amount::zero());
+                        // No need to take care of the denomination as that
+                        // should already be the default
+                        // one for the given token
+                        let note_amount = Amount::from_masp_denominated(
+                            note.value,
+                            asset_data.position,
+                        );
+                        *input_entry = checked!(input_entry + note_amount)
+                            .wrap_err("Overflow in shielded history inputs")?;
+                    }
+                }
             }
         }
+
+        Ok(())
     }
 
     /// Compute the total unspent notes associated with the viewing key in the
@@ -454,7 +556,12 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         &mut self,
         masp_tx: &Transaction,
     ) -> Result<(), eyre::Error> {
-        self.save_shielded_spends(masp_tx, false);
+        self.save_shielded_spends(
+            masp_tx,
+            false,
+            #[cfg(feature = "historic")]
+            None,
+        )?;
 
         // Save the speculative state for future usage
         self.sync_status = ContextSyncStatus::Speculative;

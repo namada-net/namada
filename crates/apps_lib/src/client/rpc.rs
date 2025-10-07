@@ -6,6 +6,7 @@ use std::io;
 use color_eyre::owo_colors::OwoColorize;
 use data_encoding::HEXLOWER;
 use either::Either;
+use futures::StreamExt;
 use masp_primitives::asset_type::AssetType;
 use masp_primitives::merkle_tree::MerklePath;
 use masp_primitives::sapling::Node;
@@ -2125,18 +2126,22 @@ pub async fn query_conversions(
         .get_addresses_with_vp_type(AddressVpType::Token);
 
     // Download conversions from all epochs to facilitate decoding asset types
-    let mut conversions = BTreeMap::new();
     let from = MaspEpoch::zero();
     let to = rpc::query_masp_epoch(context.client())
         .await
         .expect("Unable to query current MASP epoch");
-    for epoch in MaspEpoch::iter_bounds_inclusive(from, to) {
-        conversions.append(
-            &mut rpc::query_conversions(context.client(), &epoch)
-                .await
-                .expect("Conversions should be defined"),
-        );
-    }
+    let epochs: Vec<_> = MaspEpoch::iter_bounds_inclusive(from, to).collect();
+    let conversion_tasks = epochs
+        .iter()
+        .map(|epoch| rpc::query_conversions(context.client(), epoch));
+    let task_stream = futures::stream::iter(conversion_tasks);
+    let conversions = task_stream
+        .buffer_unordered(100)
+        .fold(BTreeMap::default(), async |mut acc, conversion| {
+            acc.append(&mut conversion.expect("Conversion should be defined"));
+            acc
+        })
+        .await;
 
     if args.dump_tree {
         display_line!(context.io(), "Conversions: {conversions:?}");

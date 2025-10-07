@@ -122,8 +122,9 @@ pub async fn syncing<
         // tests only as the cli wallet is not supposed to compile the
         // history of shielded transactions
         shielded.load_confirmed().await;
+        let masp_epoch = namada_sdk::rpc::query_masp_epoch(&client).await?;
         for (asset_type, (token, denom, position, epoch, _conv)) in
-            namada_sdk::rpc::query_conversions(&client).await?
+            namada_sdk::rpc::query_conversions(&client, &masp_epoch).await?
         {
             let pre_asset_type = AssetData {
                 token,

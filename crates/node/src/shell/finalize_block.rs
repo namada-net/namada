@@ -732,6 +732,12 @@ where
             let result_code = ResultCode::from_u32(processed_tx.result.code)
                 .expect("Result code conversion should not fail");
 
+            let tx_hash = tx.header_hash();
+            let result_info = serde_json::to_string(&serde_json::json!({
+                "namada_tx_hash": tx_hash,
+            }))
+            .unwrap();
+
             let tx_header = tx.header();
             // If [`process_proposal`] rejected a Tx, emit an event here and
             // move on to next tx
@@ -768,6 +774,7 @@ where
 
                 tx_results.push(tendermint::abci::types::ExecTxResult {
                     code: result_code.into(),
+                    info: result_info,
                     ..Default::default()
                 });
 
@@ -799,6 +806,7 @@ where
                                 tx_results.push(
                                     tendermint::abci::types::ExecTxResult {
                                         code: result_code.into(),
+                                        info: result_info,
                                         ..Default::default()
                                     },
                                 );
@@ -893,7 +901,6 @@ where
             let tx_event = new_tx_event(&tx, height.0);
             let is_atomic_batch = tx.header.atomic;
             let commitments_len = tx.commitments().len() as u64;
-            let tx_hash = tx.header_hash();
             let tx_gas_meter = RefCell::new(tx_gas_meter);
 
             let dispatch_result = protocol::dispatch_tx(
@@ -918,6 +925,7 @@ where
             tx_results.push(tendermint::abci::types::ExecTxResult {
                 code: result_code.into(),
                 gas_used,
+                info: result_info,
                 ..Default::default()
             });
 

@@ -993,13 +993,12 @@ impl Client for MockNode {
                 namada_sdk::tendermint::abci::Event::from(event.clone())
             })
             .collect();
-        let has_events = !events.is_empty();
         Ok(tendermint_rpc::endpoint::block_results::Response {
             height,
             txs_results: None,
-            finalize_block_events: vec![],
+            finalize_block_events: events,
             begin_block_events: None,
-            end_block_events: has_events.then_some(events),
+            end_block_events: None,
             validator_updates: vec![],
             consensus_param_updates: None,
             app_hash: namada_sdk::tendermint::hash::AppHash::default(),

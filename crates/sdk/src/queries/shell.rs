@@ -98,7 +98,7 @@ router! {SHELL,
     ( "conv" / [asset_type: AssetType] ) -> Option<Conversion> = read_conversion,
 
     // Conversion state access - read conversion
-    ( "conversions" ) -> BTreeMap<AssetType, ConversionWithoutPath> = read_conversions,
+    ( "conversions" / [masp_epoch: MaspEpoch] ) -> BTreeMap<AssetType, ConversionWithoutPath> = read_conversions,
 
     // Conversion state access - read conversion
     ( "masp_reward_tokens" ) -> Vec<MaspTokenRewardData> = masp_reward_tokens,
@@ -211,6 +211,7 @@ where
 /// Query to read the conversion state
 fn read_conversions<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
+    masp_epoch: MaspEpoch,
 ) -> namada_storage::Result<BTreeMap<AssetType, ConversionWithoutPath>>
 where
     D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
@@ -222,6 +223,7 @@ where
         .conversion_state
         .assets
         .iter()
+        .filter(|&(_, asset)| (asset.epoch == masp_epoch))
         .map(|(&asset_type, asset)| {
             (
                 asset_type,

@@ -4537,9 +4537,9 @@ dependencies = [
 
 [[package]]
 name = "nam-sparse-merkle-tree"
-version = "0.3.2-nam.0"
+version = "0.3.3-nam.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fae108a0f6aabf789e34d6d447c1184608d1c70c087f957b720042226a47ab63"
+checksum = "09548cb2907afb9ee1047b7bbe9601e25b73b69229fca50d49badd97cc190cfb"
 dependencies = [
  "borsh",
  "cfg-if",

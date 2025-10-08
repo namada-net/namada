@@ -117,14 +117,37 @@ pub async fn syncing<
 
     #[cfg(feature = "testing")]
     {
+        use std::collections::BTreeMap;
+
+        use futures::StreamExt;
+        use namada_core::masp::MaspEpoch;
+
         // Load the confirmed context (if present) and update the conversions
         // for the shielded history. This is needed for integration
         // tests only as the cli wallet is not supposed to compile the
         // history of shielded transactions
         shielded.load_confirmed().await;
-        let masp_epoch = namada_sdk::rpc::query_masp_epoch(&client).await?;
-        for (asset_type, (token, denom, position, epoch, _conv)) in
-            namada_sdk::rpc::query_conversions(&client, &masp_epoch).await?
+        let current_masp_epoch =
+            namada_sdk::rpc::query_masp_epoch(&client).await?;
+        let epochs: Vec<_> = MaspEpoch::iter_bounds_inclusive(
+            MaspEpoch::zero(),
+            current_masp_epoch,
+        )
+        .collect();
+        let conversion_tasks = epochs
+            .iter()
+            .map(|epoch| namada_sdk::rpc::query_conversions(&client, epoch));
+        let conversions = futures::stream::iter(conversion_tasks)
+            .buffer_unordered(100)
+            .fold(BTreeMap::default(), async |mut acc, conversion| {
+                acc.append(
+                    &mut conversion.expect("Conversion should be defined"),
+                );
+                acc
+            })
+            .await;
+
+        for (asset_type, (token, denom, position, epoch, _conv)) in conversions
         {
             let pre_asset_type = AssetData {
                 token,

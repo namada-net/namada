@@ -750,6 +750,11 @@ where
                         .with(GasUsed(0.into())),
                 );
 
+                tx_results.push(tendermint::abci::types::ExecTxResult {
+                    code: result_code.into(),
+                    ..Default::default()
+                });
+
                 continue;
             }
 
@@ -774,6 +779,14 @@ where
                                         ))
                                         .with(GasUsed(0.into())),
                                 );
+
+                                tx_results.push(
+                                    tendermint::abci::types::ExecTxResult {
+                                        code: result_code.into(),
+                                        ..Default::default()
+                                    },
+                                );
+
                                 continue;
                             }
                         };

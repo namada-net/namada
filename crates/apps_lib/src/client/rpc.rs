@@ -2154,8 +2154,7 @@ pub async fn query_conversions(
     let conversion_tasks = epochs
         .iter()
         .map(|epoch| rpc::query_conversions(context.client(), epoch));
-    let task_stream = futures::stream::iter(conversion_tasks);
-    let conversions = task_stream
+    let conversions = futures::stream::iter(conversion_tasks)
         .buffer_unordered(100)
         .fold(BTreeMap::default(), async |mut acc, conversion| {
             acc.append(&mut conversion.expect("Conversion should be defined"));

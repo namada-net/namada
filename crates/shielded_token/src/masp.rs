@@ -2,6 +2,7 @@
 #![allow(clippy::arithmetic_side_effects)]
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_sign_loss)]
+pub mod bridge_tree;
 mod shielded_sync;
 pub mod shielded_wallet;
 #[cfg(test)]
@@ -42,7 +43,7 @@ use namada_macros::BorshDeserializer;
 #[cfg(feature = "migrations")]
 use namada_migrations::*;
 use rand_core::{CryptoRng, RngCore};
-pub use shielded_wallet::ShieldedWallet;
+pub use shielded_wallet::{NotePosition, ShieldedWallet};
 use thiserror::Error;
 
 use self::utils::MaspIndexedTx;
@@ -284,7 +285,7 @@ pub type MaspAmount = ValueSum<(Option<MaspEpoch>, Address), token::Change>;
 /// A type tracking the notes used to construct a shielded transfer. Used to
 /// avoid reusing the same notes multiple times which would lead to an invalid
 /// transaction
-pub type SpentNotesTracker = HashMap<ViewingKey, HashSet<usize>>;
+pub type SpentNotesTracker = HashMap<ViewingKey, HashSet<NotePosition>>;
 
 /// Represents the amount used of different conversions
 pub type Conversions =
@@ -297,15 +298,16 @@ pub type TransferDelta = HashMap<Address, MaspChange>;
 pub type TransactionDelta = HashMap<ViewingKey, I128Sum>;
 
 /// Maps a shielded tx to the index of its first output note.
-pub type NoteIndex = BTreeMap<MaspIndexedTx, usize>;
+pub type NoteIndex = BTreeMap<MaspIndexedTx, NotePosition>;
 
 /// Maps the note index (in the commitment tree) to a witness
-pub type WitnessMap = HashMap<usize, IncrementalWitness<Node>>;
+pub type WitnessMap = HashMap<NotePosition, IncrementalWitness<Node>>;
 
-#[derive(Copy, Clone, BorshSerialize, BorshDeserialize, Debug)]
+#[derive(Copy, Clone, BorshSerialize, BorshDeserialize, Debug, Default)]
 /// The possible sync states of the shielded context
 pub enum ContextSyncStatus {
     /// The context contains data that has been confirmed by the protocol
+    #[default]
     Confirmed,
     /// The context possibly contains data that has not yet been confirmed by
     /// the protocol and could be incomplete or invalid
@@ -1262,7 +1264,7 @@ pub mod fs {
                 .load(&mut shielded, true)
                 .await
                 .expect("Test failed");
-            assert_eq!(shielded.spents, HashSet::from([42]));
+            assert_eq!(shielded.spents, HashSet::from([NotePosition(42)]));
         }
 
         #[tokio::test]
@@ -1281,11 +1283,11 @@ pub mod fs {
                 let mut bytes: Vec<u8> = Vec::new();
                 let shielded = ShieldedWallet {
                     utils,
-                    spents: HashSet::from([42]),
+                    spents: HashSet::from([NotePosition(42)]),
                     ..Default::default()
                 };
                 BorshSerialize::serialize(
-                    &VersionedWalletRef::V1(&shielded),
+                    &VersionedWalletRef::V2(&shielded),
                     &mut bytes,
                 )
                 .expect("Test failed");
@@ -1300,7 +1302,7 @@ pub mod fs {
                 .load(&mut shielded, true)
                 .await
                 .expect("Test failed");
-            assert_eq!(shielded.spents, HashSet::from([42]));
+            assert_eq!(shielded.spents, HashSet::from([NotePosition(42)]));
         }
 
         /// Check that we error out if the file cannot be loaded and migrated

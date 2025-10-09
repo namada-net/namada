@@ -89,6 +89,86 @@ Namada v1.0.0 is the first stable release of the Namada apps.
 - updated namada libraries to libs-v0.46.1
   ([\#4123](https://github.com/anoma/namada/pull/4123))
 
+## libs-v0.251.2
+
+Namada libs v0.251.2
+
+### BUG FIXES
+
+- Fixed state loading from DB to ignore tx gas map from previous block
+  in line with its removal from in-memory state after block commit.
+  ([\#4843](https://github.com/namada-net/namada/pull/4843))
+- Integrate an updated `nam-bellperson` that fixes issues in wasm,
+  namely the usage of `std::time::Instant`, which has been replaced
+  with `wasmtimer::std::Instant`. Moreover, silence a lot of the
+  `INFO` log lines previously sent to the CLI, when generating proofs.
+  ([\#4878](https://github.com/namada-net/namada/pull/4878))
+
+### FEATURES
+
+- Extends the `ShieldedWallet` to also compile the
+  history of shielded transactions if requested.
+  ([\#4705](https://github.com/anoma/namada/pull/4705))
+
+### IMPROVEMENTS
+
+- Removed handling of failed atomic batches from `handle_inner_tx_results` that
+  was never hit. ([\#4450](https://github.com/namada-net/namada/issues/4450))
+- Querying the conversion state becomes more difficult as nodes progress
+  to higher and higher epochs. For instance, on a mainnet clone running on
+  accelerated epochs, client queries for conversions always timeout (even after
+  modifying timeout_broadcast_tx_commit) when the node goes beyond a certain
+  MASP epoch. This happens because the conversion state grows linearly with
+  the MASP epoch counter. This PR attempts to address this problem by making
+  the conversions RPC endpoint require that clients specify the MASP epoch
+  they want conversions from. This implies two things: first the size of the
+  response from the conversions RPC endpoint should now be constant (equal to
+  the number of tokens in the shielded rewards program), and second a client
+  requiring all conversions now has to do a separate query for each MASP epoch.
+  ([\#4776](https://github.com/namada-net/namada/pull/4776))
+- Optimize shielded sync and shielded wallet layout.
+  ([\#4785](https://github.com/anoma/namada/pull/4785))
+- Uses the new published version of our sparse merkle tree that speeds up
+  validation times. This should speed up the time it takes to start a node.
+  ([\#4791](https://github.com/anoma/namada/pull/4791))
+- Use more precise version for wasm cache key to avoid collisions of serialized
+  artifacts ([\#4799](https://github.com/anoma/namada/pull/4799))
+- Clear tx gas map after every block to avoid indefinite accumulation
+  ([\#4800](https://github.com/anoma/namada/pull/4800))
+- The masp now uses the bellperson backend to synthesize circuits and build zk
+  proofs. Benchmarking this indicates substantial speed ups in proving time.
+  ([\#4817](https://github.com/namada-net/namada/pull/4817))
+- Updated tiny-hderive crate to replace unmaintained memzero crate with zeroize.
+  ([\#4818](https://github.com/namada-net/namada/pull/4818))
+- Closes #4714
+  - When dry-running, dummy signatures are used in
+    txs
+  - Validation does not perform signature checks when dry-running
+  
+I have tested that the gas estimation hasn't changed between dry-running
+with signatures and with dummies. It is curious however that in both cases there is a small discrepancy between dry-running and the actual tx.
+([\#4714](https://github.com/namada-net/namada/issues/4714))
+
+### SDK
+
+- Updated the transaction building process to avoid using MASP conversions with
+  no rewards. ([\#4789](https://github.com/namada-net/namada/issues/4789))
+- Reworked SDK wrapping and signatures, including some breaking changes.
+  More specifically:
+  - The wrapper arguments have been extracted into a separate type and their
+    presence signals the need to wrap the tx
+  - The dump and dry-run arguments have been turned into enumerations
+  - The wrapper signer data has been removed from SigningTxData and moved into
+    SigningWrapperData
+  - Simplified the interface of aux_signing_data
+  - Removed redundant dispatcher functions
+  - Prevent casting from a wrapped to a raw transaction type
+  - Prevent submitting an unwrapped transaction
+  - Avoided passing the MASP internal address as a transaction's owner
+  - Updated the interface of build_batch
+  - Removed the owner for reveal_pk
+  ([\#4816](https://github.com/anoma/namada/pull/4816))
+
 ## libs-v0.251.1
 
 Namada libs v0.251.1 minor release.

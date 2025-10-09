@@ -62,48 +62,48 @@ keywords = ["blockchain", "privacy", "crypto", "protocol", "network"]
 license = "GPL-3.0"
 readme = "README.md"
 repository = "https://github.com/namada-net/namada"
-version = "0.251.1"
+version = "0.251.2"
 rust-version = "1.85" # MSRV
 
 [workspace.dependencies]
-namada_account = { version = "0.251.1", path = "crates/account" }
-namada_apps_lib = { version = "0.251.1", path = "crates/apps_lib" }
-namada_controller = { version = "0.251.1", path = "crates/controller" }
-namada_core = { version = "0.251.1", path = "crates/core" }
-namada_encoding_spec = { version = "0.251.1", path = "crates/encoding_spec" }
-namada_ethereum_bridge = { version = "0.251.1", path = "crates/ethereum_bridge" }
-namada_events = { version = "0.251.1", path = "crates/events" }
-namada_gas = { version = "0.251.1", path = "crates/gas" }
-namada_governance = { version = "0.251.1", path = "crates/governance" }
-namada_ibc = { version = "0.251.1", path = "crates/ibc" }
-namada_io = { version = "0.251.1", path = "crates/io" }
-namada_light_sdk = { version = "0.251.1", path = "crates/light_sdk" }
-namada_macros = { version = "0.251.1", path = "crates/macros" }
-namada_migrations = { version = "0.251.1", path = "crates/migrations" }
-namada_merkle_tree = { version = "0.251.1", path = "crates/merkle_tree" }
-namada_parameters = { version = "0.251.1", path = "crates/parameters" }
-namada_proof_of_stake = { version = "0.251.1", path = "crates/proof_of_stake" }
-namada_replay_protection = { version = "0.251.1", path = "crates/replay_protection" }
-namada_node = { version = "0.251.1", path = "crates/node" }
-namada_sdk = { version = "0.251.1", path = "crates/sdk", default-features = false }
-namada_shielded_token = { version = "0.251.1", path = "crates/shielded_token" }
-namada_state = { version = "0.251.1", path = "crates/state" }
-namada_storage = { version = "0.251.1", path = "crates/storage" }
-namada_systems = { version = "0.251.1", path = "crates/systems" }
-namada_test_utils = { version = "0.251.1", path = "crates/test_utils" }
-namada_tests = { version = "0.251.1", path = "crates/tests" }
-namada_token = { version = "0.251.1", path = "crates/token" }
-namada_trans_token = { version = "0.251.1", path = "crates/trans_token" }
-namada_tx = { version = "0.251.1", path = "crates/tx" }
-namada_tx_env = { version = "0.251.1", path = "crates/tx_env" }
-namada_tx_prelude = { version = "0.251.1", path = "crates/tx_prelude" }
-namada_vm = { version = "0.251.1", path = "crates/vm", default-features = false }
-namada_vm_env = { version = "0.251.1", path = "crates/vm_env" }
-namada_vote_ext = { version = "0.251.1", path = "crates/vote_ext" }
-namada_vp = { version = "0.251.1", path = "crates/vp" }
-namada_vp_env = { version = "0.251.1", path = "crates/vp_env" }
-namada_vp_prelude = { version = "0.251.1", path = "crates/vp_prelude" }
-namada_wallet = { version = "0.251.1", path = "crates/wallet" }
+namada_account = { version = "0.251.2", path = "crates/account" }
+namada_apps_lib = { version = "0.251.2", path = "crates/apps_lib" }
+namada_controller = { version = "0.251.2", path = "crates/controller" }
+namada_core = { version = "0.251.2", path = "crates/core" }
+namada_encoding_spec = { version = "0.251.2", path = "crates/encoding_spec" }
+namada_ethereum_bridge = { version = "0.251.2", path = "crates/ethereum_bridge" }
+namada_events = { version = "0.251.2", path = "crates/events" }
+namada_gas = { version = "0.251.2", path = "crates/gas" }
+namada_governance = { version = "0.251.2", path = "crates/governance" }
+namada_ibc = { version = "0.251.2", path = "crates/ibc" }
+namada_io = { version = "0.251.2", path = "crates/io" }
+namada_light_sdk = { version = "0.251.2", path = "crates/light_sdk" }
+namada_macros = { version = "0.251.2", path = "crates/macros" }
+namada_migrations = { version = "0.251.2", path = "crates/migrations" }
+namada_merkle_tree = { version = "0.251.2", path = "crates/merkle_tree" }
+namada_parameters = { version = "0.251.2", path = "crates/parameters" }
+namada_proof_of_stake = { version = "0.251.2", path = "crates/proof_of_stake" }
+namada_replay_protection = { version = "0.251.2", path = "crates/replay_protection" }
+namada_node = { version = "0.251.2", path = "crates/node" }
+namada_sdk = { version = "0.251.2", path = "crates/sdk", default-features = false }
+namada_shielded_token = { version = "0.251.2", path = "crates/shielded_token" }
+namada_state = { version = "0.251.2", path = "crates/state" }
+namada_storage = { version = "0.251.2", path = "crates/storage" }
+namada_systems = { version = "0.251.2", path = "crates/systems" }
+namada_test_utils = { version = "0.251.2", path = "crates/test_utils" }
+namada_tests = { version = "0.251.2", path = "crates/tests" }
+namada_token = { version = "0.251.2", path = "crates/token" }
+namada_trans_token = { version = "0.251.2", path = "crates/trans_token" }
+namada_tx = { version = "0.251.2", path = "crates/tx" }
+namada_tx_env = { version = "0.251.2", path = "crates/tx_env" }
+namada_tx_prelude = { version = "0.251.2", path = "crates/tx_prelude" }
+namada_vm = { version = "0.251.2", path = "crates/vm", default-features = false }
+namada_vm_env = { version = "0.251.2", path = "crates/vm_env" }
+namada_vote_ext = { version = "0.251.2", path = "crates/vote_ext" }
+namada_vp = { version = "0.251.2", path = "crates/vp" }
+namada_vp_env = { version = "0.251.2", path = "crates/vp_env" }
+namada_vp_prelude = { version = "0.251.2", path = "crates/vp_prelude" }
+namada_wallet = { version = "0.251.2", path = "crates/wallet" }
 
 arbitrary = {version = "1.4", features = ["derive"]}
 ark-bls12-381 = {version = "0.5"}

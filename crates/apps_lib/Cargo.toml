@@ -50,6 +50,7 @@ futures.workspace = true
 itertools.workspace = true
 jubjub.workspace = true
 kdam.workspace = true
+konst.workspace = true
 lazy_static = { workspace = true, optional = true }
 linkme = { workspace = true, optional = true }
 ledger-lib.workspace = true

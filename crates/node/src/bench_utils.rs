@@ -30,6 +30,7 @@ use namada_sdk::borsh::{
 };
 use namada_sdk::chain::testing::get_dummy_header;
 use namada_sdk::chain::{BlockHeight, ChainId, Epoch};
+use namada_sdk::dec::Dec;
 use namada_sdk::events::Event;
 use namada_sdk::events::extend::{ComposeEvent, InnerTxHash, TxHash};
 use namada_sdk::gas::TxGasMeter;
@@ -90,7 +91,11 @@ use namada_sdk::state::StorageRead;
 use namada_sdk::state::write_log::StorageModification;
 use namada_sdk::storage::{Key, KeySeg, TxIndex};
 use namada_sdk::time::DateTimeUtc;
-use namada_sdk::token::{self, Amount, DenominatedAmount, Transfer};
+use namada_sdk::token::storage_key::minted_balance_key;
+use namada_sdk::token::{
+    self, Amount, DenominatedAmount, NATIVE_MAX_DECIMAL_PLACES, ShieldedParams,
+    Transfer, get_effective_total_native_supply,
+};
 use namada_sdk::tx::data::pos::Bond;
 use namada_sdk::tx::data::{
     BatchedTxResult, Fee, TxResult, VpsResult, compute_inner_tx_hash,
@@ -300,6 +305,7 @@ impl BenchShellInner {
         self.state.in_mem_mut().block.epoch =
             self.state.in_mem().block.epoch.next();
         let current_epoch = self.state.in_mem().block.epoch;
+        self.state.in_mem_mut().last_epoch = current_epoch;
 
         proof_of_stake::validator_set_update::copy_validator_sets_and_positions(
             &mut self.state,
@@ -1132,6 +1138,39 @@ impl Client for BenchShell {
 impl Default for BenchShieldedCtx {
     fn default() -> Self {
         let shell = BenchShell::default();
+        let native_token = shell.read().state.get_native_token().unwrap();
+
+        // Updated MASP params to ensure we produce actual rewards for the
+        // native token
+        {
+            let token_params = ShieldedParams {
+                max_reward_rate: Dec::from_str("1").unwrap(),
+                kp_gain_nom: Dec::from_str("0.75").unwrap(),
+                kd_gain_nom: Dec::from_str("0.75").unwrap(),
+                locked_amount_target: u64::MAX,
+            };
+            let mut write_lock = shell.write();
+            let supply =
+                get_effective_total_native_supply(&write_lock.state).unwrap();
+            namada_sdk::token::write_params(
+                &Some(token_params),
+                &mut write_lock.inner.state,
+                &native_token,
+                &token::Denomination(NATIVE_MAX_DECIMAL_PLACES),
+            )
+            .unwrap();
+            // Reset the original supply of the native token which has been
+            // zeroed by the previous function
+            write_lock
+                .inner
+                .state
+                .write_log_mut()
+                .protocol_write(
+                    &minted_balance_key(&native_token),
+                    supply.serialize_to_vec(),
+                )
+                .unwrap();
+        }
 
         let mut chain_ctx = {
             let shell_read = shell.read();
@@ -1260,7 +1299,7 @@ impl BenchShieldedCtx {
             self.wallet,
             self.shielded.into(),
             StdIo,
-            native_token,
+            native_token.clone(),
         );
         let masp_transfer_data = MaspTransferData {
             sources: vec![(
@@ -1318,7 +1357,7 @@ impl BenchShieldedCtx {
                     .transfer(
                         source.effective_address(),
                         MASP,
-                        address::testing::nam(),
+                        native_token,
                         DenominatedAmount::native(amount),
                     )
                     .unwrap(),
@@ -1333,7 +1372,7 @@ impl BenchShieldedCtx {
                     .transfer(
                         MASP,
                         target.effective_address(),
-                        address::testing::nam(),
+                        native_token,
                         DenominatedAmount::native(amount),
                     )
                     .unwrap(),

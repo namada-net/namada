@@ -8,7 +8,7 @@ use masp_primitives::asset_type::AssetType;
 use masp_primitives::merkle_tree::{
     CommitmentTree, IncrementalWitness, MerklePath,
 };
-use masp_primitives::sapling::{Node, Note, Rseed, ViewingKey};
+use masp_primitives::sapling::{Node, Rseed, ViewingKey};
 use masp_primitives::transaction::Transaction;
 use masp_primitives::transaction::components::I128Sum;
 use masp_primitives::zip32::ExtendedFullViewingKey;
@@ -30,11 +30,11 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use super::utils::MaspIndexedTx;
 use crate::ShieldedWallet;
-use crate::masp::ShieldedUtils;
-use crate::masp::shielded_wallet::ShieldedQueries;
+use crate::masp::shielded_wallet::{CompactNote, ShieldedQueries};
 use crate::masp::utils::{
     IndexedNoteEntry, MaspClient, MaspClientCapabilities,
 };
+use crate::masp::{NotePosition, ShieldedUtils};
 
 /// A viewing key derived from A_SPENDING_KEY
 pub const AA_VIEWING_KEY: &str = "zvknam1qqqqqqqqqqqqqq9v0sls5r5de7njx8ehu49pqgmqr9ygelg87l5x8y4s9r0pjlvu6x74w9gjpw856zcu826qesdre628y6tjc26uhgj6d9zqur9l5u3p99d9ggc74ald6s8y3sdtka74qmheyqvdrasqpwyv2fsmxlz57lj4grm2pthzj3sflxc0jx0edrakx3vdcngrfjmru8ywkguru8mxss2uuqxdlglaz6undx5h8w7g70t2es850g48xzdkqay5qs0yw06rtxcpjdve6";
@@ -386,6 +386,8 @@ pub enum TestError {
 impl MaspClient for TestingMaspClient {
     type Error = TestError;
 
+    fn hint(&mut self, _from: BlockHeight, _to: BlockHeight) {}
+
     async fn last_block_height(
         &self,
     ) -> Result<Option<BlockHeight>, Self::Error> {
@@ -412,7 +414,7 @@ impl MaspClient for TestingMaspClient {
 
     #[inline(always)]
     fn capabilities(&self) -> MaspClientCapabilities {
-        MaspClientCapabilities::OnlyTransfers
+        MaspClientCapabilities::NONE
     }
 
     async fn fetch_commitment_tree(
@@ -427,7 +429,7 @@ impl MaspClient for TestingMaspClient {
     async fn fetch_note_index(
         &self,
         _: BlockHeight,
-    ) -> Result<BTreeMap<MaspIndexedTx, usize>, Self::Error> {
+    ) -> Result<BTreeMap<MaspIndexedTx, NotePosition>, Self::Error> {
         unimplemented!(
             "Transaction notes map fetching is not implemented by this client"
         )
@@ -436,7 +438,8 @@ impl MaspClient for TestingMaspClient {
     async fn fetch_witness_map(
         &self,
         _: BlockHeight,
-    ) -> Result<HashMap<usize, IncrementalWitness<Node>>, Self::Error> {
+    ) -> Result<HashMap<NotePosition, IncrementalWitness<Node>>, Self::Error>
+    {
         unimplemented!("Witness map fetching is not implemented by this client")
     }
 
@@ -465,25 +468,28 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> TestingContext<U> {
     }
 
     /// Add a note to a given viewing key
-    pub fn add_note(&mut self, note: Note, vk: ViewingKey) {
+    pub fn add_note(&mut self, note: CompactNote, vk: ViewingKey) {
         let next_note_idx = self
             .wallet
             .note_map
             .keys()
             .max()
-            .map(|ix| ix + 1)
+            .map(|ix| ix.checked_add(1).unwrap())
             .unwrap_or_default();
         self.wallet.note_map.insert(next_note_idx, note);
         let avail_notes = self.wallet.pos_map.entry(vk).or_default();
         avail_notes.insert(next_note_idx);
     }
 
-    pub fn spend_note(&mut self, note: &Note) {
+    pub fn spend_note(&mut self, note: &CompactNote) {
+        let other = note.into_note().unwrap();
         let idx = self
             .wallet
             .note_map
             .iter()
-            .find(|(_, v)| *v == note)
+            .find(|(_, compact_note)| {
+                compact_note.into_note().unwrap() == other
+            })
             .map(|(idx, _)| idx)
             .expect("Could find the note to spend in the note map");
         self.wallet.spents.insert(*idx);
@@ -675,11 +681,11 @@ pub fn create_note(
     asset_data: AssetData,
     value: u64,
     pa: PaymentAddress,
-) -> Note {
+) -> CompactNote {
     let payment_addr: masp_primitives::sapling::PaymentAddress = pa.into();
-    Note {
+    CompactNote {
         value,
-        g_d: payment_addr.g_d().unwrap(),
+        diversifier: *payment_addr.diversifier(),
         pk_d: *payment_addr.pk_d(),
         asset_type: asset_data.encode().unwrap(),
         rseed: Rseed::AfterZip212([0; 32]),

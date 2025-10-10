@@ -57,10 +57,9 @@ use crate::masp::bridge_tree::BridgeTree;
 use crate::masp::utils::MaspClient;
 use crate::masp::wallet_migrations::VersionedWalletRef;
 use crate::masp::{
-    ContextSyncStatus, Conversions, MaspAmount, MaspDataLogEntry, MaspFeeData,
-    MaspTransferData, MaspTxCombinedData, NETWORK, NoteIndex,
-    ShieldedSyncConfig, ShieldedTransfer, ShieldedUtils, SpentNotesTracker,
-    TransferErr, WalletMap,
+    Conversions, MaspAmount, MaspDataLogEntry, MaspFeeData, MaspTransferData,
+    MaspTxCombinedData, NETWORK, NoteIndex, ShieldedSyncConfig,
+    ShieldedTransfer, ShieldedUtils, SpentNotesTracker, TransferErr, WalletMap,
 };
 #[cfg(any(test, feature = "testing"))]
 use crate::masp::{ENV_VAR_MASP_TEST_SEED, testing};
@@ -311,8 +310,6 @@ pub struct ShieldedWallet<U: ShieldedUtils> {
     pub conversions: EpochedConversions,
     /// Maps a shielded tx to the index of its first output note.
     pub note_index: NoteIndex,
-    /// The sync state of the context
-    pub sync_status: ContextSyncStatus,
     /// Maps note positions to their corresponding viewing keys
     #[cfg(feature = "historic")]
     pub vk_map: HashMap<NotePosition, ViewingKey>,
@@ -341,7 +338,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
     /// Otherwise, we load the wallet and attempt to migrate it to the
     /// latest version. This function panics if that fails.
     pub async fn load(&mut self) {
-        self.utils.clone().load(self, false).await.unwrap()
+        self.utils.clone().load(self).await.unwrap()
     }
 
     /// Same as the load function, but is provided an async closure
@@ -352,26 +349,14 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
         F: Fn(std::io::Error) -> X,
         X: std::future::Future<Output = ()>,
     {
-        if let Err(e) = self.utils.clone().load(self, false).await {
+        if let Err(e) = self.utils.clone().load(self).await {
             on_error(e).await;
         }
     }
 
-    /// Try to load the last saved confirmed shielded context from the given
-    /// context directory.If the file is missing, an empty wallet is created.
-    /// Otherwise, we load the wallet and attempt to migrate it to the
-    /// latest version. This function panics if that fails.
-    pub async fn load_confirmed(&mut self) {
-        self.utils.clone().load(self, true).await.unwrap()
-    }
-
-    /// Save this shielded context into its associated context directory. If the
-    /// state to be saved is confirmed than also delete the speculative one (if
-    /// available)
+    /// Save this shielded context into its associated context directory.
     pub async fn save(&self) -> std::io::Result<()> {
-        self.utils
-            .save(VersionedWalletRef::V2(self), self.sync_status)
-            .await
+        self.utils.save(VersionedWalletRef::V2(self)).await
     }
 
     /// Update the merkle tree of witnesses the first time we
@@ -717,29 +702,6 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
                 *input -= comp;
             }
         }
-        Ok(())
-    }
-
-    /// Updates the internal state with the data of the newly generated
-    /// transaction. More specifically invalidate the spent notes, but do not
-    /// cache the newly produced output descriptions and therefore the merkle
-    /// tree (this is because we don't know the exact position in the tree where
-    /// the new notes will be appended)
-    pub async fn pre_cache_transaction(
-        &mut self,
-        masp_tx: &Transaction,
-    ) -> Result<(), eyre::Error> {
-        self.save_shielded_spends(
-            masp_tx,
-            true,
-            #[cfg(feature = "historic")]
-            None,
-        )?;
-
-        // Save the speculative state for future usage
-        self.sync_status = ContextSyncStatus::Speculative;
-        self.save().await.map_err(|e| eyre!(e.to_string()))?;
-
         Ok(())
     }
 }

@@ -18,6 +18,8 @@ pub enum VersionedWallet<U: ShieldedUtils> {
     V1(v1::ShieldedWallet<U>),
     /// Version 2
     V2(ShieldedWallet<U>),
+    // FIXME: need a new version without the sync state, also mention what the
+    // change was
 }
 
 impl<U: ShieldedUtils> VersionedWallet<U> {
@@ -301,7 +303,6 @@ pub mod v0 {
                     asset_types: wallet.asset_types,
                     conversions: Default::default(),
                     note_index: wallet.note_index,
-                    sync_status: wallet.sync_status,
                 }
             }
             #[cfg(feature = "historic")]
@@ -441,7 +442,6 @@ pub mod v1 {
                     asset_types: wallet.asset_types,
                     conversions: wallet.conversions,
                     note_index: wallet.note_index,
-                    sync_status: wallet.sync_status,
                 }
             }
             #[cfg(feature = "historic")]

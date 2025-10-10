@@ -126,7 +126,7 @@ pub async fn syncing<
         // for the shielded history. This is needed for integration
         // tests only as the cli wallet is not supposed to compile the
         // history of shielded transactions
-        shielded.load_confirmed().await;
+        shielded.load().await;
         let current_masp_epoch =
             namada_sdk::rpc::query_masp_epoch(&client).await?;
         let epochs: Vec<_> = MaspEpoch::iter_bounds_inclusive(

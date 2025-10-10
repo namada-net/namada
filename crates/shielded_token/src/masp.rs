@@ -228,14 +228,12 @@ pub trait ShieldedUtils:
     async fn load<U: ShieldedUtils + MaybeSend>(
         &self,
         ctx: &mut ShieldedWallet<U>,
-        force_confirmed: bool,
     ) -> std::io::Result<()>;
 
     /// Save the given ShieldedContext for future loads
     async fn save<'a, U: ShieldedUtils + MaybeSync>(
         &'a self,
         ctx: VersionedWalletRef<'a, U>,
-        sync_status: ContextSyncStatus,
     ) -> std::io::Result<()>;
 
     /// Save a cache of data as part of shielded sync if that
@@ -306,8 +304,13 @@ pub type NoteIndex = BTreeMap<MaspIndexedTx, NotePosition>;
 /// Maps the note index (in the commitment tree) to a witness
 pub type WitnessMap = HashMap<NotePosition, IncrementalWitness<Node>>;
 
+// FIXME: actually, we need this to deserialize the wallet from file, can we
+// avoid deserializing that field so that we can remove this type?
 #[derive(Copy, Clone, BorshSerialize, BorshDeserialize, Debug, Default)]
 /// The possible sync states of the shielded context
+/// WARNING: this is deprecated in favor of explicit calls to shielded-sync
+/// before MASP operations. Users of the SDK should do the same or construct a
+/// local cache akin to the speculative context on a use-case basis.
 pub enum ContextSyncStatus {
     /// The context contains data that has been confirmed by the protocol
     #[default]
@@ -983,8 +986,6 @@ pub mod fs {
     /// Shielded context file name
     const FILE_NAME: &str = "shielded.dat";
     const TMP_FILE_PREFIX: &str = "shielded.tmp";
-    const SPECULATIVE_FILE_NAME: &str = "speculative_shielded.dat";
-    const SPECULATIVE_TMP_FILE_PREFIX: &str = "speculative_shielded.tmp";
     const CACHE_FILE_NAME: &str = "shielded_sync.cache";
     const CACHE_FILE_TMP_PREFIX: &str = "shielded_sync.cache.tmp";
 
@@ -1024,21 +1025,9 @@ pub mod fs {
                 }
             }
             // Finally initialize a shielded context with the supplied directory
-
-            let sync_status =
-                if std::fs::read(context_dir.join(SPECULATIVE_FILE_NAME))
-                    .is_ok()
-                {
-                    // Load speculative state
-                    ContextSyncStatus::Speculative
-                } else {
-                    ContextSyncStatus::Confirmed
-                };
-
             let utils = Self { context_dir };
             ShieldedWallet {
                 utils,
-                sync_status,
                 ..Default::default()
             }
         }
@@ -1117,19 +1106,10 @@ pub mod fs {
         async fn load<U: ShieldedUtils + MaybeSend>(
             &self,
             ctx: &mut ShieldedWallet<U>,
-            force_confirmed: bool,
         ) -> std::io::Result<()> {
             // Try to load shielded context from file
-            let file_name = if force_confirmed {
-                FILE_NAME
-            } else {
-                match ctx.sync_status {
-                    ContextSyncStatus::Confirmed => FILE_NAME,
-                    ContextSyncStatus::Speculative => SPECULATIVE_FILE_NAME,
-                }
-            };
             let mut ctx_file =
-                match File::open(self.context_dir.join(file_name)) {
+                match File::open(self.context_dir.join(FILE_NAME)) {
                     Ok(file) => file,
                     Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                         // a missing file means there is nothing to load.
@@ -1157,33 +1137,18 @@ pub mod fs {
         }
 
         /// Save this confirmed shielded context into its associated context
-        /// directory. At the same time, delete the speculative file if present
+        /// directory.
         async fn save<'a, U: ShieldedUtils + MaybeSync>(
             &'a self,
             ctx: VersionedWalletRef<'a, U>,
-            sync_status: ContextSyncStatus,
         ) -> std::io::Result<()> {
-            let (tmp_file_pref, file_name) = match sync_status {
-                ContextSyncStatus::Confirmed => (TMP_FILE_PREFIX, FILE_NAME),
-                ContextSyncStatus::Speculative => {
-                    (SPECULATIVE_TMP_FILE_PREFIX, SPECULATIVE_FILE_NAME)
-                }
-            };
             let tmp_file_name = {
                 let t = tempfile::Builder::new()
-                    .prefix(tmp_file_pref)
+                    .prefix(TMP_FILE_PREFIX)
                     .tempfile()?;
                 t.path().file_name().unwrap().to_owned()
             };
-            self.atomic_file_write(tmp_file_name, file_name, ctx)?;
-
-            // Remove the speculative file if present since it's state is
-            // overruled by the confirmed one we just saved
-            if let ContextSyncStatus::Confirmed = sync_status {
-                let _ = std::fs::remove_file(
-                    self.context_dir.join(SPECULATIVE_FILE_NAME),
-                );
-            }
+            self.atomic_file_write(tmp_file_name, FILE_NAME, ctx)?;
 
             Ok(())
         }
@@ -1225,14 +1190,7 @@ pub mod fs {
                 utils,
                 ..Default::default()
             };
-            assert!(
-                shielded
-                    .utils
-                    .clone()
-                    .load(&mut shielded, false)
-                    .await
-                    .is_ok()
-            );
+            assert!(shielded.utils.clone().load(&mut shielded).await.is_ok());
         }
 
         /// Test that if the backing file isn't versioned but contains V0 data,
@@ -1266,7 +1224,7 @@ pub mod fs {
             shielded
                 .utils
                 .clone()
-                .load(&mut shielded, true)
+                .load(&mut shielded)
                 .await
                 .expect("Test failed");
             assert_eq!(shielded.spents, HashSet::from([NotePosition(42)]));
@@ -1304,7 +1262,7 @@ pub mod fs {
             shielded
                 .utils
                 .clone()
-                .load(&mut shielded, true)
+                .load(&mut shielded)
                 .await
                 .expect("Test failed");
             assert_eq!(shielded.spents, HashSet::from([NotePosition(42)]));
@@ -1333,14 +1291,7 @@ pub mod fs {
 
             std::fs::write(temp.path().join(FILE_NAME), &serialized)
                 .expect("Test failed");
-            assert!(
-                shielded
-                    .utils
-                    .clone()
-                    .load(&mut shielded, true)
-                    .await
-                    .is_err()
-            );
+            assert!(shielded.utils.clone().load(&mut shielded,).await.is_err());
         }
     }
 }

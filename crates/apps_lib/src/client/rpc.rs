@@ -3,7 +3,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 
-use color_eyre::owo_colors::OwoColorize;
 use data_encoding::HEXLOWER;
 use either::Either;
 use futures::StreamExt;
@@ -60,6 +59,7 @@ use namada_sdk::wallet::AddressVpType;
 use namada_sdk::{Namada, error, state as storage, token};
 
 use crate::cli::{self, args};
+use crate::client::masp::sync_shielded_context;
 use crate::tendermint::merkle::proof::ProofOps;
 
 /// Query the status of a given transaction.
@@ -428,6 +428,17 @@ pub async fn query_rewards_estimate(
         edisplay_line!(context.io(), "Failed to load shielded context: {}", e);
         cli::safe_exit(1);
     }
+    // Sync the shielded context before estimating the rewards
+    if let Err(e) =
+        sync_shielded_context(args.query.ledger_address, &mut *shielded).await
+    {
+        edisplay_line!(
+            context.io(),
+            "Failed to sync the shielded context: {}",
+            e
+        );
+        cli::safe_exit(1);
+    }
     let raw_balance = match shielded
         .compute_shielded_balance(&args.owner.as_viewing_key())
         .await
@@ -476,16 +487,9 @@ async fn query_shielded_balance(
     context: &impl Namada,
     args: args::QueryBalance,
 ) {
-    display_line!(
-        context.io(),
-        "{}: {}\n",
-        "WARNING".bold().underline().yellow(),
-        "The resulting balance could be outdated, make sure to run `namadac \
-         shielded-sync` before querying the balance to get the most recent \
-         value."
-    );
-
     let args::QueryBalance {
+        // Need the ledger address for sync purposes
+        query,
         // Token owner (needs to be a viewing key)
         owner,
         // The token to query
@@ -537,6 +541,18 @@ async fn query_shielded_balance(
     let no_balance = || {
         display_line!(context.io(), "{token_alias}: 0");
     };
+
+    // Sync the shielded context before computing the balance
+    if let Err(e) =
+        sync_shielded_context(query.ledger_address, &mut *shielded).await
+    {
+        edisplay_line!(
+            context.io(),
+            "Failed to sync the shielded context: {}",
+            e
+        );
+        cli::safe_exit(1);
+    }
 
     let balance = if no_conversions || token != context.native_token() {
         let Some(bal) = shielded

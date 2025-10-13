@@ -419,7 +419,7 @@ impl CliApi {
                         );
 
                         crate::client::masp::syncing(
-                            ShieldedContext::new(chain_ctx.shielded),
+                            &mut ShieldedContext::new(chain_ctx.shielded),
                             client,
                             args,
                             &io,

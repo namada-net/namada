@@ -1243,9 +1243,9 @@ impl BenchShieldedCtx {
             spending_key,
             self.wallet.find_birthday(ALBERT_SPENDING_KEY).copied(),
         );
-        self.shielded = async_runtime
+        async_runtime
             .block_on(namada_apps_lib::client::masp::syncing(
-                self.shielded,
+                &mut self.shielded,
                 self.shell.clone(),
                 ShieldedSync {
                     ledger_address: FromStr::from_str("http://127.0.0.1:1337")

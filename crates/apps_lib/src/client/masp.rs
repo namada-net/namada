@@ -13,6 +13,9 @@ use namada_sdk::masp::{
     IndexerMaspClient, LedgerMaspClient, LinearBackoffSleepMaspClient,
     MaspLocalTaskEnv, ShieldedContext, ShieldedSyncConfig, ShieldedUtils,
 };
+use tendermint_rpc::HttpClient;
+
+use crate::cli::api::{CliClient, CliIo};
 
 const MASP_INDEXER_CLIENT_USER_AGENT: &str = {
     const TOKENS: &[&str] =
@@ -26,11 +29,11 @@ pub async fn syncing<
     C: Client + Send + Sync + 'static,
     IO: Io + Send + Sync,
 >(
-    mut shielded: ShieldedContext<U>,
+    shielded: &mut ShieldedContext<U>,
     client: C,
     args: ShieldedSync,
     io: &IO,
-) -> Result<ShieldedContext<U>, Error> {
+) -> Result<(), Error> {
     let (fetched_bar, scanned_bar, applied_bar) = {
         #[cfg(any(test, feature = "testing"))]
         {
@@ -97,7 +100,7 @@ pub async fn syncing<
 
             let env = MaspLocalTaskEnv::new(500)
                 .map_err(|e| Error::Other(e.to_string()))?;
-            let ctx = shielded
+            let res = shielded
                 .sync(
                     env,
                     config,
@@ -106,12 +109,11 @@ pub async fn syncing<
                     &vks,
                 )
                 .await
-                .map(|_| shielded)
                 .map_err(|e| Error::Other(e.to_string()));
 
             display!(io, "\nSyncing finished\n");
 
-            ctx
+            res
         }};
     }
 
@@ -163,7 +165,7 @@ pub async fn syncing<
             .map_err(|e| Error::Other(e.to_string()))?;
     }
 
-    let shielded = if let Some(endpoint) = args.with_indexer {
+    if let Some(endpoint) = args.with_indexer {
         display_line!(
             io,
             "{}\n",
@@ -203,7 +205,31 @@ pub async fn syncing<
             LedgerMaspClient::new(client, args.max_concurrent_fetches,),
             Duration::from_millis(5)
         ))?
+    }
+
+    Ok(())
+}
+
+// FIXME: rename?
+pub async fn sync_shielded_context<U: ShieldedUtils>(
+    ledger_address: tendermint_rpc::Url,
+    shielded_ctx: &mut ShieldedContext<U>,
+) -> Result<(), Error> {
+    let sync_client = HttpClient::from_tendermint_address(&ledger_address);
+    // FIXME: review these args
+    let sync_args = namada_sdk::args::ShieldedSync {
+        ledger_address,
+        last_query_height: None,
+        spending_keys: vec![],
+        viewing_keys: vec![],
+        with_indexer: None,
+        wait_for_last_query_height: false,
+        max_concurrent_fetches: 100,
+        block_batch_size: 10,
+        retry_strategy: namada_sdk::masp::utils::RetryStrategy::Forever,
     };
 
-    Ok(shielded)
+    // FIXME: is CliIo correct?
+    crate::client::masp::syncing(shielded_ctx, sync_client, sync_args, &CliIo)
+        .await
 }

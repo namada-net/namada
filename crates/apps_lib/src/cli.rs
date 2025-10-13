@@ -1912,11 +1912,11 @@ pub mod cmds {
         }
 
         fn def() -> App {
+            // FIXME: remove the cli shielded-sync command
             App::new(Self::CMD)
                 .about(wrap!(
                     "Estimate the amount of MASP rewards for the \
-                     next MASP epoch. Please run shielded-sync first for best \
-                     results."
+                     next MASP epoch." 
                 ))
                 .add_args::<args::QueryShieldingRewardsEstimate<args::CliTypes>>()
         }

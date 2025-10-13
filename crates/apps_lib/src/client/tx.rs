@@ -35,6 +35,7 @@ use namada_sdk::{ExtendedViewingKey, Namada, error, signing, tx};
 use rand::rngs::OsRng;
 use tokio::sync::RwLock;
 
+use super::masp::sync_shielded_context;
 use super::rpc;
 use crate::cli::{args, safe_exit};
 use crate::client::tx::signing::{SigningTxData, default_sign};
@@ -1209,15 +1210,6 @@ pub async fn submit_shielded_transfer(
     namada: &impl Namada,
     mut args: args::TxShieldedTransfer,
 ) -> Result<(), error::Error> {
-    display_line!(
-        namada.io(),
-        "{}: {}\n",
-        "WARNING".bold().underline().yellow(),
-        "Some information might be leaked if your shielded wallet is not up \
-         to date, make sure to run `namadac shielded-sync` before running \
-         this command.",
-    );
-
     let sources = args
         .sources
         .iter_mut()
@@ -1232,6 +1224,14 @@ pub async fn submit_shielded_transfer(
         &args.tx,
     )
     .await?;
+
+    // Sync the shielded context before building the transaction
+    sync_shielded_context(
+        args.tx.ledger_address.clone(),
+        &mut *namada.shielded_mut().await,
+    )
+    .await?;
+
     let (mut tx, signing_data) =
         args.clone().build(namada, &mut bparams).await?;
     let disposable_fee_payer = match signing_data {
@@ -1284,7 +1284,6 @@ pub async fn submit_shielded_transfer(
     }
     Ok(())
 }
-// FIXME: add calls to shielded sync
 
 pub async fn submit_shielding_transfer(
     namada: &impl Namada,
@@ -1373,15 +1372,6 @@ pub async fn submit_unshielding_transfer(
     namada: &impl Namada,
     mut args: args::TxUnshieldingTransfer,
 ) -> Result<(), error::Error> {
-    display_line!(
-        namada.io(),
-        "{}: {}\n",
-        "WARNING".bold().underline().yellow(),
-        "Some information might be leaked if your shielded wallet is not up \
-         to date, make sure to run `namadac shielded-sync` before running \
-         this command.",
-    );
-
     let sources = args
         .sources
         .iter_mut()
@@ -1396,6 +1386,14 @@ pub async fn submit_unshielding_transfer(
         &args.tx,
     )
     .await?;
+
+    // Sync the shielded context before building the transaction
+    sync_shielded_context(
+        args.tx.ledger_address.clone(),
+        &mut *namada.shielded_mut().await,
+    )
+    .await?;
+
     let (mut tx, signing_data) =
         args.clone().build(namada, &mut bparams).await?;
     let disposable_fee_payer = match signing_data {
@@ -1463,6 +1461,7 @@ where
         .chain(args.gas_spending_key.iter_mut());
     let shielded_hw_keys =
         augment_masp_hardware_keys(namada, &args.tx, sources).await?;
+    // FIXME: don't we need this only if masp is involved?
     // Try to generate MASP build parameters. This might fail when using a
     // hardware wallet if it does not support MASP operations.
     let bparams_result = generate_masp_build_params(
@@ -1478,6 +1477,15 @@ where
         |e| (Box::new(StoredBuildParams::default()) as _, Some(e)),
         |bparams| (bparams, None),
     );
+
+    // If the ibc sources are MASP, sync the shielded context before building
+    // the transaction FIXME: only if source is masp
+    sync_shielded_context(
+        args.tx.ledger_address.clone(),
+        &mut *namada.shielded_mut().await,
+    )
+    .await?;
+
     // If transaction building fails for any reason, then abort the process
     // blaming MASP build parameter generation if that had also failed.
     let (mut tx, signing_data, _) = args

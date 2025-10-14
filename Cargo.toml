@@ -190,8 +190,8 @@ libfuzzer-sys = "0.4"
 libloading = "0.8"
 linkme = "0.3"
 madato = "0.7"
-masp_primitives = "3.0.8"
-masp_proofs = { version = "3.0.8", default-features = false, features = ["local-prover"] }
+masp_primitives = "3.0.9"
+masp_proofs = { version = "3.0.9", default-features = false, features = ["local-prover"] }
 num256 = "0.6"
 num_cpus = "1.13"
 num_enum = "0.7"

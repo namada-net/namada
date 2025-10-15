@@ -56,6 +56,7 @@ pub use crate::masp::shielded_sync::{
 pub use crate::masp::wallet_migrations::{
     VersionedWallet, VersionedWalletRef, v0,
 };
+#[cfg(feature = "masp-validation")]
 pub use crate::validation::{
     CONVERT_NAME, ENV_VAR_MASP_PARAMS_DIR, OUTPUT_NAME, PVKs, SPEND_NAME,
     partial_deauthorize, preload_verifying_keys,
@@ -326,6 +327,7 @@ mod tests {
     /// quick and dirty test. will fail on size check
     #[test]
     #[should_panic(expected = "parameter file size is not correct")]
+    #[cfg(feature = "masp-validation")]
     fn test_wrong_masp_params() {
         use std::io::Write;
 
@@ -358,6 +360,7 @@ mod tests {
     /// size but the wrong hash.
     #[test]
     #[should_panic(expected = "parameter file is not correct")]
+    #[cfg(feature = "masp-validation")]
     fn test_wrong_masp_params_hash() {
         use masp_primitives::ff::PrimeField;
         use masp_proofs::bellman::groth16::{
@@ -962,7 +965,7 @@ pub mod testing {
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "masp-validation"))]
 /// Implementation of MASP functionality depending on a standard filesystem
 pub mod fs {
     use std::env;

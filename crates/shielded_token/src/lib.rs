@@ -24,7 +24,9 @@ pub mod masp;
 mod storage;
 pub mod storage_key;
 pub mod utils;
+#[cfg(feature = "masp-validation")]
 pub mod validation;
+#[cfg(feature = "masp-validation")]
 pub mod vp;
 
 use std::str::FromStr;

@@ -26,8 +26,7 @@ async-send = ["namada_io/async-send"]
 namada-eth-bridge = ["namada_ethereum_bridge/namada-eth-bridge"]
 benches = ["namada_core/benches", "namada_core/testing", "namada_state/benches"]
 wasm-runtime = ["namada_vm/wasm-runtime"]
-masp = ["namada_core/task_env", "namada_core/control_flow", "namada_token/masp"]
-historic-masp = ["masp", "namada_token/historic-masp"]
+historic-masp = ["namada_token/historic-masp"]
 # for tests and test utilities
 testing = [
   "masp_primitives/test-dependencies",
@@ -86,7 +85,7 @@ namada_parameters.workspace = true
 namada_proof_of_stake.workspace = true
 namada_state.workspace = true
 namada_storage.workspace = true
-namada_token = { workspace = true, features = ["masp"] }
+namada_token = { workspace = true, features = ["masp", "masp-validation"] }
 namada_tx.workspace = true
 namada_vm = { workspace = true, default-features = false }
 namada_vote_ext.workspace = true

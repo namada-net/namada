@@ -89,6 +89,20 @@ Namada v1.0.0 is the first stable release of the Namada apps.
 - updated namada libraries to libs-v0.46.1
   ([\#4123](https://github.com/anoma/namada/pull/4123))
 
+## libs-v0.251.3
+
+Namada libs v0.251.3
+
+### BUG FIXES
+
+- Update MASP crates to version 3.0.9, in order to fix wasm threading issues in
+  Namadillo. ([\#4930](https://github.com/namada-net/namada/pull/4930))
+
+### SDK
+
+- Updated `build_batch` to support building raw batches.
+  ([\#4929](https://github.com/namada-net/namada/pull/4929))
+
 ## libs-v0.251.2
 
 Namada libs v0.251.2

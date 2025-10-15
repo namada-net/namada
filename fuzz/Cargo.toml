@@ -1,6 +1,6 @@
 [package]
 name = "namada_fuzz"
-version = "0.251.2"
+version = "0.251.3"
 publish = false
 edition = "2024"
 license = "GPL-3.0-or-later"

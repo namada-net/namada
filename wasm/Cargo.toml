@@ -32,7 +32,7 @@ members = [
 authors = ["Heliax AG <hello@heliax.dev>"]
 edition = "2024"
 license = "GPL-3.0"
-version = "0.251.2"
+version = "0.251.3"
 
 [workspace.dependencies]
 namada_tx_prelude = { path = "../crates/tx_prelude" }

@@ -44,19 +44,18 @@ impl<N> GasMeter<N> {
     /// Get the inner wasm gas meter.
     #[cfg(feature = "wasm-runtime")]
     pub fn wasm(&self) -> Option<&WasmGasMeter> {
-        if let Self::Wasm(meter) = self {
-            Some(meter)
-        } else {
-            None
+        match self {
+            Self::Wasm(meter) => Some(meter),
+            Self::Native(_) => None,
         }
     }
 
     /// Get the inner native gas meter.
     pub fn native(&self) -> Option<&N> {
-        if let Self::Native(meter) = self {
-            Some(meter)
-        } else {
-            None
+        match self {
+            Self::Native(meter) => Some(meter),
+            #[cfg(feature = "wasm-runtime")]
+            Self::Wasm(_) => None,
         }
     }
 }

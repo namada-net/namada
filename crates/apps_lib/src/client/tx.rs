@@ -256,13 +256,30 @@ where
         let (mut batched_tx, batched_signing_data) =
             namada_sdk::tx::build_batch(batched_tx_data)?;
         // Sign the batch with the union of the signers required for each part
-        sign(
-            namada,
-            &mut batched_tx,
-            args,
-            SigningData::Wrapper(batched_signing_data),
-        )
-        .await?;
+        match batched_signing_data {
+            either::Either::Left(wrapper_sig_data) => {
+                sign(
+                    namada,
+                    &mut batched_tx,
+                    args,
+                    SigningData::Wrapper(wrapper_sig_data),
+                )
+                .await?;
+            }
+            either::Either::Right(sig_data_collection) => {
+                // In this case we need to loop on all the signing data and
+                // produce a signature for each one
+                for sig_data in sig_data_collection {
+                    sign(
+                        namada,
+                        &mut batched_tx,
+                        args,
+                        SigningData::Inner(sig_data),
+                    )
+                    .await?;
+                }
+            }
+        }
         // Then finally submit everything in one go
         namada.submit(batched_tx, args).await
     }

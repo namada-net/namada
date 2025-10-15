@@ -3259,38 +3259,33 @@ async fn used_asset_types<P, K, N>(
     Ok(asset_types)
 }
 
-/// Constructs the wrapped batched tx from the provided list. Returns the batch
-/// and the data for signing.
+/// Constructs the batched tx from the provided list. Returns the batch and the
+/// data for signing.
 ///
 /// # Arguments
 ///
 /// * `txs` - The list of transactions for the batch. The first transaction in
-///   the list must be the wrapper transaction that will be used as the first
-///   transaction of the batch and whose `Header` will be used as the whole
-///   batche's header. If MASP fee payment is required that should be included
-///   in this first transaction. The remaining ones are supposed to be raw
-///   transactions. They can also be wrapped but in that case their wrapper data
-///   will simply be discarded
+///   the list can be either a wrapper transaction or a raw one. In the former
+///   case, its `Header` will be used as the whole batche's header. If MASP fee
+///   payment is required that should be included in this first transaction. The
+///   remaining transactions are supposed to be raw transactions. They can also
+///   be wrapped but in this case their wrapper data will be silently discarded
 pub fn build_batch(
     mut txs: Vec<(Tx, SigningData)>,
-) -> Result<(Tx, SigningWrapperData)> {
+) -> Result<(Tx, either::Either<SigningWrapperData, Vec<SigningTxData>>)> {
     if txs.is_empty() {
         return Err(Error::Other(
             "No transactions provided for the batch".to_string(),
         ));
     }
     let (mut batched_tx, signing_data) = txs.remove(0);
-    if batched_tx.header.wrapper().is_none() {
-        return Err(Error::Other(
-            "The first transaction of the list is expected to be wrapped"
-                .to_string(),
-        ));
-    }
-    let SigningData::Wrapper(mut signing_wrapper_data) = signing_data else {
-        return Err(Error::Other(
-            "The first signing data of the list is missing fee authorization"
-                .to_string(),
-        ));
+    let mut signing_batch_data = match signing_data {
+        SigningData::Wrapper(signing_wrapper_data) => {
+            either::Left(signing_wrapper_data)
+        }
+        SigningData::Inner(signing_tx_data) => {
+            either::Right(vec![signing_tx_data])
+        }
     };
 
     for (tx, sig_data) in txs {
@@ -3302,15 +3297,24 @@ pub fn build_batch(
         })?;
         // Avoid redundant signing data
         for signing_tx_data in sig_data.signing_tx_data() {
-            if !signing_wrapper_data.signing_data.contains(signing_tx_data) {
-                signing_wrapper_data
-                    .signing_data
-                    .push(signing_tx_data.to_owned());
+            match &mut signing_batch_data {
+                either::Either::Left(wrapper_data) => {
+                    if !wrapper_data.signing_data.contains(signing_tx_data) {
+                        wrapper_data
+                            .signing_data
+                            .push(signing_tx_data.to_owned());
+                    }
+                }
+                either::Either::Right(sig_data) => {
+                    if !sig_data.contains(signing_tx_data) {
+                        sig_data.push(signing_tx_data.to_owned());
+                    }
+                }
             }
         }
     }
 
-    Ok((batched_tx, signing_wrapper_data))
+    Ok((batched_tx, signing_batch_data))
 }
 
 /// Build a transparent transfer

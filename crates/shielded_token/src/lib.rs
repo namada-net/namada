@@ -29,20 +29,57 @@ pub mod validation;
 #[cfg(feature = "masp-validation")]
 pub mod vp;
 
+use std::marker::PhantomData;
 use std::str::FromStr;
 
 use namada_core::borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
 pub use namada_core::dec::Dec;
 pub use namada_core::masp::{MaspEpoch, MaspTransaction, MaspTxId, MaspValue};
+use namada_core::masp_primitives::merkle_tree::CommitmentTree;
+use namada_core::masp_primitives::sapling::Node as SaplingNode;
 pub use namada_state::{
     ConversionLeaf, ConversionState, Error, Key, OptionExt, Result, ResultExt,
     StorageRead, StorageWrite, WithConversionState,
 };
+use namada_systems::shielded_token as shielded_token_sys;
 use serde::{Deserialize, Serialize};
 pub use storage::*;
 
 #[cfg(feature = "masp")]
 pub use crate::masp::shielded_wallet::ShieldedWallet;
+
+/// Shielded token storage `Read/Write` implementation
+#[derive(Debug)]
+pub struct ShieldedStore<S>(PhantomData<S>);
+
+impl<S: StorageRead> shielded_token_sys::Read<S> for ShieldedStore<S> {
+    fn read_commitment_tree(
+        storage: &S,
+    ) -> Result<CommitmentTree<SaplingNode>> {
+        use crate::storage_key::masp_commitment_tree_key;
+
+        let tree_key = masp_commitment_tree_key();
+        let commitment_tree: CommitmentTree<SaplingNode> = storage
+            .read(&tree_key)?
+            .unwrap_or_else(CommitmentTree::empty);
+
+        Ok(commitment_tree)
+    }
+}
+
+impl<S: StorageRead + StorageWrite> shielded_token_sys::Write<S>
+    for ShieldedStore<S>
+{
+    fn write_commitment_tree(
+        storage: &mut S,
+        commitment_tree: CommitmentTree<SaplingNode>,
+    ) -> Result<()> {
+        use crate::storage_key::masp_commitment_tree_key;
+
+        let tree_key = masp_commitment_tree_key();
+        storage.write(&tree_key, commitment_tree)
+    }
+}
 
 /// Token parameters for each kind of asset held on chain
 #[derive(

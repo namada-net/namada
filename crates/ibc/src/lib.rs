@@ -690,18 +690,17 @@ where
                 );
                 // Add the source to the set of verifiers
                 self.verifiers.borrow_mut().insert(
-                    Address::from_str(msg.message.packet_data.sender.as_ref())
-                        .map_err(|_| {
-                            Error::TokenTransfer(
-                                HostError::Other {
-                                    description: format!(
-                                        "Cannot convert the sender address {}",
-                                        msg.message.packet_data.sender
-                                    ),
-                                }
-                                .into(),
-                            )
-                        })?,
+                    match msg
+                        .message
+                        .packet_data
+                        .sender
+                        .as_ref()
+                        .parse::<IbcAccountId>()
+                        .map_err(|err| Error::TokenTransfer(err.into()))?
+                    {
+                        IbcAccountId::Transparent(addr) => addr,
+                        IbcAccountId::Shielded(_) => address::MASP,
+                    },
                 );
                 if msg.transfer.is_some() {
                     token_transfer_ctx.enable_shielded_transfer();
@@ -731,18 +730,17 @@ where
                 }
                 // Add the source to the set of verifiers
                 self.verifiers.borrow_mut().insert(
-                    Address::from_str(msg.message.packet_data.sender.as_ref())
-                        .map_err(|_| {
-                            Error::NftTransfer(
-                                HostError::Other {
-                                    description: format!(
-                                        "Cannot convert the sender address {}",
-                                        msg.message.packet_data.sender
-                                    ),
-                                }
-                                .into(),
-                            )
-                        })?,
+                    match msg
+                        .message
+                        .packet_data
+                        .sender
+                        .as_ref()
+                        .parse::<IbcAccountId>()
+                        .map_err(|err| Error::TokenTransfer(err.into()))?
+                    {
+                        IbcAccountId::Transparent(addr) => addr,
+                        IbcAccountId::Shielded(_) => address::MASP,
+                    },
                 );
                 // Record the tokens credited/debited in this NFT transfer
                 let tokens = msg
@@ -777,12 +775,14 @@ where
                 if let Some(verifier) = get_envelope_verifier(envelope.as_ref())
                 {
                     self.verifiers.borrow_mut().insert(
-                        Address::from_str(verifier.as_ref()).map_err(|_| {
-                            Error::Other(format!(
-                                "Cannot convert the address {}",
-                                verifier,
-                            ))
-                        })?,
+                        match verifier
+                            .as_ref()
+                            .parse::<IbcAccountId>()
+                            .map_err(|err| Error::TokenTransfer(err.into()))?
+                        {
+                            IbcAccountId::Transparent(addr) => addr,
+                            IbcAccountId::Shielded(_) => address::MASP,
+                        },
                     );
                 }
                 execute(&mut self.ctx, &mut self.router, *envelope.clone())

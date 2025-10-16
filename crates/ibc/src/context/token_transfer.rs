@@ -26,7 +26,7 @@ where
 {
     pub(crate) inner: Rc<RefCell<C>>,
     pub(crate) verifiers: Rc<RefCell<BTreeSet<Address>>>,
-    is_shielded: bool,
+    has_masp_tx: bool,
 }
 
 impl<C> TokenTransferContext<C>
@@ -41,7 +41,7 @@ where
         Self {
             inner,
             verifiers,
-            is_shielded: false,
+            has_masp_tx: false,
         }
     }
 
@@ -52,7 +52,7 @@ where
 
     /// Set to enable a shielded transfer
     pub fn enable_shielded_transfer(&mut self) {
-        self.is_shielded = true;
+        self.has_masp_tx = true;
     }
 
     fn validate_sent_coin(&self, coin: &PrefixedCoin) -> Result<(), HostError> {
@@ -286,7 +286,7 @@ where
             self.insert_verifier(&ibc_token);
         }
 
-        let from_account = if self.is_shielded {
+        let from_account = if self.has_masp_tx {
             &MASP
         } else {
             from_account
@@ -366,7 +366,7 @@ where
             self.insert_verifier(&ibc_token);
         }
 
-        let account = if self.is_shielded { &MASP } else { account };
+        let account = if self.has_masp_tx { &MASP } else { account };
 
         // The burn is "unminting" from the minted balance
         self.inner

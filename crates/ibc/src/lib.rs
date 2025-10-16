@@ -30,6 +30,7 @@ pub mod vp;
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -92,7 +93,7 @@ use namada_core::ibc::core::channel::types::commitment::{
     AcknowledgementCommitment, PacketCommitment, compute_packet_commitment,
 };
 pub use namada_core::ibc::*;
-use namada_core::masp::{TAddrData, addr_taddr, ibc_taddr};
+use namada_core::masp::{PaymentAddress, TAddrData, addr_taddr, ibc_taddr};
 use namada_core::masp_primitives::transaction::components::ValueSum;
 use namada_core::token::Amount;
 use namada_events::EmitEvents;
@@ -353,6 +354,57 @@ where
             }
         }
         Ok(accum)
+    }
+}
+
+/// Account id for IBC transfers.
+#[derive(Debug)]
+pub enum IbcAccountId {
+    /// Transparent account.
+    Transparent(Address),
+    /// Shielded account.
+    Shielded(PaymentAddress),
+}
+
+impl FromStr for IbcAccountId {
+    type Err = HostError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match () {
+            // assume we have a transparent addr
+            _ if s.starts_with('t') => {
+                Ok(IbcAccountId::Transparent(s.parse().map_err(|err| {
+                    HostError::Other {
+                        description: format!(
+                            "Failed to parse IBC transparent address {s:?}: \
+                             {err}"
+                        ),
+                    }
+                })?))
+            }
+            // assume we have a shielded addr
+            _ if s.starts_with('z') => {
+                Ok(IbcAccountId::Shielded(s.parse().map_err(|err| {
+                    HostError::Other {
+                        description: format!(
+                            "Failed to parse IBC shielded address {s:?}: {err}"
+                        ),
+                    }
+                })?))
+            }
+            _ => Err(HostError::Other {
+                description: format!("Unknown IBC address {s:?}"),
+            }),
+        }
+    }
+}
+
+impl fmt::Display for IbcAccountId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Transparent(addr) => write!(f, "{addr}"),
+            Self::Shielded(addr) => write!(f, "{addr}"),
+        }
     }
 }
 

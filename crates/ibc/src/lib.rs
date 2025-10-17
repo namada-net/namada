@@ -637,21 +637,23 @@ pub struct InternalData<Transfer> {
 
 /// IBC actions to handle IBC operations
 #[derive(Debug)]
-pub struct IbcActions<'a, C, Params, Token>
+pub struct IbcActions<'a, C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
 {
     ctx: IbcContext<C, Params>,
     router: IbcRouter<'a>,
     verifiers: Rc<RefCell<BTreeSet<Address>>>,
-    _marker: PhantomData<Token>,
+    _marker: PhantomData<(Token, ShieldedToken)>,
 }
 
-impl<'a, C, Params, Token> IbcActions<'a, C, Params, Token>
+impl<'a, C, Params, Token, ShieldedToken>
+    IbcActions<'a, C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
     Params: namada_systems::parameters::Read<C::Storage>,
     Token: trans_token::Keys,
+    ShieldedToken: namada_systems::shielded_token::Write<C::Storage>,
 {
     /// Make new IBC actions
     pub fn new(
@@ -684,10 +686,11 @@ where
         let message = decode_message::<Transfer>(tx_data)?;
         let result = match message {
             IbcMessage::Transfer(msg) => {
-                let mut token_transfer_ctx = TokenTransferContext::new(
-                    self.ctx.inner.clone(),
-                    self.verifiers.clone(),
-                );
+                let mut token_transfer_ctx =
+                    TokenTransferContext::<_, ShieldedToken>::new(
+                        self.ctx.inner.clone(),
+                        self.verifiers.clone(),
+                    );
                 // Add the source to the set of verifiers
                 self.verifiers.borrow_mut().insert(
                     match msg
@@ -871,10 +874,11 @@ where
         let message = decode_message::<Transfer>(tx_data)?;
         let result = match message {
             IbcMessage::Transfer(msg) => {
-                let mut token_transfer_ctx = TokenTransferContext::new(
-                    self.ctx.inner.clone(),
-                    verifiers.clone(),
-                );
+                let mut token_transfer_ctx =
+                    TokenTransferContext::<_, ShieldedToken>::new(
+                        self.ctx.inner.clone(),
+                        verifiers.clone(),
+                    );
                 if msg.transfer.is_some() {
                     token_transfer_ctx.enable_shielded_transfer();
                 }

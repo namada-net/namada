@@ -1745,17 +1745,19 @@ fn ibc_vp_validate_action(c: &mut Criterion) {
 
         let exec_ctx = IbcVpContext::new(ibc.ctx.pre());
         let ctx = Rc::new(RefCell::new(exec_ctx));
-        let mut actions =
-            IbcActions::<_, parameters::Store<_>, token::Store<()>>::new(
-                ctx.clone(),
-                verifiers.clone(),
-            );
+        let mut actions = IbcActions::<
+            _,
+            parameters::Store<_>,
+            token::Store<()>,
+            token::ShieldedStore<_>,
+        >::new(ctx.clone(), verifiers.clone());
         actions.set_validation_params(ibc.validation_params().unwrap());
 
-        let module = create_transfer_middlewares::<_, parameters::Store<_>>(
-            ctx.clone(),
-            verifiers,
-        );
+        let module = create_transfer_middlewares::<
+            _,
+            parameters::Store<_>,
+            token::ShieldedStore<_>,
+        >(ctx.clone(), verifiers);
         actions.add_transfer_module(module);
         let module = NftTransferModule::<_, token::Store<()>>::new(ctx);
         actions.add_transfer_module(module);
@@ -1810,17 +1812,19 @@ fn ibc_vp_execute_action(c: &mut Criterion) {
         let exec_ctx = IbcVpContext::new(ibc.ctx.pre());
         let ctx = Rc::new(RefCell::new(exec_ctx));
 
-        let mut actions =
-            IbcActions::<_, parameters::Store<_>, token::Store<()>>::new(
-                ctx.clone(),
-                verifiers.clone(),
-            );
+        let mut actions = IbcActions::<
+            _,
+            parameters::Store<_>,
+            token::Store<()>,
+            token::ShieldedStore<_>,
+        >::new(ctx.clone(), verifiers.clone());
         actions.set_validation_params(ibc.validation_params().unwrap());
 
-        let module = create_transfer_middlewares::<_, parameters::Store<_>>(
-            ctx.clone(),
-            verifiers,
-        );
+        let module = create_transfer_middlewares::<
+            _,
+            parameters::Store<_>,
+            token::ShieldedStore<_>,
+        >(ctx.clone(), verifiers);
         actions.add_transfer_module(module);
         let module = NftTransferModule::<_, token::Store<()>>::new(ctx);
         actions.add_transfer_module(module);

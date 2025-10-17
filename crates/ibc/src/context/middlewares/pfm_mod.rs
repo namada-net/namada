@@ -42,18 +42,18 @@ use crate::{Error, IbcCommonContext, IbcStorageContext, TokenTransferContext};
 /// A wrapper around an IBC transfer module necessary to
 /// build execution contexts. This allows us to implement
 /// packet forward middleware on this struct.
-pub struct PfmTransferModule<C, Params>
+pub struct PfmTransferModule<C, Params, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
 {
     /// The main module
-    pub transfer_module: TransferModule<C>,
+    pub transfer_module: TransferModule<C, ShieldedToken>,
     #[allow(missing_docs)]
     pub _phantom: PhantomData<Params>,
 }
 
-impl<C: IbcCommonContext + Debug, Params> Debug
-    for PfmTransferModule<C, Params>
+impl<C: IbcCommonContext + Debug, Params, ShieldedToken: Debug> Debug
+    for PfmTransferModule<C, Params, ShieldedToken>
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(stringify!(PfmTransferModule))
@@ -63,16 +63,21 @@ impl<C: IbcCommonContext + Debug, Params> Debug
 }
 
 from_middleware! {
-    impl<C, Params> Module for PfmTransferModule<C, Params>
+    impl<C, Params, ShieldedToken> Module for PfmTransferModule<C, Params, ShieldedToken>
     where
         C: IbcCommonContext + Debug,
+        ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
+            + Debug,
 }
 
-impl<C, Params> MiddlewareModule for PfmTransferModule<C, Params>
+impl<C, Params, ShieldedToken> MiddlewareModule
+    for PfmTransferModule<C, Params, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
+    ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
+        + Debug,
 {
-    type NextMiddleware = TransferModule<C>;
+    type NextMiddleware = TransferModule<C, ShieldedToken>;
 
     fn next_middleware(&self) -> &Self::NextMiddleware {
         &self.transfer_module
@@ -83,10 +88,12 @@ where
     }
 }
 
-impl<C, Params> PfmContext for PfmTransferModule<C, Params>
+impl<C, Params, ShieldedToken> PfmContext
+    for PfmTransferModule<C, Params, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
     Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>,
 {
     type Error = crate::Error;
 
@@ -106,10 +113,11 @@ where
         let mut ctx = IbcContext::<C, Params>::new(
             self.transfer_module.ctx.inner.clone(),
         );
-        let mut token_transfer_ctx = TokenTransferContext::new(
-            self.transfer_module.ctx.inner.clone(),
-            Default::default(),
-        );
+        let mut token_transfer_ctx =
+            TokenTransferContext::<_, ShieldedToken>::new(
+                self.transfer_module.ctx.inner.clone(),
+                Default::default(),
+            );
 
         self.transfer_module.ctx.insert_verifier(&MULTITOKEN);
 
@@ -125,10 +133,11 @@ where
         data: PacketData,
     ) -> Result<(), Self::Error> {
         tracing::debug!(?packet, ?data, "PFM receive_refund_execute");
-        let mut token_transfer_ctx = TokenTransferContext::new(
-            self.transfer_module.ctx.inner.clone(),
-            self.transfer_module.ctx.verifiers.clone(),
-        );
+        let mut token_transfer_ctx =
+            TokenTransferContext::<_, ShieldedToken>::new(
+                self.transfer_module.ctx.inner.clone(),
+                self.transfer_module.ctx.verifiers.clone(),
+            );
         self.transfer_module.ctx.insert_verifier(&MULTITOKEN);
         refund_packet_token_execute(&mut token_transfer_ctx, packet, &data)
             .map_err(Error::TokenTransfer)
@@ -146,10 +155,11 @@ where
                  packet",
             );
 
-        let mut token_transfer_ctx = TokenTransferContext::new(
-            self.transfer_module.ctx.inner.clone(),
-            self.transfer_module.ctx.verifiers.clone(),
-        );
+        let mut token_transfer_ctx =
+            TokenTransferContext::<_, ShieldedToken>::new(
+                self.transfer_module.ctx.inner.clone(),
+                self.transfer_module.ctx.verifiers.clone(),
+            );
 
         self.transfer_module.ctx.insert_verifier(&MULTITOKEN);
 

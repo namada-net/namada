@@ -34,6 +34,8 @@ pub type IbcVp<'a, S, CA> = ibc::vp::Ibc<
     ParamsIbcPseudoStore<'a, S, CA>,
     GovPreStore<'a, S, CA>,
     TokenStoreForIbcExec<'a, S, CA>,
+    ShieldedTokenIbcVpStore<'a, S, CA>,
+    ShieldedTokenStoreForIbcExec<'a, S, CA>,
     PosPreStore<'a, S, CA>,
     token::Transfer,
 >;
@@ -121,6 +123,22 @@ pub type IbcPostStore<'a, S, CA> =
 
 /// Token store impl over IBC pseudo-execution storage
 pub type TokenStoreForIbcExec<'a, S, CA> = token::Store<
+    ibc::vp::context::PseudoExecutionStorage<
+        'a,
+        'a,
+        S,
+        VpCache<CA>,
+        Eval<S, CA>,
+    >,
+>;
+
+/// Shielded token store impl over the native prior context
+pub type ShieldedTokenIbcVpStore<'a, S, CA> = token::ShieldedStore<
+    ibc::vp::context::VpValidationContext<'a, 'a, S, VpCache<CA>, Eval<S, CA>>,
+>;
+
+/// Shielded token store impl over IBC pseudo-execution storage
+pub type ShieldedTokenStoreForIbcExec<'a, S, CA> = token::ShieldedStore<
     ibc::vp::context::PseudoExecutionStorage<
         'a,
         'a,

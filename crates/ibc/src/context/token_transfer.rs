@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::marker::PhantomData;
 use std::rc::Rc;
 
 use ibc::apps::transfer::context::{
@@ -16,20 +17,22 @@ use namada_core::token::Amount;
 use namada_core::uint::Uint;
 
 use super::common::IbcCommonContext;
+use crate::context::storage::IbcStorageContext;
 use crate::{IBC_ESCROW_ADDRESS, trace};
 
 /// Token transfer context to handle tokens
 #[derive(Debug)]
-pub struct TokenTransferContext<C>
+pub struct TokenTransferContext<C, ShieldedToken>
 where
     C: IbcCommonContext,
 {
     pub(crate) inner: Rc<RefCell<C>>,
     pub(crate) verifiers: Rc<RefCell<BTreeSet<Address>>>,
     has_masp_tx: bool,
+    _marker: PhantomData<ShieldedToken>,
 }
 
-impl<C> TokenTransferContext<C>
+impl<C, ShieldedToken> TokenTransferContext<C, ShieldedToken>
 where
     C: IbcCommonContext,
 {
@@ -42,6 +45,7 @@ where
             inner,
             verifiers,
             has_masp_tx: false,
+            _marker: PhantomData,
         }
     }
 
@@ -172,7 +176,8 @@ where
     }
 }
 
-impl<C> TokenTransferValidationContext for TokenTransferContext<C>
+impl<C, ShieldedToken> TokenTransferValidationContext
+    for TokenTransferContext<C, ShieldedToken>
 where
     C: IbcCommonContext,
 {
@@ -263,9 +268,11 @@ where
     }
 }
 
-impl<C> TokenTransferExecutionContext for TokenTransferContext<C>
+impl<C, ShieldedToken> TokenTransferExecutionContext
+    for TokenTransferContext<C, ShieldedToken>
 where
     C: IbcCommonContext,
+    ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>,
 {
     fn escrow_coins_execute(
         &mut self,

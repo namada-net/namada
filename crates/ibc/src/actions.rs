@@ -23,7 +23,7 @@ use namada_state::{
     BlockHeader, BlockHeight, Epoch, Epochs, Key, Result, ResultExt, State,
     StorageRead, StorageWrite, TxIndex,
 };
-use namada_systems::{parameters, trans_token};
+use namada_systems::{parameters, shielded_token, trans_token};
 
 use crate::event::IbcEvent;
 use crate::{
@@ -192,7 +192,7 @@ where
 }
 
 /// Transfer tokens over IBC
-pub fn transfer_over_ibc<'a, S, Params, Token, Transfer>(
+pub fn transfer_over_ibc<'a, S, Params, Token, ShieldedToken, Transfer>(
     state: &'a mut S,
     token: &Address,
     source: &Address,
@@ -207,6 +207,9 @@ where
         + trans_token::Write<S>
         + trans_token::Events<S>
         + Debug,
+    ShieldedToken: shielded_token::Write<
+            <IbcProtocolContext<'a, S, Token> as IbcStorageContext>::Storage,
+        > + Debug,
     Transfer: BorshSerialize + BorshDeserialize,
 {
     let token = PrefixedCoin {
@@ -254,7 +257,7 @@ where
     // Use an empty verifiers set placeholder for validation, this is only
     // needed in txs and not protocol
     let verifiers = Rc::new(RefCell::new(BTreeSet::<Address>::new()));
-    let mut actions = IbcActions::<_, Params, Token>::new(
+    let mut actions = IbcActions::<_, Params, Token, ShieldedToken>::new(
         Rc::new(RefCell::new(ctx)),
         verifiers,
     );

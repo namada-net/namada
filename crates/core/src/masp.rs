@@ -568,6 +568,25 @@ impl PaymentAddress {
                 )
             })
     }
+
+    /// Create a note owned by this payment address
+    ///
+    /// ## Caution
+    ///
+    /// The value of `rseed` must be unique between each note appended
+    /// to the commitment tree, in order to avoid nullifier collisions,
+    /// when generating notes deterministically.
+    pub fn create_note(
+        &self,
+        asset_type: AssetType,
+        value: u64,
+        rseed: [u8; 32],
+    ) -> Option<masp_primitives::sapling::Note> {
+        use masp_primitives::sapling::Rseed;
+
+        self.0
+            .create_note(asset_type, value, Rseed::AfterZip212(rseed))
+    }
 }
 
 impl From<PaymentAddress> for masp_primitives::sapling::PaymentAddress {

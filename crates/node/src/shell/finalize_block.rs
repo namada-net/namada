@@ -1198,6 +1198,7 @@ where
                 _,
                 parameters::Store<_>,
                 token::Store<_>,
+                token::ShieldedStore<_>,
                 token::Transfer,
             >(state, token, source, target)
         },
@@ -1254,6 +1255,7 @@ where
                 _,
                 parameters::Store<_>,
                 token::Store<_>,
+                token::ShieldedStore<_>,
                 token::Transfer,
             >(state, token, source, target)
         },

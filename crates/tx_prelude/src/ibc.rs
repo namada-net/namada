@@ -27,14 +27,21 @@ use crate::{Ctx, Result, parameters, token};
 /// execution.
 pub fn ibc_actions(
     ctx: &mut Ctx,
-) -> IbcActions<'_, Ctx, crate::parameters::Store<Ctx>, token::Store<Ctx>> {
+) -> IbcActions<
+    '_,
+    Ctx,
+    crate::parameters::Store<Ctx>,
+    token::Store<Ctx>,
+    token::ShieldedStore<Ctx>,
+> {
     let ctx = Rc::new(RefCell::new(ctx.clone()));
     let verifiers = Rc::new(RefCell::new(BTreeSet::<Address>::new()));
     let mut actions = IbcActions::new(ctx.clone(), verifiers.clone());
-    let module = create_transfer_middlewares::<_, parameters::Store<Ctx>>(
-        ctx.clone(),
-        verifiers,
-    );
+    let module = create_transfer_middlewares::<
+        _,
+        parameters::Store<Ctx>,
+        token::ShieldedStore<Ctx>,
+    >(ctx.clone(), verifiers);
     actions.add_transfer_module(module);
     let module = NftTransferModule::<Ctx, token::Store<Ctx>>::new(ctx);
     actions.add_transfer_module(module);

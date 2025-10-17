@@ -25,7 +25,7 @@ use namada_gas::{IBC_ACTION_EXECUTE_GAS, IBC_ACTION_VALIDATE_GAS};
 use namada_state::write_log::StorageModification;
 use namada_state::{Error, Result, StateRead};
 use namada_systems::trans_token::{self as token, Amount};
-use namada_systems::{governance, parameters, proof_of_stake};
+use namada_systems::{governance, parameters, proof_of_stake, shielded_token};
 use namada_tx::BatchedTxRef;
 use namada_vp::VpEnv;
 use namada_vp::native_vp::{Ctx, CtxPreStorageRead, NativeVp, VpEvaluator};
@@ -84,6 +84,8 @@ pub struct Ibc<
     ParamsPseudo,
     Gov,
     Token,
+    ShieldedToken,
+    ShieldedTokenPseudo,
     PoS,
     Transfer,
 > where
@@ -92,12 +94,15 @@ pub struct Ibc<
     /// Context to interact with the host structures.
     pub ctx: Ctx<'ctx, S, CA, EVAL>,
     /// Generic types for DI
+    #[allow(clippy::type_complexity)]
     pub _marker: PhantomData<(
         Params,
         ParamsPre,
         ParamsPseudo,
         Gov,
         Token,
+        ShieldedToken,
+        ShieldedTokenPseudo,
         PoS,
         Transfer,
     )>,
@@ -114,6 +119,8 @@ impl<
     ParamsPseudo,
     Gov,
     Token,
+    ShieldedToken,
+    ShieldedTokenPseudo,
     PoS,
     Transfer,
 > NativeVp<'view>
@@ -127,6 +134,8 @@ impl<
         ParamsPseudo,
         Gov,
         Token,
+        ShieldedToken,
+        ShieldedTokenPseudo,
         PoS,
         Transfer,
     >
@@ -142,6 +151,10 @@ where
         parameters::Read<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>,
     Token: token::Keys
         + token::Write<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    ShieldedToken: shielded_token::Write<VpValidationContext<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    ShieldedTokenPseudo: shielded_token::Write<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
         + Debug,
     PoS: proof_of_stake::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>,
     Transfer: BorshDeserialize,
@@ -196,6 +209,8 @@ impl<
     ParamsPseudo,
     Gov,
     Token,
+    ShieldedToken,
+    ShieldedTokenPseudo,
     PoS,
     Transfer,
 >
@@ -209,6 +224,8 @@ impl<
         ParamsPseudo,
         Gov,
         Token,
+        ShieldedToken,
+        ShieldedTokenPseudo,
         PoS,
         Transfer,
     >
@@ -223,6 +240,10 @@ where
         parameters::Read<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>,
     Token: token::Keys
         + token::Write<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    ShieldedToken: shielded_token::Write<VpValidationContext<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    ShieldedTokenPseudo: shielded_token::Write<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
         + Debug,
     PoS: proof_of_stake::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>,
     Transfer: BorshDeserialize,
@@ -249,14 +270,16 @@ where
         // needed in actual txs to addresses whose VPs should be triggered
         let verifiers = Rc::new(RefCell::new(BTreeSet::<Address>::new()));
 
-        let mut actions = IbcActions::<_, ParamsPseudo, Token>::new(
-            ctx.clone(),
-            verifiers.clone(),
-        );
-        let module = create_transfer_middlewares::<_, ParamsPseudo>(
-            ctx.clone(),
-            verifiers,
-        );
+        let mut actions =
+            IbcActions::<_, ParamsPseudo, Token, ShieldedTokenPseudo>::new(
+                ctx.clone(),
+                verifiers.clone(),
+            );
+        let module = create_transfer_middlewares::<
+            _,
+            ParamsPseudo,
+            ShieldedTokenPseudo,
+        >(ctx.clone(), verifiers);
         actions.add_transfer_module(module);
         let module = NftTransferModule::<_, Token>::new(ctx.clone());
         actions.add_transfer_module(module);
@@ -316,12 +339,16 @@ where
         // needed in actual txs to addresses whose VPs should be triggered
         let verifiers = Rc::new(RefCell::new(BTreeSet::<Address>::new()));
 
-        let mut actions =
-            IbcActions::<_, Params, Token>::new(ctx.clone(), verifiers.clone());
+        let mut actions = IbcActions::<_, Params, Token, ShieldedToken>::new(
+            ctx.clone(),
+            verifiers.clone(),
+        );
         actions.set_validation_params(self.validation_params()?);
 
-        let module =
-            create_transfer_middlewares::<_, Params>(ctx.clone(), verifiers);
+        let module = create_transfer_middlewares::<_, Params, ShieldedToken>(
+            ctx.clone(),
+            verifiers,
+        );
         actions.add_transfer_module(module);
         let module = NftTransferModule::<_, Token>::new(ctx);
         actions.add_transfer_module(module);
@@ -657,6 +684,12 @@ mod tests {
             CtxPreStorageRead<'ctx, 'ctx, TestState, VpCache<CA>, Eval>,
         >,
         namada_token::Store<
+            PseudoExecutionStorage<'ctx, 'ctx, TestState, VpCache<CA>, Eval>,
+        >,
+        namada_token::ShieldedStore<
+            VpValidationContext<'ctx, 'ctx, TestState, VpCache<CA>, Eval>,
+        >,
+        namada_token::ShieldedStore<
             PseudoExecutionStorage<'ctx, 'ctx, TestState, VpCache<CA>, Eval>,
         >,
         namada_proof_of_stake::Store<

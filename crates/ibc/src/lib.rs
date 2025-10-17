@@ -366,6 +366,18 @@ pub enum IbcAccountId {
     Shielded(PaymentAddress),
 }
 
+impl IbcAccountId {
+    /// Check whether this is a transparent address.
+    pub const fn is_transparent(&self) -> bool {
+        matches!(self, Self::Transparent(_))
+    }
+
+    /// Check whether this is a shielded address.
+    pub const fn is_shielded(&self) -> bool {
+        matches!(self, Self::Shielded(_))
+    }
+}
+
 impl FromStr for IbcAccountId {
     type Err = HostError;
 

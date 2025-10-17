@@ -13,7 +13,8 @@ use ibc::core::host::types::error::HostError;
 use ibc::core::host::types::identifiers::{ChannelId, PortId};
 use ibc::core::primitives::Signer;
 use namada_core::address::{Address, InternalAddress, MASP};
-use namada_core::token::Amount;
+use namada_core::masp::{AssetData, PaymentAddress};
+use namada_core::token::{Amount, MaspDigitPos};
 use namada_core::uint::Uint;
 
 use super::common::IbcCommonContext;
@@ -173,6 +174,60 @@ where
             &trace_hash,
             &ibc_denom,
         )
+    }
+
+    #[allow(dead_code)]
+    fn store_masp_note_commitments(
+        &self,
+        owner_pa: &PaymentAddress,
+        token: &Address,
+        amount: &Amount,
+    ) -> Result<(), HostError>
+    where
+        ShieldedToken: namada_systems::shielded_token::Write<
+                <C as IbcStorageContext>::Storage,
+            >,
+    {
+        let mut note_commitments = vec![];
+
+        for (digit, note_value) in MaspDigitPos::iter()
+            .zip(amount.iter_words())
+            .filter(|(_, word)| *word != 0u64)
+        {
+            let asset = AssetData {
+                token: token.clone(),
+                denom: 0u8.into(), // TODO: read actual denom
+                position: digit,
+                epoch: None, /* TODO: read actual epoch, if asset has
+                              * conversions */
+            };
+            let asset_type = asset.encode().map_err(|_| HostError::Other {
+                description: format!(
+                    "Failed to create asset type of IBC shielding: {asset:?}"
+                ),
+            })?;
+
+            // TODO: get deterministic and unique seed of randomness
+            let rseed = namada_core::hash::Hash::sha256(b"placeholder").0;
+
+            let note = owner_pa
+                .create_note(asset_type, note_value, rseed)
+                .ok_or_else(|| HostError::Other {
+                    description: format!(
+                        "Invalid payment address used to mint note: {owner_pa}"
+                    ),
+                })?;
+
+            note_commitments.push(note.commitment());
+        }
+
+        // TODO: emit masp events
+
+        ShieldedToken::update_commitment_tree(
+            self.inner.borrow_mut().storage_mut(),
+            note_commitments,
+        )
+        .map_err(HostError::from)
     }
 }
 

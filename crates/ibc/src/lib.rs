@@ -179,12 +179,7 @@ impl TryFrom<IbcMsgTransfer> for IbcTransferInfo {
         let packet_data = serde_json::to_vec(&message.packet_data)
             .map_err(StorageError::new)?;
         let ibc_traces = vec![message.packet_data.token.denom.to_string()];
-        let amount = message
-            .packet_data
-            .token
-            .amount
-            .try_into()
-            .into_storage_result()?;
+        let amount: Amount = message.packet_data.token.amount.into();
         let receiver = message.packet_data.receiver.to_string();
         Ok(Self {
             src_port_id: message.port_id_on_a,
@@ -308,11 +303,7 @@ where
                         let addr = TAddrData::Ibc(receiver.clone());
                         accum.decoder.insert(ibc_taddr(receiver), addr);
                         let ibc_denom = packet_data.token.denom.to_string();
-                        let amount = packet_data
-                            .token
-                            .amount
-                            .try_into()
-                            .into_storage_result()?;
+                        let amount: Amount = packet_data.token.amount.into();
                         accum = apply_recv_msg(
                             storage,
                             accum,

@@ -125,9 +125,7 @@ where
         + trans_token::Write<S>
         + trans_token::Events<S>
         + Debug,
-    ShieldedToken: shielded_token::Write<
-            <IbcProtocolContext<'a, S, Token> as IbcStorageContext>::Storage,
-        > + Debug,
+    ShieldedToken: shielded_token::Write<S> + Debug,
     Transfer: BorshSerialize + BorshDeserialize,
 {
     let token = PrefixedCoin {

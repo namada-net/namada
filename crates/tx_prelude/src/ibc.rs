@@ -40,6 +40,7 @@ pub fn ibc_actions(
     let module = create_transfer_middlewares::<
         _,
         parameters::Store<Ctx>,
+        token::Store<Ctx>,
         token::ShieldedStore<Ctx>,
     >(ctx.clone(), verifiers);
     actions.add_transfer_module(module);

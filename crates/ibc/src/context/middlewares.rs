@@ -22,17 +22,21 @@ use crate::context::transfer_mod::TransferModule;
 use crate::{IbcCommonContext, IbcStorageContext};
 
 /// The stack of middlewares of the transfer module.
-pub type TransferMiddlewares<C, Params, ShieldedToken> =
-    OverflowReceiveMiddleware<ShieldedRecvModule<C, Params, ShieldedToken>>;
+pub type TransferMiddlewares<C, Params, Token, ShieldedToken> =
+    OverflowReceiveMiddleware<
+        ShieldedRecvModule<C, Params, Token, ShieldedToken>,
+    >;
 
 /// Create a new instance of [`TransferMiddlewares`]
-pub fn create_transfer_middlewares<C, Params, ShieldedToken>(
+pub fn create_transfer_middlewares<C, Params, Token, ShieldedToken>(
     ctx: Rc<RefCell<C>>,
     verifiers: Rc<RefCell<BTreeSet<Address>>>,
-) -> TransferMiddlewares<C, Params, ShieldedToken>
+) -> TransferMiddlewares<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
     Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
         + Debug,
 {
@@ -44,11 +48,13 @@ where
     })
 }
 
-impl<C, Params, ShieldedToken> crate::ModuleWrapper
-    for TransferMiddlewares<C, Params, ShieldedToken>
+impl<C, Params, Token, ShieldedToken> crate::ModuleWrapper
+    for TransferMiddlewares<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
     Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
         + Debug,
 {

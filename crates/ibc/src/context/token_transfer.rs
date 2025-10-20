@@ -195,9 +195,21 @@ where
             .zip(amount.iter_words())
             .filter(|(_, word)| *word != 0u64)
         {
+            let denom = Token::read_denom(self.inner.borrow().storage(), token)
+                .map_err(|err| HostError::Other {
+                    description: format!(
+                        "Failed to read token denom of {token}: {err}"
+                    ),
+                })?
+                .ok_or_else(|| HostError::Other {
+                    description: format!(
+                        "No token denom in storage for {token}"
+                    ),
+                })?;
+
             let asset = AssetData {
                 token: token.clone(),
-                denom: 0u8.into(), // TODO: read actual denom
+                denom,
                 position: digit,
                 epoch: None, /* TODO: read actual epoch, if asset has
                               * conversions */

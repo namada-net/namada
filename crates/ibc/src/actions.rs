@@ -14,15 +14,11 @@ use ibc::core::channel::types::timeout::{TimeoutHeight, TimeoutTimestamp};
 use ibc::primitives::IntoTimestamp;
 use namada_core::address::Address;
 use namada_core::borsh::{BorshSerialize, BorshSerializeExt};
-use namada_core::chain::ChainId;
 use namada_core::ibc::PGFIbcTarget;
 use namada_core::tendermint::Time as TmTime;
 use namada_core::token::Amount;
 use namada_events::EmitEvents;
-use namada_state::{
-    BlockHeader, BlockHeight, Epoch, Epochs, Key, Result, ResultExt, State,
-    StorageRead, StorageWrite, TxIndex,
-};
+use namada_state::{Result, ResultExt, State};
 use namada_systems::{parameters, shielded_token, trans_token};
 
 use crate::event::IbcEvent;
@@ -39,82 +35,6 @@ pub struct IbcProtocolContext<'a, S, Token> {
     _marker: PhantomData<Token>,
 }
 
-impl<S, Token> StorageRead for IbcProtocolContext<'_, S, Token>
-where
-    S: State,
-{
-    type PrefixIter<'iter>
-        = <S as StorageRead>::PrefixIter<'iter>
-    where
-        Self: 'iter;
-
-    fn read_bytes(&self, key: &Key) -> Result<Option<Vec<u8>>> {
-        self.state.read_bytes(key)
-    }
-
-    fn has_key(&self, key: &Key) -> Result<bool> {
-        self.state.has_key(key)
-    }
-
-    fn iter_prefix<'iter>(
-        &'iter self,
-        prefix: &Key,
-    ) -> Result<Self::PrefixIter<'iter>> {
-        self.state.iter_prefix(prefix)
-    }
-
-    fn iter_next<'iter>(
-        &'iter self,
-        iter: &mut Self::PrefixIter<'iter>,
-    ) -> Result<Option<(String, Vec<u8>)>> {
-        self.state.iter_next(iter)
-    }
-
-    fn get_chain_id(&self) -> Result<ChainId> {
-        self.state.get_chain_id()
-    }
-
-    fn get_block_height(&self) -> Result<BlockHeight> {
-        self.state.get_block_height()
-    }
-
-    fn get_block_header(
-        &self,
-        height: BlockHeight,
-    ) -> Result<Option<BlockHeader>> {
-        StorageRead::get_block_header(self.state, height)
-    }
-
-    fn get_block_epoch(&self) -> Result<Epoch> {
-        self.state.get_block_epoch()
-    }
-
-    fn get_pred_epochs(&self) -> Result<Epochs> {
-        self.state.get_pred_epochs()
-    }
-
-    fn get_tx_index(&self) -> Result<TxIndex> {
-        self.state.get_tx_index()
-    }
-
-    fn get_native_token(&self) -> Result<Address> {
-        self.state.get_native_token()
-    }
-}
-
-impl<S, Token> StorageWrite for IbcProtocolContext<'_, S, Token>
-where
-    S: State,
-{
-    fn write_bytes(&mut self, key: &Key, val: impl AsRef<[u8]>) -> Result<()> {
-        self.state.write_bytes(key, val)
-    }
-
-    fn delete(&mut self, key: &Key) -> Result<()> {
-        self.state.delete(key)
-    }
-}
-
 impl<S, Token> IbcStorageContext for IbcProtocolContext<'_, S, Token>
 where
     S: State + EmitEvents,
@@ -123,14 +43,14 @@ where
         + trans_token::Write<S>
         + trans_token::Events<S>,
 {
-    type Storage = Self;
+    type Storage = S;
 
     fn storage(&self) -> &Self::Storage {
-        self
+        self.state
     }
 
     fn storage_mut(&mut self) -> &mut Self::Storage {
-        self
+        self.state
     }
 
     fn emit_ibc_event(&mut self, event: IbcEvent) -> Result<()> {
@@ -224,9 +144,10 @@ where
     };
     let ctx = IbcProtocolContext {
         state,
-        _marker: PhantomData,
+        _marker: PhantomData::<Token>,
     };
-    let min_duration = Params::epoch_duration_parameter(&ctx)?.min_duration;
+    let min_duration =
+        Params::epoch_duration_parameter(ctx.state)?.min_duration;
     #[allow(clippy::arithmetic_side_effects)]
     let timeout_timestamp = ctx
         .state

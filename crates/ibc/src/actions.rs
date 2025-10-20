@@ -120,9 +120,7 @@ pub fn transfer_over_ibc<'a, S, Params, Token, ShieldedToken, Transfer>(
 ) -> Result<()>
 where
     S: 'a + State + EmitEvents,
-    Params: parameters::Read<
-            <IbcProtocolContext<'a, S, Token> as IbcStorageContext>::Storage,
-        >,
+    Params: parameters::Read<S>,
     Token: trans_token::Keys
         + trans_token::Write<S>
         + trans_token::Events<S>

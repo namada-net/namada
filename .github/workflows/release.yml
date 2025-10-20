@@ -29,7 +29,7 @@ jobs:
       image:  ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         fetch-depth: 0
     - run: |
@@ -59,7 +59,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - run: |

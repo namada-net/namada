@@ -84,6 +84,7 @@ pub struct Ibc<
     ParamsPseudo,
     Gov,
     Token,
+    TokenPseudo,
     ShieldedToken,
     ShieldedTokenPseudo,
     PoS,
@@ -101,6 +102,7 @@ pub struct Ibc<
         ParamsPseudo,
         Gov,
         Token,
+        TokenPseudo,
         ShieldedToken,
         ShieldedTokenPseudo,
         PoS,
@@ -119,6 +121,7 @@ impl<
     ParamsPseudo,
     Gov,
     Token,
+    TokenPseudo,
     ShieldedToken,
     ShieldedTokenPseudo,
     PoS,
@@ -134,6 +137,7 @@ impl<
         ParamsPseudo,
         Gov,
         Token,
+        TokenPseudo,
         ShieldedToken,
         ShieldedTokenPseudo,
         PoS,
@@ -150,6 +154,9 @@ where
     ParamsPseudo:
         parameters::Read<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>,
     Token: token::Keys
+        + token::Write<VpValidationContext<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    TokenPseudo: token::Keys
         + token::Write<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
         + Debug,
     ShieldedToken: shielded_token::Write<VpValidationContext<'view, 'ctx, S, CA, EVAL>>
@@ -209,6 +216,7 @@ impl<
     ParamsPseudo,
     Gov,
     Token,
+    TokenPseudo,
     ShieldedToken,
     ShieldedTokenPseudo,
     PoS,
@@ -224,6 +232,7 @@ impl<
         ParamsPseudo,
         Gov,
         Token,
+        TokenPseudo,
         ShieldedToken,
         ShieldedTokenPseudo,
         PoS,
@@ -239,6 +248,9 @@ where
     ParamsPseudo:
         parameters::Read<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>,
     Token: token::Keys
+        + token::Write<VpValidationContext<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    TokenPseudo: token::Keys
         + token::Write<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
         + Debug,
     ShieldedToken: shielded_token::Write<VpValidationContext<'view, 'ctx, S, CA, EVAL>>
@@ -262,7 +274,7 @@ where
         keys_changed: &BTreeSet<Key>,
     ) -> Result<()> {
         let exec_ctx =
-            PseudoExecutionContext::<'_, '_, S, CA, EVAL, Token>::new(
+            PseudoExecutionContext::<'_, '_, S, CA, EVAL, TokenPseudo>::new(
                 self.ctx.pre(),
             );
         let ctx = Rc::new(RefCell::new(exec_ctx));
@@ -270,18 +282,20 @@ where
         // needed in actual txs to addresses whose VPs should be triggered
         let verifiers = Rc::new(RefCell::new(BTreeSet::<Address>::new()));
 
-        let mut actions =
-            IbcActions::<_, ParamsPseudo, Token, ShieldedTokenPseudo>::new(
-                ctx.clone(),
-                verifiers.clone(),
-            );
+        let mut actions = IbcActions::<
+            _,
+            ParamsPseudo,
+            TokenPseudo,
+            ShieldedTokenPseudo,
+        >::new(ctx.clone(), verifiers.clone());
         let module = create_transfer_middlewares::<
             _,
             ParamsPseudo,
+            TokenPseudo,
             ShieldedTokenPseudo,
         >(ctx.clone(), verifiers);
         actions.add_transfer_module(module);
-        let module = NftTransferModule::<_, Token>::new(ctx.clone());
+        let module = NftTransferModule::<_, TokenPseudo>::new(ctx.clone());
         actions.add_transfer_module(module);
         // Charge gas for the expensive execution
         self.ctx.charge_gas(IBC_ACTION_EXECUTE_GAS.into())?;
@@ -345,10 +359,11 @@ where
         );
         actions.set_validation_params(self.validation_params()?);
 
-        let module = create_transfer_middlewares::<_, Params, ShieldedToken>(
-            ctx.clone(),
-            verifiers,
-        );
+        let module =
+            create_transfer_middlewares::<_, Params, Token, ShieldedToken>(
+                ctx.clone(),
+                verifiers,
+            );
         actions.add_transfer_module(module);
         let module = NftTransferModule::<_, Token>::new(ctx);
         actions.add_transfer_module(module);
@@ -450,7 +465,7 @@ where
         let tokens: BTreeSet<&Address> = keys_changed
             .iter()
             .filter_map(|k| {
-                Token::is_any_token_balance_key(k).map(|[key, _]| key)
+                TokenPseudo::is_any_token_balance_key(k).map(|[key, _]| key)
             })
             .collect();
         for token in tokens {
@@ -682,6 +697,9 @@ mod tests {
         >,
         namada_governance::Store<
             CtxPreStorageRead<'ctx, 'ctx, TestState, VpCache<CA>, Eval>,
+        >,
+        namada_token::Store<
+            VpValidationContext<'ctx, 'ctx, TestState, VpCache<CA>, Eval>,
         >,
         namada_token::Store<
             PseudoExecutionStorage<'ctx, 'ctx, TestState, VpCache<CA>, Eval>,

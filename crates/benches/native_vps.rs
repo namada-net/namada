@@ -1748,7 +1748,7 @@ fn ibc_vp_validate_action(c: &mut Criterion) {
         let mut actions = IbcActions::<
             _,
             parameters::Store<_>,
-            token::Store<()>,
+            token::Store<_>,
             token::ShieldedStore<_>,
         >::new(ctx.clone(), verifiers.clone());
         actions.set_validation_params(ibc.validation_params().unwrap());
@@ -1756,6 +1756,7 @@ fn ibc_vp_validate_action(c: &mut Criterion) {
         let module = create_transfer_middlewares::<
             _,
             parameters::Store<_>,
+            token::Store<_>,
             token::ShieldedStore<_>,
         >(ctx.clone(), verifiers);
         actions.add_transfer_module(module);
@@ -1815,7 +1816,7 @@ fn ibc_vp_execute_action(c: &mut Criterion) {
         let mut actions = IbcActions::<
             _,
             parameters::Store<_>,
-            token::Store<()>,
+            token::Store<_>,
             token::ShieldedStore<_>,
         >::new(ctx.clone(), verifiers.clone());
         actions.set_validation_params(ibc.validation_params().unwrap());
@@ -1823,6 +1824,7 @@ fn ibc_vp_execute_action(c: &mut Criterion) {
         let module = create_transfer_middlewares::<
             _,
             parameters::Store<_>,
+            token::Store<_>,
             token::ShieldedStore<_>,
         >(ctx.clone(), verifiers);
         actions.add_transfer_module(module);

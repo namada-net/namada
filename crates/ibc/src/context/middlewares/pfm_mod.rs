@@ -42,18 +42,22 @@ use crate::{Error, IbcCommonContext, IbcStorageContext, TokenTransferContext};
 /// A wrapper around an IBC transfer module necessary to
 /// build execution contexts. This allows us to implement
 /// packet forward middleware on this struct.
-pub struct PfmTransferModule<C, Params, ShieldedToken>
+pub struct PfmTransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
 {
     /// The main module
-    pub transfer_module: TransferModule<C, ShieldedToken>,
+    pub transfer_module: TransferModule<C, Token, ShieldedToken>,
     #[allow(missing_docs)]
     pub _phantom: PhantomData<Params>,
 }
 
-impl<C: IbcCommonContext + Debug, Params, ShieldedToken: Debug> Debug
-    for PfmTransferModule<C, Params, ShieldedToken>
+impl<C, Params, Token, ShieldedToken> Debug
+    for PfmTransferModule<C, Params, Token, ShieldedToken>
+where
+    C: IbcCommonContext + Debug,
+    Token: Debug,
+    ShieldedToken: Debug,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(stringify!(PfmTransferModule))
@@ -63,21 +67,25 @@ impl<C: IbcCommonContext + Debug, Params, ShieldedToken: Debug> Debug
 }
 
 from_middleware! {
-    impl<C, Params, ShieldedToken> Module for PfmTransferModule<C, Params, ShieldedToken>
+    impl<C, Params, Token, ShieldedToken> Module for PfmTransferModule<C, Params, Token, ShieldedToken>
     where
         C: IbcCommonContext + Debug,
+        Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+            + Debug,
         ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
             + Debug,
 }
 
-impl<C, Params, ShieldedToken> MiddlewareModule
-    for PfmTransferModule<C, Params, ShieldedToken>
+impl<C, Params, Token, ShieldedToken> MiddlewareModule
+    for PfmTransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
         + Debug,
 {
-    type NextMiddleware = TransferModule<C, ShieldedToken>;
+    type NextMiddleware = TransferModule<C, Token, ShieldedToken>;
 
     fn next_middleware(&self) -> &Self::NextMiddleware {
         &self.transfer_module
@@ -88,11 +96,12 @@ where
     }
 }
 
-impl<C, Params, ShieldedToken> PfmContext
-    for PfmTransferModule<C, Params, ShieldedToken>
+impl<C, Params, Token, ShieldedToken> PfmContext
+    for PfmTransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
     Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>,
 {
     type Error = crate::Error;
@@ -114,7 +123,7 @@ where
             self.transfer_module.ctx.inner.clone(),
         );
         let mut token_transfer_ctx =
-            TokenTransferContext::<_, ShieldedToken>::new(
+            TokenTransferContext::<_, Token, ShieldedToken>::new(
                 self.transfer_module.ctx.inner.clone(),
                 Default::default(),
             );
@@ -134,7 +143,7 @@ where
     ) -> Result<(), Self::Error> {
         tracing::debug!(?packet, ?data, "PFM receive_refund_execute");
         let mut token_transfer_ctx =
-            TokenTransferContext::<_, ShieldedToken>::new(
+            TokenTransferContext::<_, Token, ShieldedToken>::new(
                 self.transfer_module.ctx.inner.clone(),
                 self.transfer_module.ctx.verifiers.clone(),
             );
@@ -156,7 +165,7 @@ where
             );
 
         let mut token_transfer_ctx =
-            TokenTransferContext::<_, ShieldedToken>::new(
+            TokenTransferContext::<_, Token, ShieldedToken>::new(
                 self.transfer_module.ctx.inner.clone(),
                 self.transfer_module.ctx.verifiers.clone(),
             );

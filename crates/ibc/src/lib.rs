@@ -102,7 +102,6 @@ use namada_state::{
     State, StorageHasher, StorageRead, StorageWrite, WlState,
 };
 use namada_systems::ibc::ChangedBalances;
-use namada_systems::trans_token;
 pub use nft::*;
 use prost::Message;
 use thiserror::Error;
@@ -655,7 +654,8 @@ impl<'a, C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
     Params: namada_systems::parameters::Read<C::Storage>,
-    Token: trans_token::Keys,
+    Token: namada_systems::trans_token::Keys
+        + namada_systems::trans_token::Read<C::Storage>,
     ShieldedToken: namada_systems::shielded_token::Write<C::Storage>,
 {
     /// Make new IBC actions
@@ -690,7 +690,7 @@ where
         let result = match message {
             IbcMessage::Transfer(msg) => {
                 let mut token_transfer_ctx =
-                    TokenTransferContext::<_, ShieldedToken>::new(
+                    TokenTransferContext::<_, Token, ShieldedToken>::new(
                         self.ctx.inner.clone(),
                         self.verifiers.clone(),
                     );
@@ -878,7 +878,7 @@ where
         let result = match message {
             IbcMessage::Transfer(msg) => {
                 let mut token_transfer_ctx =
-                    TokenTransferContext::<_, ShieldedToken>::new(
+                    TokenTransferContext::<_, Token, ShieldedToken>::new(
                         self.ctx.inner.clone(),
                         verifiers.clone(),
                     );

@@ -43,22 +43,28 @@ use crate::{Error, IbcCommonContext, IbcStorageContext, TokenTransferContext};
 /// after a shielded swap. The minimum amount will
 /// be shielded and the rest placed in an overflow
 /// account.
-pub struct ShieldedRecvModule<C, Params, ShieldedToken>
+pub struct ShieldedRecvModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
     Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
         + Debug,
 {
     /// The next middleware module
-    pub next:
-        PacketForwardMiddleware<PfmTransferModule<C, Params, ShieldedToken>>,
+    pub next: PacketForwardMiddleware<
+        PfmTransferModule<C, Params, Token, ShieldedToken>,
+    >,
 }
 
-impl<C, Params, ShieldedToken> ShieldedRecvModule<C, Params, ShieldedToken>
+impl<C, Params, Token, ShieldedToken>
+    ShieldedRecvModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
     Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
         + Debug,
 {
@@ -81,11 +87,13 @@ where
     }
 }
 
-impl<C, Params, ShieldedToken> Debug
-    for ShieldedRecvModule<C, Params, ShieldedToken>
+impl<C, Params, Token, ShieldedToken> Debug
+    for ShieldedRecvModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
     Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
         + Debug,
 {
@@ -97,24 +105,30 @@ where
 }
 
 from_middleware! {
-    impl<C, Params, ShieldedToken> Module for ShieldedRecvModule<C, Params, ShieldedToken>
+    impl<C, Params, Token, ShieldedToken> Module
+        for ShieldedRecvModule<C, Params, Token, ShieldedToken>
     where
         C: IbcCommonContext + Debug,
         Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+        Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+            + Debug,
         ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
             + Debug,
 }
 
-impl<C, Params, ShieldedToken> MiddlewareModule
-    for ShieldedRecvModule<C, Params, ShieldedToken>
+impl<C, Params, Token, ShieldedToken> MiddlewareModule
+    for ShieldedRecvModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
     Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
         + Debug,
 {
-    type NextMiddleware =
-        PacketForwardMiddleware<PfmTransferModule<C, Params, ShieldedToken>>;
+    type NextMiddleware = PacketForwardMiddleware<
+        PfmTransferModule<C, Params, Token, ShieldedToken>,
+    >;
 
     fn next_middleware(&self) -> &Self::NextMiddleware {
         &self.next
@@ -209,11 +223,13 @@ impl ibc_middleware_overflow_receive::PacketMetadata
     }
 }
 
-impl<C, Params, ShieldedToken> OverflowRecvContext
-    for ShieldedRecvModule<C, Params, ShieldedToken>
+impl<C, Params, Token, ShieldedToken> OverflowRecvContext
+    for ShieldedRecvModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
     Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
         + Debug,
 {
@@ -228,7 +244,9 @@ where
         let ctx = self.get_ctx();
         let verifiers = self.get_verifiers();
         let mut token_transfer_context =
-            TokenTransferContext::<_, ShieldedToken>::new(ctx, verifiers);
+            TokenTransferContext::<_, Token, ShieldedToken>::new(
+                ctx, verifiers,
+            );
         token_transfer_context
             .mint_coins_execute(receiver, coin)
             .map_err(|e| Error::TokenTransfer(TokenTransferError::Host(e)))
@@ -244,7 +262,9 @@ where
         let ctx = self.get_ctx();
         let verifiers = self.get_verifiers();
         let mut token_transfer_context =
-            TokenTransferContext::<_, ShieldedToken>::new(ctx, verifiers);
+            TokenTransferContext::<_, Token, ShieldedToken>::new(
+                ctx, verifiers,
+            );
         token_transfer_context
             .unescrow_coins_execute(receiver, port, channel, coin)
             .map_err(|e| Error::TokenTransfer(TokenTransferError::Host(e)))

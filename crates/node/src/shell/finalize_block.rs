@@ -93,7 +93,7 @@ where
             txs,
             decided_last_commit,
             misbehavior,
-            hash,
+            hash: _,
             height: expected_height,
             time,
             next_validators_hash,
@@ -105,7 +105,7 @@ where
 
         // Begin the new block and check if a new epoch has begun
         let header = BlockHeader {
-            hash,
+            hash: self.state.in_mem().merkle_root().into(),
             time,
             next_validators_hash,
         };

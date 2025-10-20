@@ -68,6 +68,8 @@ pub struct Response {
     /// A list of updates to the validator set.
     /// These will reflect the validator set at current height + 2.
     pub validator_updates: Vec<validator::Update>,
+    /// Merkle tree root hash
+    pub app_hash: AppHash,
 }
 
 impl<D, H> Shell<D, H>
@@ -91,6 +93,25 @@ where
             next_validators_hash,
             proposer_address,
         } = req;
+
+        // If this height has been previously finalized, we need to do it again.
+        if self.finalized_merkle_tree == Some(expected_height) {
+            // For that we have to reload merkle tree from DB.
+            let tree = self
+                .state
+                .restrict_writes_to_write_log()
+                .get_merkle_tree(
+                    expected_height
+                        .checked_sub(1)
+                        .expect("There should be a previous height"),
+                    None,
+                )
+                .expect("Merkle tree should be restored");
+
+            tree.validate().unwrap();
+            self.state.in_mem_mut().block.tree = tree;
+        }
+
         let mut tx_results: Vec<tendermint::abci::types::ExecTxResult> = vec![];
         let mut validator_updates = vec![];
         let mut events: Vec<Event> = vec![];
@@ -269,10 +290,28 @@ where
 
         debug_assert_eq!(txs.len(), tx_results.len());
 
+        self.state.pre_commit_block()?;
+
+        if let Some(migration) = &self.scheduled_migration {
+            if height == migration.height {
+                let migration = migration
+                    .load_and_validate()
+                    .expect("The scheduled migration is not valid.");
+                migrations::commit(&mut self.state, migration);
+            }
+        }
+
+        let merkle_root = self.state.in_mem().block.tree.root();
+        let app_hash = AppHash::try_from(merkle_root.0.to_vec())
+            .expect("expected a valid app hash");
+
+        self.finalized_merkle_tree = Some(height);
+
         Ok(Response {
             events,
             tx_results,
             validator_updates,
+            app_hash,
         })
     }
 

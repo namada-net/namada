@@ -391,6 +391,7 @@ where
     /// Data for a node downloading and apply snapshots as part of
     /// the fast sync protocol.
     pub syncing: Option<SnapshotSync>,
+    pub finalized_merkle_tree: Option<BlockHeight>,
 }
 
 /// Storage key filter to store the diffs into the storage. Return `false` for
@@ -684,6 +685,7 @@ where
             snapshot_task: None,
             snapshots_to_keep,
             syncing: None,
+            finalized_merkle_tree: None,
         };
         shell.update_eth_oracle(&Default::default());
         shell
@@ -805,32 +807,24 @@ where
     /// Commit a block. Persist the application state and return the Merkle root
     /// hash.
     pub fn commit(&mut self) -> response::Commit {
+        let merkle_root_pre = self.state.in_mem().block.tree.root();
+
         self.bump_last_processed_eth_block();
         let height_to_commit = self.state.in_mem().block.height;
 
-        let migration = match self.scheduled_migration.as_ref() {
-            Some(migration) if height_to_commit == migration.height => Some(
-                self.scheduled_migration
-                    .take()
-                    .unwrap()
-                    .load_and_validate()
-                    .expect("The scheduled migration is not valid."),
-            ),
-            _ => None,
-        };
+        if let Some(migration) = self.scheduled_migration.as_ref() {
+            if height_to_commit == migration.height {
+                // Remove migration applied in FinalizeBlock
+                self.scheduled_migration.take().unwrap();
+            }
+        }
 
         self.state
             .commit_block()
             .expect("Encountered a storage error while committing a block");
 
-        if let Some(migration) = migration {
-            migrations::commit(&mut self.state, migration);
-            self.state
-                .update_last_block_merkle_tree()
-                .expect("Must update merkle tree after migration");
-        }
-
         let merkle_root = self.state.in_mem().merkle_root();
+        assert_eq!(merkle_root_pre, merkle_root);
 
         tracing::info!(
             "Committed block hash: {merkle_root}, height: {height_to_commit}",

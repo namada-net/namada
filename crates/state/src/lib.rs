@@ -621,9 +621,9 @@ pub mod testing {
     impl Default for InMemoryState {
         fn default() -> Self {
             let chain_id = ChainId::default();
+            let tree = MerkleTree::default();
             let block = BlockStorage {
-                tree: MerkleTree::default(),
-                pre_commit_tree: MerkleTree::default(),
+                tree,
                 height: BlockHeight::default(),
                 epoch: Epoch::default(),
                 pred_epochs: Epochs::default(),

@@ -29,7 +29,6 @@ use arse_merkle_tree::error::Error as MtError;
 use arse_merkle_tree::{
     Hash as SmtHash, Key as TreeKey, SparseMerkleTree as ArseMerkleTree,
 };
-use derivative::Derivative;
 use eth_bridge_pool::{BridgePoolProof, BridgePoolTree};
 pub use ics23::CommitmentProof;
 use ics23::commitment_proof::Proof as Ics23Proof;
@@ -458,8 +457,7 @@ impl CommitDataRoot {
 }
 
 /// Merkle tree storage
-#[derive(Default, Derivative)]
-#[derivative(Clone(bound = ""))] // No bound on hasher
+#[derive(Default)]
 pub struct MerkleTree<H: StorageHasher + Default> {
     base: Smt<H>,
     account: Smt<H>,

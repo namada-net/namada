@@ -172,7 +172,6 @@ fn process_request(
                              events,
                              tx_results,
                              validator_updates,
-                             app_hash,
                          }| {
                             Response::FinalizeBlock(response::FinalizeBlock {
                                 events: events
@@ -182,7 +181,7 @@ fn process_request(
                                 tx_results,
                                 validator_updates,
                                 consensus_param_updates: None,
-                                app_hash,
+                                app_hash: Default::default(),
                             })
                         },
                     )

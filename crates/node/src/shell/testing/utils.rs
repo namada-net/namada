@@ -21,7 +21,7 @@ pub enum Bin {
 
 /// A temporary directory for testing
 #[derive(Debug)]
-pub struct TestDir(PathBuf);
+pub struct TestDir(pub PathBuf);
 
 impl TestDir {
     /// Creat a new temp directory. This will have to be manually

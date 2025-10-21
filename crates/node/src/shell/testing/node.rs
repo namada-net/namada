@@ -602,6 +602,79 @@ impl MockNode {
         );
     }
 
+    /// Call the `FinalizeBlock` handler.
+    pub fn finalize_block(&self, header_time: Option<DateTimeUtc>) {
+        let (proposer_address, votes) = self.prepare_request();
+
+        let height = self.last_block_height().next_height();
+        let mut locked = self.shell.lock().unwrap();
+
+        // check if we have protocol txs to be included
+        // in the finalize block request
+        let txs: Vec<ProcessedTx> = {
+            let req = RequestPrepareProposal {
+                proposer_address: proposer_address.clone().into(),
+                ..Default::default()
+            };
+            let txs = locked.prepare_proposal(req).txs;
+
+            txs.into_iter()
+                .map(|tx| ProcessedTx {
+                    tx,
+                    result: TxResult {
+                        code: 0,
+                        info: String::new(),
+                    },
+                })
+                .collect()
+        };
+        // build finalize block abci request
+        let req = finalize_block::Request {
+            hash: Hash([0; 32]),
+            #[allow(clippy::disallowed_methods)]
+            time: header_time.unwrap_or_else(DateTimeUtc::now),
+            next_validators_hash: Hash([0; 32]),
+            misbehavior: vec![],
+            txs: txs.clone(),
+            proposer_address: tendermint::account::Id::try_from(
+                proposer_address,
+            )
+            .unwrap(),
+            height,
+            decided_last_commit: tendermint::abci::types::CommitInfo {
+                round: 0u8.into(),
+                votes,
+            },
+        };
+
+        let resp = locked.finalize_block(req).expect("Test failed");
+        let mut result_codes = resp
+            .events
+            .iter()
+            .filter_map(|e| {
+                e.read_attribute_opt::<CodeAttr>()
+                    .unwrap()
+                    .map(|result_code| {
+                        if result_code == ResultCode::Ok {
+                            NodeResults::Ok
+                        } else {
+                            NodeResults::Failed(result_code)
+                        }
+                    })
+            })
+            .collect::<Vec<_>>();
+        let mut tx_results = resp
+            .events
+            .into_iter()
+            .filter_map(|e| e.read_attribute_opt::<BatchAttr<'_>>().unwrap())
+            .collect::<Vec<_>>();
+        self.tx_result_codes
+            .lock()
+            .unwrap()
+            .append(&mut result_codes);
+        self.tx_results.lock().unwrap().append(&mut tx_results);
+    }
+
     /// Send a tx through Process Proposal and Finalize Block
     /// and register the results.
     pub fn submit_txs(&self, txs: Vec<Vec<u8>>) {

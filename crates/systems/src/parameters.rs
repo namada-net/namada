@@ -1,6 +1,7 @@
 //! Parameters abstract interfaces
 
-use namada_core::chain::BlockHeight;
+use namada_core::chain::{BlockHeight, Epoch};
+use namada_core::masp::MaspEpoch;
 pub use namada_core::parameters::*;
 use namada_core::storage;
 use namada_core::time::DurationSecs;
@@ -37,6 +38,15 @@ pub trait Read<S> {
         last_block_height: BlockHeight,
         num_blocks_to_read: u64,
     ) -> Result<DurationSecs>;
+
+    /// Read the current MASP epoch
+    fn masp_epoch(storage: &S, current_epoch: Epoch) -> Result<MaspEpoch> {
+        MaspEpoch::try_from_epoch(
+            current_epoch,
+            Self::masp_epoch_multiplier(storage)?,
+        )
+        .map_err(namada_storage::Error::SimpleMessage)
+    }
 }
 
 /// Abstract parameters storage write interface

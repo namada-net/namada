@@ -177,10 +177,6 @@ impl FromStr for MaspTxRef {
     }
 }
 
-/// A list of MASP tx references
-#[derive(Default, Clone, Serialize, Deserialize)]
-pub struct MaspTxRefs(pub Vec<(IndexedTx, MaspTxRef)>);
-
 /// MASP transaction event
 pub struct MaspEvent {
     /// The indexed transaction that generated this event

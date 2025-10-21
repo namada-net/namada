@@ -14,9 +14,10 @@ use ibc::core::host::types::identifiers::{ChannelId, PortId};
 use ibc::core::primitives::Signer;
 use namada_core::address::{Address, InternalAddress, MASP};
 use namada_core::arith::{CheckedAdd, checked};
-use namada_core::masp::{AssetData, PaymentAddress};
+use namada_core::masp::{AssetData, CompactNote, PaymentAddress};
 use namada_core::token::{Amount, MaspDigitPos};
 use namada_core::uint::Uint;
+use namada_tx::event::{MaspEvent, MaspEventKind, MaspTxRef};
 
 use super::common::IbcCommonContext;
 use crate::context::storage::IbcStorageContext;
@@ -198,6 +199,7 @@ where
             return Ok(());
         }
 
+        let mut notes = vec![];
         let mut note_commitments = vec![];
 
         let mut next_shielding_counter = load_shielding_counter(
@@ -292,6 +294,10 @@ where
                 })?;
 
             note_commitments.push(note.commitment());
+            notes.push(
+                CompactNote::new(note, (*owner_pa).into())
+                    .expect("The payment address has already been validated"),
+            );
         }
 
         write_shielding_counter(
@@ -304,7 +310,14 @@ where
             ),
         })?;
 
-        // TODO: emit masp events
+        self.inner.borrow_mut().emit_event(
+            MaspEvent {
+                tx_index: Default::default(), // TODO: get actual tx index value
+                kind: MaspEventKind::Transfer,
+                data: MaspTxRef::Unencrypted(notes),
+            }
+            .into(),
+        )?;
 
         ShieldedToken::update_commitment_tree(
             self.inner.borrow_mut().storage_mut(),

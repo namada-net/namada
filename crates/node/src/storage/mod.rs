@@ -509,22 +509,42 @@ mod tests {
                 state.in_mem_mut().begin_block(next_height)?;
                 batch = PersistentState::batch();
             }
+            let persist_diffs = (state.diff_key_filter)(&key);
+            let tree_key = if !persist_diffs {
+                let prefix =
+                    Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
+                prefix.join(&key)
+            } else {
+                key.clone()
+            };
             match write_type {
                 0 => {
                     // no update
                 }
                 1 => {
+                    state.in_mem_mut().block.tree.delete(&tree_key)?;
                     state.db_delete(&key)?;
                 }
                 2 => {
                     let value_bytes = encode(&state.in_mem().block.height);
+                    state
+                        .in_mem_mut()
+                        .block
+                        .tree
+                        .update(&tree_key, &value_bytes)?;
                     state.db_write(&key, value_bytes)?;
                 }
                 3 => {
+                    state.in_mem_mut().block.tree.delete(&tree_key)?;
                     state.batch_delete_subspace_val(&mut batch, &key)?;
                 }
                 _ => {
                     let value_bytes = encode(&state.in_mem().block.height);
+                    state
+                        .in_mem_mut()
+                        .block
+                        .tree
+                        .update(&tree_key, &value_bytes)?;
                     state.batch_write_subspace_val(
                         &mut batch,
                         &key,
@@ -911,6 +931,7 @@ mod tests {
         assert_eq!(res, val2);
 
         // Commit block and storage changes
+        state.pre_commit_block().unwrap();
         state.commit_block().unwrap();
         state.in_mem_mut().block.height =
             state.in_mem_mut().block.height.next_height();
@@ -970,6 +991,7 @@ mod tests {
         // Delete the data then commit the block
         state.delete(&key1).unwrap();
         state.delete(&key2).unwrap();
+        state.pre_commit_block().unwrap();
         state.commit_block().unwrap();
         state.in_mem_mut().block.height =
             state.in_mem().block.height.next_height();

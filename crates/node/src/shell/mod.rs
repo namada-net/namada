@@ -3180,7 +3180,7 @@ mod shell_tests {
             .expect("Test failed");
         shell.state.commit_block().expect("Test failed");
         let new_root = shell.state.in_mem().merkle_root();
-        assert_ne!(new_root, original_root);
+        assert_eq!(new_root, original_root);
 
         shell.restore_database_from_state_sync();
         assert_eq!(shell.state.in_mem().merkle_root(), new_root,);

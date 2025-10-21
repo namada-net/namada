@@ -2201,9 +2201,9 @@ mod test_finalize_block {
 
             let _events = shell.finalize_block(req).unwrap();
 
-            // the merkle tree root should not change after finalize_block
+            // the merkle tree root should change after finalize_block
             let root_post = shell.shell.state.in_mem().block.tree.root();
-            assert_eq!(root_pre.0, root_post.0);
+            assert_ne!(root_pre.0, root_post.0);
             let new_state = store_block_state(&shell);
             // The new state must be unchanged
             itertools::assert_equal(
@@ -3311,9 +3311,9 @@ mod test_finalize_block {
         let code = event.read_attribute::<CodeAttr>().expect("Test failed");
         assert_eq!(code, ResultCode::Ok);
 
-        // the merkle tree root should not change after finalize_block
+        // the merkle tree root should change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
-        assert_eq!(root_pre.0, root_post.0);
+        assert_ne!(root_pre.0, root_post.0);
 
         // Check transaction's hash in storage
         assert!(
@@ -3379,7 +3379,7 @@ mod test_finalize_block {
 
         // the merkle tree root should change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
-        assert_eq!(root_pre.0, root_post.0);
+        assert_ne!(root_pre.0, root_post.0);
         // Check that the hashes are present in the merkle tree
         shell.state.commit_block().unwrap();
         assert!(
@@ -3467,9 +3467,9 @@ mod test_finalize_block {
             })
             .expect("Test failed");
 
-        // the merkle tree root should not change after finalize_block
+        // the merkle tree root should change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
-        assert_eq!(root_pre.0, root_post.0);
+        assert_ne!(root_pre.0, root_post.0);
 
         assert_eq!(*event[0].kind(), APPLIED_TX);
         let code = event[0].read_attribute::<CodeAttr>().expect("Test failed");
@@ -3595,9 +3595,9 @@ mod test_finalize_block {
             })
             .expect("Test failed");
 
-        // the merkle tree root should not change after finalize_block
+        // the merkle tree root should change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
-        assert_eq!(root_pre.0, root_post.0);
+        assert_ne!(root_pre.0, root_post.0);
 
         assert_eq!(*event[0].kind(), APPLIED_TX);
         let code = event[0].read_attribute::<CodeAttr>().expect("Test failed");
@@ -3724,9 +3724,9 @@ mod test_finalize_block {
             })
             .expect("Test failed");
 
-        // the merkle tree root should not change after finalize_block
+        // the merkle tree root should change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
-        assert_eq!(root_pre.0, root_post.0);
+        assert_ne!(root_pre.0, root_post.0);
 
         assert_eq!(*event[0].kind(), APPLIED_TX);
         let code = event[0].read_attribute::<CodeAttr>().expect("Test failed");
@@ -3879,9 +3879,9 @@ mod test_finalize_block {
             })
             .expect("Test failed");
 
-        // the merkle tree root should not change after finalize_block
+        // the merkle tree root should change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
-        assert_eq!(root_pre.0, root_post.0);
+        assert_ne!(root_pre.0, root_post.0);
 
         assert_eq!(*event[0].kind(), APPLIED_TX);
         let code = event[0].read_attribute::<CodeAttr>().expect("Test failed");

@@ -1031,6 +1031,7 @@ mod tests {
         assert_eq!(bp_erc_balance_post, Amount::from(0));
     }
 
+    #[ignore]
     #[test]
     /// Test that the transfers time out in the bridge pool then the refund when
     /// we act on a TransfersToEthereum

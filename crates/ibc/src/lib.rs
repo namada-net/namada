@@ -689,11 +689,15 @@ where
         let message = decode_message::<Transfer>(tx_data)?;
         let result = match message {
             IbcMessage::Transfer(msg) => {
-                let mut token_transfer_ctx =
-                    TokenTransferContext::<_, Token, ShieldedToken>::new(
-                        self.ctx.inner.clone(),
-                        self.verifiers.clone(),
-                    );
+                let mut token_transfer_ctx = TokenTransferContext::<
+                    _,
+                    Params,
+                    Token,
+                    ShieldedToken,
+                >::new(
+                    self.ctx.inner.clone(),
+                    self.verifiers.clone(),
+                );
                 // Add the source to the set of verifiers
                 self.verifiers.borrow_mut().insert(
                     match msg
@@ -877,11 +881,15 @@ where
         let message = decode_message::<Transfer>(tx_data)?;
         let result = match message {
             IbcMessage::Transfer(msg) => {
-                let mut token_transfer_ctx =
-                    TokenTransferContext::<_, Token, ShieldedToken>::new(
-                        self.ctx.inner.clone(),
-                        verifiers.clone(),
-                    );
+                let mut token_transfer_ctx = TokenTransferContext::<
+                    _,
+                    Params,
+                    Token,
+                    ShieldedToken,
+                >::new(
+                    self.ctx.inner.clone(),
+                    verifiers.clone(),
+                );
                 if msg.transfer.is_some() {
                     token_transfer_ctx.enable_shielded_transfer();
                 }

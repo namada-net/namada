@@ -2,7 +2,6 @@
 //! [`TransferModule`].
 
 use std::fmt::{Debug, Formatter};
-use std::marker::PhantomData;
 
 use ibc::apps::transfer::context::TokenTransferExecutionContext;
 use ibc::apps::transfer::handler::{
@@ -47,15 +46,14 @@ where
     C: IbcCommonContext + Debug,
 {
     /// The main module
-    pub transfer_module: TransferModule<C, Token, ShieldedToken>,
-    #[allow(missing_docs)]
-    pub _phantom: PhantomData<Params>,
+    pub transfer_module: TransferModule<C, Params, Token, ShieldedToken>,
 }
 
 impl<C, Params, Token, ShieldedToken> Debug
     for PfmTransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
+    Params: Debug,
     Token: Debug,
     ShieldedToken: Debug,
 {
@@ -70,6 +68,8 @@ from_middleware! {
     impl<C, Params, Token, ShieldedToken> Module for PfmTransferModule<C, Params, Token, ShieldedToken>
     where
         C: IbcCommonContext + Debug,
+        Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+            + Debug,
         Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
             + Debug,
         ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
@@ -80,12 +80,14 @@ impl<C, Params, Token, ShieldedToken> MiddlewareModule
     for PfmTransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
         + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
         + Debug,
 {
-    type NextMiddleware = TransferModule<C, Token, ShieldedToken>;
+    type NextMiddleware = TransferModule<C, Params, Token, ShieldedToken>;
 
     fn next_middleware(&self) -> &Self::NextMiddleware {
         &self.transfer_module
@@ -123,7 +125,7 @@ where
             self.transfer_module.ctx.inner.clone(),
         );
         let mut token_transfer_ctx =
-            TokenTransferContext::<_, Token, ShieldedToken>::new(
+            TokenTransferContext::<_, Params, Token, ShieldedToken>::new(
                 self.transfer_module.ctx.inner.clone(),
                 Default::default(),
             );
@@ -143,7 +145,7 @@ where
     ) -> Result<(), Self::Error> {
         tracing::debug!(?packet, ?data, "PFM receive_refund_execute");
         let mut token_transfer_ctx =
-            TokenTransferContext::<_, Token, ShieldedToken>::new(
+            TokenTransferContext::<_, Params, Token, ShieldedToken>::new(
                 self.transfer_module.ctx.inner.clone(),
                 self.transfer_module.ctx.verifiers.clone(),
             );
@@ -165,7 +167,7 @@ where
             );
 
         let mut token_transfer_ctx =
-            TokenTransferContext::<_, Token, ShieldedToken>::new(
+            TokenTransferContext::<_, Params, Token, ShieldedToken>::new(
                 self.transfer_module.ctx.inner.clone(),
                 self.transfer_module.ctx.verifiers.clone(),
             );

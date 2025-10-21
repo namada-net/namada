@@ -7,6 +7,7 @@ use std::num::ParseIntError;
 use std::str::FromStr;
 
 use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
+use data_encoding::HEXUPPER;
 use masp_primitives::asset_type::AssetType;
 use masp_primitives::sapling::{Diversifier, Note, ViewingKey};
 use masp_primitives::transaction::TransparentAddress;
@@ -1033,6 +1034,36 @@ impl BorshDeserialize for CompactNote {
             pk_d,
             rseed,
         })
+    }
+}
+
+impl serde::Serialize for CompactNote {
+    fn serialize<S>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let encoded = HEXUPPER.encode(&self.serialize_to_vec());
+        serde::Serialize::serialize(&encoded, serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for CompactNote {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let encoded: String = serde::Deserialize::deserialize(deserializer)?;
+
+        let borsh_bytes =
+            HEXUPPER.decode(encoded.as_bytes()).map_err(Error::custom)?;
+
+        <Self as BorshDeserialize>::try_from_slice(&borsh_bytes)
+            .map_err(Error::custom)
     }
 }
 

@@ -209,28 +209,60 @@ where
             ),
         })?;
 
+        let denom = Token::read_denom(self.inner.borrow().storage(), token)
+            .map_err(|err| HostError::Other {
+                description: format!(
+                    "Failed to read token denom of {token}: {err}"
+                ),
+            })?
+            .ok_or_else(|| HostError::Other {
+                description: format!("No token denom in storage for {token}"),
+            })?;
+
+        let epoched_asset = {
+            use namada_state::StorageRead;
+
+            let masp_epoch = {
+                let current_epoch =
+                    self.inner.borrow().storage().get_block_epoch()?;
+                Params::masp_epoch(
+                    self.inner.borrow().storage(),
+                    current_epoch,
+                )?
+            };
+            let asset = AssetData {
+                token: token.clone(),
+                denom,
+                // NB: assume there are conversions for all
+                // other digit positions
+                position: MaspDigitPos::Zero,
+                epoch: Some(masp_epoch),
+            };
+            let asset_type = asset.encode().map_err(|_| HostError::Other {
+                description: format!(
+                    "Failed to create asset type of IBC shielding: {asset:?}"
+                ),
+            })?;
+
+            // NB: attribute an epoch to the asset so that
+            // it can earn rewards, assuming it has conversions
+            // in the conversion state at the current masp epoch
+            self.inner
+                .borrow()
+                .storage()
+                .has_conversion(&asset_type)?
+                .then_some(masp_epoch)
+        };
+
         for (digit, note_value) in MaspDigitPos::iter()
             .zip(amount.iter_words())
             .filter(|(_, word)| *word != 0u64)
         {
-            let denom = Token::read_denom(self.inner.borrow().storage(), token)
-                .map_err(|err| HostError::Other {
-                    description: format!(
-                        "Failed to read token denom of {token}: {err}"
-                    ),
-                })?
-                .ok_or_else(|| HostError::Other {
-                    description: format!(
-                        "No token denom in storage for {token}"
-                    ),
-                })?;
-
             let asset = AssetData {
                 token: token.clone(),
                 denom,
                 position: digit,
-                epoch: None, /* TODO: read actual epoch, if asset has
-                              * conversions */
+                epoch: epoched_asset,
             };
             let asset_type = asset.encode().map_err(|_| HostError::Other {
                 description: format!(

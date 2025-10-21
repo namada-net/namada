@@ -354,4 +354,5 @@ mod native_vp_host_env {
     ));
     native_host_fn!(vp_charge_gas(used_gas: u64));
     native_host_fn!(vp_yield_value(buf_ptr: u64, buf_len: u64));
+    native_host_fn!(vp_has_conversion(buf_ptr: u64, buf_len: u64) -> i64);
 }

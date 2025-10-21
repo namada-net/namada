@@ -270,6 +270,19 @@ macro_rules! impl_storage_read {
                 }
             }
 
+            fn has_conversion(
+                &self,
+                asset_type: &namada_storage::conversion_state::AssetType,
+            ) -> namada_storage::Result<bool> {
+                Ok(
+                    self
+                    .in_mem()
+                    .conversion_state
+                    .assets
+                    .contains_key(asset_type),
+                )
+            }
+
             fn iter_prefix<'iter>(
                 &'iter self,
                 prefix: &storage::Key,

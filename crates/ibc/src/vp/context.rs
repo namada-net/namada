@@ -7,6 +7,7 @@ use namada_core::address::Address;
 use namada_core::arith::checked;
 use namada_core::chain::{BlockHeader, BlockHeight, ChainId, Epoch, Epochs};
 use namada_core::collections::{HashMap, HashSet};
+use namada_core::masp_primitives::asset_type::AssetType;
 use namada_core::storage::{Key, TxIndex};
 use namada_events::Event;
 use namada_gas::MEMORY_ACCESS_GAS_PER_BYTE;
@@ -126,6 +127,10 @@ where
 
     fn has_key(&self, key: &Key) -> Result<bool> {
         Ok(self.store.contains_key(key) || self.ctx.has_key(key)?)
+    }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        self.ctx.has_conversion(asset_type)
     }
 
     fn iter_prefix<'iter>(
@@ -320,6 +325,10 @@ where
 
     fn has_key(&self, key: &Key) -> Result<bool> {
         self.ctx.has_key(key)
+    }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        self.ctx.has_conversion(asset_type)
     }
 
     fn iter_prefix<'iter>(

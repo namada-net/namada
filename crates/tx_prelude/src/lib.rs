@@ -36,6 +36,7 @@ pub use namada_core::chain::{
 pub use namada_core::ethereum_events::EthAddress;
 use namada_core::internal::HostEnvResult;
 use namada_core::key::common;
+use namada_core::masp_primitives::asset_type::AssetType;
 use namada_core::storage::TxIndex;
 pub use namada_core::{address, encode, eth_bridge_pool, storage, *};
 pub use namada_events::extend::Log;
@@ -157,6 +158,17 @@ impl StorageRead for Ctx {
         let key = key.to_string();
         let found =
             unsafe { namada_tx_has_key(key.as_ptr() as _, key.len() as _) };
+        Ok(HostEnvResult::is_success(found))
+    }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        let asset_type = asset_type.serialize_to_vec();
+        let found = unsafe {
+            namada_tx_has_conversion(
+                asset_type.as_ptr() as _,
+                asset_type.len() as _,
+            )
+        };
         Ok(HostEnvResult::is_success(found))
     }
 

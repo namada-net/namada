@@ -19,6 +19,7 @@ use namada_core::collections::HashSet;
 use namada_core::decode;
 use namada_core::hash::Hash;
 use namada_core::internal::{HostEnvResult, KeyVal};
+use namada_core::masp_primitives::asset_type::AssetType;
 use namada_core::storage::{Key, TX_INDEX_LENGTH, TxIndex};
 use namada_events::{Event, EventTypeBuilder};
 use namada_gas::{
@@ -2249,6 +2250,37 @@ where
     Ok(())
 }
 
+/// Check if an asset type has an entry in the conversion table
+pub fn tx_has_conversion<MEM, D, H, CA>(
+    env: &mut TxVmEnv<MEM, D, H, CA>,
+    asset_type_ptr: u64,
+    asset_type_len: u64,
+) -> TxResult<i64>
+where
+    MEM: VmMemory,
+    D: 'static + DB + for<'iter> DBIter<'iter>,
+    H: 'static + StorageHasher,
+    CA: WasmCacheAccess,
+{
+    let (asset_type_bytes, gas) = env
+        .memory
+        .read_bytes(asset_type_ptr, asset_type_len.try_into()?)
+        .map_err(|e| TxRuntimeError::MemoryError(Box::new(e)))?;
+    consume_tx_gas::<MEM, D, H, CA>(env, gas)?;
+    let asset_type: AssetType =
+        BorshDeserialize::try_from_slice(&asset_type_bytes[..])
+            .map_err(TxRuntimeError::EncodingError)?;
+    let present = unsafe {
+        env.ctx
+            .in_mem
+            .get()
+            .conversion_state
+            .assets
+            .contains_key(&asset_type)
+    };
+    Ok(HostEnvResult::from(present).to_i64())
+}
+
 /// Evaluate a validity predicate with the given input data.
 pub fn vp_eval<MEM, D, H, EVAL, CA>(
     env: &mut VpVmEnv<MEM, D, H, EVAL, CA>,
@@ -2367,6 +2399,38 @@ where
     let host_buf = unsafe { env.ctx.yielded_value.get_mut() };
     host_buf.replace(value_to_yield);
     Ok(())
+}
+
+/// Check if an asset type has an entry in the conversion table
+pub fn vp_has_conversion<MEM, D, H, EVAL, CA>(
+    env: &mut VpVmEnv<MEM, D, H, EVAL, CA>,
+    asset_type_ptr: u64,
+    asset_type_len: u64,
+) -> Result<i64>
+where
+    MEM: VmMemory,
+    D: 'static + DB + for<'iter> DBIter<'iter>,
+    H: 'static + StorageHasher,
+    EVAL: VpEvaluator,
+    CA: WasmCacheAccess,
+{
+    let (asset_type_bytes, gas) = env
+        .memory
+        .read_bytes(asset_type_ptr, asset_type_len.try_into()?)
+        .map_err(Into::into)?;
+    vp_host_fns::add_gas(env.ctx.gas_meter(), gas)?;
+    let asset_type: AssetType =
+        BorshDeserialize::try_from_slice(&asset_type_bytes[..])
+            .map_err(TxRuntimeError::EncodingError)?;
+    let present = unsafe {
+        env.ctx
+            .in_mem
+            .get()
+            .conversion_state
+            .assets
+            .contains_key(&asset_type)
+    };
+    Ok(HostEnvResult::from(present).to_i64())
 }
 
 // Internal funtion to charge gas for txs. Called by the other functions in this

@@ -164,6 +164,9 @@ pub mod tx {
 
         /// Yield a byte array value back to the host.
         pub fn namada_tx_yield_value(buf_ptr: u64, buf_len: u64);
+
+        /// Check if an asset type has an entry in the conversions table
+        pub fn namada_tx_has_conversion(asset_type_ptr: u64, asset_type_len: u64) -> i64;
     }
 }
 
@@ -280,6 +283,9 @@ pub mod vp {
 
         /// Charge the provided amount of gas for the current vp
         pub fn namada_vp_charge_gas(used_gas: u64);
+
+        /// Check if an asset type has an entry in the conversions table
+        pub fn namada_vp_has_conversion(asset_type_ptr: u64, asset_type_len: u64) -> i64;
     }
 }
 

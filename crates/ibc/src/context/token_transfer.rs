@@ -13,12 +13,14 @@ use ibc::core::host::types::error::HostError;
 use ibc::core::host::types::identifiers::{ChannelId, PortId};
 use ibc::core::primitives::Signer;
 use namada_core::address::{Address, InternalAddress, MASP};
+use namada_core::arith::{CheckedAdd, checked};
 use namada_core::masp::{AssetData, PaymentAddress};
 use namada_core::token::{Amount, MaspDigitPos};
 use namada_core::uint::Uint;
 
 use super::common::IbcCommonContext;
 use crate::context::storage::IbcStorageContext;
+use crate::storage::{load_shielding_counter, write_shielding_counter};
 use crate::{IBC_ESCROW_ADDRESS, trace};
 
 /// Token transfer context to handle tokens
@@ -189,7 +191,20 @@ where
                 <C as IbcStorageContext>::Storage,
             >,
     {
+        if amount.is_zero() {
+            return Ok(());
+        }
+
         let mut note_commitments = vec![];
+
+        let mut next_shielding_counter = load_shielding_counter(
+            self.inner.borrow().storage(),
+        )
+        .map_err(|err| HostError::Other {
+            description: format!(
+                "Failed to load IBC shielding counter from storage: {err}"
+            ),
+        })?;
 
         for (digit, note_value) in MaspDigitPos::iter()
             .zip(amount.iter_words())
@@ -220,8 +235,18 @@ where
                 ),
             })?;
 
-            // TODO: get deterministic and unique seed of randomness
-            let rseed = namada_core::hash::Hash::sha256(b"placeholder").0;
+            let rseed = namada_core::hash::Hash::sha256(format!(
+                "Namada IBC shielding {next_shielding_counter}"
+            ))
+            .0;
+
+            checked!(next_shielding_counter += 1).map_err(|_err| {
+                HostError::Other {
+                    description: "Arithmetic overflow in IBC shielding \
+                                  counter increment"
+                        .to_string(),
+                }
+            })?;
 
             let note = owner_pa
                 .create_note(asset_type, note_value, rseed)
@@ -233,6 +258,16 @@ where
 
             note_commitments.push(note.commitment());
         }
+
+        write_shielding_counter(
+            self.inner.borrow_mut().storage_mut(),
+            next_shielding_counter,
+        )
+        .map_err(|err| HostError::Other {
+            description: format!(
+                "Failed to write IBC shielding counter to storage: {err}"
+            ),
+        })?;
 
         // TODO: emit masp events
 

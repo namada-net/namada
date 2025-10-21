@@ -25,17 +25,18 @@ use crate::{IBC_ESCROW_ADDRESS, trace};
 
 /// Token transfer context to handle tokens
 #[derive(Debug)]
-pub struct TokenTransferContext<C, Token, ShieldedToken>
+pub struct TokenTransferContext<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
 {
     pub(crate) inner: Rc<RefCell<C>>,
     pub(crate) verifiers: Rc<RefCell<BTreeSet<Address>>>,
     has_masp_tx: bool,
-    _marker: PhantomData<(Token, ShieldedToken)>,
+    _marker: PhantomData<(Params, Token, ShieldedToken)>,
 }
 
-impl<C, Token, ShieldedToken> TokenTransferContext<C, Token, ShieldedToken>
+impl<C, Params, Token, ShieldedToken>
+    TokenTransferContext<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
 {
@@ -186,6 +187,8 @@ where
         amount: &Amount,
     ) -> Result<(), HostError>
     where
+        Params:
+            namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
         Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>,
         ShieldedToken: namada_systems::shielded_token::Write<
                 <C as IbcStorageContext>::Storage,
@@ -279,8 +282,8 @@ where
     }
 }
 
-impl<C, Token, ShieldedToken> TokenTransferValidationContext
-    for TokenTransferContext<C, Token, ShieldedToken>
+impl<C, Params, Token, ShieldedToken> TokenTransferValidationContext
+    for TokenTransferContext<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
 {
@@ -371,10 +374,11 @@ where
     }
 }
 
-impl<C, Token, ShieldedToken> TokenTransferExecutionContext
-    for TokenTransferContext<C, Token, ShieldedToken>
+impl<C, Params, Token, ShieldedToken> TokenTransferExecutionContext
+    for TokenTransferContext<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>,
     Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>,
 {

@@ -148,11 +148,13 @@ where
     EVAL: 'static + VpEvaluator<'ctx, S, CA, EVAL> + Debug,
     CA: 'static + Clone + Debug,
     Gov: governance::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>,
-    Params: parameters::Read<VpValidationContext<'view, 'ctx, S, CA, EVAL>>,
+    Params:
+        parameters::Read<VpValidationContext<'view, 'ctx, S, CA, EVAL>> + Debug,
     ParamsPre: parameters::Keys
-        + parameters::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>,
-    ParamsPseudo:
-        parameters::Read<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>,
+        + parameters::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    ParamsPseudo: parameters::Read<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
     Token: token::Keys
         + token::Write<VpValidationContext<'view, 'ctx, S, CA, EVAL>>
         + Debug,
@@ -242,11 +244,13 @@ where
     S: 'static + StateRead,
     EVAL: 'static + VpEvaluator<'ctx, S, CA, EVAL> + Debug,
     CA: 'static + Clone + Debug,
-    Params: parameters::Read<VpValidationContext<'view, 'ctx, S, CA, EVAL>>,
+    Params:
+        parameters::Read<VpValidationContext<'view, 'ctx, S, CA, EVAL>> + Debug,
     ParamsPre: parameters::Keys
-        + parameters::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>,
-    ParamsPseudo:
-        parameters::Read<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>,
+        + parameters::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    ParamsPseudo: parameters::Read<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
     Token: token::Keys
         + token::Write<VpValidationContext<'view, 'ctx, S, CA, EVAL>>
         + Debug,

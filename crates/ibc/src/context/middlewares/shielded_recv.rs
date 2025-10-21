@@ -46,7 +46,8 @@ use crate::{Error, IbcCommonContext, IbcStorageContext, TokenTransferContext};
 pub struct ShieldedRecvModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
-    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
         + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
@@ -62,7 +63,8 @@ impl<C, Params, Token, ShieldedToken>
     ShieldedRecvModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
-    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
         + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
@@ -91,7 +93,8 @@ impl<C, Params, Token, ShieldedToken> Debug
     for ShieldedRecvModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
-    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
         + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
@@ -109,7 +112,8 @@ from_middleware! {
         for ShieldedRecvModule<C, Params, Token, ShieldedToken>
     where
         C: IbcCommonContext + Debug,
-        Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+        Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+            + Debug,
         Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
             + Debug,
         ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
@@ -120,7 +124,8 @@ impl<C, Params, Token, ShieldedToken> MiddlewareModule
     for ShieldedRecvModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
-    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
         + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
@@ -227,7 +232,8 @@ impl<C, Params, Token, ShieldedToken> OverflowRecvContext
     for ShieldedRecvModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
-    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
         + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
@@ -244,7 +250,7 @@ where
         let ctx = self.get_ctx();
         let verifiers = self.get_verifiers();
         let mut token_transfer_context =
-            TokenTransferContext::<_, Token, ShieldedToken>::new(
+            TokenTransferContext::<_, Params, Token, ShieldedToken>::new(
                 ctx, verifiers,
             );
         token_transfer_context
@@ -262,7 +268,7 @@ where
         let ctx = self.get_ctx();
         let verifiers = self.get_verifiers();
         let mut token_transfer_context =
-            TokenTransferContext::<_, Token, ShieldedToken>::new(
+            TokenTransferContext::<_, Params, Token, ShieldedToken>::new(
                 ctx, verifiers,
             );
         token_transfer_context

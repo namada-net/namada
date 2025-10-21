@@ -51,15 +51,16 @@ pub trait ModuleWrapper: Module {
 
 /// IBC module for token transfer
 #[derive(Debug)]
-pub struct TransferModule<C, Token, ShieldedToken>
+pub struct TransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
 {
     /// IBC actions
-    pub ctx: TokenTransferContext<C, Token, ShieldedToken>,
+    pub ctx: TokenTransferContext<C, Params, Token, ShieldedToken>,
 }
 
-impl<C, Token, ShieldedToken> TransferModule<C, Token, ShieldedToken>
+impl<C, Params, Token, ShieldedToken>
+    TransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
 {
@@ -74,10 +75,12 @@ where
     }
 }
 
-impl<C, Token, ShieldedToken> ModuleWrapper
-    for TransferModule<C, Token, ShieldedToken>
+impl<C, Params, Token, ShieldedToken> ModuleWrapper
+    for TransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
         + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
@@ -100,9 +103,12 @@ where
     }
 }
 
-impl<C, Token, ShieldedToken> Module for TransferModule<C, Token, ShieldedToken>
+impl<C, Params, Token, ShieldedToken> Module
+    for TransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
         + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>

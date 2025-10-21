@@ -6,7 +6,6 @@ pub mod shielded_recv;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::rc::Rc;
 
 use ibc::core::host::types::identifiers::PortId;
@@ -34,7 +33,8 @@ pub fn create_transfer_middlewares<C, Params, Token, ShieldedToken>(
 ) -> TransferMiddlewares<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
-    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
         + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
@@ -43,7 +43,6 @@ where
     OverflowReceiveMiddleware::wrap(ShieldedRecvModule {
         next: PacketForwardMiddleware::wrap(PfmTransferModule {
             transfer_module: TransferModule::new(ctx, verifiers),
-            _phantom: PhantomData,
         }),
     })
 }
@@ -52,7 +51,8 @@ impl<C, Params, Token, ShieldedToken> crate::ModuleWrapper
     for TransferMiddlewares<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
-    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
     Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
         + Debug,
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>

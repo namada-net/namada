@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use namada_core::address::Address;
 use namada_core::token::Amount;
+use namada_events::Event;
 use namada_ibc::context::middlewares::create_transfer_middlewares;
 pub use namada_ibc::event::{IbcEvent, IbcEventType};
 pub use namada_ibc::storage::{
@@ -64,7 +65,7 @@ impl IbcStorageContext for Ctx {
         super::log_string(message);
     }
 
-    fn emit_ibc_event(&mut self, event: IbcEvent) -> Result<()> {
+    fn emit_event(&mut self, event: Event) -> Result<()> {
         <Ctx as TxEnv>::emit_event(self, event)
     }
 

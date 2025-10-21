@@ -17,11 +17,10 @@ use namada_core::borsh::{BorshSerialize, BorshSerializeExt};
 use namada_core::ibc::PGFIbcTarget;
 use namada_core::tendermint::Time as TmTime;
 use namada_core::token::Amount;
-use namada_events::EmitEvents;
+use namada_events::{EmitEvents, Event};
 use namada_state::{Result, ResultExt, State};
 use namada_systems::{parameters, shielded_token, trans_token};
 
-use crate::event::IbcEvent;
 use crate::{
     IbcActions, IbcCommonContext, IbcStorageContext, MsgTransfer,
     storage as ibc_storage,
@@ -53,7 +52,7 @@ where
         self.state
     }
 
-    fn emit_ibc_event(&mut self, event: IbcEvent) -> Result<()> {
+    fn emit_event(&mut self, event: Event) -> Result<()> {
         // There's no gas cost for protocol, we can ignore result
         self.state.write_log_mut().emit_event(event);
         Ok(())

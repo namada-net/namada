@@ -18,7 +18,6 @@ use namada_systems::trans_token::{self as token, Amount};
 use namada_vp::VpEnv;
 use namada_vp::native_vp::{CtxPreStorageRead, VpEvaluator};
 
-use crate::event::IbcEvent;
 use crate::storage::{self, is_ibc_key};
 use crate::{IbcCommonContext, IbcStorageContext};
 
@@ -230,8 +229,8 @@ where
         &mut self.storage
     }
 
-    fn emit_ibc_event(&mut self, event: IbcEvent) -> Result<()> {
-        self.storage.event.insert(event.into());
+    fn emit_event(&mut self, event: Event) -> Result<()> {
+        self.storage.event.insert(event);
         Ok(())
     }
 
@@ -413,7 +412,7 @@ where
         self
     }
 
-    fn emit_ibc_event(&mut self, _event: IbcEvent) -> Result<()> {
+    fn emit_event(&mut self, _event: Event) -> Result<()> {
         unimplemented!("Validation doesn't emit an event")
     }
 

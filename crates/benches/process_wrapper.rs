@@ -1,6 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use namada_apps_lib::key::RefTo;
-use namada_apps_lib::state::TxIndex;
 use namada_apps_lib::time::DateTimeUtc;
 use namada_apps_lib::token::{Amount, DenominatedAmount, Transfer};
 use namada_apps_lib::tx::Authorization;
@@ -90,7 +89,7 @@ fn process_tx(c: &mut Criterion) {
                     shell
                         .check_proposal_tx(
                             &wrapper,
-                            &TxIndex::default(),
+                            Default::default(),
                             validation_meta,
                             temp_state,
                             datetime,

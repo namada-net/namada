@@ -263,7 +263,11 @@ where
                 let batched_tx_result = apply_wasm_tx(
                     wrapper_hash,
                     &tx.batch_ref_tx(cmt),
-                    &tx_index,
+                    &IndexedTx {
+                        block_height: height,
+                        block_index: tx_index,
+                        batch_index: Some(0),
+                    },
                     ShellParams {
                         tx_gas_meter,
                         state,
@@ -325,7 +329,7 @@ where
                 tx,
                 wrapper,
                 tx_bytes,
-                &tx_index,
+                tx_index,
                 height,
                 tx_gas_meter,
                 &mut shell_params,
@@ -376,11 +380,23 @@ where
         .collect::<HashSet<_>>()
         .into_iter();
 
+    let mut indexed_tx = IndexedTx {
+        block_height: height,
+        block_index: tx_index,
+        batch_index: None,
+    };
+
     for cmt in inner_txs {
+        indexed_tx.batch_index = tx
+            .header
+            .batch
+            .get_index_of(cmt)
+            .map(|idx| TxIndex::must_from_usize(idx).into());
+
         match apply_wasm_tx(
             wrapper_hash,
             &tx.batch_ref_tx(cmt),
-            &tx_index,
+            &indexed_tx,
             ShellParams {
                 tx_gas_meter,
                 state,
@@ -417,17 +433,7 @@ where
                         compute_inner_tx_hash(wrapper_hash, Either::Right(cmt));
                     batched_tx_result.events.insert(
                         MaspEvent {
-                            tx_index: IndexedTx {
-                                block_height: height,
-                                block_index: tx_index,
-                                batch_index: tx
-                                    .header
-                                    .batch
-                                    .get_index_of(cmt)
-                                    .map(|idx| {
-                                        TxIndex::must_from_usize(idx).into()
-                                    }),
-                            },
+                            tx_index: indexed_tx,
                             kind: MaspEventKind::Transfer,
                             data: masp_ref,
                         }
@@ -489,7 +495,7 @@ pub(crate) fn apply_wrapper_tx<S, D, H, CA>(
     tx: &Tx,
     wrapper: &WrapperTx,
     tx_bytes: &[u8],
-    tx_index: &TxIndex,
+    tx_index: TxIndex,
     height: BlockHeight,
     tx_gas_meter: &RefCell<TxGasMeter>,
     shell_params: &mut ShellParams<'_, S, D, H, CA>,
@@ -517,9 +523,14 @@ where
     // Charge or check fees, propagate any errors to prevent committing invalid
     // data
     let payment_result = match block_proposer {
-        Some(block_proposer) => {
-            transfer_fee(shell_params, block_proposer, tx, wrapper, tx_index)?
-        }
+        Some(block_proposer) => transfer_fee(
+            shell_params,
+            block_proposer,
+            tx,
+            wrapper,
+            tx_index,
+            height,
+        )?,
         None => check_fees(shell_params, tx, wrapper, dry_run)?,
     };
 
@@ -582,7 +593,8 @@ pub fn transfer_fee<S, D, H, CA>(
     block_proposer: &Address,
     tx: &Tx,
     wrapper: &WrapperTx,
-    tx_index: &TxIndex,
+    tx_index: TxIndex,
+    height: BlockHeight,
 ) -> Result<Option<MaspTxResult>>
 where
     S: 'static
@@ -633,7 +645,16 @@ where
             } else {
                 // See if the first inner transaction of the batch pays the fees
                 // with a masp unshield
-                match try_masp_fee_payment(shell_params, tx, tx_index, false) {
+                match try_masp_fee_payment(
+                    shell_params,
+                    tx,
+                    &IndexedTx {
+                        block_height: height,
+                        block_index: tx_index,
+                        batch_index: Some(0),
+                    },
+                    false,
+                ) {
                     Ok(valid_batched_tx_result) => {
                         #[cfg(not(fuzzing))]
                         let balance = token::read_balance(
@@ -789,7 +810,7 @@ fn try_masp_fee_payment<S, D, H, CA>(
         tx_wasm_cache,
     }: &mut ShellParams<'_, S, D, H, CA>,
     tx: &Tx,
-    tx_index: &TxIndex,
+    indexed_tx: &IndexedTx,
     dry_run: bool,
 ) -> std::result::Result<MaspTxResult, MaspFeeError>
 where
@@ -832,7 +853,7 @@ where
         match apply_wasm_tx(
             Some(&tx.header_hash()),
             &first_tx,
-            tx_index,
+            indexed_tx,
             ShellParams {
                 tx_gas_meter: &masp_gas_meter,
                 state: *state,
@@ -1002,7 +1023,7 @@ where
                     let valid_batched_tx_result = try_masp_fee_payment(
                         shell_params,
                         tx,
-                        &TxIndex::default(),
+                        &Default::default(),
                         dry_run,
                     )?;
                     let balance = token::read_balance(
@@ -1037,7 +1058,7 @@ where
 fn apply_wasm_tx<S, D, H, CA>(
     wrapper_hash: Option<&Hash>,
     batched_tx: &BatchedTxRef<'_>,
-    tx_index: &TxIndex,
+    indexed_tx: &IndexedTx,
     shell_params: ShellParams<'_, S, D, H, CA>,
     gas_meter_kind: GasMeterKind,
     dry_run: bool,
@@ -1058,7 +1079,7 @@ where
     let verifiers = execute_tx(
         wrapper_hash,
         batched_tx,
-        tx_index,
+        indexed_tx,
         state,
         tx_gas_meter,
         vp_wasm_cache,
@@ -1069,7 +1090,7 @@ where
 
     let vps_result = check_vps(CheckVps {
         batched_tx,
-        tx_index,
+        indexed_tx,
         state,
         tx_gas_meter: &mut tx_gas_meter.borrow_mut(),
         verifiers_from_tx: &verifiers,
@@ -1179,7 +1200,7 @@ where
 fn execute_tx<S, D, H, CA>(
     wrapper_hash: Option<&Hash>,
     batched_tx: &BatchedTxRef<'_>,
-    tx_index: &TxIndex,
+    indexed_tx: &IndexedTx,
     state: &mut S,
     tx_gas_meter: &RefCell<TxGasMeter>,
     vp_wasm_cache: &mut VpCache<CA>,
@@ -1197,7 +1218,7 @@ where
         state,
         tx_gas_meter,
         wrapper_hash,
-        tx_index,
+        &indexed_tx.block_index,
         batched_tx.tx,
         batched_tx.cmt,
         vp_wasm_cache,
@@ -1219,7 +1240,7 @@ where
     CA: 'static + WasmCacheAccess + Sync,
 {
     batched_tx: &'a BatchedTxRef<'a>,
-    tx_index: &'a TxIndex,
+    indexed_tx: &'a IndexedTx,
     state: &'a S,
     tx_gas_meter: &'a mut TxGasMeter,
     verifiers_from_tx: &'a BTreeSet<Address>,
@@ -1232,7 +1253,7 @@ where
 fn check_vps<S, CA>(
     CheckVps {
         batched_tx: tx,
-        tx_index,
+        indexed_tx,
         state,
         tx_gas_meter,
         verifiers_from_tx,
@@ -1253,7 +1274,7 @@ where
         verifiers,
         keys_changed,
         tx,
-        tx_index,
+        indexed_tx,
         state,
         tx_gas_meter,
         vp_wasm_cache,
@@ -1275,7 +1296,7 @@ fn execute_vps<S, CA>(
     verifiers: BTreeSet<Address>,
     keys_changed: BTreeSet<storage::Key>,
     batched_tx: &BatchedTxRef<'_>,
-    tx_index: &TxIndex,
+    indexed_tx: &IndexedTx,
     state: &S,
     tx_gas_meter: &TxGasMeter,
     vp_wasm_cache: &mut VpCache<CA>,
@@ -1309,7 +1330,7 @@ where
                         wasm::run::vp(
                             vp_code_hash,
                             batched_tx,
-                            tx_index,
+                            &indexed_tx.block_index,
                             addr,
                             state,
                             &gas_meter,
@@ -1335,7 +1356,7 @@ where
                             state,
                             batched_tx.tx,
                             batched_tx.cmt,
-                            tx_index,
+                            &indexed_tx.block_index,
                             &gas_meter,
                             &keys_changed,
                             &verifiers,
@@ -1770,7 +1791,7 @@ mod tests {
             verifiers,
             changed_keys,
             &batched_tx,
-            &TxIndex::default(),
+            &IndexedTx::default(),
             &state,
             &gas_meter,
             &mut vp_cache,

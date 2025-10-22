@@ -37,7 +37,10 @@ use serde_json::{Map, Value};
 
 use crate::context::middlewares::pfm_mod::PfmTransferModule;
 use crate::msg::{NamadaMemo, OsmosisSwapMemoData};
-use crate::{Error, IbcCommonContext, IbcStorageContext, TokenTransferContext};
+use crate::{
+    Error, IbcAccountId, IbcCommonContext, IbcStorageContext,
+    TokenTransferContext,
+};
 
 /// A middleware for handling IBC pockets received
 /// after a shielded swap. The minimum amount will
@@ -254,7 +257,10 @@ where
                 ctx, verifiers,
             );
         token_transfer_context
-            .mint_coins_execute(receiver, coin)
+            .mint_coins_execute(
+                &IbcAccountId::Transparent(receiver.clone()),
+                coin,
+            )
             .map_err(|e| Error::TokenTransfer(TokenTransferError::Host(e)))
     }
 
@@ -272,7 +278,12 @@ where
                 ctx, verifiers,
             );
         token_transfer_context
-            .unescrow_coins_execute(receiver, port, channel, coin)
+            .unescrow_coins_execute(
+                &IbcAccountId::Transparent(receiver.clone()),
+                port,
+                channel,
+                coin,
+            )
             .map_err(|e| Error::TokenTransfer(TokenTransferError::Host(e)))
     }
 }

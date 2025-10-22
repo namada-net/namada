@@ -240,8 +240,14 @@ where
         self.ctx.get_block_epoch()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex> {
-        self.ctx.get_tx_index().into_storage_result()
+    fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)> {
+        self.ctx.get_tx_index().into_storage_result().map(
+            |IndexedTx {
+                 block_height,
+                 block_index,
+                 batch_index,
+             }| (block_height, block_index, batch_index),
+        )
     }
 
     fn get_native_token(&self) -> Result<Address> {
@@ -328,8 +334,14 @@ where
         self.ctx.get_block_epoch()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex> {
-        self.ctx.get_tx_index().into_storage_result()
+    fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)> {
+        self.ctx.get_tx_index().into_storage_result().map(
+            |IndexedTx {
+                 block_height,
+                 block_index,
+                 batch_index,
+             }| (block_height, block_index, batch_index),
+        )
     }
 
     fn get_native_token(&self) -> Result<Address> {
@@ -399,8 +411,8 @@ where
             .into_storage_result()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex> {
-        vp_host_fns::get_tx_index(self.gas_meter, &self.indexed_tx.block_index)
+    fn get_tx_index(&self) -> Result<IndexedTx> {
+        vp_host_fns::get_tx_index(self.gas_meter, self.indexed_tx)
             .into_storage_result()
     }
 

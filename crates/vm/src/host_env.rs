@@ -1637,8 +1637,18 @@ where
             .expect("Consts mul that cannot overflow")
             .into(),
     )?;
+
     let indexed_tx = unsafe { env.ctx.indexed_tx.get() };
-    Ok(indexed_tx.block_index.0)
+
+    let value = indexed_tx.serialize_to_vec();
+    let len: u32 = value
+        .len()
+        .try_into()
+        .map_err(TxRuntimeError::NumConversionError)?;
+    let result_buffer = unsafe { env.ctx.result_buffer.get_mut() };
+    result_buffer.replace(value);
+
+    Ok(len)
 }
 
 /// Getting the block height function exposed to the wasm VM VP
@@ -1656,8 +1666,17 @@ where
 {
     let gas_meter = env.ctx.gas_meter();
     let indexed_tx = unsafe { env.ctx.indexed_tx.get() };
-    let tx_idx = vp_host_fns::get_tx_index(gas_meter, &indexed_tx.block_index)?;
-    Ok(tx_idx.0)
+    let indexed_tx = vp_host_fns::get_tx_index(gas_meter, indexed_tx)?;
+
+    let value = indexed_tx.serialize_to_vec();
+    let len: u32 = value
+        .len()
+        .try_into()
+        .map_err(TxRuntimeError::NumConversionError)?;
+    let result_buffer = unsafe { env.ctx.result_buffer.get_mut() };
+    result_buffer.replace(value);
+
+    Ok(len)
 }
 
 /// Getting the block epoch function exposed to the wasm VM Tx

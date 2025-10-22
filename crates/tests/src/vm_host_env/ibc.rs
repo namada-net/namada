@@ -68,7 +68,7 @@ use namada_sdk::proof_of_stake::OwnedPosParams;
 use namada_sdk::proof_of_stake::test_utils::get_dummy_genesis_validator;
 use namada_sdk::state::StateRead;
 use namada_sdk::state::testing::TestState;
-use namada_sdk::storage::{self, BlockHeight, Epoch, Key, TxIndex};
+use namada_sdk::storage::{self, BlockHeight, Epoch, Key};
 use namada_sdk::tendermint::time::Time as TmTime;
 use namada_sdk::time::DurationSecs;
 use namada_sdk::tx::BatchedTxRef;
@@ -123,12 +123,13 @@ pub fn validate_ibc_vp_from_tx<'a>(
     let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
         &TxGasMeter::new(10_000_000_000, 1),
     ));
+    let indexed_tx = namada_sdk::tx::IndexedTx::default();
     let ctx = Ctx::new(
         &ADDRESS,
         &tx_env.state,
         batched_tx.tx,
         batched_tx.cmt,
-        &TxIndex(0),
+        &indexed_tx,
         &gas_meter,
         &keys_changed,
         &verifiers,
@@ -163,12 +164,13 @@ pub fn validate_multitoken_vp_from_tx<'a>(
     let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
         &TxGasMeter::new(10_000_000_000, 1),
     ));
+    let indexed_tx = namada_sdk::tx::IndexedTx::default();
     let ctx = Ctx::<_, _, VpEvalWasm<_, _, _>>::new(
         &ADDRESS,
         &tx_env.state,
         batched_tx.tx,
         batched_tx.cmt,
-        &TxIndex(0),
+        &indexed_tx,
         &gas_meter,
         &keys_changed,
         &verifiers,

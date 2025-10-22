@@ -41,12 +41,12 @@ use namada_apps_lib::masp_primitives::merkle_tree::CommitmentTree;
 use namada_apps_lib::masp_primitives::transaction::Transaction;
 use namada_apps_lib::masp_proofs::sapling::SaplingVerificationContextInner;
 use namada_apps_lib::proof_of_stake::KeySeg;
-use namada_apps_lib::state::{Epoch, StorageRead, StorageWrite, TxIndex};
+use namada_apps_lib::state::{Epoch, StorageRead, StorageWrite};
 use namada_apps_lib::token::masp::{
     PVKs, partial_deauthorize, preload_verifying_keys,
 };
 use namada_apps_lib::token::{Amount, Transfer};
-use namada_apps_lib::tx::{BatchedTx, Code, Section, Tx};
+use namada_apps_lib::tx::{BatchedTx, Code, IndexedTx, Section, Tx};
 use namada_apps_lib::validation::{
     EthBridgeNutVp, EthBridgePoolVp, EthBridgeVp, GovernanceVp, IbcVp,
     IbcVpContext, MaspVp, MultitokenVp, ParametersVp, PgfVp, PosVp,
@@ -222,12 +222,13 @@ fn governance(c: &mut Criterion) {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
+        let indexed_tx = IndexedTx::default();
         let ctx = Ctx::new(
             &Address::Internal(InternalAddress::Governance),
             &shell.state,
             &signed_tx.tx,
             &signed_tx.cmt,
-            &TxIndex(0),
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -294,13 +295,14 @@ fn governance(c: &mut Criterion) {
 //              .write_log
 //              .verifiers_and_changed_keys(&verifiers_from_tx);
 
+//          let indexed_tx = IndexedTx::default();
 //          let slash_fund = SlashFundVp {
 //              ctx: Ctx::new(
 //                  &Address::Internal(InternalAddress::SlashFund),
 //                  &shell.state.storage,
 //                  &shell.state.write_log,
 //                  &tx,
-//                  &TxIndex(0),
+//                  &indexed_tx,
 //
 // VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
 // u64::MAX.into(),                  )),
@@ -451,12 +453,13 @@ fn ibc(c: &mut Criterion) {
             &TxGasMeter::new(u64::MAX, 1),
         ));
         let shell_read = shielded_ctx.shell.read();
+        let indexed_tx = IndexedTx::default();
         let ibc = IbcVp::new(Ctx::new(
             &Address::Internal(InternalAddress::Ibc),
             &shell_read.state,
             &signed_tx.tx,
             &signed_tx.cmt,
-            &TxIndex(0),
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -519,12 +522,13 @@ fn vp_multitoken(c: &mut Criterion) {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
+        let indexed_tx = IndexedTx::default();
         let ctx = Ctx::new(
             &Address::Internal(InternalAddress::Multitoken),
             &shell.state,
             &signed_tx.tx,
             &signed_tx.cmt,
-            &TxIndex(0),
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -644,12 +648,13 @@ fn masp(c: &mut Criterion) {
             let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
                 &TxGasMeter::new(u64::MAX, 1),
             ));
+            let indexed_tx = IndexedTx::default();
             let ctx = Ctx::new(
                 &Address::Internal(InternalAddress::Masp),
                 &shell_read.state,
                 &signed_tx.tx,
                 &signed_tx.cmt,
-                &TxIndex(0),
+                &indexed_tx,
                 &gas_meter,
                 &keys_changed,
                 &verifiers,
@@ -1271,12 +1276,13 @@ fn pgf(c: &mut Criterion) {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
+        let indexed_tx = IndexedTx::default();
         let ctx = Ctx::new(
             &Address::Internal(InternalAddress::Pgf),
             &shell.state,
             &signed_tx.tx,
             &signed_tx.cmt,
-            &TxIndex(0),
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1349,12 +1355,13 @@ fn eth_bridge_nut(c: &mut Criterion) {
     let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
         &TxGasMeter::new(u64::MAX, 1),
     ));
+    let indexed_tx = IndexedTx::default();
     let ctx = Ctx::new(
         &vp_address,
         &shell.state,
         &signed_tx.tx,
         &signed_tx.cmt,
-        &TxIndex(0),
+        &indexed_tx,
         &gas_meter,
         &keys_changed,
         &verifiers,
@@ -1423,12 +1430,13 @@ fn eth_bridge(c: &mut Criterion) {
     let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
         &TxGasMeter::new(u64::MAX, 1),
     ));
+    let indexed_tx = IndexedTx::default();
     let ctx = Ctx::new(
         &vp_address,
         &shell.state,
         &signed_tx.tx,
         &signed_tx.cmt,
-        &TxIndex(0),
+        &indexed_tx,
         &gas_meter,
         &keys_changed,
         &verifiers,
@@ -1522,12 +1530,13 @@ fn eth_bridge_pool(c: &mut Criterion) {
     let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
         &TxGasMeter::new(u64::MAX, 1),
     ));
+    let indexed_tx = IndexedTx::default();
     let ctx = Ctx::new(
         &vp_address,
         &shell.state,
         &signed_tx.tx,
         &signed_tx.cmt,
-        &TxIndex(0),
+        &indexed_tx,
         &gas_meter,
         &keys_changed,
         &verifiers,
@@ -1596,12 +1605,13 @@ fn parameters(c: &mut Criterion) {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
+        let indexed_tx = IndexedTx::default();
         let ctx = Ctx::new(
             &vp_address,
             &shell.state,
             &signed_tx.tx,
             &signed_tx.cmt,
-            &TxIndex(0),
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1673,12 +1683,13 @@ fn pos(c: &mut Criterion) {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
+        let indexed_tx = IndexedTx::default();
         let ctx = Ctx::new(
             &vp_address,
             &shell.state,
             &signed_tx.tx,
             &signed_tx.cmt,
-            &TxIndex(0),
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1727,12 +1738,13 @@ fn ibc_vp_validate_action(c: &mut Criterion) {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
+        let indexed_tx = IndexedTx::default();
         let ibc = IbcVp::new(Ctx::new(
             &Address::Internal(InternalAddress::Ibc),
             &shell_read.state,
             &signed_tx.tx,
             &signed_tx.cmt,
-            &TxIndex(0),
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1794,12 +1806,13 @@ fn ibc_vp_execute_action(c: &mut Criterion) {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
+        let indexed_tx = IndexedTx::default();
         let ibc = IbcVp::new(Ctx::new(
             &Address::Internal(InternalAddress::Ibc),
             &shell_read.state,
             &signed_tx.tx,
             &signed_tx.cmt,
-            &TxIndex(0),
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,

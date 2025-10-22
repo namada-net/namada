@@ -1218,7 +1218,7 @@ where
         state,
         tx_gas_meter,
         wrapper_hash,
-        &indexed_tx.block_index,
+        indexed_tx,
         batched_tx.tx,
         batched_tx.cmt,
         vp_wasm_cache,
@@ -1330,7 +1330,7 @@ where
                         wasm::run::vp(
                             vp_code_hash,
                             batched_tx,
-                            &indexed_tx.block_index,
+                            indexed_tx,
                             addr,
                             state,
                             &gas_meter,
@@ -1356,7 +1356,7 @@ where
                             state,
                             batched_tx.tx,
                             batched_tx.cmt,
-                            &indexed_tx.block_index,
+                            indexed_tx,
                             &gas_meter,
                             &keys_changed,
                             &verifiers,
@@ -1837,7 +1837,7 @@ mod tests {
                         wasm::run::vp(
                             code_hash,
                             &batched_tx,
-                            &TxIndex::default(),
+                            &IndexedTx::default(),
                             &addr,
                             &state,
                             &RefCell::new(VpGasMeter::new_from_tx_meter(
@@ -1868,7 +1868,7 @@ mod tests {
                     wasm::run::vp(
                         code_hash,
                         &batched_tx,
-                        &TxIndex::default(),
+                        &IndexedTx::default(),
                         &addr,
                         &state,
                         &RefCell::new(VpGasMeter::new_from_tx_meter(

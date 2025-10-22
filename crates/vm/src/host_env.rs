@@ -20,7 +20,7 @@ use namada_core::decode;
 use namada_core::hash::Hash;
 use namada_core::internal::{HostEnvResult, KeyVal};
 use namada_core::masp_primitives::asset_type::AssetType;
-use namada_core::storage::{Key, TX_INDEX_LENGTH, TxIndex};
+use namada_core::storage::{Key, TX_INDEX_LENGTH};
 use namada_events::{Event, EventTypeBuilder};
 use namada_gas::{
     self as gas, Gas, GasMetering, MEMORY_ACCESS_GAS_PER_BYTE, TxGasMeter,
@@ -39,7 +39,7 @@ use namada_token::storage_key::{
     is_any_token_parameter_key,
 };
 use namada_tx::data::{InnerTxId, TxSentinel};
-use namada_tx::{BatchedTx, BatchedTxRef, Tx, TxCommitments};
+use namada_tx::{BatchedTx, BatchedTxRef, IndexedTx, Tx, TxCommitments};
 use namada_vp::vp_host_fns;
 use thiserror::Error;
 
@@ -134,7 +134,7 @@ where
     pub cmt: HostRef<RoAccess, TxCommitments>,
     /// The transaction index is used to identify a shielded transaction's
     /// parent
-    pub tx_index: HostRef<RoAccess, TxIndex>,
+    pub indexed_tx: HostRef<RoAccess, IndexedTx>,
     /// The verifiers whose validity predicates should be triggered.
     pub verifiers: HostRef<RwAccess, BTreeSet<Address>>,
     /// Cache for 2-step reads from host environment.
@@ -179,7 +179,7 @@ where
         wrapper_hash: &Hash,
         tx: &Tx,
         cmt: &TxCommitments,
-        tx_index: &TxIndex,
+        indexed_tx: &IndexedTx,
         verifiers: &mut BTreeSet<Address>,
         result_buffer: &mut Option<Vec<u8>>,
         yielded_value: &mut Option<Vec<u8>>,
@@ -195,7 +195,7 @@ where
         let wrapper_hash = unsafe { RoHostRef::new(wrapper_hash) };
         let tx = unsafe { RoHostRef::new(tx) };
         let cmt = unsafe { RoHostRef::new(cmt) };
-        let tx_index = unsafe { RoHostRef::new(tx_index) };
+        let indexed_tx = unsafe { RoHostRef::new(indexed_tx) };
         let verifiers = unsafe { RwHostRef::new(verifiers) };
         let result_buffer = unsafe { RwHostRef::new(result_buffer) };
         let yielded_value = unsafe { RwHostRef::new(yielded_value) };
@@ -213,7 +213,7 @@ where
             wrapper_hash,
             tx,
             cmt,
-            tx_index,
+            indexed_tx,
             verifiers,
             result_buffer,
             yielded_value,
@@ -306,7 +306,7 @@ where
             wrapper_hash: self.wrapper_hash,
             tx: self.tx,
             cmt: self.cmt,
-            tx_index: self.tx_index,
+            indexed_tx: self.indexed_tx,
             verifiers: self.verifiers,
             result_buffer: self.result_buffer,
             yielded_value: self.yielded_value,
@@ -359,7 +359,7 @@ where
     pub cmt: HostRef<RoAccess, TxCommitments>,
     /// The transaction index is used to identify a shielded transaction's
     /// parent
-    pub tx_index: HostRef<RoAccess, TxIndex>,
+    pub indexed_tx: HostRef<RoAccess, IndexedTx>,
     /// The runner of the [`vp_eval`] function
     pub eval_runner: HostRef<RoAccess, EVAL>,
     /// Cache for 2-step reads from host environment.
@@ -428,7 +428,7 @@ where
         gas_meter: &RefCell<gas_meter::GasMeter<VpGasMeter>>,
         tx: &Tx,
         cmt: &TxCommitments,
-        tx_index: &TxIndex,
+        indexed_tx: &IndexedTx,
         iterators: &mut PrefixIterators<'static, D>,
         verifiers: &BTreeSet<Address>,
         result_buffer: &mut Option<Vec<u8>>,
@@ -445,7 +445,7 @@ where
             gas_meter,
             tx,
             cmt,
-            tx_index,
+            indexed_tx,
             iterators,
             verifiers,
             result_buffer,
@@ -509,7 +509,7 @@ where
         gas_meter: &RefCell<gas_meter::GasMeter<VpGasMeter>>,
         tx: &Tx,
         cmt: &TxCommitments,
-        tx_index: &TxIndex,
+        indexed_tx: &IndexedTx,
         iterators: &mut PrefixIterators<'static, D>,
         verifiers: &BTreeSet<Address>,
         result_buffer: &mut Option<Vec<u8>>,
@@ -524,7 +524,7 @@ where
         let in_mem = unsafe { RoHostRef::new(in_mem) };
         let tx = unsafe { RoHostRef::new(tx) };
         let cmt = unsafe { RoHostRef::new(cmt) };
-        let tx_index = unsafe { RoHostRef::new(tx_index) };
+        let indexed_tx = unsafe { RoHostRef::new(indexed_tx) };
         let iterators = unsafe { RwHostRef::new(iterators) };
         let gas_meter = unsafe { RoHostRef::new(gas_meter) };
         let verifiers = unsafe { RoHostRef::new(verifiers) };
@@ -543,7 +543,7 @@ where
             gas_meter,
             tx,
             cmt,
-            tx_index,
+            indexed_tx,
             eval_runner,
             result_buffer,
             yielded_value,
@@ -593,7 +593,7 @@ where
             gas_meter: self.gas_meter,
             tx: self.tx,
             cmt: self.cmt,
-            tx_index: self.tx_index,
+            indexed_tx: self.indexed_tx,
             eval_runner: self.eval_runner,
             result_buffer: self.result_buffer,
             yielded_value: self.yielded_value,
@@ -1637,8 +1637,8 @@ where
             .expect("Consts mul that cannot overflow")
             .into(),
     )?;
-    let tx_index = unsafe { env.ctx.tx_index.get() };
-    Ok(tx_index.0)
+    let indexed_tx = unsafe { env.ctx.indexed_tx.get() };
+    Ok(indexed_tx.block_index.0)
 }
 
 /// Getting the block height function exposed to the wasm VM VP
@@ -1655,8 +1655,8 @@ where
     CA: WasmCacheAccess,
 {
     let gas_meter = env.ctx.gas_meter();
-    let tx_index = unsafe { env.ctx.tx_index.get() };
-    let tx_idx = vp_host_fns::get_tx_index(gas_meter, tx_index)?;
+    let indexed_tx = unsafe { env.ctx.indexed_tx.get() };
+    let tx_idx = vp_host_fns::get_tx_index(gas_meter, &indexed_tx.block_index)?;
     Ok(tx_idx.0)
 }
 
@@ -2483,7 +2483,7 @@ pub mod testing {
         sentinel: &RefCell<TxSentinel>,
         tx: &Tx,
         cmt: &TxCommitments,
-        tx_index: &TxIndex,
+        indexed_tx: &IndexedTx,
         result_buffer: &mut Option<Vec<u8>>,
         yielded_value: &mut Option<Vec<u8>>,
         #[cfg(feature = "wasm-runtime")] vp_wasm_cache: &mut VpCache<CA>,
@@ -2506,7 +2506,7 @@ pub mod testing {
             &Hash::zero(),
             tx,
             cmt,
-            tx_index,
+            indexed_tx,
             verifiers,
             result_buffer,
             yielded_value,
@@ -2527,7 +2527,7 @@ pub mod testing {
         sentinel: &RefCell<TxSentinel>,
         tx: &Tx,
         cmt: &TxCommitments,
-        tx_index: &TxIndex,
+        indexed_tx: &IndexedTx,
         result_buffer: &mut Option<Vec<u8>>,
         yielded_value: &mut Option<Vec<u8>>,
         store: Rc<RefCell<wasmer::Store>>,
@@ -2557,7 +2557,7 @@ pub mod testing {
             &Hash::zero(),
             tx,
             cmt,
-            tx_index,
+            indexed_tx,
             verifiers,
             result_buffer,
             yielded_value,
@@ -2580,7 +2580,7 @@ pub mod testing {
         gas_meter: &RefCell<gas_meter::GasMeter<VpGasMeter>>,
         tx: &Tx,
         cmt: &TxCommitments,
-        tx_index: &TxIndex,
+        indexed_tx: &IndexedTx,
         verifiers: &BTreeSet<Address>,
         result_buffer: &mut Option<Vec<u8>>,
         yielded_value: &mut Option<Vec<u8>>,
@@ -2603,7 +2603,7 @@ pub mod testing {
             gas_meter,
             tx,
             cmt,
-            tx_index,
+            indexed_tx,
             iterators,
             verifiers,
             result_buffer,

@@ -574,7 +574,6 @@ mod tests {
     use namada_core::chain::testing::get_dummy_header;
     use namada_core::chain::{BlockHeight, Epoch};
     use namada_core::key::testing::keypair_1;
-    use namada_core::storage::TxIndex;
     use namada_core::tendermint::time::Time as TmTime;
     use namada_core::time::DurationSecs;
     use namada_gas::{GasMeterKind, TxGasMeter, VpGasMeter};
@@ -587,7 +586,7 @@ mod tests {
     use namada_token::Transfer;
     use namada_token::storage_key::balance_key;
     use namada_tx::data::TxType;
-    use namada_tx::{Authorization, Code, Data, Section, Tx};
+    use namada_tx::{Authorization, Code, Data, IndexedTx, Section, Tx};
     use namada_vm::wasm::VpCache;
     use namada_vm::wasm::run::VpEvalWasm;
     use namada_vm::{WasmCacheRwAccess, wasm};
@@ -1121,7 +1120,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -1147,7 +1146,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1201,7 +1200,7 @@ mod tests {
             signer: "account0".to_string().into(),
         };
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -1224,7 +1223,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1328,7 +1327,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -1351,7 +1350,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1435,7 +1434,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -1461,7 +1460,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1533,7 +1532,7 @@ mod tests {
         keys_changed.insert(conn_counter_key);
         // No event
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -1556,7 +1555,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1656,7 +1655,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -1678,7 +1677,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1764,7 +1763,7 @@ mod tests {
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
         let tx_code = vec![];
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
         let mut outer_tx = Tx::from_type(TxType::Raw);
@@ -1789,7 +1788,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1860,7 +1859,7 @@ mod tests {
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
         let tx_code = vec![];
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
         let mut outer_tx = Tx::from_type(TxType::Raw);
@@ -1885,7 +1884,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1983,7 +1982,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -2009,7 +2008,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2106,7 +2105,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -2132,7 +2131,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2214,7 +2213,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -2240,7 +2239,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2320,7 +2319,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -2343,7 +2342,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2474,7 +2473,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(message_event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let tx_data = MsgTransfer::<Transfer> {
             message: msg,
@@ -2500,7 +2499,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2682,7 +2681,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -2705,7 +2704,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2838,7 +2837,7 @@ mod tests {
             },
         });
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -2861,7 +2860,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2997,7 +2996,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -3020,7 +3019,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -3156,7 +3155,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -3179,7 +3178,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -3332,7 +3331,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let tx_data = MsgNftTransfer::<Transfer> {
             message: msg,
@@ -3358,7 +3357,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -3563,7 +3562,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -3586,7 +3585,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -3721,7 +3720,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(message_event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let tx_data = MsgTransfer::<Transfer> {
             message: msg,
@@ -3747,7 +3746,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,

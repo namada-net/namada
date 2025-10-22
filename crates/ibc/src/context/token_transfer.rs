@@ -195,6 +195,8 @@ where
                 <C as IbcStorageContext>::Storage,
             >,
     {
+        use namada_state::StorageRead;
+
         if amount.is_zero() {
             return Ok(());
         }
@@ -312,7 +314,15 @@ where
 
         self.inner.borrow_mut().emit_event(
             MaspEvent {
-                tx_index: Default::default(), // TODO: get actual tx index value
+                tx_index: self
+                    .inner
+                    .borrow()
+                    .storage()
+                    .get_tx_index()
+                    .map_err(|err| HostError::Other {
+                        description: format!("Failed to read tx index: {err}"),
+                    })?
+                    .into(),
                 kind: MaspEventKind::Transfer,
                 data: MaspTxRef::Unencrypted(notes),
             }

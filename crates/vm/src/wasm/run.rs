@@ -12,14 +12,16 @@ use borsh::BorshDeserialize;
 use namada_core::address::Address;
 use namada_core::hash::{Error as TxHashError, Hash};
 use namada_core::internal::HostEnvResult;
-use namada_core::storage::{Key, TxIndex};
+use namada_core::storage::Key;
 use namada_core::validity_predicate::VpError;
 pub use namada_gas::GasMeterKind;
 use namada_gas::{GasMetering, TxGasMeter, VpGasMeter, WASM_MEMORY_PAGE_GAS};
 use namada_state::prefix_iter::PrefixIterators;
 use namada_state::{DB, DBIter, State, StateRead, StorageHasher, StorageRead};
 use namada_tx::data::{TxSentinel, TxType};
-use namada_tx::{BatchedTxRef, Commitment, Section, Tx, TxCommitments};
+use namada_tx::{
+    BatchedTxRef, Commitment, IndexedTx, Section, Tx, TxCommitments,
+};
 use namada_vp::vp_host_fns;
 use parity_wasm::elements::Instruction::*;
 use parity_wasm::elements::{self, SignExtInstruction};
@@ -151,7 +153,7 @@ pub fn tx<S, CA>(
     state: &mut S,
     gas_meter: &RefCell<TxGasMeter>,
     wrapper_hash: Option<&Hash>,
-    tx_index: &TxIndex,
+    indexed_tx: &IndexedTx,
     tx: &Tx,
     cmt: &TxCommitments,
     vp_wasm_cache: &mut VpCache<CA>,
@@ -252,7 +254,7 @@ where
         wrapper_hash,
         tx,
         cmt,
-        tx_index,
+        indexed_tx,
         &mut verifiers,
         &mut result_buffer,
         &mut yielded_value,
@@ -383,7 +385,7 @@ where
 pub fn vp<S, CA>(
     vp_code_hash: Hash,
     batched_tx: &BatchedTxRef<'_>,
-    tx_index: &TxIndex,
+    indexed_tx: &IndexedTx,
     address: &Address,
     state: &S,
     gas_meter: &RefCell<VpGasMeter>,
@@ -435,7 +437,7 @@ where
         &wasm_gas_meter,
         tx,
         cmt,
-        tx_index,
+        indexed_tx,
         &mut iterators,
         verifiers,
         &mut result_buffer,
@@ -696,7 +698,7 @@ where
             &wasm_gas_meter,
             native_ctx.tx,
             native_ctx.cmt,
-            native_ctx.tx_index,
+            native_ctx.indexed_tx,
             &mut iterators,
             native_ctx.verifiers,
             &mut result_buffer,
@@ -1573,7 +1575,7 @@ mod tests {
     fn test_tx_memory_limiter_in_guest() {
         let mut state = TestState::default();
         let gas_meter = RefCell::new(TxGasMeter::new(TX_GAS_LIMIT, GAS_SCALE));
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         // This code will allocate memory of the given size
         let tx_code = TestWasms::TxMemoryLimit.read_bytes();
@@ -1603,7 +1605,7 @@ mod tests {
             &mut state,
             &gas_meter,
             None,
-            &tx_index,
+            &indexed_tx,
             batched_tx.tx,
             batched_tx.cmt,
             &mut vp_cache,
@@ -1624,7 +1626,7 @@ mod tests {
             &mut state,
             &gas_meter,
             None,
-            &tx_index,
+            &indexed_tx,
             batched_tx.tx,
             batched_tx.cmt,
             &mut vp_cache,
@@ -1649,7 +1651,7 @@ mod tests {
         ));
         let keys_changed = BTreeSet::new();
         let verifiers = BTreeSet::new();
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         // This code will call `eval` with the other VP below
         let vp_eval = TestWasms::VpEval.read_bytes();
@@ -1696,7 +1698,7 @@ mod tests {
             vp(
                 code_hash,
                 &outer_tx.batch_ref_first_tx().unwrap(),
-                &tx_index,
+                &indexed_tx,
                 &addr,
                 &state,
                 &gas_meter,
@@ -1730,7 +1732,7 @@ mod tests {
             vp(
                 code_hash,
                 &outer_tx.batch_ref_first_tx().unwrap(),
-                &tx_index,
+                &indexed_tx,
                 &addr,
                 &state,
                 &gas_meter,
@@ -1755,7 +1757,7 @@ mod tests {
         ));
         let keys_changed = BTreeSet::new();
         let verifiers = BTreeSet::new();
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         // This code will allocate memory of the given size
         let vp_code = TestWasms::VpMemoryLimit.read_bytes();
@@ -1782,7 +1784,7 @@ mod tests {
         let result = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
-            &tx_index,
+            &indexed_tx,
             &addr,
             &state,
             &gas_meter,
@@ -1803,7 +1805,7 @@ mod tests {
         let error = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
-            &tx_index,
+            &indexed_tx,
             &addr,
             &state,
             &gas_meter,
@@ -1824,7 +1826,7 @@ mod tests {
     fn test_tx_memory_limiter_in_host_input() {
         let mut state = TestState::default();
         let gas_meter = RefCell::new(TxGasMeter::new(TX_GAS_LIMIT, GAS_SCALE));
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         let tx_no_op = TestWasms::TxNoOp.read_bytes();
         // store the wasm code
@@ -1857,7 +1859,7 @@ mod tests {
             &mut state,
             &gas_meter,
             None,
-            &tx_index,
+            &indexed_tx,
             batched_tx.tx,
             batched_tx.cmt,
             &mut vp_cache,
@@ -1886,7 +1888,7 @@ mod tests {
         ));
         let keys_changed = BTreeSet::new();
         let verifiers = BTreeSet::new();
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         let vp_code = TestWasms::VpAlwaysTrue.read_bytes();
         // store the wasm code
@@ -1913,7 +1915,7 @@ mod tests {
         let result = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
-            &tx_index,
+            &indexed_tx,
             &addr,
             &state,
             &gas_meter,
@@ -1940,7 +1942,7 @@ mod tests {
     fn test_tx_memory_limiter_in_host_env() {
         let mut state = TestState::default();
         let gas_meter = RefCell::new(TxGasMeter::new(TX_GAS_LIMIT, GAS_SCALE));
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         let tx_read_key = TestWasms::TxReadStorageKey.read_bytes();
         // store the wasm code
@@ -1978,7 +1980,7 @@ mod tests {
             &mut state,
             &gas_meter,
             None,
-            &tx_index,
+            &indexed_tx,
             batched_tx.tx,
             batched_tx.cmt,
             &mut vp_cache,
@@ -2003,7 +2005,7 @@ mod tests {
         ));
         let keys_changed = BTreeSet::new();
         let verifiers = BTreeSet::new();
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         let vp_read_key = TestWasms::VpReadStorageKey.read_bytes();
         // store the wasm code
@@ -2035,7 +2037,7 @@ mod tests {
         let error = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
-            &tx_index,
+            &indexed_tx,
             &addr,
             &state,
             &gas_meter,
@@ -2063,7 +2065,7 @@ mod tests {
         ));
         let keys_changed = BTreeSet::new();
         let verifiers = BTreeSet::new();
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         // This code will call `eval` with the other VP below
         let vp_eval = TestWasms::VpEval.read_bytes();
@@ -2114,7 +2116,7 @@ mod tests {
             vp(
                 code_hash,
                 &outer_tx.batch_ref_first_tx().unwrap(),
-                &tx_index,
+                &indexed_tx,
                 &addr,
                 &state,
                 &gas_meter,
@@ -2204,7 +2206,7 @@ mod tests {
         let mut state = TestState::default();
         let gas_meter =
             RefCell::new(TxGasMeter::new(OUT_OF_GAS_LIMIT, GAS_SCALE));
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         // This code will charge gas in a host function indefinetely
         let tx_code = TestWasms::TxInfiniteGuestGas.read_bytes();
@@ -2228,7 +2230,7 @@ mod tests {
             &mut state,
             &gas_meter,
             None,
-            &tx_index,
+            &indexed_tx,
             batched_tx.tx,
             batched_tx.cmt,
             &mut vp_cache,
@@ -2247,7 +2249,7 @@ mod tests {
         let mut state = TestState::default();
         let gas_meter =
             RefCell::new(TxGasMeter::new(OUT_OF_GAS_LIMIT, GAS_SCALE));
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         // This code will charge gas in a host function indefinetely
         let tx_code = TestWasms::TxInfiniteHostGas.read_bytes();
@@ -2271,7 +2273,7 @@ mod tests {
             &mut state,
             &gas_meter,
             None,
-            &tx_index,
+            &indexed_tx,
             batched_tx.tx,
             batched_tx.cmt,
             &mut vp_cache,
@@ -2287,7 +2289,7 @@ mod tests {
     #[test]
     fn test_vp_out_of_gas_in_guest() {
         let mut state = TestState::default();
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         let addr = state.in_mem_mut().address_gen.generate_address("rng seed");
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
@@ -2314,7 +2316,7 @@ mod tests {
         let result = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
-            &tx_index,
+            &indexed_tx,
             &addr,
             &state,
             &gas_meter,
@@ -2333,7 +2335,7 @@ mod tests {
     #[test]
     fn test_vp_out_of_gas_in_host() {
         let mut state = TestState::default();
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         let addr = state.in_mem_mut().address_gen.generate_address("rng seed");
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
@@ -2360,7 +2362,7 @@ mod tests {
         let result = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
-            &tx_index,
+            &indexed_tx,
             &addr,
             &state,
             &gas_meter,
@@ -2518,7 +2520,7 @@ mod tests {
     ) -> Result<()> {
         let mut outer_tx = Tx::from_type(TxType::Raw);
         outer_tx.push_default_inner_tx();
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let mut state = TestState::default();
         let addr = state.in_mem_mut().address_gen.generate_address("rng seed");
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
@@ -2537,7 +2539,7 @@ mod tests {
         vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
-            &tx_index,
+            &indexed_tx,
             &addr,
             &state,
             &gas_meter,
@@ -2563,7 +2565,7 @@ mod tests {
         vp_cache: &mut VpCache<CA>,
     ) -> Result<BTreeSet<Address>> {
         let tx_data = vec![];
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let mut state = TestState::default();
         let gas_meter = RefCell::new(TxGasMeter::new(TX_GAS_LIMIT, GAS_SCALE));
 
@@ -2587,7 +2589,7 @@ mod tests {
             &mut state,
             &gas_meter,
             None,
-            &tx_index,
+            &indexed_tx,
             batched_tx.tx,
             batched_tx.cmt,
             vp_cache,
@@ -2604,7 +2606,7 @@ mod tests {
     fn test_tx_alloc() {
         let mut state = TestState::default();
         let gas_meter = RefCell::new(TxGasMeter::new(TX_GAS_LIMIT, GAS_SCALE));
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         let tx_write = TestWasms::TxWriteStorageKey.read_bytes();
         // store the wasm code
@@ -2643,7 +2645,7 @@ mod tests {
             &mut state,
             &gas_meter,
             None,
-            &tx_index,
+            &indexed_tx,
             batched_tx.tx,
             batched_tx.cmt,
             &mut vp_cache,

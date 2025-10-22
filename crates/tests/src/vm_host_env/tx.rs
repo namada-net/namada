@@ -9,8 +9,8 @@ use namada_sdk::hash::Hash;
 use namada_sdk::parameters::{self, EpochDuration};
 use namada_sdk::state::prefix_iter::PrefixIterators;
 use namada_sdk::state::testing::TestState;
+use namada_sdk::storage::Key;
 use namada_sdk::storage::mockdb::MockDB;
-use namada_sdk::storage::{Key, TxIndex};
 use namada_sdk::time::DurationSecs;
 pub use namada_sdk::tx::data::TxType;
 pub use namada_sdk::tx::*;
@@ -55,7 +55,7 @@ pub struct TestTxEnv {
     pub verifiers: BTreeSet<Address>,
     pub gas_meter: RefCell<GasMeter<TxGasMeter>>,
     pub sentinel: RefCell<TxSentinel>,
-    pub tx_index: TxIndex,
+    pub indexed_tx: IndexedTx,
     pub result_buffer: Option<Vec<u8>>,
     pub yielded_value: Option<Vec<u8>>,
     pub vp_wasm_cache: VpCache<WasmCacheRwAccess>,
@@ -90,7 +90,7 @@ impl Default for TestTxEnv {
                 1,
             ))),
             sentinel: RefCell::new(TxSentinel::default()),
-            tx_index: TxIndex::default(),
+            indexed_tx: IndexedTx::default(),
             verifiers: BTreeSet::default(),
             result_buffer: None,
             yielded_value: None,
@@ -243,7 +243,7 @@ impl TestTxEnv {
             &mut self.state,
             &gas_meter,
             None,
-            &self.tx_index,
+            &self.indexed_tx,
             &self.batched_tx.tx,
             &self.batched_tx.cmt,
             &mut self.vp_wasm_cache,
@@ -370,7 +370,7 @@ mod native_tx_host_env {
                                 sentinel,
                                 result_buffer,
                                 yielded_value,
-                                tx_index,
+                                indexed_tx,
                                 vp_wasm_cache,
                                 vp_cache_dir: _,
                                 tx_wasm_cache,
@@ -387,7 +387,7 @@ mod native_tx_host_env {
                                 sentinel,
                                 &batched_tx.tx,
                                 &batched_tx.cmt,
-                                tx_index,
+                                indexed_tx,
                                 result_buffer,
                                 yielded_value,
                                 vp_wasm_cache,
@@ -408,7 +408,7 @@ mod native_tx_host_env {
                     #[unsafe(no_mangle)]
                     extern "C-unwind" fn extern_fn_name( $($arg: $type),* ) -> $ret {
                         with(|TestTxEnv {
-                                tx_index,
+                                indexed_tx,
                                 state,
                                 iterators,
                                 verifiers,
@@ -432,7 +432,7 @@ mod native_tx_host_env {
                                 sentinel,
                                 &batched_tx.tx,
                                 &batched_tx.cmt,
-                                tx_index,
+                                indexed_tx,
                                 result_buffer,
                                 yielded_value,
                                 vp_wasm_cache,
@@ -460,7 +460,7 @@ mod native_tx_host_env {
                                 sentinel,
                                 result_buffer,
                                 yielded_value,
-                                tx_index,
+                                indexed_tx,
                                 vp_wasm_cache,
                                 vp_cache_dir: _,
                                 tx_wasm_cache,
@@ -477,7 +477,7 @@ mod native_tx_host_env {
                                 sentinel,
                                 &batched_tx.tx,
                                 &batched_tx.cmt,
-                                tx_index,
+                                indexed_tx,
                                 result_buffer,
                                 yielded_value,
                                 vp_wasm_cache,
@@ -784,7 +784,7 @@ mod tests {
             sentinel,
             result_buffer,
             yielded_value,
-            tx_index,
+            indexed_tx,
             vp_wasm_cache,
             vp_cache_dir: _,
             tx_wasm_cache,
@@ -801,7 +801,7 @@ mod tests {
             sentinel,
             &batched_tx.tx,
             &batched_tx.cmt,
-            tx_index,
+            indexed_tx,
             result_buffer,
             yielded_value,
             wasmer_store.clone(),

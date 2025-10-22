@@ -13,7 +13,7 @@ use namada_core::chain::{ChainId, Epochs};
 use namada_core::masp_primitives::asset_type::AssetType;
 use namada_gas::{Gas, GasMeterKind, GasMetering, VpGasMeter};
 use namada_state::{ConversionState, ReadConversionState};
-use namada_tx::{BatchedTxRef, Tx, TxCommitments};
+use namada_tx::{BatchedTxRef, IndexedTx, Tx, TxCommitments};
 
 use super::vp_host_fns;
 use crate::state::prefix_iter::PrefixIterators;
@@ -59,7 +59,7 @@ where
     pub cmt: &'a TxCommitments,
     /// The transaction index is used to obtain the shielded transaction's
     /// parent
-    pub tx_index: &'a TxIndex,
+    pub indexed_tx: &'a IndexedTx,
     /// The storage keys that have been changed. Used for calls to `eval`.
     pub keys_changed: &'a BTreeSet<Key>,
     /// The verifiers whose validity predicates should be triggered. Used for
@@ -125,7 +125,7 @@ where
         state: &'a S,
         tx: &'a Tx,
         cmt: &'a TxCommitments,
-        tx_index: &'a TxIndex,
+        indexed_tx: &'a IndexedTx,
         gas_meter: &'a RefCell<VpGasMeter>,
         keys_changed: &'a BTreeSet<Key>,
         verifiers: &'a BTreeSet<Address>,
@@ -139,7 +139,7 @@ where
             gas_meter,
             tx,
             cmt,
-            tx_index,
+            indexed_tx,
             keys_changed,
             verifiers,
             vp_wasm_cache,
@@ -400,7 +400,7 @@ where
     }
 
     fn get_tx_index(&self) -> Result<TxIndex> {
-        vp_host_fns::get_tx_index(self.gas_meter, self.tx_index)
+        vp_host_fns::get_tx_index(self.gas_meter, &self.indexed_tx.block_index)
             .into_storage_result()
     }
 

@@ -958,11 +958,11 @@ mod shielded_token_tests {
     use namada_core::address::testing::nam;
     use namada_core::borsh::BorshSerializeExt;
     use namada_gas::{GasMeterKind, TxGasMeter, VpGasMeter};
+    use namada_state::StateRead;
     use namada_state::testing::{TestState, arb_account_storage_key, arb_key};
-    use namada_state::{StateRead, TxIndex};
     use namada_trans_token::Amount;
     use namada_trans_token::storage_key::balance_key;
-    use namada_tx::{BatchedTx, Tx};
+    use namada_tx::{BatchedTx, IndexedTx, Tx};
     use namada_vm::WasmCacheRwAccess;
     use namada_vm::wasm::VpCache;
     use namada_vm::wasm::compilation_cache::common::testing::vp_cache;
@@ -1014,7 +1014,7 @@ mod shielded_token_tests {
 
         state.db_write(&src_key, amount.serialize_to_vec()).unwrap();
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let mut tx = Tx::from_type(namada_tx::data::TxType::Raw);
         tx.push_default_inner_tx();
         let BatchedTx { tx, cmt } = tx.batch_first_tx();
@@ -1039,7 +1039,7 @@ mod shielded_token_tests {
                 &state,
                 &tx,
                 &cmt,
-                &tx_index,
+                &indexed_tx,
                 &gas_meter,
                 &keys_changed,
                 &verifiers,
@@ -1069,7 +1069,7 @@ mod shielded_token_tests {
             let keys_changed = BTreeSet::from([src_key.clone()]);
             let verifiers = Default::default();
 
-            let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
             let mut tx = Tx::from_type(namada_tx::data::TxType::Raw);
             tx.push_default_inner_tx();
             let BatchedTx { tx, cmt } = tx.batch_first_tx();
@@ -1089,7 +1089,7 @@ mod shielded_token_tests {
                 &state,
                 &tx,
                 &cmt,
-                &tx_index,
+                &indexed_tx,
                 &gas_meter,
                 &keys_changed,
                 &verifiers,
@@ -1118,7 +1118,7 @@ mod shielded_token_tests {
             namada_parameters::init_test_storage(&mut state).unwrap();
             let verifiers = Default::default();
 
-            let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
             let mut tx = Tx::from_type(namada_tx::data::TxType::Raw);
             tx.push_default_inner_tx();
             let BatchedTx { tx, cmt } = tx.batch_first_tx();
@@ -1139,7 +1139,7 @@ mod shielded_token_tests {
                 &state,
                 &tx,
                 &cmt,
-                &tx_index,
+                &indexed_tx,
                 &gas_meter,
                 &keys_changed,
                 &verifiers,

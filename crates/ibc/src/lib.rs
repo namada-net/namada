@@ -709,17 +709,14 @@ where
                 );
                 // Add the source to the set of verifiers
                 self.verifiers.borrow_mut().insert(
-                    match msg
-                        .message
+                    msg.message
                         .packet_data
                         .sender
                         .as_ref()
                         .parse::<IbcAccountId>()
                         .map_err(|err| Error::TokenTransfer(err.into()))?
-                    {
-                        IbcAccountId::Transparent(addr) => addr,
-                        IbcAccountId::Shielded(_) => address::MASP,
-                    },
+                        .to_address()
+                        .into_owned(),
                 );
                 if msg.transfer.is_some() {
                     token_transfer_ctx.enable_shielded_transfer();
@@ -749,17 +746,14 @@ where
                 }
                 // Add the source to the set of verifiers
                 self.verifiers.borrow_mut().insert(
-                    match msg
-                        .message
+                    msg.message
                         .packet_data
                         .sender
                         .as_ref()
                         .parse::<IbcAccountId>()
                         .map_err(|err| Error::TokenTransfer(err.into()))?
-                    {
-                        IbcAccountId::Transparent(addr) => addr,
-                        IbcAccountId::Shielded(_) => address::MASP,
-                    },
+                        .to_address()
+                        .into_owned(),
                 );
                 // Record the tokens credited/debited in this NFT transfer
                 let tokens = msg
@@ -794,14 +788,12 @@ where
                 if let Some(verifier) = get_envelope_verifier(envelope.as_ref())
                 {
                     self.verifiers.borrow_mut().insert(
-                        match verifier
+                        verifier
                             .as_ref()
                             .parse::<IbcAccountId>()
                             .map_err(|err| Error::TokenTransfer(err.into()))?
-                        {
-                            IbcAccountId::Transparent(addr) => addr,
-                            IbcAccountId::Shielded(_) => address::MASP,
-                        },
+                            .to_address()
+                            .into_owned(),
                     );
                 }
                 execute(&mut self.ctx, &mut self.router, *envelope.clone())

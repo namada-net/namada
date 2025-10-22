@@ -1056,6 +1056,22 @@ impl FromStr for IndexedTx {
     }
 }
 
+impl From<(BlockHeight, TxIndex, Option<u32>)> for IndexedTx {
+    fn from(
+        (block_height, block_index, batch_index): (
+            BlockHeight,
+            TxIndex,
+            Option<u32>,
+        ),
+    ) -> Self {
+        Self {
+            block_height,
+            block_index,
+            batch_index,
+        }
+    }
+}
+
 /// Inclusive range of [`IndexedTx`] entries.
 pub struct IndexedTxRange {
     lo: IndexedTx,

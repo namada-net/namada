@@ -36,7 +36,10 @@ use namada_state::{StorageRead, StorageWrite};
 use crate::context::IbcContext;
 use crate::context::transfer_mod::TransferModule;
 use crate::storage::inflight_packet_key;
-use crate::{Error, IbcCommonContext, IbcStorageContext, TokenTransferContext};
+use crate::{
+    Error, IbcAccountId, IbcCommonContext, IbcStorageContext,
+    TokenTransferContext,
+};
 
 /// A wrapper around an IBC transfer module necessary to
 /// build execution contexts. This allows us to implement
@@ -190,7 +193,7 @@ where
 
             token_transfer_ctx
                 .escrow_coins_execute(
-                    &IBC_ADDRESS,
+                    &IbcAccountId::Transparent(IBC_ADDRESS),
                     &msg.refund_port_id,
                     &msg.refund_channel_id,
                     &coin,
@@ -208,7 +211,11 @@ where
             };
 
             token_transfer_ctx
-                .burn_coins_execute(&IBC_ADDRESS, &coin, &String::new().into())
+                .burn_coins_execute(
+                    &IbcAccountId::Transparent(IBC_ADDRESS),
+                    &coin,
+                    &String::new().into(),
+                )
                 .map_err(|e| Error::TokenTransfer(e.into()))
         }
     }

@@ -167,7 +167,7 @@ where
         self.ctx.get_block_epoch()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex> {
+    fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)> {
         self.ctx.get_tx_index()
     }
 
@@ -363,7 +363,7 @@ where
         self.ctx.get_block_epoch()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex> {
+    fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)> {
         self.ctx.get_tx_index()
     }
 

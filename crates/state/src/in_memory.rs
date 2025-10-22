@@ -18,8 +18,9 @@ use namada_storage::tx_queue::ExpiredTxsQueue;
 use namada_storage::types::CommitOnlyData;
 use namada_storage::{
     BlockHeader, BlockHeight, BlockResults, EPOCH_TYPE_LENGTH, Epoch, Epochs,
-    EthEventsQueue, Key, KeySeg, StorageHasher, TxIndex,
+    EthEventsQueue, Key, KeySeg, StorageHasher,
 };
+use namada_tx::IndexedTx;
 
 use crate::Result;
 
@@ -58,7 +59,7 @@ where
     /// this is reset back to `None`.
     pub update_epoch_blocks_delay: Option<u32>,
     /// The shielded transaction index
-    pub tx_index: TxIndex,
+    pub indexed_tx: IndexedTx,
     /// The currently saved conversion state
     pub conversion_state: ConversionState,
     /// Queue of expired transactions that need to be retransmitted.
@@ -157,7 +158,7 @@ where
                 "Privacy is a function of liberty.",
             ),
             update_epoch_blocks_delay: None,
-            tx_index: TxIndex::default(),
+            indexed_tx: IndexedTx::default(),
             conversion_state: ConversionState::default(),
             expired_txs_queue: ExpiredTxsQueue::default(),
             native_token,

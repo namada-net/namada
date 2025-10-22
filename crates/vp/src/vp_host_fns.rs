@@ -7,10 +7,10 @@ use namada_core::address::{Address, ESTABLISHED_ADDRESS_BYTES_LEN};
 use namada_core::arith::checked;
 use namada_core::chain::{BlockHeader, BlockHeight, ChainId, Epoch, Epochs};
 use namada_core::hash::{HASH_LENGTH, Hash};
-use namada_core::storage::{Key, TX_INDEX_LENGTH, TxIndex};
+use namada_core::storage::{Key, TX_INDEX_LENGTH};
 use namada_events::{Event, EventTypeBuilder};
 use namada_gas::{self as gas, Gas, GasMetering, MEMORY_ACCESS_GAS_PER_BYTE};
-use namada_tx::{BatchedTxRef, Section};
+use namada_tx::{BatchedTxRef, IndexedTx, Section};
 use thiserror::Error;
 
 use crate::state::write_log::WriteLog;
@@ -275,12 +275,11 @@ where
     Ok(epoch)
 }
 
-/// Getting the block epoch. The epoch is that of the block to which the
-/// current transaction is being applied.
+/// Getting the transaction index.
 pub fn get_tx_index(
     gas_meter: &RefCell<impl GasMetering>,
-    tx_index: &TxIndex,
-) -> Result<TxIndex> {
+    indexed_tx: &IndexedTx,
+) -> Result<IndexedTx> {
     add_gas(
         gas_meter,
         (TX_INDEX_LENGTH as u64)
@@ -288,7 +287,7 @@ pub fn get_tx_index(
             .expect("Consts mul that cannot overflow")
             .into(),
     )?;
-    Ok(*tx_index)
+    Ok(*indexed_tx)
 }
 
 /// Getting the native token's address.

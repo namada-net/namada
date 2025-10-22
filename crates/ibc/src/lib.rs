@@ -28,6 +28,7 @@ pub mod storage;
 pub mod trace;
 pub mod vp;
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -365,6 +366,14 @@ impl IbcAccountId {
     /// Check whether this is a shielded address.
     pub const fn is_shielded(&self) -> bool {
         matches!(self, Self::Shielded(_))
+    }
+
+    /// Convert this [`IbcAccountId`] to a transparent address.
+    pub fn to_address(&self) -> Cow<'_, Address> {
+        match self {
+            Self::Transparent(addr) => Cow::Borrowed(addr),
+            Self::Shielded(_) => Cow::Owned(address::MASP),
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 //! IBC token transfer context
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::marker::PhantomData;
@@ -22,7 +23,7 @@ use namada_tx::event::{MaspEvent, MaspEventKind, MaspTxRef};
 use super::common::IbcCommonContext;
 use crate::context::storage::IbcStorageContext;
 use crate::storage::{load_shielding_counter, write_shielding_counter};
-use crate::{IBC_ESCROW_ADDRESS, trace};
+use crate::{IBC_ESCROW_ADDRESS, IbcAccountId, trace};
 
 /// Token transfer context to handle tokens
 #[derive(Debug)]
@@ -129,9 +130,18 @@ where
     /// Add the amount to the per-epoch withdraw of the token
     fn add_deposit(
         &self,
+        to_account: &IbcAccountId,
         token: &Address,
         amount: Amount,
-    ) -> Result<(), HostError> {
+    ) -> Result<(), HostError>
+    where
+        Params:
+            namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+        Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>,
+        ShieldedToken: namada_systems::shielded_token::Write<
+                <C as IbcStorageContext>::Storage,
+            >,
+    {
         let deposit = self.inner.borrow().deposit(token)?;
         let added_deposit =
             deposit
@@ -139,15 +149,23 @@ where
                 .ok_or_else(|| HostError::Other {
                     description: "The per-epoch deposit overflowed".to_string(),
                 })?;
-        self.inner.borrow_mut().store_deposit(token, added_deposit)
+        self.inner
+            .borrow_mut()
+            .store_deposit(token, added_deposit)?;
+        if let IbcAccountId::Shielded(owner_pa) = to_account {
+            self.store_masp_note_commitments(owner_pa, token, &amount)?;
+        }
+        Ok(())
     }
 
     /// Add the amount to the per-epoch withdraw of the token
     fn add_withdraw(
         &self,
+        from_account: &IbcAccountId,
         token: &Address,
         amount: Amount,
     ) -> Result<(), HostError> {
+        self.validate_masp_withdraw(from_account)?;
         let withdraw = self.inner.borrow().withdraw(token)?;
         let added_withdraw =
             withdraw
@@ -180,7 +198,21 @@ where
         )
     }
 
-    #[allow(dead_code)]
+    fn validate_masp_withdraw(
+        &self,
+        from_account: &IbcAccountId,
+    ) -> Result<(), HostError> {
+        if from_account.is_shielded() && !self.has_masp_tx {
+            return Err(HostError::Other {
+                description: format!(
+                    "Set refund address {from_account} without including an \
+                     IBC unshielding MASP transaction"
+                ),
+            });
+        }
+        Ok(())
+    }
+
     fn store_masp_note_commitments(
         &self,
         owner_pa: &PaymentAddress,
@@ -343,28 +375,20 @@ impl<C, Params, Token, ShieldedToken> TokenTransferValidationContext
 where
     C: IbcCommonContext,
 {
-    type AccountId = Address;
+    type AccountId = IbcAccountId;
 
     fn sender_account(
         &self,
         signer: &Signer,
     ) -> Result<Self::AccountId, HostError> {
-        Address::decode(signer.as_ref()).map_err(|e| HostError::Other {
-            description: format!(
-                "Decoding the signer failed: {signer}, error {e}"
-            ),
-        })
+        signer.as_ref().parse()
     }
 
     fn receiver_account(
         &self,
         signer: &Signer,
     ) -> Result<Self::AccountId, HostError> {
-        Address::try_from(signer).map_err(|e| HostError::Other {
-            description: format!(
-                "Decoding the signer failed: {signer}, error {e}"
-            ),
-        })
+        signer.as_ref().parse()
     }
 
     fn get_port(&self) -> Result<PortId, HostError> {
@@ -448,7 +472,7 @@ where
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
-        self.add_withdraw(&ibc_token, amount)?;
+        self.add_withdraw(from_account, &ibc_token, amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
         if ibc_token.is_internal()
@@ -458,15 +482,15 @@ where
         }
 
         let from_account = if self.has_masp_tx {
-            &MASP
+            Cow::Owned(MASP)
         } else {
-            from_account
+            from_account.to_address()
         };
 
         self.inner
             .borrow_mut()
             .transfer_token(
-                from_account,
+                &from_account,
                 &IBC_ESCROW_ADDRESS,
                 &ibc_token,
                 amount,
@@ -483,11 +507,16 @@ where
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
-        self.add_deposit(&ibc_token, amount)?;
+        self.add_deposit(to_account, &ibc_token, amount)?;
 
         self.inner
             .borrow_mut()
-            .transfer_token(&IBC_ESCROW_ADDRESS, to_account, &ibc_token, amount)
+            .transfer_token(
+                &IBC_ESCROW_ADDRESS,
+                &to_account.to_address(),
+                &ibc_token,
+                amount,
+            )
             .map_err(HostError::from)
     }
 
@@ -500,7 +529,7 @@ where
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
         self.update_mint_amount(&ibc_token, amount, true)?;
-        self.add_deposit(&ibc_token, amount)?;
+        self.add_deposit(account, &ibc_token, amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
         if ibc_token.is_internal()
@@ -509,13 +538,15 @@ where
             self.insert_verifier(&ibc_token);
         }
 
+        let account = account.to_address();
+
         // Store the IBC denom with the token hash to be able to retrieve it
         // later
-        self.maybe_store_ibc_denom(account, coin)?;
+        self.maybe_store_ibc_denom(&account, coin)?;
 
         self.inner
             .borrow_mut()
-            .mint_token(account, &ibc_token, amount)
+            .mint_token(&account, &ibc_token, amount)
             .map_err(HostError::from)
     }
 
@@ -528,7 +559,7 @@ where
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
         self.update_mint_amount(&ibc_token, amount, false)?;
-        self.add_withdraw(&ibc_token, amount)?;
+        self.add_withdraw(account, &ibc_token, amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
         if ibc_token.is_internal()
@@ -537,12 +568,16 @@ where
             self.insert_verifier(&ibc_token);
         }
 
-        let account = if self.has_masp_tx { &MASP } else { account };
+        let account = if self.has_masp_tx {
+            Cow::Owned(MASP)
+        } else {
+            account.to_address()
+        };
 
         // The burn is "unminting" from the minted balance
         self.inner
             .borrow_mut()
-            .burn_token(account, &ibc_token, amount)
+            .burn_token(&account, &ibc_token, amount)
             .map_err(HostError::from)
     }
 }

@@ -48,7 +48,7 @@ pub use namada_macros::validity_predicate;
 pub use namada_storage::{
     Error, OptionExt, ResultExt, StorageRead, iter_prefix, iter_prefix_bytes,
 };
-pub use namada_tx::{BatchedTx, Section, Tx};
+pub use namada_tx::{BatchedTx, IndexedTx, Section, Tx};
 use namada_vm_env::vp::*;
 use namada_vm_env::{read_from_buffer, read_key_val_bytes_from_buffer};
 pub use namada_vp_env::{VpEnv, collection_validation};
@@ -342,8 +342,14 @@ impl<'view> VpEnv<'view> for Ctx {
         get_pred_epochs()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex, Error> {
-        get_tx_index()
+    fn get_tx_index(&self) -> Result<IndexedTx, Error> {
+        get_tx_index().map(|(block_height, block_index, batch_index)| {
+            IndexedTx {
+                block_height,
+                block_index,
+                batch_index,
+            }
+        })
     }
 
     fn get_native_token(&self) -> Result<Address, Error> {
@@ -505,7 +511,9 @@ impl StorageRead for CtxPreStorageRead<'_> {
         get_pred_epochs()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex, Error> {
+    fn get_tx_index(
+        &self,
+    ) -> Result<(BlockHeight, TxIndex, Option<u32>), Error> {
         get_tx_index()
     }
 
@@ -592,7 +600,9 @@ impl StorageRead for CtxPostStorageRead<'_> {
         get_pred_epochs()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex, Error> {
+    fn get_tx_index(
+        &self,
+    ) -> Result<(BlockHeight, TxIndex, Option<u32>), Error> {
         get_tx_index()
     }
 
@@ -653,8 +663,20 @@ fn get_block_epoch() -> Result<Epoch, Error> {
     Ok(Epoch(unsafe { namada_vp_get_block_epoch() }))
 }
 
-fn get_tx_index() -> Result<TxIndex, Error> {
-    Ok(TxIndex(unsafe { namada_vp_get_tx_index() }))
+fn get_tx_index() -> Result<(BlockHeight, TxIndex, Option<u32>), Error> {
+    // NOTE: the conversion to i64 is infallible
+    let read_result = unsafe { namada_vp_get_tx_index() } as i64;
+    let bytes = read_from_buffer(read_result, namada_vp_result_buffer).ok_or(
+        Error::SimpleMessage(
+            "Missing result from `namada_vp_get_tx_index` call",
+        ),
+    )?;
+    let IndexedTx {
+        block_height,
+        block_index,
+        batch_index,
+    } = namada_core::decode(bytes).expect("Cannot decode tx index");
+    Ok((block_height, block_index, batch_index))
 }
 
 fn get_pred_epochs() -> Result<Epochs, Error> {

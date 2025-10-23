@@ -3306,8 +3306,14 @@ fn transfer_from_cosmos(
     // If the receiver is a payment address we want to mask it to the more
     // general MASP internal address to improve on privacy
     let receiver = match PaymentAddress::from_str(receiver.as_ref()) {
-        Ok(_) => MASP.to_string(),
-        Err(_) => receiver.as_ref().to_string(),
+        // assume we have IBC shielding data if the memo is read from the
+        // filesystem. in this we override the receiver, setting it to
+        // the MASP transparent addr.
+        Ok(_) if memo.as_ref().is_some_and(|memo| memo.is_left()) => {
+            MASP.to_string()
+        }
+        // otherwise, we take whatever receiver is specified in the call args.
+        _ => receiver.as_ref().to_string(),
     };
     let mut args = vec![
         "tx",

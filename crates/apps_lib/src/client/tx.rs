@@ -1471,7 +1471,6 @@ where
         .chain(args.gas_spending_key.iter_mut());
     let shielded_hw_keys =
         augment_masp_hardware_keys(namada, &args.tx, sources).await?;
-    // FIXME: don't we need this only if masp is involved?
     // Try to generate MASP build parameters. This might fail when using a
     // hardware wallet if it does not support MASP operations.
     let bparams_result = generate_masp_build_params(
@@ -1489,17 +1488,19 @@ where
     );
 
     // If the ibc sources are MASP, sync the shielded context before building
-    // the transaction FIXME: only if source is masp
-    sync_shielded_context(
-        namada,
-        args.tx.ledger_address.clone(),
-        args.shielded_sync.clone().ok_or_else(|| {
-            error::Error::Other(
-                "Missing arguments for shielded sync".to_string(),
-            )
-        })?,
-    )
-    .await?;
+    // the transaction
+    if args.source.spending_key().is_some() || args.gas_spending_key.is_some() {
+        sync_shielded_context(
+            namada,
+            args.tx.ledger_address.clone(),
+            args.shielded_sync.clone().ok_or_else(|| {
+                error::Error::Other(
+                    "Missing arguments for shielded sync".to_string(),
+                )
+            })?,
+        )
+        .await?;
+    }
 
     // If transaction building fails for any reason, then abort the process
     // blaming MASP build parameter generation if that had also failed.

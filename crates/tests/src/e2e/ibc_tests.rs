@@ -53,8 +53,8 @@ use sha2::{Digest, Sha256};
 
 use crate::e2e::helpers::{
     epoch_sleep, epochs_per_year_from_min_duration, find_address,
-    find_cosmos_address, get_actor_rpc, get_cosmos_gov_address,
-    get_cosmos_rpc_address, get_epoch,
+    find_cosmos_address, find_payment_address, get_actor_rpc,
+    get_cosmos_gov_address, get_cosmos_rpc_address, get_epoch,
 };
 use crate::e2e::ledger_tests::{
     start_namada_ledger_node_wait_wasm, write_json_file,
@@ -75,6 +75,95 @@ const UPGRADED_CHAIN_ID: &str = "upgraded-chain";
 const CW721_WASM: &str = "cw721_base.wasm";
 const ICS721_WASM: &str = "ics721_base.wasm";
 const NFT_ID: &str = "test_nft";
+
+#[test]
+fn ibc_to_and_from_payment_addrs() -> Result<()> {
+    let update_genesis =
+        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
+            genesis.parameters.parameters.epochs_per_year =
+                epochs_per_year_from_min_duration(1800);
+            genesis.parameters.ibc_params.default_mint_limit =
+                Amount::max_signed();
+            genesis
+                .parameters
+                .ibc_params
+                .default_per_epoch_throughput_limit = Amount::max_signed();
+            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+        };
+    let (ledger, gaia, test, test_gaia) =
+        run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
+    let _bg_ledger = ledger.background();
+    let _bg_gaia = gaia.background();
+
+    let hermes_dir = setup_hermes(&test, &test_gaia)?;
+    let port_id_namada = FT_PORT_ID.parse().unwrap();
+    let port_id_gaia = FT_PORT_ID.parse().unwrap();
+    let (channel_id_namada, channel_id_gaia) = create_channel_with_hermes(
+        &hermes_dir,
+        &test,
+        &test_gaia,
+        &port_id_namada,
+        &port_id_gaia,
+    )?;
+
+    // Start relaying
+    let hermes = run_hermes(&hermes_dir)?;
+    let _bg_hermes = hermes.background();
+
+    // Shielding transfer 200 samoleans from Gaia to Namada
+    let albert_payment_addr = find_payment_address(&test, AA_PAYMENT_ADDRESS)?;
+    transfer_from_cosmos(
+        &test_gaia,
+        COSMOS_USER,
+        albert_payment_addr.to_string(),
+        COSMOS_COIN,
+        200,
+        &port_id_gaia,
+        &channel_id_gaia,
+        None,
+        None,
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_gaia,
+        &channel_id_gaia,
+        &test_gaia,
+    )?;
+    let ibc_denom_on_namada =
+        format!("{port_id_namada}/{channel_id_namada}/{COSMOS_COIN}");
+    check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 200)?;
+    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 800)?;
+
+    // Unshielding transfer 100 samoleans from Namada to Gaia
+    let gaia_receiver = find_cosmos_address(&test_gaia, COSMOS_USER)?;
+    transfer(
+        &test,
+        A_SPENDING_KEY,
+        &gaia_receiver,
+        &ibc_denom_on_namada,
+        100,
+        Some(BERTHA_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        None,
+        None,
+        None,
+        None,
+        true,
+        None,
+        None,
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+    check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 100)?;
+    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 900)?;
+
+    Ok(())
+}
 
 /// IBC transfer tests:
 /// 1. Transparent transfers

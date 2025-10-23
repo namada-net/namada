@@ -429,8 +429,13 @@ pub async fn query_rewards_estimate(
         cli::safe_exit(1);
     }
     // Sync the shielded context before estimating the rewards
-    if let Err(e) =
-        sync_shielded_context(args.query.ledger_address, &mut *shielded).await
+    if let Err(e) = args
+        .shielded_sync
+        .ok_or("Missing arguments for shielded-sync")
+        .map(async |sync_args| {
+            sync_shielded_context(context, args.query.ledger_address, sync_args)
+                .await
+        })
     {
         edisplay_line!(
             context.io(),
@@ -543,8 +548,13 @@ async fn query_shielded_balance(
     };
 
     // Sync the shielded context before computing the balance
-    if let Err(e) =
-        sync_shielded_context(query.ledger_address, &mut *shielded).await
+    if let Err(e) = args
+        .shielded_sync
+        .ok_or("Missing arguments for shielded-sync")
+        .map(async |sync_args| {
+            sync_shielded_context(context, query.ledger_address, sync_args)
+                .await
+        })
     {
         edisplay_line!(
             context.io(),

@@ -3,6 +3,7 @@ use std::time::Duration;
 use color_eyre::owo_colors::OwoColorize;
 #[cfg(feature = "testing")]
 use namada_core::masp::AssetData;
+use namada_sdk::Namada;
 use namada_sdk::args::ShieldedSync;
 use namada_sdk::control_flow::install_shutdown_signal;
 use namada_sdk::error::Error;
@@ -13,6 +14,7 @@ use namada_sdk::masp::{
     IndexerMaspClient, LedgerMaspClient, LinearBackoffSleepMaspClient,
     MaspLocalTaskEnv, ShieldedContext, ShieldedSyncConfig, ShieldedUtils,
 };
+use namada_wallet::DatedViewingKey;
 use tendermint_rpc::HttpClient;
 
 use crate::cli::api::{CliClient, CliIo};
@@ -210,26 +212,26 @@ pub async fn syncing<
     Ok(())
 }
 
-// FIXME: rename?
-pub async fn sync_shielded_context<U: ShieldedUtils>(
+pub async fn sync_shielded_context(
+    ctx: &impl Namada,
     ledger_address: tendermint_rpc::Url,
-    shielded_ctx: &mut ShieldedContext<U>,
+    mut sync_args: namada_sdk::args::ShieldedSync,
 ) -> Result<(), Error> {
     let sync_client = HttpClient::from_tendermint_address(&ledger_address);
-    // FIXME: review these args
-    let sync_args = namada_sdk::args::ShieldedSync {
-        ledger_address,
-        last_query_height: None,
-        spending_keys: vec![],
-        viewing_keys: vec![],
-        with_indexer: None,
-        wait_for_last_query_height: false,
-        max_concurrent_fetches: 100,
-        block_batch_size: 10,
-        retry_strategy: namada_sdk::masp::utils::RetryStrategy::Forever,
-    };
 
-    // FIXME: is CliIo correct?
-    crate::client::masp::syncing(shielded_ctx, sync_client, sync_args, &CliIo)
-        .await
+    // Extend the keys we are interested into
+    let wallet = ctx.wallet().await;
+    sync_args
+        .viewing_keys
+        .extend(wallet.get_viewing_keys().into_iter().map(|(k, v)| {
+            DatedViewingKey::new(v, wallet.find_birthday(k).copied())
+        }));
+
+    crate::client::masp::syncing(
+        &mut *ctx.shielded_mut().await,
+        sync_client,
+        sync_args,
+        &CliIo,
+    )
+    .await
 }

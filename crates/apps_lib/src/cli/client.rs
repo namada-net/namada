@@ -396,9 +396,7 @@ impl CliApi {
                     Sub::ShieldedSync(ShieldedSync(args)) => {
                         let mut args = args.to_sdk(&mut ctx)?;
                         let chain_ctx = ctx.take_chain_or_exit();
-                        let client = client.unwrap_or_else(|| {
-                            C::from_tendermint_address(&args.ledger_address)
-                        });
+                        let client = client.unwrap();
                         if args.with_indexer.is_none() {
                             client.wait_until_node_is_synced(&io).await?;
                         }

@@ -174,6 +174,7 @@ pub trait Namada: NamadaIo {
             gas_spending_key,
             tx_code_path: PathBuf::from(TX_TRANSFER_WASM),
             tx: self.tx_builder(),
+            shielded_sync: None,
         }
     }
 
@@ -210,6 +211,7 @@ pub trait Namada: NamadaIo {
             tx_code_path: PathBuf::from(TX_TRANSFER_WASM),
             tx: self.tx_builder(),
             frontend_sus_fee,
+            shielded_sync: None,
         }
     }
 
@@ -315,6 +317,7 @@ pub trait Namada: NamadaIo {
             tx: self.tx_builder(),
             tx_code_path: PathBuf::from(TX_IBC_WASM),
             frontend_sus_fee,
+            shielded_sync: None,
         }
     }
 

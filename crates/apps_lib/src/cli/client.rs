@@ -2,8 +2,6 @@ use std::io::Read;
 
 use color_eyre::eyre::Result;
 use namada_sdk::io::{Io, NamadaIo, display_line};
-use namada_sdk::masp::ShieldedContext;
-use namada_sdk::wallet::DatedViewingKey;
 use namada_sdk::{Namada, NamadaImpl};
 
 use crate::cli;
@@ -392,37 +390,6 @@ impl CliApi {
                         let namada = ctx.to_sdk(client, io);
                         tx::submit_validator_metadata_change(&namada, args)
                             .await?;
-                    }
-                    Sub::ShieldedSync(ShieldedSync(args)) => {
-                        let mut args = args.to_sdk(&mut ctx)?;
-                        let chain_ctx = ctx.take_chain_or_exit();
-                        let client = client.unwrap();
-                        if args.with_indexer.is_none() {
-                            client.wait_until_node_is_synced(&io).await?;
-                        }
-                        args.viewing_keys.extend(
-                            chain_ctx
-                                .wallet
-                                .get_viewing_keys()
-                                .into_iter()
-                                .map(|(k, v)| {
-                                    DatedViewingKey::new(
-                                        v,
-                                        chain_ctx
-                                            .wallet
-                                            .find_birthday(k)
-                                            .copied(),
-                                    )
-                                }),
-                        );
-
-                        crate::client::masp::syncing(
-                            &mut ShieldedContext::new(chain_ctx.shielded),
-                            client,
-                            args,
-                            &io,
-                        )
-                        .await?;
                     }
                     Sub::GenIbcShieldingTransfer(GenIbcShieldingTransfer(
                         args,

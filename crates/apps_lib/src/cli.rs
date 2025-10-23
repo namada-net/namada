@@ -301,7 +301,6 @@ pub mod cmds {
                 .subcommand(QueryEffNativeSupply::def().display_order(5))
                 .subcommand(QueryStakingRewardsRate::def().display_order(5))
                 // Actions
-                .subcommand(ShieldedSync::def().display_order(6))
                 .subcommand(GenIbcShieldingTransfer::def().display_order(6))
                 // Utils
                 .subcommand(ClientUtils::def().display_order(7))
@@ -404,7 +403,6 @@ pub mod cmds {
                 Self::parse_with_ctx(matches, QueryIbcRateLimit);
             let add_to_eth_bridge_pool =
                 Self::parse_with_ctx(matches, AddToEthBridgePool);
-            let shielded_sync = Self::parse_with_ctx(matches, ShieldedSync);
             let gen_ibc_shielding =
                 Self::parse_with_ctx(matches, GenIbcShieldingTransfer);
             let utils = SubCmd::parse(matches).map(Self::WithoutContext);
@@ -465,7 +463,6 @@ pub mod cmds {
                 .or(query_staking_rewards_rate)
                 .or(query_account)
                 .or(query_ibc_rate_limit)
-                .or(shielded_sync)
                 .or(gen_ibc_shielding)
                 .or(utils)
         }
@@ -561,7 +558,6 @@ pub mod cmds {
         QueryValidatorState(QueryValidatorState),
         QueryRewards(QueryRewards),
         QueryIbcRateLimit(QueryIbcRateLimit),
-        ShieldedSync(ShieldedSync),
         GenIbcShieldingTransfer(GenIbcShieldingTransfer),
     }
 
@@ -1912,7 +1908,6 @@ pub mod cmds {
         }
 
         fn def() -> App {
-            // FIXME: remove the cli shielded-sync command
             App::new(Self::CMD)
                 .about(wrap!(
                     "Estimate the amount of MASP rewards for the \

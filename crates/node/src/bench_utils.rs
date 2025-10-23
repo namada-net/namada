@@ -1248,8 +1248,6 @@ impl BenchShieldedCtx {
                 &mut self.shielded,
                 self.shell.clone(),
                 ShieldedSync {
-                    ledger_address: FromStr::from_str("http://127.0.0.1:1337")
-                        .unwrap(),
                     last_query_height: None,
                     spending_keys: vec![spending_key],
                     viewing_keys: vec![],

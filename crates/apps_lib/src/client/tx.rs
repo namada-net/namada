@@ -1227,8 +1227,13 @@ pub async fn submit_shielded_transfer(
 
     // Sync the shielded context before building the transaction
     sync_shielded_context(
+        namada,
         args.tx.ledger_address.clone(),
-        &mut *namada.shielded_mut().await,
+        args.shielded_sync.clone().ok_or_else(|| {
+            error::Error::Other(
+                "Missing arguments for shielded sync".to_string(),
+            )
+        })?,
     )
     .await?;
 
@@ -1389,8 +1394,13 @@ pub async fn submit_unshielding_transfer(
 
     // Sync the shielded context before building the transaction
     sync_shielded_context(
+        namada,
         args.tx.ledger_address.clone(),
-        &mut *namada.shielded_mut().await,
+        args.shielded_sync.clone().ok_or_else(|| {
+            error::Error::Other(
+                "Missing arguments for shielded sync".to_string(),
+            )
+        })?,
     )
     .await?;
 
@@ -1481,8 +1491,13 @@ where
     // If the ibc sources are MASP, sync the shielded context before building
     // the transaction FIXME: only if source is masp
     sync_shielded_context(
+        namada,
         args.tx.ledger_address.clone(),
-        &mut *namada.shielded_mut().await,
+        args.shielded_sync.clone().ok_or_else(|| {
+            error::Error::Other(
+                "Missing arguments for shielded sync".to_string(),
+            )
+        })?,
     )
     .await?;
 

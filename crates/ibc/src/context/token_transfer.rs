@@ -227,7 +227,9 @@ where
                 <C as IbcStorageContext>::Storage,
             >,
     {
+        use namada_events::extend::ComposeEvent;
         use namada_state::StorageRead;
+        use namada_tx::event::ProtocolIbcShielding;
 
         if amount.is_zero() {
             return Ok(());
@@ -359,6 +361,7 @@ where
                 kind: MaspEventKind::Transfer,
                 data: MaspTxRef::Unencrypted(notes),
             }
+            .with(ProtocolIbcShielding)
             .into(),
         )?;
 

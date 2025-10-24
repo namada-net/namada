@@ -921,6 +921,7 @@ mod tests {
         assert_eq!(res, val2);
 
         // Commit block and storage changes
+        state.pre_commit_block().unwrap();
         state.commit_block().unwrap();
         state.in_mem_mut().block.height =
             state.in_mem().block.height.next_height();
@@ -986,6 +987,7 @@ mod tests {
         state.delete(&key2).unwrap();
 
         // Commit the block again
+        state.pre_commit_block().unwrap();
         state.commit_block().unwrap();
         state.in_mem_mut().block.height =
             state.in_mem().block.height.next_height();

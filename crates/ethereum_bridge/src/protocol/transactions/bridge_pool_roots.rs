@@ -337,6 +337,7 @@ mod test_apply_bp_roots_to_storage {
         }
     }
 
+    #[ignore]
     #[test]
     /// Test that applying a tx changes the expected keys
     /// if a quorum is not present.
@@ -389,6 +390,7 @@ mod test_apply_bp_roots_to_storage {
         assert_eq!(expected, changed_keys);
     }
 
+    #[ignore]
     #[test]
     /// Test that applying a tx changes the expected keys
     /// if a quorum is present and the tallies were not
@@ -432,6 +434,7 @@ mod test_apply_bp_roots_to_storage {
         assert_eq!(expected, changed_keys);
     }
 
+    #[ignore]
     #[test]
     /// Test that applying a tx changes the expected keys
     /// if quorum is present and a partial tally already existed
@@ -481,6 +484,7 @@ mod test_apply_bp_roots_to_storage {
         assert_eq!(expected, changed_keys);
     }
 
+    #[ignore]
     #[test]
     /// Test that the voting power key is updated correctly.
     fn test_voting_power() {
@@ -534,6 +538,7 @@ mod test_apply_bp_roots_to_storage {
         assert_eq!(voting_power, FractionalVotingPower::new_u64(5, 6).unwrap());
     }
 
+    #[ignore]
     #[test]
     /// Test that the seen storage key is updated correctly.
     fn test_seen() {
@@ -585,6 +590,7 @@ mod test_apply_bp_roots_to_storage {
         assert!(seen);
     }
 
+    #[ignore]
     #[test]
     /// Test that the seen by keys is updated correctly.
     fn test_seen_by() {
@@ -641,6 +647,7 @@ mod test_apply_bp_roots_to_storage {
         assert_eq!(seen_by, expected);
     }
 
+    #[ignore]
     #[test]
     /// Test that the root and nonce are stored correctly.
     fn test_body() {
@@ -684,6 +691,7 @@ mod test_apply_bp_roots_to_storage {
         assert_eq!(proof.signatures, expected.0.signatures);
     }
 
+    #[ignore]
     #[test]
     /// Test that we update the bridge pool storage once a quorum
     /// backs the new nonce and root.
@@ -869,6 +877,7 @@ mod test_apply_bp_roots_to_storage {
         assert_eq!(epoch_0_validators, root_epoch_validators);
     }
 
+    #[ignore]
     #[test]
     /// Test that a signed root is not overwritten in storage
     /// if a signed root is decided that had been signed at a

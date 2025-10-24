@@ -114,7 +114,6 @@ mod test_vote_extensions {
     use namada_sdk::eth_bridge::EthBridgeQueries;
     use namada_sdk::eth_bridge::storage::eth_bridge_queries::is_bridge_comptime_enabled;
     use namada_sdk::eth_bridge::test_utils::GovStore;
-    use namada_sdk::governance;
     use namada_sdk::key::RefTo;
     use namada_sdk::proof_of_stake::Epoch;
     use namada_sdk::proof_of_stake::queries::get_consensus_validator_from_protocol_pk;
@@ -125,11 +124,12 @@ mod test_vote_extensions {
     use namada_sdk::proof_of_stake::types::WeightedValidator;
     use namada_sdk::state::collections::lazy_map::{NestedSubKey, SubKey};
     use namada_sdk::tendermint::abci::types::VoteInfo;
+    use namada_sdk::{governance, tendermint};
     use namada_vote_ext::validator_set_update;
 
     use super::validate_valset_upd_vext;
+    use crate::shell::FinalizeBlockRequest;
     use crate::shell::test_utils::{self, get_pkh_from_address};
-    use crate::shims::abcipp_shim_types::shim::request::FinalizeBlock;
 
     /// Test if a [`validator_set_update::Vext`] that incorrectly labels what
     /// epoch it was included on in a vote extension is rejected
@@ -325,8 +325,9 @@ mod test_vote_extensions {
             sig_info:
                 crate::tendermint::abci::types::BlockSignatureInfo::LegacySigned,
         }];
-        let req = FinalizeBlock {
-            proposer_address: pkh1.to_vec(),
+        let req = FinalizeBlockRequest {
+            proposer_address: tendermint::account::Id::try_from(pkh1.to_vec())
+                .unwrap(),
             decided_last_commit: crate::tendermint::abci::types::CommitInfo {
                 round: 0u8.into(),
                 votes,

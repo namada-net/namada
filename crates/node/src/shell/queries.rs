@@ -88,8 +88,8 @@ mod test_queries {
     use namada_sdk::tendermint::abci::types::VoteInfo;
 
     use super::*;
+    use crate::shell::FinalizeBlockRequest;
     use crate::shell::test_utils::get_pkh_from_address;
-    use crate::shims::abcipp_shim_types::shim::request::FinalizeBlock;
 
     macro_rules! test_must_send_valset_upd {
         (epoch_assertions: $epoch_assertions:expr $(,)?) => {
@@ -169,8 +169,11 @@ mod test_queries {
                         },
                         sig_info: namada_sdk::tendermint::abci::types::BlockSignatureInfo::LegacySigned,
                     }];
-                    let req = FinalizeBlock {
-                        proposer_address: pkh1.to_vec(),
+                    let req = FinalizeBlockRequest {
+            proposer_address: tendermint::account::Id::try_from(
+                pkh1.to_vec(),
+            )
+            .unwrap(),
                         decided_last_commit: namada_sdk::tendermint::abci::types::CommitInfo{
                             round: 0u8.into(),
                             votes

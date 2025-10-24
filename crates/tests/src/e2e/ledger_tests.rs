@@ -31,8 +31,10 @@ use namada_apps_lib::wallet::defaults::is_use_device;
 use namada_apps_lib::wallet::{self, Alias};
 use namada_core::chain::ChainId;
 use namada_core::token::NATIVE_MAX_DECIMAL_PLACES;
+use namada_node::tendermint_config::TxIndexConfig;
 use namada_sdk::address::Address;
 use namada_sdk::chain::{ChainIdPrefix, Epoch};
+use namada_sdk::tendermint_rpc::Client;
 use namada_sdk::time::DateTimeUtc;
 use namada_sdk::token;
 use namada_test_utils::TestWasms;
@@ -2849,6 +2851,98 @@ fn test_genesis_manipulation() -> Result<()> {
             start_namada_ledger_node_wait_wasm(&test, Some(0), Some(40));
         assert!(result.is_err())
     }
+
+    Ok(())
+}
+
+#[test]
+fn comet_tx_indexer() -> Result<()> {
+    use namada_apps_lib::config::Config;
+    use namada_sdk::{tendermint, tendermint_rpc};
+
+    let test = Arc::new(setup::network(
+        |genesis, base_dir: &_| {
+            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+        },
+        None,
+    )?);
+
+    // Enable comet tx indexer
+    let update_config = |mut config: Config| {
+        config.ledger.cometbft.tx_index = TxIndexConfig {
+            indexer: namada_node::tendermint_config::TxIndexer::Kv,
+        };
+        config
+    };
+
+    let validator_base_dir = test.get_base_dir(Who::Validator(0));
+    let validator_config = update_config(Config::load(
+        &validator_base_dir,
+        &test.net.chain_id,
+        None,
+    ));
+    validator_config
+        .write(&validator_base_dir, &test.net.chain_id, true)
+        .unwrap();
+
+    set_ethereum_bridge_mode(
+        &test,
+        &test.net.chain_id,
+        Who::Validator(0),
+        ethereum_bridge::ledger::Mode::Off,
+        None,
+    );
+
+    // 1. Run the ledger node
+    let bg_ledger =
+        start_namada_ledger_node_wait_wasm(&test, Some(0), Some(40))?
+            .background();
+
+    let validator_rpc = get_actor_rpc(&test, Who::Validator(0));
+
+    // A token transfer tx args
+    let tx_args = apply_use_device(vec![
+        "transparent-transfer",
+        "--source",
+        BERTHA,
+        "--target",
+        ALBERT,
+        "--token",
+        NAM,
+        "--amount",
+        "1.01",
+        "--signing-keys",
+        BERTHA_KEY,
+        "--node",
+        &validator_rpc,
+    ]);
+    let mut client = run!(*test, Bin::Client, tx_args, Some(80))?;
+    let expected = "CometBFT tx hash: ";
+    let (_unread, matched) = client.exp_regex(&format!("{expected}.*\n"))?;
+    let comet_tx_hash = matched.trim().split_once(expected).unwrap().1;
+    client.assert_success();
+
+    // Wait to commit a block
+    let mut ledger = bg_ledger.foreground();
+    ledger.exp_regex(r"Committed block hash.*, height: [0-9]+")?;
+
+    // Check the tx result in Comet's indexer
+    let client = tendermint_rpc::HttpClient::builder(
+        tendermint_rpc::HttpClientUrl::from_str(&validator_rpc).unwrap(),
+    )
+    .compat_mode(tendermint_rpc::client::CompatMode::V0_38)
+    .timeout(std::time::Duration::from_secs(30))
+    .build()
+    .unwrap();
+    let result = test
+        .async_runtime()
+        .block_on(
+            client
+                .tx(tendermint::Hash::from_str(comet_tx_hash).unwrap(), false),
+        )
+        .unwrap();
+    assert!(result.tx_result.code.is_ok());
+    assert!(result.tx_result.gas_used > 0);
 
     Ok(())
 }

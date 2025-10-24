@@ -145,7 +145,6 @@ mod test_vote_extensions {
     use namada_sdk::ethereum_events::{
         EthAddress, EthereumEvent, TransferToEthereum, Uint,
     };
-    use namada_sdk::governance;
     use namada_sdk::hash::Hash;
     use namada_sdk::key::*;
     use namada_sdk::proof_of_stake::queries::get_consensus_validator_from_protocol_pk;
@@ -157,11 +156,12 @@ mod test_vote_extensions {
     use namada_sdk::state::collections::lazy_map::{NestedSubKey, SubKey};
     use namada_sdk::storage::{Epoch, InnerEthEventsQueue, StorageWrite};
     use namada_sdk::tendermint::abci::types::VoteInfo;
+    use namada_sdk::{governance, tendermint};
     use namada_vote_ext::ethereum_events;
 
     use super::validate_eth_events_vext;
+    use crate::shell::FinalizeBlockRequest;
     use crate::shell::test_utils::*;
-    use crate::shims::abcipp_shim_types::shim::request::FinalizeBlock;
 
     /// Test validating Ethereum events.
     #[test]
@@ -475,8 +475,9 @@ mod test_vote_extensions {
             sig_info:
                 crate::tendermint::abci::types::BlockSignatureInfo::LegacySigned,
         }];
-        let req = FinalizeBlock {
-            proposer_address: pkh1.to_vec(),
+        let req = FinalizeBlockRequest {
+            proposer_address: tendermint::account::Id::try_from(pkh1.to_vec())
+                .unwrap(),
             decided_last_commit: crate::tendermint::abci::types::CommitInfo {
                 round: 0u8.into(),
                 votes,

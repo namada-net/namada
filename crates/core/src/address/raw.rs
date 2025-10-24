@@ -50,16 +50,20 @@ pub enum Discriminant {
     /// IBC raw address.
     Ibc = 6,
     /// Ethereum bridge raw address.
+    #[deprecated]
     EthBridge = 7,
     /// Bridge pool raw address.
+    #[deprecated]
     BridgePool = 8,
     /// Multitoken raw address.
     Multitoken = 9,
     /// Public goods funding raw address.
     Pgf = 10,
     /// ERC20 raw address.
+    #[deprecated]
     Erc20 = 11,
     /// NUT raw address.
+    #[deprecated]
     Nut = 12,
     /// IBC token raw address.
     IbcToken = 13,
@@ -116,8 +120,6 @@ impl<S> Address<'_, S> {
             self.discriminant,
             Discriminant::Implicit
                 | Discriminant::Established
-                | Discriminant::Erc20
-                | Discriminant::Nut
                 | Discriminant::IbcToken,
         )
     }

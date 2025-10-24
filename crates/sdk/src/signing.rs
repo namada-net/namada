@@ -48,11 +48,10 @@ use tokio::sync::RwLock;
 use crate::args::SdkTypes;
 use crate::borsh::BorshSerializeExt;
 use crate::error::{EncodingError, Error, TxSubmitError};
-use crate::eth_bridge_pool::PendingTransfer;
 use crate::governance::storage::proposal::{AddRemove, PGFAction, PGFTarget};
 use crate::rpc::validate_amount;
 use crate::tx::{
-    Commitment, TX_BECOME_VALIDATOR_WASM, TX_BOND_WASM, TX_BRIDGE_POOL_WASM,
+    Commitment, TX_BECOME_VALIDATOR_WASM, TX_BOND_WASM,
     TX_CHANGE_COMMISSION_WASM, TX_CHANGE_CONSENSUS_KEY_WASM,
     TX_CHANGE_METADATA_WASM, TX_CLAIM_REWARDS_WASM,
     TX_DEACTIVATE_VALIDATOR_WASM, TX_IBC_WASM, TX_INIT_ACCOUNT_WASM,
@@ -2273,39 +2272,6 @@ pub async fn to_ledger_vector(
             ]);
 
             tv.output_expert.push(format!("Steward : {}", address));
-        } else if code_sec.tag == Some(TX_BRIDGE_POOL_WASM.to_string()) {
-            let transfer = PendingTransfer::try_from_slice(
-                &tx.data(cmt)
-                    .ok_or_else(|| Error::Other("Invalid Data".to_string()))?,
-            )
-            .map_err(|err| {
-                Error::from(EncodingError::Conversion(err.to_string()))
-            })?;
-
-            tv.name = "Bridge_Pool_Transfer_0".to_string();
-
-            tv.output.extend(vec![
-                format!("Type : Bridge Pool Transfer"),
-                format!("Transfer Kind : {}", transfer.transfer.kind),
-                format!("Transfer Sender : {}", transfer.transfer.sender),
-                format!("Transfer Recipient : {}", transfer.transfer.recipient),
-                format!("Transfer Asset : {}", transfer.transfer.asset),
-                format!("Transfer Amount : {}", transfer.transfer.amount),
-                format!("Gas Payer : {}", transfer.gas_fee.payer),
-                format!("Gas Token : {}", transfer.gas_fee.token),
-                format!("Gas Amount : {}", transfer.gas_fee.amount),
-            ]);
-
-            tv.output_expert.extend(vec![
-                format!("Transfer Kind : {}", transfer.transfer.kind),
-                format!("Transfer Sender : {}", transfer.transfer.sender),
-                format!("Transfer Recipient : {}", transfer.transfer.recipient),
-                format!("Transfer Asset : {}", transfer.transfer.asset),
-                format!("Transfer Amount : {}", transfer.transfer.amount),
-                format!("Gas Payer : {}", transfer.gas_fee.payer),
-                format!("Gas Token : {}", transfer.gas_fee.token),
-                format!("Gas Amount : {}", transfer.gas_fee.amount),
-            ]);
         } else {
             tv.name = "Custom_0".to_string();
             tv.output.push("Type : Custom".to_string());
@@ -2982,7 +2948,6 @@ mod test_signing {
             TX_REDELEGATE_WASM,
             TX_UPDATE_STEWARD_COMMISSION,
             TX_RESIGN_STEWARD,
-            TX_BRIDGE_POOL_WASM,
         ] {
             let mut tx_malformed = tx.clone();
             let cmts = std::mem::take(&mut tx_malformed.header.batch);

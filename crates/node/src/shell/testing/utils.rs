@@ -16,7 +16,6 @@ pub enum Bin {
     Node,
     Client,
     Wallet,
-    Relayer,
 }
 
 /// A temporary directory for testing

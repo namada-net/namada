@@ -15,9 +15,8 @@ use namada_core::masp::{
     BalanceOwner, ExtendedSpendingKey, ExtendedViewingKey, PaymentAddress,
     TransferSource, TransferTarget,
 };
-use namada_sdk::address::{Address, InternalAddress};
+use namada_sdk::address::Address;
 use namada_sdk::chain::ChainId;
-use namada_sdk::ethereum_events::EthAddress;
 use namada_sdk::ibc::trace::{ibc_token, is_ibc_denom, is_nft_trace};
 use namada_sdk::io::Io;
 use namada_sdk::key::*;
@@ -443,21 +442,7 @@ impl ArgFromContext for Address {
         let raw = raw.as_ref();
         // An address can be either raw (bech32m encoding)
         FromStr::from_str(raw)
-            // An Ethereum address
-            .or_else(|_| {
-                if raw.len() == 42 && raw.starts_with("0x") {
-                    {
-                        raw.parse::<EthAddress>()
-                            .map(|addr| {
-                                Address::Internal(InternalAddress::Erc20(addr))
-                            })
-                            .map_err(|_| SkipErr)
-                    }
-                } else {
-                    Err(SkipErr)
-                }
-            })
-            // An IBC token
+            // Or an IBC token
             .or_else(|_| {
                 is_ibc_denom(raw)
                     .map(|(trace_path, base_denom)| {

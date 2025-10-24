@@ -11,10 +11,7 @@ use masp_primitives::transaction::components::sapling::builder::BuildParams;
 use masp_primitives::zip32::PseudoExtendedKey;
 use namada_core::address::{Address, MASP};
 use namada_core::chain::{BlockHeight, ChainId, Epoch};
-use namada_core::collections::HashMap;
 use namada_core::dec::Dec;
-use namada_core::ethereum_events::EthAddress;
-use namada_core::keccak::KeccakHash;
 use namada_core::key::{SchemeType, common};
 use namada_core::masp::{DiversifierIndex, MaspEpoch, PaymentAddress};
 use namada_core::string_encoding::StringEncoded;
@@ -33,7 +30,6 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 use crate::error::Error;
-use crate::eth_bridge::bridge_pool;
 use crate::ibc::core::host::types::identifiers::{ChannelId, PortId};
 use crate::ibc::{NamadaMemo, NamadaMemoData};
 use crate::rpc::{
@@ -74,8 +70,6 @@ pub trait NamadaTypes: Clone + std::fmt::Debug {
     type ConfigRpcTendermintAddress: Clone
         + std::fmt::Debug
         + From<Self::TendermintAddress>;
-    /// Represents the address of an Ethereum endpoint
-    type EthereumAddress: Clone + std::fmt::Debug;
     /// Represents a shielded viewing key
     type ViewingKey: Clone + std::fmt::Debug;
     /// Represents a shielded spending key
@@ -96,8 +90,6 @@ pub trait NamadaTypes: Clone + std::fmt::Debug {
     type TransferTarget: Clone + std::fmt::Debug;
     /// Represents some data that is used in a transaction
     type Data: Clone + std::fmt::Debug;
-    /// Bridge pool recommendations conversion rates table.
-    type BpConversionTable: Clone + std::fmt::Debug;
     /// Address of a `namada-masp-indexer` live instance
     type MaspIndexerAddress: Clone + std::fmt::Debug;
     /// Represents a block height
@@ -108,28 +100,15 @@ pub trait NamadaTypes: Clone + std::fmt::Debug {
 #[derive(Clone, Debug)]
 pub struct SdkTypes;
 
-/// An entry in the Bridge pool recommendations conversion
-/// rates table.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BpConversionTableEntry {
-    /// An alias for the token, or the string representation
-    /// of its address if none is available.
-    pub alias: String,
-    /// Conversion rate from the given token to gwei.
-    pub conversion_rate: f64,
-}
-
 impl NamadaTypes for SdkTypes {
     type AddrOrNativeToken = Address;
     type Address = Address;
     type BalanceOwner = namada_core::masp::BalanceOwner;
     type BlockHeight = namada_core::chain::BlockHeight;
-    type BpConversionTable = HashMap<Address, BpConversionTableEntry>;
     type ConfigRpcTendermintAddress = tendermint_rpc::Url;
     type Data = Vec<u8>;
     type DatedSpendingKey = DatedSpendingKey;
     type DatedViewingKey = DatedViewingKey;
-    type EthereumAddress = ();
     type Keypair = namada_core::key::common::SecretKey;
     type MaspIndexerAddress = String;
     type PaymentAddress = namada_core::masp::PaymentAddress;
@@ -2980,235 +2959,6 @@ pub struct PayAddressGen {
     pub viewing_key: String,
     /// Diversifier index to start search at
     pub diversifier_index: Option<DiversifierIndex>,
-}
-
-/// Bridge pool batch recommendation.
-#[derive(Clone, Debug)]
-pub struct RecommendBatch<C: NamadaTypes = SdkTypes> {
-    /// The query parameters.
-    pub query: Query<C>,
-    /// The maximum amount of gas to spend.
-    pub max_gas: Option<u64>,
-    /// An optional parameter indicating how much net
-    /// gas the relayer is willing to pay.
-    pub gas: Option<u64>,
-    /// Bridge pool recommendations conversion rates table.
-    pub conversion_table: C::BpConversionTable,
-}
-
-/// A transfer to be added to the Ethereum bridge pool.
-#[derive(Clone, Debug)]
-pub struct EthereumBridgePool<C: NamadaTypes = SdkTypes> {
-    /// Whether the transfer is for a NUT.
-    ///
-    /// By default, we add wrapped ERC20s onto the
-    /// Bridge pool.
-    pub nut: bool,
-    /// The args for building a tx to the bridge pool
-    pub tx: Tx<C>,
-    /// The type of token
-    pub asset: EthAddress,
-    /// The recipient address
-    pub recipient: EthAddress,
-    /// The sender of the transfer
-    pub sender: C::Address,
-    /// The amount to be transferred
-    pub amount: InputAmount,
-    /// The amount of gas fees
-    pub fee_amount: InputAmount,
-    /// The account of fee payer.
-    ///
-    /// If unset, it is the same as the sender.
-    pub fee_payer: Option<C::Address>,
-    /// The token in which the gas is being paid
-    pub fee_token: C::AddrOrNativeToken,
-    /// Path to the tx WASM code file
-    pub code_path: PathBuf,
-}
-
-impl<C: NamadaTypes> TxBuilder<C> for EthereumBridgePool<C> {
-    fn tx<F>(self, func: F) -> Self
-    where
-        F: FnOnce(Tx<C>) -> Tx<C>,
-    {
-        EthereumBridgePool {
-            tx: func(self.tx),
-            ..self
-        }
-    }
-}
-
-impl<C: NamadaTypes> EthereumBridgePool<C> {
-    /// Whether the transfer is for a NUT.
-    ///
-    /// By default, we add wrapped ERC20s onto the
-    /// Bridge pool.
-    pub fn nut(self, nut: bool) -> Self {
-        Self { nut, ..self }
-    }
-
-    /// The type of token
-    pub fn asset(self, asset: EthAddress) -> Self {
-        Self { asset, ..self }
-    }
-
-    /// The recipient address
-    pub fn recipient(self, recipient: EthAddress) -> Self {
-        Self { recipient, ..self }
-    }
-
-    /// The sender of the transfer
-    pub fn sender(self, sender: C::Address) -> Self {
-        Self { sender, ..self }
-    }
-
-    /// The amount to be transferred
-    pub fn amount(self, amount: InputAmount) -> Self {
-        Self { amount, ..self }
-    }
-
-    /// The amount of gas fees
-    pub fn fee_amount(self, fee_amount: InputAmount) -> Self {
-        Self { fee_amount, ..self }
-    }
-
-    /// The account of fee payer.
-    ///
-    /// If unset, it is the same as the sender.
-    pub fn fee_payer(self, fee_payer: C::Address) -> Self {
-        Self {
-            fee_payer: Some(fee_payer),
-            ..self
-        }
-    }
-
-    /// The token in which the gas is being paid
-    pub fn fee_token(self, fee_token: C::Address) -> Self {
-        Self {
-            fee_token: fee_token.into(),
-            ..self
-        }
-    }
-
-    /// Path to the tx WASM code file
-    pub fn code_path(self, code_path: PathBuf) -> Self {
-        Self { code_path, ..self }
-    }
-}
-
-impl EthereumBridgePool {
-    /// Build a transaction from this builder
-    pub async fn build(
-        self,
-        context: &impl Namada,
-    ) -> crate::error::Result<(namada_tx::Tx, SigningData)> {
-        bridge_pool::build_bridge_pool_tx(context, self).await
-    }
-}
-
-/// Bridge pool proof arguments.
-#[derive(Debug, Clone)]
-pub struct BridgePoolProof<C: NamadaTypes = SdkTypes> {
-    /// The address of the ledger node as host:port
-    pub ledger_address: C::TendermintAddress,
-    /// The keccak hashes of transfers to
-    /// acquire a proof of.
-    pub transfers: Vec<KeccakHash>,
-    /// The address of the node responsible for relaying
-    /// the transfers.
-    ///
-    /// This node will receive the gas fees escrowed in
-    /// the Bridge pool, to compensate the Ethereum relay
-    /// procedure.
-    pub relayer: Address,
-}
-
-/// Arguments to an Ethereum Bridge pool relay operation.
-#[derive(Debug, Clone)]
-pub struct RelayBridgePoolProof<C: NamadaTypes = SdkTypes> {
-    /// The address of the ledger node as host:port
-    pub ledger_address: C::TendermintAddress,
-    /// The hashes of the transfers to be relayed
-    pub transfers: Vec<KeccakHash>,
-    /// The Namada address for receiving fees for relaying
-    pub relayer: Address,
-    /// The number of confirmations to wait for on Ethereum
-    pub confirmations: u64,
-    /// The Ethereum RPC endpoint.
-    pub eth_rpc_endpoint: C::EthereumAddress,
-    /// The Ethereum gas that can be spent during
-    /// the relay call.
-    pub gas: Option<u64>,
-    /// The price of Ethereum gas, during the
-    /// relay call.
-    pub gas_price: Option<u64>,
-    /// The address of the Ethereum wallet to pay the gas fees.
-    /// If unset, the default wallet is used.
-    pub eth_addr: Option<EthAddress>,
-    /// Synchronize with the network, or exit immediately,
-    /// if the Ethereum node has fallen behind.
-    pub sync: bool,
-}
-
-/// Bridge validator set arguments.
-#[derive(Debug, Clone)]
-pub struct BridgeValidatorSet<C: NamadaTypes = SdkTypes> {
-    /// The address of the ledger node as host:port
-    pub ledger_address: C::TendermintAddress,
-    /// The epoch to query.
-    pub epoch: Option<Epoch>,
-}
-
-/// Governance validator set arguments.
-#[derive(Debug, Clone)]
-pub struct GovernanceValidatorSet<C: NamadaTypes = SdkTypes> {
-    /// The address of the ledger node as host:port
-    pub ledger_address: C::TendermintAddress,
-    /// The epoch to query.
-    pub epoch: Option<Epoch>,
-}
-
-/// Validator set proof arguments.
-#[derive(Debug, Clone)]
-pub struct ValidatorSetProof<C: NamadaTypes = SdkTypes> {
-    /// The address of the ledger node as host:port
-    pub ledger_address: C::TendermintAddress,
-    /// The epoch to query.
-    pub epoch: Option<Epoch>,
-}
-
-/// Validator set update relayer arguments.
-#[derive(Debug, Clone)]
-pub struct ValidatorSetUpdateRelay<C: NamadaTypes = SdkTypes> {
-    /// Run in daemon mode, which will continuously
-    /// perform validator set updates.
-    pub daemon: bool,
-    /// The address of the ledger node as host:port
-    pub ledger_address: C::TendermintAddress,
-    /// The number of block confirmations on Ethereum.
-    pub confirmations: u64,
-    /// The Ethereum RPC endpoint.
-    pub eth_rpc_endpoint: C::EthereumAddress,
-    /// The epoch of the validator set to relay.
-    pub epoch: Option<Epoch>,
-    /// The Ethereum gas that can be spent during
-    /// the relay call.
-    pub gas: Option<u64>,
-    /// The price of Ethereum gas, during the
-    /// relay call.
-    pub gas_price: Option<u64>,
-    /// The address of the Ethereum wallet to pay the gas fees.
-    /// If unset, the default wallet is used.
-    pub eth_addr: Option<EthAddress>,
-    /// Synchronize with the network, or exit immediately,
-    /// if the Ethereum node has fallen behind.
-    pub sync: bool,
-    /// The amount of time to sleep between failed
-    /// daemon mode relays.
-    pub retry_dur: Option<StdDuration>,
-    /// The amount of time to sleep between successful
-    /// daemon mode relays.
-    pub success_dur: Option<StdDuration>,
 }
 
 /// IBC shielding transfer generation arguments

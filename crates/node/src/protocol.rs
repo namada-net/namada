@@ -4,7 +4,6 @@ use std::collections::BTreeSet;
 use std::fmt::{Debug, Display};
 
 use either::Either;
-use eyre::{WrapErr, eyre};
 use namada_sdk::address::{Address, InternalAddress};
 use namada_sdk::booleans::BoolResultUnitExt;
 use namada_sdk::chain::BlockHeight;
@@ -25,7 +24,6 @@ use namada_sdk::token::Amount;
 use namada_sdk::token::event::{TokenEvent, TokenOperation};
 use namada_sdk::token::utils::is_masp_transfer;
 use namada_sdk::tx::action::{self, Read};
-use namada_sdk::tx::data::protocol::{ProtocolTx, ProtocolTxType};
 use namada_sdk::tx::data::{
     BatchedTxResult, TxResult, VpStatusFlags, VpsResult, WrapperTx,
     compute_inner_tx_hash,
@@ -33,15 +31,14 @@ use namada_sdk::tx::data::{
 use namada_sdk::tx::event::{MaspEvent, MaspEventKind, MaspTxRef};
 use namada_sdk::tx::{BatchedTxRef, IndexedTx, Tx, TxCommitments};
 use namada_sdk::validation::{
-    EthBridgeNutVp, EthBridgePoolVp, EthBridgeVp, GovernanceVp, IbcVp, MaspVp,
-    MultitokenVp, NativeVpCtx, ParametersVp, PgfVp, PosVp,
+    GovernanceVp, IbcVp, MaspVp, MultitokenVp, NativeVpCtx, ParametersVp,
+    PgfVp, PosVp,
 };
-use namada_sdk::{governance, parameters, state, storage, token};
+use namada_sdk::{parameters, state, storage, token};
 #[doc(inline)]
 pub use namada_vm::wasm::run::GasMeterKind;
 use namada_vm::wasm::{TxCache, VpCache};
 use namada_vm::{self, WasmCacheAccess, wasm};
-use namada_vote_ext::EthereumTxData;
 use namada_vp::native_vp::NativeVp;
 use namada_vp::state::ReadConversionState;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -85,6 +82,8 @@ pub enum Error {
     NativeVpError(state::Error),
     #[error("Access to an internal address {0:?} is forbidden")]
     AccessForbidden(InternalAddress),
+    #[error("Triggered a deprecated ETH related VP")]
+    DeprecatedEthVp,
 }
 
 impl Error {
@@ -167,8 +166,6 @@ impl From<Error> for DispatchError {
 
 /// Arguments for transactions' execution
 pub enum DispatchArgs<'a, CA: 'static + WasmCacheAccess + Sync> {
-    /// Protocol tx data
-    Protocol(&'a ProtocolTx),
     /// Raw tx data
     Raw {
         /// The tx index
@@ -285,25 +282,6 @@ where
                     batch_results
                 })
             }
-        }
-        DispatchArgs::Protocol(protocol_tx) => {
-            // No bundles of protocol transactions, only take the first one
-            let cmt = tx.first_commitments().ok_or_else(|| {
-                Box::new(DispatchError::from(Error::MissingInnerTxs))
-            })?;
-            let batched_tx_result =
-                apply_protocol_tx(protocol_tx.tx, tx.data(cmt), state)
-                    .map_err(|e| Box::new(DispatchError::from(e)))?;
-
-            Ok({
-                let mut batch_results = TxResult::new();
-                batch_results.insert_inner_tx_result(
-                    None,
-                    either::Right(cmt),
-                    Ok(batched_tx_result),
-                );
-                batch_results
-            })
         }
         DispatchArgs::Wrapper {
             wrapper,
@@ -1090,90 +1068,6 @@ where
     })
 }
 
-/// Apply a derived transaction to storage based on some protocol transaction.
-/// The logic here must be completely deterministic and will be executed by all
-/// full nodes every time a protocol transaction is included in a block. Storage
-/// is updated natively rather than via the wasm environment, so gas does not
-/// need to be metered and validity predicates are bypassed. A [`TxResult`]
-/// containing changed keys and the like should be returned in the normal way.
-pub(crate) fn apply_protocol_tx<D, H>(
-    tx: ProtocolTxType,
-    data: Option<Vec<u8>>,
-    state: &mut WlState<D, H>,
-) -> Result<BatchedTxResult>
-where
-    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
-    H: 'static + StorageHasher + Sync,
-{
-    use namada_sdk::eth_bridge::protocol::transactions;
-    use namada_vote_ext::{ethereum_events, validator_set_update};
-
-    let Some(data) = data else {
-        return Err(Error::ProtocolTxError(eyre!(
-            "Protocol tx data must be present"
-        )));
-    };
-    let ethereum_tx_data = EthereumTxData::deserialize(&tx, &data)
-        .wrap_err_with(|| {
-            format!(
-                "Attempt made to apply an unsupported protocol transaction! - \
-                 {tx:?}",
-            )
-        })
-        .map_err(Error::ProtocolTxError)?;
-
-    match ethereum_tx_data {
-        EthereumTxData::EthEventsVext(
-            namada_vote_ext::ethereum_events::SignedVext(ext),
-        ) => {
-            let ethereum_events::VextDigest { events, .. } =
-                ethereum_events::VextDigest::singleton(ext);
-            transactions::ethereum_events::apply_derived_tx::<
-                _,
-                _,
-                governance::Store<_>,
-            >(state, events)
-            .map_err(Error::ProtocolTxError)
-        }
-        EthereumTxData::BridgePoolVext(ext) => {
-            transactions::bridge_pool_roots::apply_derived_tx::<
-                _,
-                _,
-                governance::Store<_>,
-            >(state, ext.into())
-            .map_err(Error::ProtocolTxError)
-        }
-        EthereumTxData::ValSetUpdateVext(ext) => {
-            // NOTE(feature = "abcipp"): with ABCI++, we can write the
-            // complete proof to storage in one go. the decided vote extension
-            // digest must already have >2/3 of the voting power behind it.
-            // with ABCI+, multiple vote extension protocol txs may be needed
-            // to reach a complete proof.
-            let signing_epoch = ext.data.signing_epoch;
-            transactions::validator_set_update::aggregate_votes::<
-                _,
-                _,
-                governance::Store<_>,
-            >(
-                state,
-                validator_set_update::VextDigest::singleton(ext),
-                signing_epoch,
-            )
-            .map_err(Error::ProtocolTxError)
-        }
-        EthereumTxData::EthereumEvents(_)
-        | EthereumTxData::BridgePool(_)
-        | EthereumTxData::ValidatorSetUpdate(_) => {
-            // TODO(namada#198): implement this
-            tracing::warn!(
-                "Attempt made to apply an unimplemented protocol transaction, \
-                 no actions will be taken"
-            );
-            Ok(BatchedTxResult::default())
-        }
-    }
-}
-
 /// Execute a transaction code. Returns verifiers requested by the transaction.
 #[allow(clippy::too_many_arguments)]
 fn execute_tx<S, D, H, CA>(
@@ -1406,35 +1300,7 @@ where
                                 &verifiers,
                             )
                             .map_err(Error::NativeVpError),
-                            InternalAddress::EthBridge => {
-                                EthBridgeVp::validate_tx(
-                                    &ctx,
-                                    batched_tx,
-                                    &keys_changed,
-                                    &verifiers,
-                                )
-                                .map_err(Error::NativeVpError)
-                            }
-                            InternalAddress::EthBridgePool => {
-                                EthBridgePoolVp::validate_tx(
-                                    &ctx,
-                                    batched_tx,
-                                    &keys_changed,
-                                    &verifiers,
-                                )
-                                .map_err(Error::NativeVpError)
-                            }
-                            InternalAddress::Nut(_) => {
-                                EthBridgeNutVp::validate_tx(
-                                    &ctx,
-                                    batched_tx,
-                                    &keys_changed,
-                                    &verifiers,
-                                )
-                                .map_err(Error::NativeVpError)
-                            }
-                            internal_addr @ (InternalAddress::IbcToken(_)
-                            | InternalAddress::Erc20(_)) => {
+                            internal_addr @ InternalAddress::IbcToken(_) => {
                                 // The address should be a part of a multitoken
                                 // key
                                 verifiers
@@ -1460,6 +1326,13 @@ where
                                     (*internal_addr).clone(),
                                 ),
                             ),
+                            #[allow(deprecated)]
+                            InternalAddress::EthBridge
+                            | InternalAddress::EthBridgePool
+                            | InternalAddress::Erc20
+                            | InternalAddress::Nut => {
+                                Err(Error::DeprecatedEthVp)
+                            }
                         }
                     }
                 };
@@ -1539,166 +1412,23 @@ fn merge_vp_results(
 
 #[cfg(test)]
 mod tests {
-    use eyre::Result;
     use namada_sdk::account::pks_handle;
-    use namada_sdk::chain::BlockHeight;
-    use namada_sdk::collections::HashMap;
-    use namada_sdk::eth_bridge::protocol::transactions::votes::{
-        EpochedVotingPower, Votes,
-    };
-    use namada_sdk::eth_bridge::storage::eth_bridge_queries::EthBridgeQueries;
-    use namada_sdk::eth_bridge::storage::proof::EthereumProof;
-    use namada_sdk::eth_bridge::storage::{vote_tallies, vp};
-    use namada_sdk::eth_bridge::test_utils;
-    use namada_sdk::ethereum_events::testing::DAI_ERC20_ETH_ADDRESS;
-    use namada_sdk::ethereum_events::{EthereumEvent, TransferToNamada};
-    use namada_sdk::keccak::keccak_hash;
+    use namada_sdk::key;
     use namada_sdk::key::RefTo;
     use namada_sdk::testing::{
         arb_tampered_inner_tx, arb_valid_signed_inner_tx,
     };
-    use namada_sdk::tx::{SignableEthMessage, Signed};
-    use namada_sdk::voting_power::FractionalVotingPower;
-    use namada_sdk::{address, key};
     use namada_test_utils::TestWasms;
-    use namada_vote_ext::bridge_pool_roots::BridgePoolRootVext;
-    use namada_vote_ext::ethereum_events::EthereumEventsVext;
     use namada_vp::state::StorageWrite;
     use proptest::test_runner::{Config, TestRunner};
+    use state::testing::TestState;
 
     use super::*;
 
-    fn apply_eth_tx<D, H>(
-        tx: EthereumTxData,
-        state: &mut WlState<D, H>,
-    ) -> Result<BatchedTxResult>
-    where
-        D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
-        H: 'static + StorageHasher + Sync,
-    {
-        let (data, tx) = tx.serialize();
-        let tx_result = apply_protocol_tx(tx, Some(data), state)?;
-        Ok(tx_result)
-    }
-
-    #[test]
-    /// Tests that if the same [`ProtocolTxType::EthEventsVext`] is applied
-    /// twice within the same block, it doesn't result in voting power being
-    /// double counted.
-    fn test_apply_protocol_tx_duplicate_eth_events_vext() -> Result<()> {
-        let validator_a = address::testing::established_address_2();
-        let validator_b = address::testing::established_address_3();
-        let validator_a_stake = Amount::native_whole(100);
-        let validator_b_stake = Amount::native_whole(100);
-        let total_stake = validator_a_stake + validator_b_stake;
-        let (mut state, _) = test_utils::setup_storage_with_validators(
-            HashMap::from_iter(vec![
-                (validator_a.clone(), validator_a_stake),
-                (validator_b, validator_b_stake),
-            ]),
-        );
-        let event = EthereumEvent::TransfersToNamada {
-            nonce: 0.into(),
-            transfers: vec![TransferToNamada {
-                amount: Amount::from(100),
-                asset: DAI_ERC20_ETH_ADDRESS,
-                receiver: address::testing::established_address_4(),
-            }],
-        };
-        let vext = EthereumEventsVext {
-            block_height: BlockHeight(100),
-            validator_addr: address::testing::established_address_2(),
-            ethereum_events: vec![event.clone()],
-        };
-        let signing_key = key::testing::keypair_1();
-        let signed = vext.sign(&signing_key);
-        let tx = EthereumTxData::EthEventsVext(
-            namada_vote_ext::ethereum_events::SignedVext(signed),
-        );
-
-        apply_eth_tx(tx.clone(), &mut state)?;
-        apply_eth_tx(tx, &mut state)?;
-
-        let eth_msg_keys = vote_tallies::Keys::from(&event);
-        let seen_by: Votes = state.read(&eth_msg_keys.seen_by())?.unwrap();
-        assert_eq!(seen_by, Votes::from([(validator_a, BlockHeight(100))]));
-
-        // the vote should have only be applied once
-        let voting_power: EpochedVotingPower =
-            state.read(&eth_msg_keys.voting_power())?.unwrap();
-        let expected = EpochedVotingPower::from([(
-            0.into(),
-            FractionalVotingPower::HALF * total_stake,
-        )]);
-        assert_eq!(voting_power, expected);
-
-        Ok(())
-    }
-
-    #[test]
-    /// Tests that if the same [`ProtocolTxType::BridgePoolVext`] is applied
-    /// twice within the same block, it doesn't result in voting power being
-    /// double counted.
-    fn test_apply_protocol_tx_duplicate_bp_roots_vext() -> Result<()> {
-        let validator_a = address::testing::established_address_2();
-        let validator_b = address::testing::established_address_3();
-        let validator_a_stake = Amount::native_whole(100);
-        let validator_b_stake = Amount::native_whole(100);
-        let total_stake = validator_a_stake + validator_b_stake;
-        let (mut state, keys) = test_utils::setup_storage_with_validators(
-            HashMap::from_iter(vec![
-                (validator_a.clone(), validator_a_stake),
-                (validator_b, validator_b_stake),
-            ]),
-        );
-        vp::bridge_pool::init_storage(&mut state);
-
-        let root = state.ethbridge_queries().get_bridge_pool_root();
-        let nonce = state.ethbridge_queries().get_bridge_pool_nonce();
-        test_utils::commit_bridge_pool_root_at_height(
-            &mut state,
-            &root,
-            100.into(),
-        );
-        let to_sign = keccak_hash([root.0, nonce.to_bytes()].concat());
-        let signing_key = key::testing::keypair_1();
-        let hot_key =
-            &keys[&address::testing::established_address_2()].eth_bridge;
-        let sig = Signed::<_, SignableEthMessage>::new(hot_key, to_sign).sig;
-        let vext = BridgePoolRootVext {
-            block_height: BlockHeight(100),
-            validator_addr: address::testing::established_address_2(),
-            sig,
-        }
-        .sign(&signing_key);
-        let tx = EthereumTxData::BridgePoolVext(vext);
-        apply_eth_tx(tx.clone(), &mut state)?;
-        apply_eth_tx(tx, &mut state)?;
-
-        let bp_root_keys = vote_tallies::Keys::from((
-            &vote_tallies::BridgePoolRoot(EthereumProof::new((root, nonce))),
-            100.into(),
-        ));
-        let root_seen_by: Votes = state.read(&bp_root_keys.seen_by())?.unwrap();
-        assert_eq!(
-            root_seen_by,
-            Votes::from([(validator_a, BlockHeight(100))])
-        );
-        // the vote should have only be applied once
-        let voting_power: EpochedVotingPower =
-            state.read(&bp_root_keys.voting_power())?.unwrap();
-        let expected = EpochedVotingPower::from([(
-            0.into(),
-            FractionalVotingPower::HALF * total_stake,
-        )]);
-        assert_eq!(voting_power, expected);
-
-        Ok(())
-    }
-
     #[test]
     fn test_native_vp_out_of_gas() {
-        let (mut state, _validators) = test_utils::setup_default_storage();
+        let mut state = TestState::default();
+        parameters::init_test_storage(&mut state).unwrap();
 
         // some random token address
         let token_address = Address::Established([0xff; 20].into());
@@ -1784,7 +1514,9 @@ mod tests {
     // the vps to detect a tx that has been tampered with
     #[test]
     fn test_tampered_inner_tx_rejected() {
-        let (mut state, _validators) = test_utils::setup_default_storage();
+        let mut state = TestState::default();
+        parameters::init_test_storage(&mut state).unwrap();
+
         let signing_key = key::testing::keypair_1();
         let pk = signing_key.ref_to();
         let addr = Address::from(&pk);

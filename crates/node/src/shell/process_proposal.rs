@@ -4,8 +4,6 @@
 use data_encoding::HEXUPPER;
 use namada_sdk::parameters;
 use namada_sdk::proof_of_stake::storage::find_validator_by_raw_hash;
-use namada_sdk::tx::data::protocol::ProtocolTxType;
-use namada_vote_ext::ethereum_tx_data_variants;
 
 use super::block_alloc::{BlockGas, BlockSpace};
 use super::*;
@@ -267,141 +265,6 @@ where
                        supported"
                     .into(),
             },
-            TxType::Protocol(protocol_tx) => {
-                // Tx chain id
-                if tx_chain_id != self.chain_id {
-                    return TxResult {
-                        code: ResultCode::InvalidChainId.into(),
-                        info: format!(
-                            "Tx carries a wrong chain id: expected {}, found \
-                             {}",
-                            self.chain_id, tx_chain_id
-                        ),
-                    };
-                }
-
-                // Tx expiration
-                if let Some(exp) = tx_expiration {
-                    if block_time > exp {
-                        return TxResult {
-                            code: ResultCode::ExpiredTx.into(),
-                            info: format!(
-                                "Tx expired at {:#?}, block time: {:#?}",
-                                exp, block_time
-                            ),
-                        };
-                    }
-                }
-
-                match protocol_tx.tx {
-                    ProtocolTxType::EthEventsVext => {
-                        ethereum_tx_data_variants::EthEventsVext::try_from(&tx)
-                            .map_err(|err| err.to_string())
-                            .and_then(|ext| {
-                                validate_eth_events_vext::<
-                                    _,
-                                    _,
-                                    governance::Store<_>,
-                                >(
-                                    &self.state,
-                                    &ext.0,
-                                    self.state.in_mem().get_last_block_height(),
-                                )
-                                .map(|_| TxResult {
-                                    code: ResultCode::Ok.into(),
-                                    info: "Process Proposal accepted this \
-                                           transaction"
-                                        .into(),
-                                })
-                                .map_err(|err| err.to_string())
-                            })
-                            .unwrap_or_else(|err| TxResult {
-                                code: ResultCode::InvalidVoteExtension.into(),
-                                info: format!(
-                                    "Process proposal rejected this proposal \
-                                     because one of the included Ethereum \
-                                     events vote extensions was invalid: {err}"
-                                ),
-                            })
-                    }
-                    ProtocolTxType::BridgePoolVext => {
-                        ethereum_tx_data_variants::BridgePoolVext::try_from(&tx)
-                            .map_err(|err| err.to_string())
-                            .and_then(|ext| {
-                                validate_bp_roots_vext::<
-                                    _,
-                                    _,
-                                    governance::Store<_>,
-                                >(
-                                    &self.state,
-                                    &ext.0,
-                                    self.state.in_mem().get_last_block_height(),
-                                )
-                                .map(|_| TxResult {
-                                    code: ResultCode::Ok.into(),
-                                    info: "Process Proposal accepted this \
-                                           transaction"
-                                        .into(),
-                                })
-                                .map_err(|err| err.to_string())
-                            })
-                            .unwrap_or_else(|err| TxResult {
-                                code: ResultCode::InvalidVoteExtension.into(),
-                                info: format!(
-                                    "Process proposal rejected this proposal \
-                                     because one of the included Bridge pool \
-                                     root's vote extensions was invalid: {err}"
-                                ),
-                            })
-                    }
-                    ProtocolTxType::ValSetUpdateVext => {
-                        ethereum_tx_data_variants::ValSetUpdateVext::try_from(
-                            &tx,
-                        )
-                        .map_err(|err| err.to_string())
-                        .and_then(|ext| {
-                            validate_valset_upd_vext::<_, _, governance::Store<_>>(
-                                &self.state,
-                                &ext,
-                                // n.b. only accept validator set updates
-                                // issued at
-                                // the current epoch (signing off on the
-                                // validators
-                                // of the next epoch)
-                                self.state.in_mem().get_current_epoch().0,
-                            )
-                            .map(|_| TxResult {
-                                code: ResultCode::Ok.into(),
-                                info: "Process Proposal accepted this \
-                                       transaction"
-                                    .into(),
-                            })
-                            .map_err(|err| err.to_string())
-                        })
-                        .unwrap_or_else(|err| {
-                            TxResult {
-                                code: ResultCode::InvalidVoteExtension.into(),
-                                info: format!(
-                                    "Process proposal rejected this proposal \
-                                     because one of the included validator \
-                                     set update vote extensions was invalid: \
-                                     {err}"
-                                ),
-                            }
-                        })
-                    }
-                    ProtocolTxType::EthereumEvents
-                    | ProtocolTxType::BridgePool
-                    | ProtocolTxType::ValidatorSetUpdate => TxResult {
-                        code: ResultCode::InvalidVoteExtension.into(),
-                        info: "Process proposal rejected this proposal \
-                               because one of the included vote extensions \
-                               was invalid: ABCI++ code paths are unreachable \
-                               in Namada"
-                            .to_string(),
-                    },
-                }
-            }
             TxType::Wrapper(wrapper) => {
                 // Validate wrapper first
                 // Account for the tx's resources
@@ -545,6 +408,11 @@ where
                     info: "Process proposal accepted this transaction".into(),
                 }
             }
+            #[allow(deprecated)]
+            TxType::Protocol(_) => TxResult {
+                code: ResultCode::DeprecatedProtocolTx.into(),
+                info: "Protocol txs are deprecated".into(),
+            },
         }
     }
 }
@@ -586,311 +454,25 @@ mod test_process_proposal {
     use namada_apps_lib::wallet;
     use namada_replay_protection as replay_protection;
     use namada_sdk::address;
-    use namada_sdk::eth_bridge::storage::eth_bridge_queries::{
-        EthBridgeQueries, is_bridge_comptime_enabled,
-    };
     use namada_sdk::key::*;
     use namada_sdk::state::StorageWrite;
     use namada_sdk::testing::{arb_tampered_wrapper_tx, arb_valid_signed_tx};
     use namada_sdk::token::{Amount, DenominatedAmount, read_denom};
     use namada_sdk::tx::data::Fee;
-    use namada_sdk::tx::{Code, Data, Signed};
-    use namada_vote_ext::{
-        bridge_pool_roots, ethereum_events, validator_set_update,
-    };
+    use namada_sdk::tx::{Code, Data};
     use proptest::prop_assert;
     use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
     use super::*;
-    use crate::shell::abci::ProcessedTx;
-    use crate::shell::test_utils::{
-        ProcessProposal, TestError, TestShell, deactivate_bridge, gen_keypair,
-        get_bp_bytes_to_sign,
-    };
+    use crate::shell::test_utils::{ProcessProposal, TestError, gen_keypair};
 
     const GAS_LIMIT: u64 = 100_000;
-
-    /// Check that we reject a validator set update protocol tx
-    /// if the bridge is not active.
-    #[test]
-    fn check_rejected_valset_upd_bridge_inactive() {
-        if is_bridge_comptime_enabled() {
-            // NOTE: validator set updates are always signed
-            // when the bridge is enabled at compile time
-            return;
-        }
-
-        let (shell, _, _, _) = test_utils::setup_at_height(3);
-        let ext = {
-            let eth_hot_key =
-                shell.mode.get_eth_bridge_keypair().expect("Test failed");
-            let signing_epoch = shell.state.in_mem().get_current_epoch().0;
-            let next_epoch = signing_epoch.next();
-            let voting_powers = shell
-                .state
-                .ethbridge_queries()
-                .get_consensus_eth_addresses::<governance::Store<_>>(next_epoch)
-                .map(|(eth_addr_book, _, voting_power)| {
-                    (eth_addr_book, voting_power)
-                })
-                .collect();
-            let validator_addr = shell
-                .mode
-                .get_validator_address()
-                .expect("Test failed")
-                .clone();
-            let ext = validator_set_update::Vext {
-                voting_powers,
-                validator_addr,
-                signing_epoch,
-            };
-            ext.sign(eth_hot_key)
-        };
-        let request = {
-            let protocol_key =
-                shell.mode.get_protocol_key().expect("Test failed");
-            let tx = EthereumTxData::ValSetUpdateVext(ext)
-                .sign(protocol_key, shell.chain_id.clone())
-                .to_bytes();
-            ProcessProposal { txs: vec![tx] }
-        };
-
-        let response = if let Err(TestError::RejectProposal(resp)) =
-            shell.process_proposal(request)
-        {
-            if let [resp] = resp.as_slice() {
-                resp.clone()
-            } else {
-                panic!("Test failed")
-            }
-        } else {
-            panic!("Test failed")
-        };
-        assert_eq!(
-            response.result.code,
-            u32::from(ResultCode::InvalidVoteExtension)
-        );
-    }
-
-    /// Check that we reject an eth events protocol tx
-    /// if the bridge is not active.
-    #[test]
-    fn check_rejected_eth_events_bridge_inactive() {
-        let (mut shell, _, _, _) = test_utils::setup_at_height(3);
-        let protocol_key = shell.mode.get_protocol_key().expect("Test failed");
-        let addr = shell.mode.get_validator_address().expect("Test failed");
-        let event = EthereumEvent::TransfersToNamada {
-            nonce: 0u64.into(),
-            transfers: vec![],
-        };
-        let ext = ethereum_events::Vext {
-            validator_addr: addr.clone(),
-            block_height: shell.state.in_mem().get_last_block_height(),
-            ethereum_events: vec![event],
-        }
-        .sign(protocol_key);
-        let tx = EthereumTxData::EthEventsVext(ext.into())
-            .sign(protocol_key, shell.chain_id.clone())
-            .to_bytes();
-        let request = ProcessProposal { txs: vec![tx] };
-
-        if is_bridge_comptime_enabled() {
-            let [resp]: [ProcessedTx; 1] = shell
-                .process_proposal(request.clone())
-                .expect("Test failed")
-                .try_into()
-                .expect("Test failed");
-            assert_eq!(resp.result.code, u32::from(ResultCode::Ok));
-            deactivate_bridge(&mut shell);
-        }
-        let response = if let Err(TestError::RejectProposal(resp)) =
-            shell.process_proposal(request)
-        {
-            if let [resp] = resp.as_slice() {
-                resp.clone()
-            } else {
-                panic!("Test failed")
-            }
-        } else {
-            panic!("Test failed")
-        };
-        assert_eq!(
-            response.result.code,
-            u32::from(ResultCode::InvalidVoteExtension)
-        );
-    }
-
-    /// Check that we reject an bp roots protocol tx
-    /// if the bridge is not active.
-    #[test]
-    fn check_rejected_bp_roots_bridge_inactive() {
-        let (mut shell, _a, _b, _c) = test_utils::setup_at_height(1);
-        shell.state.in_mem_mut().block.height =
-            shell.state.in_mem().get_last_block_height();
-        shell.commit();
-        let protocol_key = shell.mode.get_protocol_key().expect("Test failed");
-        let addr = shell.mode.get_validator_address().expect("Test failed");
-        let to_sign = get_bp_bytes_to_sign();
-        let sig = Signed::<_, SignableEthMessage>::new(
-            shell.mode.get_eth_bridge_keypair().expect("Test failed"),
-            to_sign,
-        )
-        .sig;
-        let vote_ext = bridge_pool_roots::Vext {
-            block_height: shell.state.in_mem().get_last_block_height(),
-            validator_addr: addr.clone(),
-            sig,
-        }
-        .sign(shell.mode.get_protocol_key().expect("Test failed"));
-        let tx = EthereumTxData::BridgePoolVext(vote_ext)
-            .sign(protocol_key, shell.chain_id.clone())
-            .to_bytes();
-        let request = ProcessProposal { txs: vec![tx] };
-
-        if is_bridge_comptime_enabled() {
-            let [resp]: [ProcessedTx; 1] = shell
-                .process_proposal(request.clone())
-                .expect("Test failed")
-                .try_into()
-                .expect("Test failed");
-
-            assert_eq!(resp.result.code, u32::from(ResultCode::Ok));
-            deactivate_bridge(&mut shell);
-        }
-        let response = if let Err(TestError::RejectProposal(resp)) =
-            shell.process_proposal(request)
-        {
-            if let [resp] = resp.as_slice() {
-                resp.clone()
-            } else {
-                panic!("Test failed")
-            }
-        } else {
-            panic!("Test failed")
-        };
-        assert_eq!(
-            response.result.code,
-            u32::from(ResultCode::InvalidVoteExtension)
-        );
-    }
-
-    fn check_rejected_eth_events(
-        shell: &mut TestShell,
-        vote_extension: ethereum_events::SignedVext,
-        protocol_key: common::SecretKey,
-    ) {
-        let tx = EthereumTxData::EthEventsVext(vote_extension)
-            .sign(&protocol_key, shell.chain_id.clone())
-            .to_bytes();
-        let request = ProcessProposal { txs: vec![tx] };
-        let response = if let Err(TestError::RejectProposal(resp)) =
-            shell.process_proposal(request)
-        {
-            if let [resp] = resp.as_slice() {
-                resp.clone()
-            } else {
-                panic!("Test failed")
-            }
-        } else {
-            panic!("Test failed")
-        };
-        assert_eq!(
-            response.result.code,
-            u32::from(ResultCode::InvalidVoteExtension)
-        );
-    }
-
-    /// Test that if a proposal contains Ethereum events with
-    /// invalid validator signatures, we reject it.
-    #[test]
-    fn test_drop_vext_with_invalid_sigs() {
-        const LAST_HEIGHT: BlockHeight = BlockHeight(2);
-        let (mut shell, _recv, _, _) = test_utils::setup_at_height(LAST_HEIGHT);
-        let (protocol_key, _) = wallet::defaults::validator_keys();
-        let addr = wallet::defaults::validator_address();
-        let event = EthereumEvent::TransfersToNamada {
-            nonce: 0u64.into(),
-            transfers: vec![],
-        };
-        let ext = {
-            // generate a valid signature
-            #[allow(clippy::redundant_clone)]
-            let mut ext = ethereum_events::Vext {
-                validator_addr: addr.clone(),
-                block_height: LAST_HEIGHT,
-                ethereum_events: vec![event.clone()],
-            }
-            .sign(&protocol_key);
-            assert!(ext.verify(&protocol_key.ref_to()).is_ok());
-
-            // modify this signature such that it becomes invalid
-            ext.sig = test_utils::invalidate_signature(ext.sig);
-            ext
-        };
-        check_rejected_eth_events(&mut shell, ext.into(), protocol_key);
-    }
-
-    /// Test that if a proposal contains Ethereum events with
-    /// invalid block heights, we reject it.
-    #[test]
-    fn test_drop_vext_with_invalid_bheights() {
-        const LAST_HEIGHT: BlockHeight = BlockHeight(3);
-        const INVALID_HEIGHT: BlockHeight = BlockHeight(LAST_HEIGHT.0 + 1);
-        let (mut shell, _recv, _, _) = test_utils::setup_at_height(LAST_HEIGHT);
-        let (protocol_key, _) = wallet::defaults::validator_keys();
-        let addr = wallet::defaults::validator_address();
-        let event = EthereumEvent::TransfersToNamada {
-            nonce: 0u64.into(),
-            transfers: vec![],
-        };
-        let ext = {
-            #[allow(clippy::redundant_clone)]
-            let ext = ethereum_events::Vext {
-                validator_addr: addr.clone(),
-                block_height: INVALID_HEIGHT,
-                ethereum_events: vec![event.clone()],
-            }
-            .sign(&protocol_key);
-            assert!(ext.verify(&protocol_key.ref_to()).is_ok());
-            ext
-        };
-        check_rejected_eth_events(&mut shell, ext.into(), protocol_key);
-    }
-
-    /// Test that if a proposal contains Ethereum events with
-    /// invalid validators, we reject it.
-    #[test]
-    fn test_drop_vext_with_invalid_validators() {
-        const LAST_HEIGHT: BlockHeight = BlockHeight(2);
-        let (mut shell, _recv, _, _) = test_utils::setup_at_height(LAST_HEIGHT);
-        let (addr, protocol_key) = {
-            let bertha_key = wallet::defaults::bertha_keypair();
-            let bertha_addr = wallet::defaults::bertha_address();
-            (bertha_addr, bertha_key)
-        };
-        let event = EthereumEvent::TransfersToNamada {
-            nonce: 0u64.into(),
-            transfers: vec![],
-        };
-        let ext = {
-            #[allow(clippy::redundant_clone)]
-            let ext = ethereum_events::Vext {
-                validator_addr: addr.clone(),
-                block_height: LAST_HEIGHT,
-                ethereum_events: vec![event.clone()],
-            }
-            .sign(&protocol_key);
-            assert!(ext.verify(&protocol_key.ref_to()).is_ok());
-            ext
-        };
-        check_rejected_eth_events(&mut shell, ext.into(), protocol_key);
-    }
 
     /// Test that if a wrapper tx is not signed, the block is rejected
     /// by [`process_proposal`].
     #[test]
     fn test_unsigned_wrapper_rejected() {
-        let (shell, _recv, _, _) = test_utils::setup_at_height(3u64);
+        let (shell, _recv) = test_utils::setup_at_height(3u64);
         let keypair = gen_keypair();
         let public_key = keypair.ref_to();
         let mut outer_tx =
@@ -941,7 +523,7 @@ mod test_process_proposal {
     /// rejected
     #[test]
     fn test_wrapper_bad_signature() {
-        let (shell, _recv, _, _) = test_utils::setup_at_height(3u64);
+        let (shell, _recv) = test_utils::setup_at_height(3u64);
 
         let mut runner = TestRunner::new(Config::default());
         // Test that the strategy produces valid txs first
@@ -989,7 +571,7 @@ mod test_process_proposal {
     /// payment
     #[test]
     fn test_wrapper_unknown_address() {
-        let (mut shell, _recv, _, _) = test_utils::setup_at_height(3u64);
+        let (mut shell, _recv) = test_utils::setup_at_height(3u64);
         let keypair = gen_keypair();
         let address = Address::from(&keypair.ref_to());
         let balance_key = token::storage_key::balance_key(
@@ -1033,7 +615,7 @@ mod test_process_proposal {
     /// balance to pay the fee, [`process_proposal`] rejects the entire block
     #[test]
     fn test_wrapper_insufficient_balance_address() {
-        let (mut shell, _recv, _, _) = test_utils::setup_at_height(3u64);
+        let (mut shell, _recv) = test_utils::setup_at_height(3u64);
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
         // reduce address balance to match the 100 token min fee
         let balance_key = token::storage_key::balance_key(
@@ -1091,7 +673,7 @@ mod test_process_proposal {
     /// Process Proposal should reject a block containing a RawTx, but not panic
     #[test]
     fn test_raw_tx_rejected() {
-        let (shell, _recv, _, _) = test_utils::setup_at_height(3u64);
+        let (shell, _recv) = test_utils::setup_at_height(3u64);
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 
@@ -1129,7 +711,7 @@ mod test_process_proposal {
     /// block is rejected
     #[test]
     fn test_wrapper_tx_hash() {
-        let (mut shell, _recv, _, _) = test_utils::setup();
+        let (mut shell, _recv) = test_utils::setup();
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 
@@ -1185,7 +767,7 @@ mod test_process_proposal {
     /// Test that a block containing two identical wrapper txs is rejected
     #[test]
     fn test_wrapper_tx_hash_same_block() {
-        let (mut shell, _recv, _, _) = test_utils::setup();
+        let (mut shell, _recv) = test_utils::setup();
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 
@@ -1241,7 +823,7 @@ mod test_process_proposal {
     /// block is rejected
     #[test]
     fn test_inner_tx_hash() {
-        let (mut shell, _recv, _, _) = test_utils::setup();
+        let (mut shell, _recv) = test_utils::setup();
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 
@@ -1297,7 +879,7 @@ mod test_process_proposal {
     /// accepted
     #[test]
     fn test_inner_tx_hash_same_block() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let (shell, _recv) = test_utils::setup();
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
         let keypair_2 = namada_apps_lib::wallet::defaults::albert_keypair();
@@ -1337,11 +919,11 @@ mod test_process_proposal {
         }
     }
 
-    /// Test that a wrapper or protocol transaction with a mismatching chain id
-    /// causes the entire block to be rejected
+    /// Test that a wrapper transaction with a mismatching chain id causes the
+    /// entire block to be rejected
     #[test]
     fn test_wrong_chain_id() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let (shell, _recv) = test_utils::setup();
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 
         let mut wrapper =
@@ -1361,19 +943,9 @@ mod test_process_proposal {
         wrapper.set_data(Data::new("transaction data".as_bytes().to_owned()));
         wrapper.sign_wrapper(keypair);
 
-        let protocol_key = shell.mode.get_protocol_key().expect("Test failed");
-        let protocol_tx = EthereumTxData::EthEventsVext({
-            let bertha_key = wallet::defaults::bertha_keypair();
-            let bertha_addr = wallet::defaults::bertha_address();
-            ethereum_events::Vext::empty(1234_u64.into(), bertha_addr)
-                .sign(&bertha_key)
-                .into()
-        })
-        .sign(protocol_key, wrong_chain_id.clone());
-
         // Run validation
         let request = ProcessProposal {
-            txs: vec![wrapper.to_bytes(), protocol_tx.to_bytes()],
+            txs: vec![wrapper.to_bytes()],
         };
         match shell.process_proposal(request) {
             Ok(_) => panic!("Test failed"),
@@ -1399,7 +971,7 @@ mod test_process_proposal {
     /// Test that an expired wrapper transaction causes a block rejection
     #[test]
     fn test_expired_wrapper() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let (shell, _recv) = test_utils::setup();
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 
         let mut wrapper =
@@ -1436,7 +1008,7 @@ mod test_process_proposal {
     /// rejection
     #[test]
     fn test_exceeding_max_block_gas_tx() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let (shell, _recv) = test_utils::setup();
 
         let block_gas_limit =
             parameters::get_max_block_gas(&shell.state).unwrap();
@@ -1475,7 +1047,7 @@ mod test_process_proposal {
     /// causes a block rejection
     #[test]
     fn test_exceeding_available_block_gas_tx() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let (shell, _recv) = test_utils::setup();
 
         let block_gas_limit =
             parameters::get_max_block_gas(&shell.state).unwrap();
@@ -1521,7 +1093,7 @@ mod test_process_proposal {
     // rejection
     #[test]
     fn test_exceeding_gas_limit_wrapper() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let (shell, _recv) = test_utils::setup();
         let keypair = super::test_utils::gen_keypair();
 
         let mut wrapper =
@@ -1557,7 +1129,7 @@ mod test_process_proposal {
     // a block rejection
     #[test]
     fn test_fee_non_whitelisted_token() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let (shell, _recv) = test_utils::setup();
 
         let apfel_denom = read_denom(&shell.state, &address::testing::apfel())
             .expect("unable to read denomination from storage")
@@ -1600,7 +1172,7 @@ mod test_process_proposal {
     // is accepted
     #[test]
     fn test_fee_whitelisted_non_native_token() {
-        let (mut shell, _recv, _, _) = test_utils::setup();
+        let (mut shell, _recv) = test_utils::setup();
 
         let apfel_denom = read_denom(&shell.state, &address::testing::apfel())
             .expect("unable to read denomination from storage")
@@ -1660,7 +1232,7 @@ mod test_process_proposal {
     // causes a block rejection
     #[test]
     fn test_fee_wrong_minimum_amount() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let (shell, _recv) = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -1696,7 +1268,7 @@ mod test_process_proposal {
     // block rejection
     #[test]
     fn test_insufficient_balance_for_fee() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let (shell, _recv) = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -1734,7 +1306,7 @@ mod test_process_proposal {
     // rejection
     #[test]
     fn test_wrapper_fee_overflow() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let (shell, _recv) = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -1772,7 +1344,7 @@ mod test_process_proposal {
     #[test]
     fn test_max_tx_bytes_process_proposal() {
         use parameters::storage::get_max_tx_bytes_key;
-        let (shell, _recv, _, _) = test_utils::setup_at_height(3u64);
+        let (shell, _recv) = test_utils::setup_at_height(3u64);
 
         let max_tx_bytes: u32 = {
             let key = get_max_tx_bytes_key();
@@ -1830,89 +1402,11 @@ mod test_process_proposal {
         }
     }
 
-    /// Test that Ethereum events with outdated nonces are
-    /// not validated by `ProcessProposal`.
-    #[test]
-    fn test_outdated_nonce_process_proposal() {
-        use namada_sdk::storage::InnerEthEventsQueue;
-
-        const LAST_HEIGHT: BlockHeight = BlockHeight(3);
-
-        if !is_bridge_comptime_enabled() {
-            // NOTE: this test doesn't work if the ethereum bridge
-            // is disabled at compile time.
-            return;
-        }
-
-        let (mut shell, _recv, _, _) = test_utils::setup_at_height(LAST_HEIGHT);
-        shell
-            .state
-            .in_mem_mut()
-            .eth_events_queue
-            // sent transfers to namada nonce to 5
-            .transfers_to_namada = InnerEthEventsQueue::new_at(5.into());
-
-        let (protocol_key, _) = wallet::defaults::validator_keys();
-
-        // only bad events
-        {
-            let ethereum_event = EthereumEvent::TransfersToNamada {
-                // outdated nonce (3 < 5)
-                nonce: 3u64.into(),
-                transfers: vec![],
-            };
-            let ext = {
-                let ext = ethereum_events::Vext {
-                    validator_addr: wallet::defaults::validator_address(),
-                    block_height: LAST_HEIGHT,
-                    ethereum_events: vec![ethereum_event],
-                }
-                .sign(&protocol_key);
-                assert!(ext.verify(&protocol_key.ref_to()).is_ok());
-                ext
-            };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
-                .sign(&protocol_key, shell.chain_id.clone())
-                .to_bytes();
-            let req = ProcessProposal { txs: vec![tx] };
-            let rsp = shell.process_proposal(req);
-            assert!(rsp.is_err());
-        }
-
-        // at least one good event
-        {
-            let e1 = EthereumEvent::TransfersToNamada {
-                nonce: 3u64.into(),
-                transfers: vec![],
-            };
-            let e2 = EthereumEvent::TransfersToNamada {
-                nonce: 5u64.into(),
-                transfers: vec![],
-            };
-            let ext = {
-                let ext = ethereum_events::Vext {
-                    validator_addr: wallet::defaults::validator_address(),
-                    block_height: LAST_HEIGHT,
-                    ethereum_events: vec![e1, e2],
-                }
-                .sign(&protocol_key);
-                assert!(ext.verify(&protocol_key.ref_to()).is_ok());
-                ext
-            };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
-                .sign(&protocol_key, shell.chain_id.clone())
-                .to_bytes();
-            let req = ProcessProposal { txs: vec![tx] };
-            let rsp = shell.process_proposal(req);
-            assert!(rsp.is_ok());
-        }
-    }
-
     /// Process Proposal should reject a block containing a tx with a number of
     /// sections exceeding the limit
     #[test]
     fn test_max_sections_exceeded_tx_rejected() {
-        let (shell, _recv, _, _) = test_utils::setup_at_height(3u64);
+        let (shell, _recv) = test_utils::setup_at_height(3u64);
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 

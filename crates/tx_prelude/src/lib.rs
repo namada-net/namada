@@ -33,11 +33,10 @@ use namada_core::chain::CHAIN_ID_LENGTH;
 pub use namada_core::chain::{
     BLOCK_HASH_LENGTH, BlockHash, BlockHeader, BlockHeight, Epoch,
 };
-pub use namada_core::ethereum_events::EthAddress;
 use namada_core::internal::HostEnvResult;
 use namada_core::key::common;
 use namada_core::storage::TxIndex;
-pub use namada_core::{address, encode, eth_bridge_pool, storage, *};
+pub use namada_core::{address, encode, storage, *};
 pub use namada_events::extend::Log;
 pub use namada_events::{
     EmitEvents, Event, EventLevel, EventToEmit, EventType,

@@ -17,10 +17,6 @@ rust-version.workspace = true
 default = ["namada_sdk/std", "namada_sdk/masp"]
 mainnet = ["namada_sdk/mainnet"]
 migrations = ["namada_sdk/migrations", "namada_core/migrations"]
-namada-eth-bridge = [
-  "namada_sdk/namada-eth-bridge",
-  "namada_apps_lib/namada-eth-bridge",
-]
 historic-masp = ["namada_sdk/historic-masp"]
 
 [dependencies]

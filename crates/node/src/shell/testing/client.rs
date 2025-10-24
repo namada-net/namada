@@ -2,9 +2,7 @@ use clap::Command as App;
 use eyre::Report;
 use namada_apps_lib::cli::api::{CliApi, CliClient};
 use namada_apps_lib::cli::args::Global;
-use namada_apps_lib::cli::{
-    Cmd, Context, NamadaClient, NamadaRelayer, args, cmds,
-};
+use namada_apps_lib::cli::{Cmd, Context, NamadaClient, args, cmds};
 use namada_sdk::error::Error as SdkError;
 use namada_sdk::io::Io;
 
@@ -66,32 +64,6 @@ pub fn run(
             let cmd = cmds::NamadaWallet::parse(&matches)
                 .expect("Could not parse wallet command");
             rt.block_on(CliApi::handle_wallet_command(cmd, ctx, &TestingIo))
-        }
-        Bin::Relayer => {
-            args.insert(0, "relayer");
-            let app = App::new("test");
-            let app = cmds::NamadaRelayer::add_sub(args::Global::def(app));
-            let matches = app.get_matches_from(args.clone());
-            let cmd = match cmds::NamadaRelayer::parse(&matches)
-                .expect("Could not parse relayer command")
-            {
-                cmds::NamadaRelayer::EthBridgePool(
-                    cmds::EthBridgePool::WithContext(sub_cmd),
-                ) => NamadaRelayer::EthBridgePoolWithCtx(Box::new((
-                    sub_cmd, ctx,
-                ))),
-                cmds::NamadaRelayer::EthBridgePool(
-                    cmds::EthBridgePool::WithoutContext(sub_cmd),
-                ) => NamadaRelayer::EthBridgePoolWithoutCtx(sub_cmd),
-                cmds::NamadaRelayer::ValidatorSet(sub_cmd) => {
-                    NamadaRelayer::ValidatorSet(sub_cmd)
-                }
-            };
-            rt.block_on(CliApi::handle_relayer_command(
-                Some(node.clone()),
-                cmd,
-                TestingIo,
-            ))
         }
     }
 }

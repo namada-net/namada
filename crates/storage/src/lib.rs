@@ -29,7 +29,6 @@ pub mod conversion_state;
 mod db;
 mod error;
 pub mod mockdb;
-pub mod tx_queue;
 pub mod types;
 
 pub use db::{Error as DbError, Result as DbResult, *};
@@ -180,10 +179,10 @@ pub trait StorageWrite {
 }
 
 /// Iterate items matching the given prefix, ordered by the storage keys.
-pub fn iter_prefix_bytes<'a>(
-    storage: &'a impl StorageRead,
+pub fn iter_prefix_bytes(
+    storage: &impl StorageRead,
     prefix: Key,
-) -> Result<impl Iterator<Item = Result<(Key, Vec<u8>)>> + 'a> {
+) -> Result<impl Iterator<Item = Result<(Key, Vec<u8>)>> + '_> {
     let mut iter = storage.iter_prefix(&prefix)?;
     let iter = std::iter::from_fn(move || {
         match storage.iter_next(&mut iter) {
@@ -209,10 +208,10 @@ pub fn iter_prefix_bytes<'a>(
 
 /// Iterate Borsh encoded items matching the given prefix, ordered by the
 /// storage keys.
-pub fn iter_prefix<'a, T>(
-    storage: &'a impl StorageRead,
+pub fn iter_prefix<T>(
+    storage: &impl StorageRead,
     prefix: Key,
-) -> Result<impl Iterator<Item = Result<(Key, T)>> + 'a>
+) -> Result<impl Iterator<Item = Result<(Key, T)>> + '_>
 where
     T: BorshDeserialize,
 {

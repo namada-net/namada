@@ -268,32 +268,6 @@ where
     }
 }
 
-pub async fn submit_bridge_pool_tx<N: Namada>(
-    namada: &N,
-    args: args::EthereumBridgePool,
-) -> Result<(), error::Error> {
-    let bridge_pool_tx_data = args.clone().build(namada).await?;
-
-    if let Some(dump_tx) = args.tx.dump_tx {
-        tx::dump_tx(
-            namada.io(),
-            dump_tx,
-            args.tx.output_folder,
-            bridge_pool_tx_data.0,
-        )?;
-    } else {
-        batch_opt_reveal_pk_and_submit(
-            namada,
-            &args.tx,
-            &[&args.sender],
-            bridge_pool_tx_data,
-        )
-        .await?;
-    }
-
-    Ok(())
-}
-
 pub async fn submit_custom<N: Namada>(
     namada: &N,
     args: args::TxCustom,

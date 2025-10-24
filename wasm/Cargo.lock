@@ -4644,35 +4644,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "namada_ethereum_bridge"
-version = "0.251.0"
-dependencies = [
- "borsh",
- "ethers",
- "eyre",
- "itertools 0.14.0",
- "konst",
- "namada_account",
- "namada_core",
- "namada_events",
- "namada_governance",
- "namada_macros",
- "namada_parameters",
- "namada_proof_of_stake",
- "namada_state",
- "namada_storage",
- "namada_systems",
- "namada_trans_token",
- "namada_tx",
- "namada_vote_ext",
- "namada_vp_env",
- "serde",
- "smooth-operator",
- "thiserror 2.0.12",
- "tracing",
-]
-
-[[package]]
 name = "namada_events"
 version = "0.251.0"
 dependencies = [
@@ -4864,7 +4835,6 @@ dependencies = [
  "nam-jubjub",
  "namada_account",
  "namada_core",
- "namada_ethereum_bridge",
  "namada_events",
  "namada_gas",
  "namada_governance",
@@ -4878,7 +4848,6 @@ dependencies = [
  "namada_token",
  "namada_tx",
  "namada_vm",
- "namada_vote_ext",
  "namada_vp",
  "namada_wallet",
  "num-traits",
@@ -5177,17 +5146,6 @@ name = "namada_vm_env"
 version = "0.251.0"
 dependencies = [
  "namada_core",
-]
-
-[[package]]
-name = "namada_vote_ext"
-version = "0.251.0"
-dependencies = [
- "borsh",
- "namada_core",
- "namada_macros",
- "namada_tx",
- "serde",
 ]
 
 [[package]]
@@ -8048,15 +8006,6 @@ dependencies = [
  "test-log",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "tx_bridge_pool"
-version = "0.251.0"
-dependencies = [
- "getrandom 0.2.15",
- "namada_tx_prelude",
- "rlsf",
 ]
 
 [[package]]

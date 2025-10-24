@@ -20,8 +20,8 @@ use namada_core::chain::ChainIdPrefix;
 use namada_core::collections::HashMap;
 use namada_node::shell::Shell;
 use namada_node::shell::testing::node::{
-    InnerMockNode, MockNode, MockServicesCfg, MockServicesController,
-    MockServicesPackage, SalvageableTestDir, mock_services,
+    InnerMockNode, MockNode, MockServicesController, MockServicesPackage,
+    SalvageableTestDir, mock_services,
 };
 use namada_node::shell::testing::utils::TestDir;
 use namada_sdk::dec::Dec;
@@ -132,25 +132,8 @@ pub fn initialize_genesis_aux(
     // Remove release archive
     fs::remove_file(release_archive_path).unwrap();
 
-    let eth_bridge_params = genesis.get_eth_bridge_params();
-    let auto_drive_services = {
-        // NB: for now, the only condition that
-        // dictates whether mock services should
-        // be enabled is if the Ethereum bridge
-        // is enabled at genesis
-        eth_bridge_params.is_some()
-    };
-    let enable_eth_oracle = {
-        // NB: we only enable the oracle if the
-        // Ethereum bridge is enabled at genesis
-        eth_bridge_params.is_some()
-    };
-    let services_cfg = MockServicesCfg {
-        auto_drive_services,
-        enable_eth_oracle,
-    };
     finalize_wallet(&template_dir, &global_args, genesis);
-    create_node(test_dir, global_args, keep_temp, services_cfg)
+    create_node(test_dir, global_args, keep_temp)
 }
 
 /// Add the address from the finalized genesis to the wallet.
@@ -195,7 +178,6 @@ fn create_node(
     test_dir: TestDir,
     global_args: args::Global,
     keep_temp: bool,
-    services_cfg: MockServicesCfg,
 ) -> Result<(MockNode, MockServicesController)> {
     // look up the chain id from the global file.
     let chain_id = global_args.chain_id.unwrap_or_default();
@@ -209,11 +191,10 @@ fn create_node(
 
     // instantiate and initialize the ledger node.
     let MockServicesPackage {
-        auto_drive_services,
         services,
         shell_handlers,
         controller,
-    } = mock_services(services_cfg);
+    } = mock_services();
     let node = MockNode(Arc::new(InnerMockNode {
         shell: Mutex::new(Shell::new(
             config::Ledger::new(
@@ -225,7 +206,6 @@ fn create_node(
                 .wasm_dir
                 .expect("Wasm path not provided to integration test setup."),
             shell_handlers.tx_broadcaster,
-            shell_handlers.eth_oracle_channels,
             None,
             None,
             50 * 1024 * 1024, // 50 kiB
@@ -239,7 +219,6 @@ fn create_node(
         tx_result_codes: Mutex::new(vec![]),
         tx_results: Mutex::new(vec![]),
         blocks: Mutex::new(HashMap::new()),
-        auto_drive_services,
     }));
     let init_req =
         namada_apps_lib::tendermint::abci::request::InitChain {

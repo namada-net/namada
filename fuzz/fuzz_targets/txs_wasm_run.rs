@@ -16,7 +16,6 @@ use namada_node::shell::FinalizeBlockRequest;
 use namada_node::shell::abci::{ProcessedTx, TxBytes, TxResult};
 use namada_node::shell::test_utils::TestShell;
 use namada_sdk::address::Address;
-use namada_sdk::eth_bridge_pool::PendingTransfer;
 use namada_sdk::ibc::apps::nft_transfer::types::msgs::transfer::MsgTransfer as IbcMsgNftTransfer;
 use namada_sdk::ibc::apps::transfer::types::msgs::transfer::MsgTransfer as IbcMsgTransfer;
 use namada_sdk::ibc::core::handler::types::msgs::MsgEnvelope;
@@ -28,7 +27,7 @@ use namada_tx::data::{pgf, pos};
 
 lazy_static! {
     static ref SHELL: Mutex<TestShell> = {
-        let (shell, _recv, _, _) = shell::test_utils::setup();
+        let (shell, _recv) = shell::test_utils::setup();
         Mutex::new(shell)
     };
 }
@@ -55,7 +54,6 @@ enum TxKind {
     ChangeCommission(pos::CommissionChange),
     ChangeConsensusKey(pos::ConsensusKeyChange),
     ChangeMetadata(pos::MetaDataChange),
-    BridgePool(PendingTransfer),
     ResignSteward(Address),
     UpdateStewardCommission(pgf::UpdateStewardCommission),
 }
@@ -158,10 +156,6 @@ fn run(kinds: NonEmptyVec<TxKind>) {
             ChangeMetadata(data) => {
                 tx.add_data(data);
                 tx::TX_CHANGE_METADATA_WASM
-            }
-            BridgePool(data) => {
-                tx.add_data(data);
-                tx::TX_BRIDGE_POOL_WASM
             }
             ResignSteward(data) => {
                 tx.add_data(data);

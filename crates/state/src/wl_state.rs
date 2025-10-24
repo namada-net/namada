@@ -4,7 +4,6 @@ use std::ops::{Deref, DerefMut};
 use itertools::Either;
 use namada_core::address::Address;
 use namada_core::arith::checked;
-use namada_core::borsh::BorshSerializeExt;
 use namada_core::chain::ChainId;
 use namada_core::masp::MaspEpoch;
 use namada_core::parameters::{EpochDuration, Parameters};
@@ -25,9 +24,9 @@ use crate::in_memory::InMemory;
 use crate::write_log::{StorageModification, WriteLog};
 use crate::{
     DB, DBIter, EPOCH_SWITCH_BLOCKS_DELAY, Epoch, Error, Hash, Key, KeySeg,
-    LastBlock, MembershipProof, MerkleTree, MerkleTreeError, ProofOps, Result,
+    LastBlock, MembershipProof, MerkleTree, ProofOps, Result,
     STORAGE_ACCESS_GAS_PER_BYTE, State, StateError, StateRead, StorageHasher,
-    StoreType, TxWrites, is_pending_transfer_key,
+    StoreType, TxWrites,
 };
 
 /// Owned state with full R/W access.
@@ -362,14 +361,12 @@ where
 
     /// Pre-commit the current block's write log to the pre-commit merkle tree
     pub fn pre_commit_write_log_block(&mut self) -> Result<()> {
-        let block_height = self.in_mem.block.height;
         for (key, entry) in self.0.write_log.block_write_log.iter() {
             let persist_diffs = (self.diff_key_filter)(key);
             match entry {
                 StorageModification::Write { value } => {
                     Self::pre_commit_write_subspace_val(
                         &mut self.0.in_mem.block.tree,
-                        block_height,
                         key,
                         value,
                         persist_diffs,
@@ -385,7 +382,6 @@ where
                 StorageModification::InitAccount { vp_code_hash } => {
                     Self::pre_commit_write_subspace_val(
                         &mut self.0.in_mem.block.tree,
-                        block_height,
                         key,
                         vp_code_hash,
                         persist_diffs,
@@ -408,7 +404,6 @@ where
         let persist_diffs = (self.diff_key_filter)(&replay_prot_key);
         Self::pre_commit_write_subspace_val(
             &mut self.0.in_mem.block.tree,
-            self.0.in_mem.block.height,
             &replay_prot_key,
             new_commitment,
             persist_diffs,
@@ -468,28 +463,19 @@ where
     /// key to the pre-commit merkle tree.
     pub fn pre_commit_write_subspace_val(
         tree: &mut MerkleTree<H>,
-        block_height: BlockHeight,
         key: &Key,
         value: impl AsRef<[u8]>,
         persist_diffs: bool,
     ) -> Result<()> {
         let value = value.as_ref();
 
-        if is_pending_transfer_key(key) {
-            // The tree of the bridge pool stores the current height for the
-            // pending transfer
-            let height = block_height.serialize_to_vec();
-            tree.update(key, height)?;
+        // Update the merkle tree
+        if !persist_diffs {
+            let prefix = Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
+            tree.update(&prefix.join(key), value)?;
         } else {
-            // Update the merkle tree
-            if !persist_diffs {
-                let prefix =
-                    Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
-                tree.update(&prefix.join(key), value)?;
-            } else {
-                tree.update(key, value)?;
-            };
-        }
+            tree.update(key, value)?;
+        };
         Ok(())
     }
 
@@ -568,20 +554,6 @@ where
                     ),
                 )?;
             }
-
-            // Prune the BridgePool subtree stores with invalid nonce
-            let mut epoch = match self.get_oldest_epoch_with_valid_nonce()? {
-                Some(epoch) => epoch,
-                None => return Ok(()),
-            };
-            while oldest_epoch < epoch {
-                epoch = epoch.prev().unwrap();
-                self.db.prune_merkle_tree_store(
-                    batch,
-                    &StoreType::BridgePool,
-                    Either::Right(epoch),
-                )?;
-            }
         }
 
         Ok(())
@@ -610,49 +582,6 @@ where
         Ok(self.db.move_current_replay_protection_entries(batch)?)
     }
 
-    /// Get oldest epoch which has the valid signed nonce of the bridge pool
-    fn get_oldest_epoch_with_valid_nonce(&self) -> Result<Option<Epoch>> {
-        let last_height = self.in_mem.get_last_block_height();
-        let current_nonce = match self
-            .db
-            .read_bridge_pool_signed_nonce(last_height, last_height)?
-        {
-            Some(nonce) => nonce,
-            None => return Ok(None),
-        };
-        let (mut epoch, _) = self.in_mem.get_last_epoch();
-        // We don't need to check the older epochs because their Merkle tree
-        // snapshots have been already removed
-        let oldest_epoch = self.in_mem.get_oldest_epoch();
-        // Look up the last valid epoch which has the previous nonce of the
-        // current one. It has the previous nonce, but it was
-        // incremented during the epoch.
-        while 0 < epoch.0 && oldest_epoch <= epoch {
-            epoch = epoch.prev().unwrap();
-            let height = match self
-                .in_mem
-                .block
-                .pred_epochs
-                .get_start_height_of_epoch(epoch)
-            {
-                Some(h) => h,
-                None => continue,
-            };
-            let nonce = match self
-                .db
-                .read_bridge_pool_signed_nonce(height, last_height)?
-            {
-                Some(nonce) => nonce,
-                // skip pruning when the old epoch doesn't have the signed nonce
-                None => break,
-            };
-            if nonce < current_nonce {
-                break;
-            }
-        }
-        Ok(Some(epoch))
-    }
-
     /// Rebuild full Merkle tree after [`read_last_block()`]
     fn rebuild_full_merkle_tree(
         &self,
@@ -675,8 +604,6 @@ where
             results,
             address_gen,
             conversion_state,
-            ethereum_height,
-            eth_events_queue,
             commit_only_data: _, /* Ignore the last tx gas map - we clear it
                                   * out after commit */
         }) = self
@@ -710,8 +637,6 @@ where
             let in_mem = &mut self.0.in_mem;
             in_mem.block.tree = tree;
             in_mem.conversion_state = conversion_state;
-            in_mem.ethereum_height = ethereum_height;
-            in_mem.eth_events_queue = eth_events_queue;
             tracing::debug!("Loaded storage from DB");
         } else {
             tracing::info!("No state could be found");
@@ -772,8 +697,6 @@ where
             update_epoch_blocks_delay: self.in_mem.update_epoch_blocks_delay,
             address_gen: &self.in_mem.address_gen,
             conversion_state: &self.in_mem.conversion_state,
-            ethereum_height: self.in_mem.ethereum_height.as_ref(),
-            eth_events_queue: &self.in_mem.eth_events_queue,
             commit_only_data: &self.in_mem.commit_only_data,
         };
         self.db
@@ -983,20 +906,12 @@ where
         let value = value.as_ref();
         let persist_diffs = (self.diff_key_filter)(key);
 
-        if is_pending_transfer_key(key) {
-            // The tree of the bright pool stores the current height for the
-            // pending transfer
-            let height = self.in_mem.block.height.serialize_to_vec();
-            self.in_mem.block.tree.update(key, height)?;
+        // Update the merkle tree
+        if !persist_diffs {
+            let prefix = Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
+            self.in_mem.block.tree.update(&prefix.join(key), value)?;
         } else {
-            // Update the merkle tree
-            if !persist_diffs {
-                let prefix =
-                    Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
-                self.in_mem.block.tree.update(&prefix.join(key), value)?;
-            } else {
-                self.in_mem.block.tree.update(key, value)?;
-            }
+            self.in_mem.block.tree.update(key, value)?;
         }
 
         let len = value.len();
@@ -1044,11 +959,6 @@ where
     }
 
     /// Get a Tendermint-compatible existence proof.
-    ///
-    /// Proofs from the Ethereum bridge pool are not
-    /// Tendermint-compatible. Requesting for a key
-    /// belonging to the bridge pool will cause this
-    /// method to error.
     pub fn get_existence_proof(
         &self,
         key: &Key,
@@ -1065,36 +975,28 @@ where
         };
 
         if height > self.in_mem.get_last_block_height() {
-            if let MembershipProof::ICS23(proof) =
+            let MembershipProof::ICS23(proof) =
                 self.in_mem.block.tree.get_sub_tree_existence_proof(
                     array::from_ref(key),
                     vec![value],
-                )?
-            {
-                self.in_mem
-                    .block
-                    .tree
-                    .get_sub_tree_proof(key, proof)
-                    .map(Into::into)
-                    .map_err(Into::into)
-            } else {
-                Err(Error::from(MerkleTreeError::TendermintProof))
-            }
+                )?;
+            self.in_mem
+                .block
+                .tree
+                .get_sub_tree_proof(key, proof)
+                .map(Into::into)
+                .map_err(Into::into)
         } else {
             let (store_type, _) = StoreType::sub_key(key)?;
             let tree = self.get_merkle_tree(height, Some(store_type))?;
-            if let MembershipProof::ICS23(proof) = tree
+            let MembershipProof::ICS23(proof) = tree
                 .get_sub_tree_existence_proof(
                     array::from_ref(key),
                     vec![value],
-                )?
-            {
-                tree.get_sub_tree_proof(key, proof)
-                    .map(Into::into)
-                    .map_err(Into::into)
-            } else {
-                Err(Error::from(MerkleTreeError::TendermintProof))
-            }
+                )?;
+            tree.get_sub_tree_proof(key, proof)
+                .map(Into::into)
+                .map_err(Into::into)
         }
     }
 
@@ -1192,14 +1094,7 @@ where
                         match old.0.cmp(&new.0) {
                             Ordering::Equal => {
                                 // the value was updated
-                                tree.update(
-                                    &new_key,
-                                    if is_pending_transfer_key(&new_key) {
-                                        target_height.serialize_to_vec()
-                                    } else {
-                                        new.1.clone()
-                                    },
-                                )?;
+                                tree.update(&new_key, new.1.clone())?;
                                 old_diff = old_diff_iter.next();
                                 new_diff = new_diff_iter.next();
                             }
@@ -1210,14 +1105,7 @@ where
                             }
                             Ordering::Greater => {
                                 // the value was inserted
-                                tree.update(
-                                    &new_key,
-                                    if is_pending_transfer_key(&new_key) {
-                                        target_height.serialize_to_vec()
-                                    } else {
-                                        new.1.clone()
-                                    },
-                                )?;
+                                tree.update(&new_key, new.1.clone())?;
                                 new_diff = new_diff_iter.next();
                             }
                         }
@@ -1235,14 +1123,7 @@ where
                         let key = Key::parse(new.0.clone())
                             .expect("the key should be parsable");
 
-                        tree.update(
-                            &key,
-                            if is_pending_transfer_key(&key) {
-                                target_height.serialize_to_vec()
-                            } else {
-                                new.1.clone()
-                            },
-                        )?;
+                        tree.update(&key, new.1.clone())?;
 
                         new_diff = new_diff_iter.next();
                     }
@@ -1665,6 +1546,7 @@ where
         key: &storage::Key,
         val: T,
     ) -> Result<()> {
+        use namada_core::borsh::BorshSerializeExt;
         let _ = self
             .write_log_mut()
             .write_temp(key, val.serialize_to_vec())?;

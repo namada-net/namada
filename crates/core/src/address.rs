@@ -1,6 +1,8 @@
 //! Implements transparent addresses as described in [Accounts
 //! Addresses](docs/src/explore/design/ledger/accounts.md#addresses).
 
+#![allow(deprecated)] // Triggered by deprecated ETH bridge addresses
+
 mod raw;
 
 use std::fmt::{Debug, Display};
@@ -16,7 +18,6 @@ use namada_migrations::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::ethereum_events::EthAddress;
 use crate::ibc::IbcTokenHash;
 use crate::key::PublicKeyHash;
 use crate::{impl_display_and_from_str_via_format, key, string_encoding};
@@ -65,8 +66,6 @@ pub const PGF: Address = Address::Internal(InternalAddress::Pgf);
 pub const MASP: Address = Address::Internal(InternalAddress::Masp);
 /// Internal Multitoken address
 pub const MULTITOKEN: Address = Address::Internal(InternalAddress::Multitoken);
-/// Internal Eth bridge address
-pub const ETH_BRIDGE: Address = Address::Internal(InternalAddress::EthBridge);
 /// Address with temporary storage is used to pass data from txs to VPs which is
 /// never committed to DB
 pub const TEMP_STORAGE: Address =
@@ -121,22 +120,10 @@ impl From<raw::Address<'_, raw::Validated>> for Address {
                 Address::Internal(InternalAddress::Governance)
             }
             raw::Discriminant::Ibc => Address::Internal(InternalAddress::Ibc),
-            raw::Discriminant::EthBridge => {
-                Address::Internal(InternalAddress::EthBridge)
-            }
-            raw::Discriminant::BridgePool => {
-                Address::Internal(InternalAddress::EthBridgePool)
-            }
             raw::Discriminant::Multitoken => {
                 Address::Internal(InternalAddress::Multitoken)
             }
             raw::Discriminant::Pgf => Address::Internal(InternalAddress::Pgf),
-            raw::Discriminant::Erc20 => Address::Internal(
-                InternalAddress::Erc20(EthAddress(*raw_addr.data())),
-            ),
-            raw::Discriminant::Nut => Address::Internal(InternalAddress::Nut(
-                EthAddress(*raw_addr.data()),
-            )),
             raw::Discriminant::IbcToken => Address::Internal(
                 InternalAddress::IbcToken(IbcTokenHash(*raw_addr.data())),
             ),
@@ -147,6 +134,11 @@ impl From<raw::Address<'_, raw::Validated>> for Address {
             raw::Discriminant::ReplayProtection => {
                 Address::Internal(InternalAddress::ReplayProtection)
             }
+            #[allow(deprecated)]
+            raw::Discriminant::EthBridge
+            | raw::Discriminant::BridgePool
+            | raw::Discriminant::Erc20
+            | raw::Discriminant::Nut => unimplemented!(),
         }
     }
 }
@@ -214,15 +206,13 @@ impl<'addr> From<&'addr Address> for raw::Address<'addr, raw::Validated> {
                     .validate()
                     .expect("This raw address is valid")
             }
-            Address::Internal(InternalAddress::Erc20(EthAddress(eth_addr))) => {
+            Address::Internal(InternalAddress::Erc20) => {
                 raw::Address::from_discriminant(raw::Discriminant::Erc20)
-                    .with_data_array_ref(eth_addr)
                     .validate()
                     .expect("This raw address is valid")
             }
-            Address::Internal(InternalAddress::Nut(EthAddress(eth_addr))) => {
+            Address::Internal(InternalAddress::Nut) => {
                 raw::Address::from_discriminant(raw::Discriminant::Nut)
-                    .with_data_array_ref(eth_addr)
                     .validate()
                     .expect("This raw address is valid")
             }
@@ -619,13 +609,17 @@ pub enum InternalAddress {
     /// Governance address
     Governance,
     /// Bridge to Ethereum
+    #[deprecated]
     EthBridge,
     /// The pool of transactions to be relayed to Ethereum
+    #[deprecated]
     EthBridgePool,
     /// ERC20 token for Ethereum bridge
-    Erc20(EthAddress),
+    #[deprecated]
+    Erc20,
     /// Non-usable ERC20 tokens
-    Nut(EthAddress),
+    #[deprecated]
+    Nut,
     /// Multitoken
     Multitoken,
     /// Pgf
@@ -653,8 +647,8 @@ impl Display for InternalAddress {
                 Self::IbcToken(hash) => format!("IbcToken: {}", hash),
                 Self::EthBridge => "EthBridge".to_string(),
                 Self::EthBridgePool => "EthBridgePool".to_string(),
-                Self::Erc20(eth_addr) => format!("Erc20: {}", eth_addr),
-                Self::Nut(eth_addr) => format!("Non-usable token: {eth_addr}"),
+                Self::Erc20 => "Erc20".to_string(),
+                Self::Nut => "Non-usable token".to_string(),
                 Self::Multitoken => "Multitoken".to_string(),
                 Self::Pgf => "PGF".to_string(),
                 Self::Masp => "MASP".to_string(),
@@ -671,8 +665,6 @@ impl InternalAddress {
         match alias {
             "pos" => Some(InternalAddress::PoS),
             "ibc" => Some(InternalAddress::Ibc),
-            "ethbridge" => Some(InternalAddress::EthBridge),
-            "bridgepool" => Some(InternalAddress::EthBridgePool),
             "governance" => Some(InternalAddress::Governance),
             "masp" => Some(InternalAddress::Masp),
             "replayprotection" => Some(InternalAddress::ReplayProtection),
@@ -934,8 +926,8 @@ pub mod testing {
             InternalAddress::IbcToken(_) => {}
             InternalAddress::EthBridge => {}
             InternalAddress::EthBridgePool => {}
-            InternalAddress::Erc20(_) => {}
-            InternalAddress::Nut(_) => {}
+            InternalAddress::Erc20 => {}
+            InternalAddress::Nut => {}
             InternalAddress::Pgf => {}
             InternalAddress::Masp => {}
             InternalAddress::Multitoken => {}
@@ -950,10 +942,6 @@ pub mod testing {
             Just(InternalAddress::Parameters),
             arb_ibc_token(),
             Just(InternalAddress::Governance),
-            Just(InternalAddress::EthBridge),
-            Just(InternalAddress::EthBridgePool),
-            arb_erc20(),
-            arb_nut(),
             Just(InternalAddress::Multitoken),
             Just(InternalAddress::Pgf),
             Just(InternalAddress::Masp),
@@ -980,18 +968,6 @@ pub mod testing {
                 output
             });
             InternalAddress::IbcToken(hash)
-        })
-    }
-
-    fn arb_erc20() -> impl Strategy<Value = InternalAddress> {
-        proptest::array::uniform20(proptest::num::u8::ANY).prop_map(|addr| {
-            InternalAddress::Erc20(crate::ethereum_events::EthAddress(addr))
-        })
-    }
-
-    fn arb_nut() -> impl Strategy<Value = InternalAddress> {
-        proptest::array::uniform20(proptest::num::u8::ANY).prop_map(|addr| {
-            InternalAddress::Nut(crate::ethereum_events::EthAddress(addr))
         })
     }
 
@@ -1035,15 +1011,6 @@ pub mod testing {
     pub fn kartoffel() -> Address {
         Address::decode("tnam1q87teqzjytwa9xd9qk8u558xxnrwuzdjzs7zvhzr")
             .expect("The token address decoding shouldn't fail")
-    }
-
-    /// Imaginary eth address for testing
-    pub const fn wnam() -> EthAddress {
-        // "DEADBEEF DEADBEEF DEADBEEF DEADBEEF DEADBEEF"
-        EthAddress([
-            222, 173, 190, 239, 222, 173, 190, 239, 222, 173, 190, 239, 222,
-            173, 190, 239, 222, 173, 190, 239,
-        ])
     }
 
     /// A hash map of tokens addresses with their informal currency codes and

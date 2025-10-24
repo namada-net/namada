@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
 
-pub(super) mod eth_bridge;
-
 use borsh::BorshDeserialize;
 use masp_primitives::asset_type::AssetType;
 use masp_primitives::merkle_tree::MerklePath;
@@ -26,7 +24,6 @@ use namada_token::storage_key::masp_token_map_key;
 use namada_tx::data::DryRunResult;
 use namada_tx::event::types::APPLIED;
 
-use self::eth_bridge::{ETH_BRIDGE, EthBridge};
 use crate::borsh::BorshSerializeExt;
 use crate::events::Event;
 use crate::events::log::dumb_queries;
@@ -57,9 +54,6 @@ type Conversion = (
 
 router! {SHELL,
     // Shell provides storage read access, block metadata and can dry-run a tx
-
-    // Ethereum bridge specific queries
-    ( "eth_bridge" ) = (sub ETH_BRIDGE),
 
     // Epoch of the last committed block
     ( "epoch" ) -> Epoch = epoch,

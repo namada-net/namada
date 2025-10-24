@@ -20,7 +20,7 @@ use namada_core::storage::{DbColFam, Key};
 use namada_core::token::NATIVE_MAX_DECIMAL_PLACES;
 use namada_node::shell::testing::client::run;
 use namada_node::shell::testing::node::{
-    InnerMockNode, MockNode, MockServicesCfg, MockServicesPackage, NodeResults,
+    InnerMockNode, MockNode, MockServicesPackage, NodeResults,
     SalvageableTestDir, mock_services,
 };
 use namada_node::shell::testing::utils::{Bin, CapturedOutput, TestDir};
@@ -3398,16 +3398,11 @@ fn test_merkle_tree_restore() -> Result<()> {
         drop(node);
         drop(services);
 
-        let services_cfg = MockServicesCfg {
-            auto_drive_services: false,
-            enable_eth_oracle: false,
-        };
         let MockServicesPackage {
-            auto_drive_services,
             services,
             shell_handlers,
             controller,
-        } = mock_services(services_cfg);
+        } = mock_services();
 
         let global_args = args::Global {
             is_pre_genesis: true,
@@ -3431,7 +3426,6 @@ fn test_merkle_tree_restore() -> Result<()> {
                     "Wasm path not provided to integration test setup.",
                 ),
                 shell_handlers.tx_broadcaster,
-                shell_handlers.eth_oracle_channels,
                 None,
                 None,
                 50 * 1024 * 1024, // 50 kiB
@@ -3445,7 +3439,6 @@ fn test_merkle_tree_restore() -> Result<()> {
             tx_result_codes: Mutex::new(vec![]),
             tx_results: Mutex::new(vec![]),
             blocks: Mutex::new(HashMap::new()),
-            auto_drive_services,
         }));
         (node, controller)
     };

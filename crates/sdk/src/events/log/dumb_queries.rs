@@ -3,11 +3,6 @@
 use namada_core::chain::BlockHeight;
 use namada_core::collections::HashMap;
 use namada_core::hash::Hash;
-use namada_core::keccak::KeccakHash;
-use namada_ethereum_bridge::event::BridgePoolTxHash;
-use namada_ethereum_bridge::event::types::{
-    BRIDGE_POOL_EXPIRED, BRIDGE_POOL_RELAYED,
-};
 use namada_ibc::event::types::UPDATE_CLIENT;
 use namada_ibc::event::{
     ClientId as ClientIdAttr, ConsensusHeights, IbcEvent, IbcEventType,
@@ -116,18 +111,6 @@ impl QueryMatcher {
         event.has_subset_of_attrs(&self.attributes)
     }
 
-    /// Returns a query matching the given relayed Bridge pool transaction hash.
-    pub fn bridge_pool_relayed(tx_hash: &KeccakHash) -> Self {
-        Self::with_event_type(BRIDGE_POOL_RELAYED)
-            .and_attribute(BridgePoolTxHash(tx_hash))
-    }
-
-    /// Returns a query matching the given expired Bridge pool transaction hash.
-    pub fn bridge_pool_expired(tx_hash: &KeccakHash) -> Self {
-        Self::with_event_type(BRIDGE_POOL_EXPIRED)
-            .and_attribute(BridgePoolTxHash(tx_hash))
-    }
-
     /// Returns a query matching the given applied transaction hash.
     pub fn applied(tx_hash: Hash) -> Self {
         Self::with_event_type(APPLIED_TX).and_attribute(TxHashAttr(tx_hash))
@@ -174,7 +157,12 @@ impl QueryMatcher {
 
 #[cfg(test)]
 mod tests {
-    use namada_ethereum_bridge::event::EthBridgeEvent;
+    use namada_core::address::testing::established_address_1;
+    use namada_core::token;
+    use namada_proof_of_stake::event::types::SLASH;
+    use namada_proof_of_stake::event::{
+        PosEvent, SlashedAmount, SlashedValidator,
+    };
     use namada_token::event::types::TRANSFER;
     use namada_tx::event::masp_types::TRANSFER as MASP_TRANSFER;
 
@@ -188,34 +176,24 @@ mod tests {
     /// Test if matching the prefix of an event type works as expected.
     #[test]
     fn test_query_matching_prefix() {
-        let matcher = QueryMatcher::of_event_type::<EthBridgeEvent>();
+        let matcher = QueryMatcher::of_event_type::<PosEvent>();
 
         let tests = {
-            let bp_hash: KeccakHash = HASH.parse().unwrap();
             let tx_hash: Hash = HASH.parse().unwrap();
+            let amount = token::Amount::from_u64(1000);
 
-            let event_1: Event =
-                Event::new(BRIDGE_POOL_RELAYED, EventLevel::Tx)
-                    .with(BridgePoolTxHash(&bp_hash))
-                    .into();
+            let event_1: Event = Event::new(SLASH, EventLevel::Tx)
+                .with(SlashedValidator(established_address_1()))
+                .with(SlashedAmount(&amount.into()))
+                .into();
             let matches_1 = true;
 
-            let event_2: Event =
-                Event::new(BRIDGE_POOL_EXPIRED, EventLevel::Tx)
-                    .with(BridgePoolTxHash(&bp_hash))
-                    .into();
-            let matches_2 = true;
-
-            let event_3: Event = Event::new(UPDATE_CLIENT, EventLevel::Tx)
+            let event_2: Event = Event::new(UPDATE_CLIENT, EventLevel::Tx)
                 .with(TxHashAttr(tx_hash))
                 .into();
-            let matches_3 = false;
+            let matches_2 = false;
 
-            [
-                (event_1, matches_1),
-                (event_2, matches_2),
-                (event_3, matches_3),
-            ]
+            [(event_1, matches_1), (event_2, matches_2)]
         };
 
         for (ev, status) in tests {

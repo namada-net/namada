@@ -23,7 +23,6 @@ mainnet = [
 multicore = ["namada_token/multicore"]
 std = ["fd-lock", "download-params", "namada_token/std", "namada_wallet/std"]
 async-send = ["namada_io/async-send"]
-namada-eth-bridge = ["namada_ethereum_bridge/namada-eth-bridge"]
 benches = ["namada_core/benches", "namada_core/testing", "namada_state/benches"]
 wasm-runtime = ["namada_vm/wasm-runtime"]
 masp = ["namada_core/task_env", "namada_core/control_flow", "namada_token/masp"]
@@ -33,7 +32,6 @@ testing = [
   "masp_primitives/test-dependencies",
   "namada_account/testing",
   "namada_core/testing",
-  "namada_ethereum_bridge/testing",
   "namada_governance/testing",
   "namada_ibc/testing",
   "namada_parameters/testing",
@@ -58,7 +56,6 @@ migrations = [
   "namada_migrations",
   "namada_account/migrations",
   "namada_core/migrations",
-  "namada_ethereum_bridge/migrations",
   "namada_events/migrations",
   "namada_governance/migrations",
   "namada_proof_of_stake/migrations",
@@ -66,7 +63,6 @@ migrations = [
   "namada_storage/migrations",
   "namada_token/migrations",
   "namada_tx/migrations",
-  "namada_vote_ext/migrations",
   "namada_gas/migrations",
   "linkme",
 ]
@@ -74,7 +70,6 @@ migrations = [
 [dependencies]
 namada_account.workspace = true
 namada_core.workspace = true
-namada_ethereum_bridge.workspace = true
 namada_events.workspace = true
 namada_gas.workspace = true
 namada_governance.workspace = true
@@ -89,7 +84,6 @@ namada_storage.workspace = true
 namada_token = { workspace = true, features = ["masp"] }
 namada_tx.workspace = true
 namada_vm = { workspace = true, default-features = false }
-namada_vote_ext.workspace = true
 namada_vp.workspace = true
 namada_wallet.workspace = true
 
@@ -151,7 +145,6 @@ getrandom = { workspace = true, features = ["wasm_js"] }
 [dev-dependencies]
 namada_account = { path = "../account", features = ["testing"] }
 namada_core = { path = "../core", features = ["rand", "testing"] }
-namada_ethereum_bridge = { path = "../ethereum_bridge", features = ["testing"] }
 namada_governance = { path = "../governance", features = ["testing"] }
 namada_ibc = { path = "../ibc", features = ["testing"] }
 namada_parameters.path = "../parameters"
@@ -161,7 +154,6 @@ namada_storage = { path = "../storage", features = ["testing"] }
 namada_token = { path = "../token", features = ["testing", "masp"] }
 namada_tx = { path = "../tx", features = ["testing"] }
 namada_vm.path = "../vm"
-namada_vote_ext.path = "../vote_ext"
 namada_vp.path = "../vp"
 
 assert_matches.workspace = true

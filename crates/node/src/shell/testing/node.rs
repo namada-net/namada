@@ -8,14 +8,10 @@ use std::task::Poll;
 
 use color_eyre::eyre::{Report, Result};
 use data_encoding::HEXUPPER;
-use itertools::Either;
 use lazy_static::lazy_static;
 use namada_sdk::address::Address;
 use namada_sdk::chain::{BlockHeight, Epoch};
 use namada_sdk::collections::HashMap;
-use namada_sdk::control_flow::time::Duration;
-use namada_sdk::eth_bridge::oracle::config::Config as OracleConfig;
-use namada_sdk::ethereum_events::EthereumEvent;
 use namada_sdk::events::Event;
 use namada_sdk::events::extend::Height as HeightAttr;
 use namada_sdk::events::log::dumb_queries;
@@ -39,20 +35,14 @@ use namada_sdk::tendermint_proto::google::protobuf::Timestamp;
 use namada_sdk::time::DateTimeUtc;
 use namada_sdk::tx::data::ResultCode;
 use namada_sdk::tx::event::{Batch as BatchAttr, Code as CodeAttr};
-use namada_sdk::{borsh, ethereum_structs, governance};
+use namada_sdk::{borsh, governance};
 use regex::Regex;
 use tokio::sync::mpsc;
 
-use crate::ethereum_oracle::test_tools::mock_web3_client::{
-    TestOracle, Web3Client, Web3Controller,
-};
-use crate::ethereum_oracle::{
-    control, last_processed_block, try_process_eth_events,
-};
 use crate::shell::abci::{ProcessedTx, TxResult};
 use crate::shell::testing::utils::TestDir;
 use crate::shell::token::MaspEpoch;
-use crate::shell::{EthereumOracleChannels, Shell, finalize_block};
+use crate::shell::{Shell, finalize_block};
 use crate::tendermint_proto::abci::{
     RequestPrepareProposal, RequestProcessProposal,
 };
@@ -61,42 +51,11 @@ use crate::tendermint_rpc::endpoint::block;
 use crate::tendermint_rpc::error::Error as RpcError;
 use crate::{dry_run_tx, storage, tendermint, tendermint_rpc};
 
-/// Mock Ethereum oracle used for testing purposes.
-struct MockEthOracle {
-    /// The inner oracle.
-    oracle: TestOracle,
-    /// The inner oracle's configuration.
-    config: OracleConfig,
-    /// The inner oracle's next block to process.
-    next_block_to_process: tokio::sync::RwLock<ethereum_structs::BlockHeight>,
-}
-
-impl MockEthOracle {
-    /// Updates the state of the Ethereum oracle.
-    ///
-    /// This includes sending any confirmed Ethereum events to
-    /// the shell and updating the height of the next Ethereum
-    /// block to process. Upon a successfully processed block,
-    /// this functions returns `true`.
-    async fn drive(&self) -> bool {
-        try_process_eth_events(
-            &self.oracle,
-            &self.config,
-            &*self.next_block_to_process.read().await,
-        )
-        .await
-        .process_new_block()
-    }
-}
-
 /// Services mocking the operation of the ledger's various async tasks.
 pub struct MockServices {
     /// Receives transactions that are supposed to be broadcasted
     /// to the network.
     tx_receiver: tokio::sync::Mutex<mpsc::UnboundedReceiver<Vec<u8>>>,
-    /// Mock Ethereum oracle, that processes blocks from Ethereum
-    /// in order to find events emitted by a transaction to vote on.
-    ethereum_oracle: MockEthOracle,
 }
 
 /// Actions to be performed by the mock node, as a result
@@ -104,22 +63,12 @@ pub struct MockServices {
 pub enum MockServiceAction {
     /// The ledger should broadcast new transactions.
     BroadcastTxs(Vec<Vec<u8>>),
-    /// Progress to the next Ethereum block to process.
-    IncrementEthHeight,
 }
 
 impl MockServices {
     /// Drive the internal state machine of the mock node's services.
     async fn drive(&self) -> Vec<MockServiceAction> {
         let mut actions = vec![];
-
-        // process new eth events
-        // NOTE: this may result in a deadlock, if the events
-        // sent to the shell exceed the capacity of the oracle's
-        // events channel!
-        if self.ethereum_oracle.drive().await {
-            actions.push(MockServiceAction::IncrementEthHeight);
-        }
 
         // receive txs from the broadcaster
         let txs = {
@@ -147,13 +96,6 @@ impl MockServices {
 
 /// Controller of various mock node services.
 pub struct MockServicesController {
-    /// Ethereum oracle controller.
-    pub eth_oracle: Web3Controller,
-    /// Handler to the Ethereum oracle sender channel.
-    ///
-    /// Bypasses the Ethereum oracle service and sends
-    /// events directly to the [`Shell`].
-    pub eth_events: mpsc::Sender<EthereumEvent>,
     /// Transaction broadcaster handle.
     pub tx_broadcaster: mpsc::UnboundedSender<Vec<u8>>,
 }
@@ -163,14 +105,10 @@ pub struct MockServicesController {
 pub struct MockServiceShellHandlers {
     /// Transaction broadcaster handle.
     pub tx_broadcaster: mpsc::UnboundedSender<Vec<u8>>,
-    /// Ethereum oracle channel handlers.
-    pub eth_oracle_channels: Option<EthereumOracleChannels>,
 }
 
 /// Mock services data returned by [`mock_services`].
 pub struct MockServicesPackage {
-    /// Whether to automatically drive mock services or not.
-    pub auto_drive_services: bool,
     /// Mock services stored by the [`MockNode`].
     pub services: MockServices,
     /// Handlers to mock services stored by the [`Shell`].
@@ -179,58 +117,17 @@ pub struct MockServicesPackage {
     pub controller: MockServicesController,
 }
 
-/// Mock services config.
-pub struct MockServicesCfg {
-    /// Whether to automatically drive mock services or not.
-    pub auto_drive_services: bool,
-    /// Whether to enable the Ethereum oracle or not.
-    pub enable_eth_oracle: bool,
-}
-
 /// Instantiate mock services for a node.
-pub fn mock_services(cfg: MockServicesCfg) -> MockServicesPackage {
-    let (_, eth_client) = Web3Client::setup();
-    let (eth_sender, eth_receiver) = mpsc::channel(1000);
-    let (last_processed_block_sender, last_processed_block_receiver) =
-        last_processed_block::channel();
-    let (control_sender, control_receiver) = control::channel();
-    let eth_oracle_controller = eth_client.controller();
-    let oracle = TestOracle::new(
-        Either::Left(eth_client),
-        eth_sender.clone(),
-        last_processed_block_sender,
-        Duration::from_millis(5),
-        Duration::from_secs(30),
-        control_receiver,
-    );
-    let eth_oracle_channels = EthereumOracleChannels::new(
-        eth_receiver,
-        control_sender,
-        last_processed_block_receiver,
-    );
+pub fn mock_services() -> MockServicesPackage {
     let (tx_broadcaster, tx_receiver) = mpsc::unbounded_channel();
-    let ethereum_oracle = MockEthOracle {
-        oracle,
-        config: Default::default(),
-        next_block_to_process: tokio::sync::RwLock::new(Default::default()),
-    };
     MockServicesPackage {
-        auto_drive_services: cfg.auto_drive_services,
         services: MockServices {
-            ethereum_oracle,
             tx_receiver: tokio::sync::Mutex::new(tx_receiver),
         },
         shell_handlers: MockServiceShellHandlers {
             tx_broadcaster: tx_broadcaster.clone(),
-            eth_oracle_channels: cfg
-                .enable_eth_oracle
-                .then_some(eth_oracle_channels),
         },
-        controller: MockServicesController {
-            eth_oracle: eth_oracle_controller,
-            eth_events: eth_sender,
-            tx_broadcaster,
-        },
+        controller: MockServicesController { tx_broadcaster },
     }
 }
 
@@ -252,7 +149,6 @@ pub struct InnerMockNode {
     pub tx_results: Mutex<Vec<namada_sdk::tx::data::TxResult<String>>>,
     pub blocks: Mutex<HashMap<BlockHeight, block::Response>>,
     pub services: MockServices,
-    pub auto_drive_services: bool,
 }
 
 #[derive(Clone)]
@@ -309,27 +205,12 @@ impl MockNode {
             MockServiceAction::BroadcastTxs(txs) => {
                 self.submit_txs(txs);
             }
-            MockServiceAction::IncrementEthHeight => {
-                let mut height = self
-                    .services
-                    .ethereum_oracle
-                    .next_block_to_process
-                    .write()
-                    .await;
-                *height = height.next();
-            }
         }
     }
 
     pub async fn drive_mock_services(&self) {
         for action in self.services.drive().await {
             self.handle_service_action(action).await;
-        }
-    }
-
-    async fn drive_mock_services_bg(&self) {
-        if self.auto_drive_services {
-            self.drive_mock_services().await;
         }
     }
 
@@ -888,7 +769,6 @@ impl Client for MockNode {
         height: Option<BlockHeight>,
         prove: bool,
     ) -> std::result::Result<EncodedResponseQuery, Report> {
-        self.drive_mock_services_bg().await;
         let rpc = RPC;
         let data = data.unwrap_or_default();
         let latest_height = {
@@ -949,7 +829,6 @@ impl Client for MockNode {
 
     /// `/abci_info`: get information about the ABCI application.
     async fn abci_info(&self) -> Result<Info, RpcError> {
-        self.drive_mock_services_bg().await;
         let locked = self.shell.lock().unwrap();
         Ok(Info {
             data: "Namada".to_string(),
@@ -974,7 +853,6 @@ impl Client for MockNode {
         tx: impl Into<Vec<u8>>,
     ) -> Result<tendermint_rpc::endpoint::broadcast::tx_sync::Response, RpcError>
     {
-        self.drive_mock_services_bg().await;
         let mut resp = tendermint_rpc::endpoint::broadcast::tx_sync::Response {
             codespace: Default::default(),
             code: Default::default(),
@@ -1005,7 +883,6 @@ impl Client for MockNode {
         _order: namada_sdk::tendermint_rpc::Order,
     ) -> Result<tendermint_rpc::endpoint::block_search::Response, RpcError>
     {
-        self.drive_mock_services_bg().await;
         let matcher = parse_tm_query(query);
         let borrowed = self.shell.lock().unwrap();
 
@@ -1038,7 +915,6 @@ impl Client for MockNode {
     where
         H: TryInto<namada_sdk::tendermint::block::Height> + Send,
     {
-        self.drive_mock_services_bg().await;
         let height = height.try_into().map_err(|_| {
             RpcError::parse("Failed to cast block height".to_string())
         })?;
@@ -1128,7 +1004,6 @@ impl Client for MockNode {
     /// Returns empty result (200 OK) on success, no response in case of an
     /// error.
     async fn health(&self) -> Result<(), RpcError> {
-        self.drive_mock_services_bg().await;
         Ok(())
     }
 }

@@ -18,7 +18,6 @@ mod abortable;
 pub mod bench_utils;
 mod broadcaster;
 mod dry_run_tx;
-pub mod ethereum_oracle;
 pub mod protocol;
 pub mod shell;
 pub mod storage;
@@ -42,9 +41,8 @@ pub use namada_apps_lib::{
     tendermint, tendermint_config, tendermint_proto, tendermint_rpc,
 };
 use namada_sdk::chain::BlockHeight;
-use namada_sdk::eth_bridge::ethers::providers::{Http, Provider};
 use namada_sdk::migrations::ScheduledMigration;
-use namada_sdk::state::{DB, StateRead};
+use namada_sdk::state::DB;
 use namada_sdk::storage::DbColFam;
 use namada_sdk::time::DateTimeUtc;
 use once_cell::unsync::Lazy;
@@ -53,11 +51,8 @@ use sysinfo::{MemoryRefreshKind, RefreshKind, System};
 use tokio::sync::mpsc;
 
 use self::abortable::AbortableSpawner;
-use self::ethereum_oracle::last_processed_block;
-use self::shell::EthereumOracleChannels;
 use crate::broadcaster::Broadcaster;
-use crate::config::{TendermintMode, ethereum_bridge};
-use crate::ethereum_oracle as oracle;
+use crate::config::TendermintMode;
 use crate::shell::{Error, Shell};
 use crate::tower_abci::{Server, split};
 pub mod tower_abci {
@@ -291,13 +286,6 @@ async fn run_aux(
     // Start Tendermint node
     start_tendermint(&mut spawner, &config, namada_version);
 
-    // Start oracle if necessary
-    let eth_oracle_channels =
-        match maybe_start_ethereum_oracle(&mut spawner, &config).await {
-            EthereumOracleTask::NotEnabled => None,
-            EthereumOracleTask::Enabled { channels } => Some(channels),
-        };
-
     tracing::info!("Loading MASP verifying keys.");
     let _ = namada_sdk::token::validation::preload_verifying_keys();
     tracing::info!("Done loading MASP verifying keys.");
@@ -306,7 +294,6 @@ async fn run_aux(
     // node)
     start_abci_broadcaster_shell(
         &mut spawner,
-        eth_oracle_channels,
         wasm_dir,
         setup_data,
         config,
@@ -430,7 +417,6 @@ async fn run_aux_setup(
 /// a new OS thread, to drive the ABCI server.
 fn start_abci_broadcaster_shell(
     spawner: &mut AbortableSpawner,
-    eth_oracle: Option<EthereumOracleChannels>,
     wasm_dir: PathBuf,
     setup_data: RunAuxSetup,
     config: config::Ledger,
@@ -491,7 +477,6 @@ fn start_abci_broadcaster_shell(
         config,
         wasm_dir,
         broadcaster_sender,
-        eth_oracle,
         Some(&db_cache),
         scheduled_migration,
         vp_wasm_compilation_cache,
@@ -650,105 +635,6 @@ fn start_tendermint(
         .spawn();
 }
 
-/// Represents a [`tokio::task`] in which an Ethereum oracle may be running, and
-/// if so, channels for communicating with it.
-enum EthereumOracleTask {
-    NotEnabled,
-    Enabled { channels: EthereumOracleChannels },
-}
-
-/// Potentially starts an Ethereum event oracle.
-async fn maybe_start_ethereum_oracle(
-    spawner: &mut AbortableSpawner,
-    config: &config::Ledger,
-) -> EthereumOracleTask {
-    if !matches!(config.shell.tendermint_mode, TendermintMode::Validator) {
-        return EthereumOracleTask::NotEnabled;
-    }
-
-    let ethereum_url = config.ethereum_bridge.oracle_rpc_endpoint.clone();
-
-    // Start the oracle for listening to Ethereum events
-    let (eth_sender, eth_receiver) =
-        mpsc::channel(config.ethereum_bridge.channel_buffer_size);
-    let (last_processed_block_sender, last_processed_block_receiver) =
-        last_processed_block::channel();
-    let (control_sender, control_receiver) = oracle::control::channel();
-
-    match config.ethereum_bridge.mode {
-        ethereum_bridge::ledger::Mode::RemoteEndpoint => {
-            oracle::run_oracle::<Provider<Http>>(
-                ethereum_url,
-                eth_sender,
-                control_receiver,
-                last_processed_block_sender,
-                spawner,
-            );
-
-            EthereumOracleTask::Enabled {
-                channels: EthereumOracleChannels::new(
-                    eth_receiver,
-                    control_sender,
-                    last_processed_block_receiver,
-                ),
-            }
-        }
-        ethereum_bridge::ledger::Mode::SelfHostedEndpoint => {
-            let (oracle_abort_send, oracle_abort_recv) =
-                tokio::sync::oneshot::channel::<tokio::sync::oneshot::Sender<()>>(
-                );
-            spawner
-                .abortable(
-                    "Ethereum Events Endpoint",
-                    move |aborter| async move {
-                        oracle::test_tools::events_endpoint::serve(
-                            ethereum_url,
-                            eth_sender,
-                            control_receiver,
-                            oracle_abort_recv,
-                        )
-                        .await;
-                        tracing::info!(
-                            "Ethereum events endpoint is no longer running."
-                        );
-
-                        drop(aborter);
-
-                        Ok(())
-                    },
-                )
-                .with_cleanup(async move {
-                    let (oracle_abort_resp_send, oracle_abort_resp_recv) =
-                        tokio::sync::oneshot::channel::<()>();
-
-                    if let Ok(()) =
-                        oracle_abort_send.send(oracle_abort_resp_send)
-                    {
-                        match oracle_abort_resp_recv.await {
-                            Ok(()) => {}
-                            Err(err) => {
-                                tracing::error!(
-                                    "Failed to receive an abort response from \
-                                     the Ethereum events endpoint task: {}",
-                                    err
-                                );
-                            }
-                        }
-                    }
-                })
-                .spawn();
-            EthereumOracleTask::Enabled {
-                channels: EthereumOracleChannels::new(
-                    eth_receiver,
-                    control_sender,
-                    last_processed_block_receiver,
-                ),
-            }
-        }
-        ethereum_bridge::ledger::Mode::Off => EthereumOracleTask::NotEnabled,
-    }
-}
-
 /// This function runs `Shell::init_chain` on the provided genesis files.
 /// This is to check that all the transactions included therein run
 /// successfully on chain initialization.
@@ -770,7 +656,6 @@ pub fn test_genesis_files(
         config,
         wasm_dir,
         broadcast_sender,
-        None,
         None,
         None,
         50 * 1024 * 1024,

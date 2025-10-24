@@ -11,7 +11,6 @@ use namada_sdk::address::{
 };
 use namada_sdk::borsh::{BorshDeserialize, BorshSerialize, BorshSerializeExt};
 use namada_sdk::chain::{ChainId, ChainIdPrefix};
-use namada_sdk::eth_bridge::EthereumBridgeParams;
 use namada_sdk::governance::pgf::parameters::PgfParameters;
 use namada_sdk::hash::Hash;
 use namada_sdk::ibc::parameters::{IbcParameters, IbcTokenRateLimits};
@@ -191,8 +190,6 @@ impl Finalized {
             InternalAddress::PoS,
             InternalAddress::Masp,
             InternalAddress::Ibc,
-            InternalAddress::EthBridge,
-            InternalAddress::EthBridgePool,
             InternalAddress::Governance,
             InternalAddress::Pgf,
         ] {
@@ -458,25 +455,6 @@ impl Finalized {
 
     pub fn get_pgf_params(&self) -> PgfParameters {
         self.parameters.pgf_params.clone()
-    }
-
-    pub fn get_eth_bridge_params(&self) -> Option<EthereumBridgeParams> {
-        if let Some(templates::EthBridgeParams {
-            eth_start_height,
-            min_confirmations,
-            contracts,
-            erc20_whitelist,
-        }) = self.parameters.eth_bridge_params.clone()
-        {
-            Some(EthereumBridgeParams {
-                eth_start_height,
-                min_confirmations,
-                erc20_whitelist,
-                contracts,
-            })
-        } else {
-            None
-        }
     }
 
     pub fn get_ibc_params(&self) -> IbcParameters {
@@ -816,7 +794,6 @@ pub struct FinalizedParameters {
     pub pos_params: templates::PosParams,
     pub gov_params: templates::GovernanceParams,
     pub pgf_params: PgfParameters,
-    pub eth_bridge_params: Option<templates::EthBridgeParams>,
     pub ibc_params: templates::IbcParams,
 }
 
@@ -827,7 +804,6 @@ impl FinalizedParameters {
             pos_params,
             gov_params,
             pgf_params,
-            eth_bridge_params,
             ibc_params,
         }: templates::Parameters<Validated>,
     ) -> Self {
@@ -842,7 +818,6 @@ impl FinalizedParameters {
             pos_params,
             gov_params,
             pgf_params: finalized_pgf_params,
-            eth_bridge_params,
             ibc_params,
         }
     }

@@ -9,7 +9,7 @@ use namada_tx::Tx;
 
 lazy_static! {
     static ref SHELL: TestShell = {
-        let (shell, _recv, _, _) = shell::test_utils::setup();
+        let (shell, _recv) = shell::test_utils::setup();
         shell
     };
 }

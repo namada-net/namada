@@ -314,9 +314,6 @@ async fn lookup_token_alias(
     owner: Option<&Address>,
 ) -> String {
     match token {
-        Address::Internal(InternalAddress::Erc20(eth_addr)) => {
-            eth_addr.to_canonical()
-        }
         Address::Internal(InternalAddress::IbcToken(_)) => {
             let ibc_denom =
                 rpc::query_ibc_denom(context, token.to_string(), owner).await;

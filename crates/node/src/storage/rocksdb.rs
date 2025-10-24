@@ -2,10 +2,6 @@
 //!
 //! The current storage tree is:
 //! - `state`: the latest ledger state
-//!   - `ethereum_height`: the height of the last eth block processed by the
-//!     oracle
-//!   - `eth_events_queue`: a queue of confirmed ethereum events to be processed
-//!     in order
 //!   - `height`: the last committed block height
 //!   - `next_epoch_min_start_height`: minimum block height from which the next
 //!     epoch can start
@@ -57,8 +53,6 @@ use namada_replay_protection as replay_protection;
 use namada_sdk::arith::checked;
 use namada_sdk::borsh::{BorshDeserialize, BorshSerialize, BorshSerializeExt};
 use namada_sdk::collections::HashSet;
-use namada_sdk::eth_bridge::storage::bridge_pool;
-use namada_sdk::eth_bridge::storage::proof::BridgePoolRootProof;
 use namada_sdk::gas::Gas;
 use namada_sdk::hash::Hash;
 use namada_sdk::state::merkle_tree::{
@@ -74,7 +68,7 @@ use namada_sdk::storage::{
     Epoch, Key, KeySeg, REPLAY_PROTECTION_CF, ROLLBACK_CF, STATE_CF,
     SUBSPACE_CF,
 };
-use namada_sdk::{decode, encode, ethereum_events};
+use namada_sdk::{decode, encode};
 use rayon::prelude::*;
 use regex::Regex;
 use rocksdb::{
@@ -97,8 +91,6 @@ const NEXT_EPOCH_MIN_START_TIME_KEY: &str = "next_epoch_min_start_time";
 const UPDATE_EPOCH_BLOCKS_DELAY_KEY: &str = "update_epoch_blocks_delay";
 const COMMIT_ONLY_DATA_KEY: &str = "commit_only_data_commitment";
 const CONVERSION_STATE_KEY: &str = "conversion_state";
-const ETHEREUM_HEIGHT_KEY: &str = "ethereum_height";
-const ETH_EVENTS_QUEUE_KEY: &str = "eth_events_queue";
 const RESULTS_KEY_PREFIX: &str = "results";
 const PRED_KEY_PREFIX: &str = "pred";
 
@@ -1189,18 +1181,6 @@ impl DB for RocksDB {
                 None => return Ok(None),
             };
 
-        let ethereum_height =
-            match self.read_value(state_cf, ETHEREUM_HEIGHT_KEY)? {
-                Some(h) => h,
-                None => return Ok(None),
-            };
-
-        let eth_events_queue =
-            match self.read_value(state_cf, ETH_EVENTS_QUEUE_KEY)? {
-                Some(q) => q,
-                None => return Ok(None),
-            };
-
         // Block results
         let results_key = format!("{RESULTS_KEY_PREFIX}/{}", height.raw());
         let results = match self.read_value(block_cf, results_key)? {
@@ -1250,8 +1230,6 @@ impl DB for RocksDB {
             next_epoch_min_start_time,
             update_epoch_blocks_delay,
             address_gen,
-            ethereum_height,
-            eth_events_queue,
             commit_only_data,
         }))
     }
@@ -1275,8 +1253,6 @@ impl DB for RocksDB {
             address_gen,
             results,
             conversion_state,
-            ethereum_height,
-            eth_events_queue,
             commit_only_data,
         }: BlockStateWrite<'_> = state;
 
@@ -1319,19 +1295,6 @@ impl DB for RocksDB {
                 batch,
             )?;
         }
-
-        self.add_value_to_batch(
-            state_cf,
-            ETHEREUM_HEIGHT_KEY,
-            &ethereum_height,
-            batch,
-        );
-        self.add_value_to_batch(
-            state_cf,
-            ETH_EVENTS_QUEUE_KEY,
-            &eth_events_queue,
-            batch,
-        );
 
         let block_cf = self.get_column_family(BLOCK_CF)?;
         let prefix = height.raw();
@@ -1689,27 +1652,6 @@ impl DB for RocksDB {
         let store_key = format!("{key_prefix}/{MERKLE_TREE_STORE_KEY_SEGMENT}");
         batch.0.delete_cf(block_cf, store_key);
         Ok(())
-    }
-
-    fn read_bridge_pool_signed_nonce(
-        &self,
-        height: BlockHeight,
-        last_height: BlockHeight,
-    ) -> Result<Option<ethereum_events::Uint>> {
-        let nonce_key = bridge_pool::get_signed_root_key();
-        let bytes = if height == BlockHeight(0) || height >= last_height {
-            self.read_subspace_val(&nonce_key)?
-        } else {
-            self.read_subspace_val_with_height(&nonce_key, height, last_height)?
-        };
-        match bytes {
-            Some(bytes) => {
-                let bp_root_proof = BridgePoolRootProof::try_from_slice(&bytes)
-                    .map_err(Error::BorshCodingError)?;
-                Ok(Some(bp_root_proof.data.1))
-            }
-            None => Ok(None),
-        }
     }
 
     fn write_replay_protection_entry(
@@ -2278,7 +2220,7 @@ mod test {
     use namada_sdk::state::{MerkleTree, Sha256Hasher};
     use namada_sdk::storage::conversion_state::ConversionState;
     use namada_sdk::storage::types::CommitOnlyData;
-    use namada_sdk::storage::{BlockResults, Epochs, EthEventsQueue};
+    use namada_sdk::storage::{BlockResults, Epochs};
     use namada_sdk::time::DateTimeUtc;
     use tempfile::tempdir;
 
@@ -2810,7 +2752,6 @@ mod test {
         let update_epoch_blocks_delay = None;
         let address_gen = EstablishedAddressGen::new("whatever");
         let results = BlockResults::default();
-        let eth_events_queue = EthEventsQueue::default();
         let commit_only_data = CommitOnlyData::default();
         let block = BlockStateWrite {
             merkle_tree_stores,
@@ -2825,8 +2766,6 @@ mod test {
             next_epoch_min_start_time,
             update_epoch_blocks_delay,
             address_gen: &address_gen,
-            ethereum_height: None,
-            eth_events_queue: &eth_events_queue,
             commit_only_data: &commit_only_data,
         };
 

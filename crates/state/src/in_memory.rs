@@ -4,21 +4,20 @@ use clru::CLruCache;
 use namada_core::address::{Address, EstablishedAddressGen, InternalAddress};
 use namada_core::borsh::{BorshDeserialize, BorshSerialize};
 use namada_core::chain::{BLOCK_HEIGHT_LENGTH, CHAIN_ID_LENGTH, ChainId};
+use namada_core::encode;
 use namada_core::hash::Hash;
 use namada_core::parameters::{EpochDuration, Parameters};
 use namada_core::time::DateTimeUtc;
-use namada_core::{encode, ethereum_structs};
 use namada_gas::{Gas, MEMORY_ACCESS_GAS_PER_BYTE};
 use namada_macros::BorshDeserializer;
 use namada_merkle_tree::{MerkleRoot, MerkleTree};
 #[cfg(feature = "migrations")]
 use namada_migrations::*;
 use namada_storage::conversion_state::ConversionState;
-use namada_storage::tx_queue::ExpiredTxsQueue;
 use namada_storage::types::CommitOnlyData;
 use namada_storage::{
     BlockHeader, BlockHeight, BlockResults, EPOCH_TYPE_LENGTH, Epoch, Epochs,
-    EthEventsQueue, Key, KeySeg, StorageHasher, TxIndex,
+    Key, KeySeg, StorageHasher, TxIndex,
 };
 
 use crate::Result;
@@ -61,17 +60,6 @@ where
     pub tx_index: TxIndex,
     /// The currently saved conversion state
     pub conversion_state: ConversionState,
-    /// Queue of expired transactions that need to be retransmitted.
-    ///
-    /// These transactions do not need to be persisted, as they are
-    /// retransmitted at the **COMMIT** phase immediately following
-    /// the block when they were queued.
-    pub expired_txs_queue: ExpiredTxsQueue,
-    /// The latest block height on Ethereum processed, if
-    /// the bridge is enabled.
-    pub ethereum_height: Option<ethereum_structs::BlockHeight>,
-    /// The queue of Ethereum events to be processed in order.
-    pub eth_events_queue: EthEventsQueue,
     /// How many block heights in the past can the storage be queried
     pub storage_read_past_height_limit: Option<u64>,
     /// Data that needs to be committed to the merkle tree
@@ -159,10 +147,7 @@ where
             update_epoch_blocks_delay: None,
             tx_index: TxIndex::default(),
             conversion_state: ConversionState::default(),
-            expired_txs_queue: ExpiredTxsQueue::default(),
             native_token,
-            ethereum_height: None,
-            eth_events_queue: EthEventsQueue::default(),
             storage_read_past_height_limit,
             commit_only_data: CommitOnlyData::default(),
             block_proposals_cache: CLruCache::new(

@@ -19,7 +19,7 @@ pub trait CliClient: Client + Send + Sync + 'static {
 impl CliClient for HttpClient {
     fn from_tendermint_address(address: &TendermintUrl) -> Self {
         HttpClient::builder(address.clone().try_into().unwrap())
-            .compat_mode(CompatMode::V0_37)
+            .compat_mode(CompatMode::V0_38)
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .unwrap()

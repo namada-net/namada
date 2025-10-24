@@ -24,7 +24,7 @@ use namada_apps_lib::client::utils::{
 };
 use namada_apps_lib::config::genesis::utils::read_toml;
 use namada_apps_lib::config::genesis::{templates, transactions};
-use namada_apps_lib::config::{Config, ethereum_bridge, genesis};
+use namada_apps_lib::config::{Config, genesis};
 use namada_apps_lib::wallet::defaults::{derive_template_dir, is_use_device};
 use namada_apps_lib::{config, wallet};
 use namada_core::address::Address;
@@ -117,23 +117,6 @@ pub fn update_actor_config<F>(
 pub fn allow_duplicate_ips(test: &Test, chain_id: &ChainId, who: Who) {
     update_actor_config(test, chain_id, who, |config| {
         config.ledger.cometbft.p2p.allow_duplicate_ip = true;
-    });
-}
-
-/// Configures the Ethereum bridge mode of `who`. This should be done before
-/// `who` starts running.
-pub fn set_ethereum_bridge_mode(
-    test: &Test,
-    chain_id: &ChainId,
-    who: Who,
-    mode: ethereum_bridge::ledger::Mode,
-    rpc_endpoint: Option<&str>,
-) {
-    update_actor_config(test, chain_id, who, |config| {
-        config.ledger.ethereum_bridge.mode = mode;
-        if let Some(addr) = rpc_endpoint {
-            config.ledger.ethereum_bridge.oracle_rpc_endpoint = addr.into();
-        }
     });
 }
 

@@ -5,8 +5,6 @@ pub mod eval_vp;
 pub mod pgf;
 /// txs to manage pos
 pub mod pos;
-/// transaction protocols made by validators
-pub mod protocol;
 /// wrapper txs
 pub mod wrapper;
 
@@ -39,7 +37,6 @@ use sha2::{Digest, Sha256};
 pub use wrapper::*;
 
 use crate::TxCommitments;
-use crate::data::protocol::ProtocolTx;
 
 /// The different result codes that the ledger may send back to a client
 /// indicating the status of their submitted tx.
@@ -579,8 +576,6 @@ pub enum TxType {
     Raw,
     /// A Tx that contains a payload in the form of a raw tx
     Wrapper(Box<WrapperTx>),
-    /// Txs issued by validators as part of internal protocols
-    Protocol(Box<ProtocolTx>),
 }
 
 impl TxType {

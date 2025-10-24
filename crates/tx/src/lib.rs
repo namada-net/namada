@@ -29,7 +29,6 @@ mod types;
 use data::TxType;
 pub use either;
 pub use event::new_tx_event;
-pub use namada_core::key::SignableEthMessage;
 pub use section::{
     Authorization, Code, Commitment, CompressedAuthorization, Data, Header,
     MaspBuilder, Memo, Section, Signer, TxCommitments,

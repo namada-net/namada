@@ -27,7 +27,7 @@ impl Broadcaster {
             client: HttpClient::builder(
                 format!("http://{}", url).as_str().try_into().unwrap(),
             )
-            .compat_mode(CompatMode::V0_37)
+            .compat_mode(CompatMode::V0_38)
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .unwrap(),

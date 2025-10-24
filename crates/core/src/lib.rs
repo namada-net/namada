@@ -26,22 +26,22 @@ pub mod control_flow;
 pub mod hints;
 
 pub use masp_primitives;
-/// Re-export of tendermint v0.37
+/// Re-export of tendermint v0.38
 pub mod tendermint {
-    /// Re-export of tendermint v0.37 ABCI
+    /// Re-export of tendermint v0.38 ABCI
     pub mod abci {
         pub use tendermint::abci::response::ApplySnapshotChunkResult;
         pub use tendermint::abci::{
             Code, Event, EventAttribute, MethodKind, types,
         };
-        pub use tendermint::v0_37::abci::*;
+        pub use tendermint::v0_38::abci::*;
     }
     pub use tendermint::*;
 }
-/// Re-export of tendermint-proto v0.37
+/// Re-export of tendermint-proto v0.38
 pub mod tendermint_proto {
     pub use tendermint_proto::google; // 💩
-    pub use tendermint_proto::v0_37::*;
+    pub use tendermint_proto::v0_38::*;
 }
 
 #[allow(missing_docs)]
@@ -64,14 +64,9 @@ pub mod address;
 pub mod booleans;
 pub mod chain;
 pub mod dec;
-pub mod eth_abi;
-pub mod eth_bridge_pool;
-pub mod ethereum_events;
-pub mod ethereum_structs;
 pub mod hash;
 pub mod ibc;
 pub mod internal;
-pub mod keccak;
 pub mod key;
 pub mod masp;
 pub mod parameters;

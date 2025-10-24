@@ -59,7 +59,7 @@ use namada_proof_of_stake::types::{
 use namada_state::{BlockHeader, LastBlock};
 use namada_token::masp::MaspTokenRewardData;
 use namada_tx::data::{BatchedTxResult, DryRunResult, ResultCode, TxResult};
-use namada_tx::event::{Batch as BatchAttr, Code as CodeAttr};
+use namada_tx::event::{Batch as BatchAttr, Code as CodeAttr, CometTxHash};
 use serde::{Deserialize, Serialize};
 
 use crate::args::{InputAmount, OsmosisPoolHop, Slippage};
@@ -706,6 +706,8 @@ pub struct TxResponse {
     pub code: ResultCode,
     /// Gas used.
     pub gas_used: WholeGas,
+    /// CometBFT matching tx hash
+    pub comet_tx_hash: Hash,
 }
 
 /// Determines a result of an inner tx from
@@ -747,6 +749,9 @@ impl TryFrom<TxAppliedEvents> for TxResponse {
         let gas_used = applied_event
             .read_attribute::<GasUsedAttr>()
             .map_err(|err| err.to_string())?;
+        let comet_tx_hash = applied_event
+            .read_attribute::<CometTxHash>()
+            .map_err(|err| err.to_string())?;
 
         // Reconstruct the inner txs' events
         if let Some(batch) = &mut batch {
@@ -776,6 +781,7 @@ impl TryFrom<TxAppliedEvents> for TxResponse {
             height,
             code,
             gas_used,
+            comet_tx_hash,
         })
     }
 }

@@ -3,7 +3,6 @@
 use namada_core::address::Address;
 use namada_core::chain::Epoch;
 use namada_core::dec::Dec;
-use namada_core::ethereum_events::EthAddress;
 use namada_core::{arith, storage};
 use namada_events::EventError;
 use namada_tx::Tx;
@@ -35,9 +34,6 @@ pub enum Error {
     /// Errors that handle querying from storage
     #[error("Querying error: {0}")]
     Query(#[from] QueryError),
-    /// Ethereum bridge related errors
-    #[error("{0}")]
-    EthereumBridge(#[from] EthereumBridgeError),
     /// Arithmetic error
     #[error("Arithmetic {0}")]
     Arith(#[from] arith::Error),
@@ -317,54 +313,4 @@ pub enum TxSubmitError {
     /// Other Errors that may show up when using the interface
     #[error("{0}")]
     Other(String),
-}
-
-/// Ethereum bridge related errors.
-#[derive(Error, Debug, Clone)]
-pub enum EthereumBridgeError {
-    /// Error invoking smart contract function.
-    #[error("Smart contract call failed: {0}")]
-    ContractCall(String),
-    /// Ethereum RPC error.
-    #[error("RPC error: {0}")]
-    Rpc(String),
-    /// Error reading the signed Bridge pool.
-    #[error("Failed to read signed Bridge pool: {0}")]
-    ReadSignedBridgePool(String),
-    /// Error reading the Bridge pool.
-    #[error("Failed to read Bridge pool: {0}")]
-    ReadBridgePool(String),
-    /// Error querying transfer to Ethereum progress.
-    #[error("Failed to query transfer to Ethereum progress: {0}")]
-    TransferToEthProgress(String),
-    /// Error querying Ethereum voting powers.
-    #[error("Failed to query Ethereum voting powers: {0}")]
-    QueryVotingPowers(String),
-    /// Ethereum node timeout error.
-    #[error("Timed out while attempting to communicate with the Ethereum node")]
-    NodeTimeout,
-    /// Error generating Bridge pool proof.
-    #[error("Failed to generate Bridge pool proof: {0}")]
-    GenBridgePoolProof(String),
-    /// Error retrieving contract address.
-    #[error("Failed to retrieve contract address: {0}")]
-    RetrieveContract(String),
-    /// Error calculating relay cost.
-    #[error("Failed to calculate relay cost: {0}")]
-    RelayCost(String),
-    /// Invalid Bridge pool nonce error.
-    #[error("The Bridge pool nonce is invalid")]
-    InvalidBpNonce,
-    /// Invalid fee token error.
-    #[error("An invalid fee token was provided: {0}")]
-    InvalidFeeToken(Address),
-    /// Not whitelisted error.
-    #[error("ERC20 is not whitelisted: {0}")]
-    Erc20NotWhitelisted(EthAddress),
-    /// Exceeded token caps error.
-    #[error("ERC20 token caps exceeded: {0}")]
-    Erc20TokenCapsExceeded(EthAddress),
-    /// Transfer already in pool error.
-    #[error("An identical transfer is already present in the Bridge pool")]
-    TransferAlreadyInPool,
 }

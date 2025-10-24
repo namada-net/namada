@@ -102,8 +102,7 @@ async fn get_indexed_masp_events_at_height<C: Client + Sync>(
         .block_results(height.0)
         .await
         .map_err(|e| Error::from(QueryError::General(e.to_string())))?
-        .end_block_events
-        .unwrap_or_default()
+        .finalize_block_events
         .into_iter()
         .map(|event| {
             // Check if the event is a Masp one

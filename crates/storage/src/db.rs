@@ -3,11 +3,11 @@ use std::num::TryFromIntError;
 
 use itertools::Either;
 use namada_core::address::EstablishedAddressGen;
+use namada_core::arith;
 use namada_core::chain::{BlockHeader, BlockHeight, Epoch, Epochs};
 use namada_core::hash::{Error as HashError, Hash};
-use namada_core::storage::{BlockResults, DbColFam, EthEventsQueue, Key};
+use namada_core::storage::{BlockResults, DbColFam, Key};
 use namada_core::time::DateTimeUtc;
-use namada_core::{arith, ethereum_events, ethereum_structs};
 use namada_gas::Gas;
 use namada_merkle_tree::{
     Error as MerkleTreeError, MerkleTreeStoresRead, MerkleTreeStoresWrite,
@@ -71,11 +71,6 @@ pub struct BlockStateRead {
     pub results: BlockResults,
     /// The conversion state
     pub conversion_state: ConversionState,
-    /// The latest block height on Ethereum processed, if
-    /// the bridge is enabled.
-    pub ethereum_height: Option<ethereum_structs::BlockHeight>,
-    /// The queue of Ethereum events to be processed in order.
-    pub eth_events_queue: EthEventsQueue,
     /// Structure holding data that needs to be added to the merkle tree
     pub commit_only_data: CommitOnlyData,
 }
@@ -106,11 +101,6 @@ pub struct BlockStateWrite<'a> {
     pub results: &'a BlockResults,
     /// The conversion state
     pub conversion_state: &'a ConversionState,
-    /// The latest block height on Ethereum processed, if
-    /// the bridge is enabled.
-    pub ethereum_height: Option<&'a ethereum_structs::BlockHeight>,
-    /// The queue of Ethereum events to be processed in order.
-    pub eth_events_queue: &'a EthEventsQueue,
     /// Structure holding data that needs to be added to the merkle tree
     pub commit_only_data: &'a CommitOnlyData,
 }
@@ -264,13 +254,6 @@ pub trait DB: Debug {
         store_type: &StoreType,
         pruned_target: Either<BlockHeight, Epoch>,
     ) -> Result<()>;
-
-    /// Read the signed nonce of Bridge Pool
-    fn read_bridge_pool_signed_nonce(
-        &self,
-        height: BlockHeight,
-        last_height: BlockHeight,
-    ) -> Result<Option<ethereum_events::Uint>>;
 
     /// Write a replay protection entry
     fn write_replay_protection_entry(

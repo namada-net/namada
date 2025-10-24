@@ -22,7 +22,6 @@ use serde::de::Error as SerdeError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::data::protocol::ProtocolTx;
 use crate::data::{TxType, WrapperTx, hash_tx};
 use crate::sign::VerifySigError;
 use crate::{SALT_LENGTH, Tx, hex_data_serde, hex_salt_serde};
@@ -116,15 +115,6 @@ impl Header {
     pub fn wrapper(&self) -> Option<WrapperTx> {
         if let TxType::Wrapper(wrapper) = &self.tx_type {
             Some(*wrapper.clone())
-        } else {
-            None
-        }
-    }
-
-    /// Get the protocol header if it is present
-    pub fn protocol(&self) -> Option<ProtocolTx> {
-        if let TxType::Protocol(protocol) = &self.tx_type {
-            Some(*protocol.clone())
         } else {
             None
         }

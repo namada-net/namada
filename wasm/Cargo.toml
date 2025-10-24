@@ -4,7 +4,6 @@ resolver = "2"
 members = [
     "tx_become_validator",
     "tx_bond",
-    "tx_change_bridge_pool",
     "tx_change_consensus_key",
     "tx_change_validator_commission",
     "tx_change_validator_metadata",

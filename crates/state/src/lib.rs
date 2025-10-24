@@ -35,17 +35,15 @@ pub use namada_core::chain::{
     BLOCK_HASH_LENGTH, BLOCK_HEIGHT_LENGTH, BlockHash, BlockHeader,
     BlockHeight, Epoch, Epochs,
 };
-use namada_core::eth_bridge_pool::is_pending_transfer_key;
 use namada_core::hash::Hash;
 pub use namada_core::hash::Sha256Hasher;
 pub use namada_core::storage::{
-    BlockResults, EPOCH_TYPE_LENGTH, EthEventsQueue, Key, KeySeg, TxIndex,
+    BlockResults, EPOCH_TYPE_LENGTH, Key, KeySeg, TxIndex,
 };
 use namada_core::tendermint::merkle::proof::ProofOps;
 use namada_gas::{
     Gas, MEMORY_ACCESS_GAS_PER_BYTE, STORAGE_ACCESS_GAS_PER_BYTE,
 };
-use namada_merkle_tree::Error as MerkleTreeError;
 pub use namada_merkle_tree::{
     self as merkle_tree, MembershipProof, MerkleTree, MerkleTreeStoresRead,
     MerkleTreeStoresWrite, StoreRef, StoreType, ics23_specs,
@@ -59,7 +57,7 @@ pub use namada_storage::{
     BlockStateRead, BlockStateWrite, DB, DBIter, DBWriteBatch, DbError,
     DbResult, Error, OptionExt, Result, ResultExt, StorageHasher, StorageRead,
     StorageWrite, collections, iter_prefix, iter_prefix_bytes,
-    iter_prefix_with_filter, iter_prefix_with_filter_map, mockdb, tx_queue,
+    iter_prefix_with_filter, iter_prefix_with_filter_map, mockdb,
 };
 use namada_systems::parameters;
 use thiserror::Error;
@@ -591,7 +589,6 @@ pub mod testing {
     use namada_core::address::EstablishedAddressGen;
     use namada_core::time::DateTimeUtc;
     pub use namada_storage::testing::{PrefixIter, *};
-    use namada_storage::tx_queue::ExpiredTxsQueue;
     use storage::types::CommitOnlyData;
 
     use super::mockdb::MockDB;
@@ -644,10 +641,7 @@ pub mod testing {
                 update_epoch_blocks_delay: None,
                 tx_index: TxIndex::default(),
                 conversion_state: ConversionState::default(),
-                expired_txs_queue: ExpiredTxsQueue::default(),
                 native_token: address::testing::nam(),
-                ethereum_height: None,
-                eth_events_queue: EthEventsQueue::default(),
                 storage_read_past_height_limit: Some(1000),
                 commit_only_data: CommitOnlyData::default(),
                 block_proposals_cache: CLruCache::new(
@@ -669,11 +663,8 @@ mod tests {
 
     use chrono::{TimeZone, Utc};
     use merkle_tree::NO_DIFF_KEY_PREFIX;
-    use namada_core::address::InternalAddress;
     use namada_core::borsh::{BorshDeserialize, BorshSerializeExt};
-    use namada_core::keccak::KeccakHash;
     use namada_core::parameters::{EpochDuration, Parameters};
-    use namada_core::storage::DbKeySeg;
     use namada_core::time::{self, DateTimeUtc, Duration};
     use proptest::prelude::*;
     use proptest::test_runner::Config;
@@ -921,6 +912,7 @@ mod tests {
         assert_eq!(res, val2);
 
         // Commit block and storage changes
+        state.pre_commit_block().unwrap();
         state.commit_block().unwrap();
         state.in_mem_mut().block.height =
             state.in_mem().block.height.next_height();
@@ -986,6 +978,7 @@ mod tests {
         state.delete(&key2).unwrap();
 
         // Commit the block again
+        state.pre_commit_block().unwrap();
         state.commit_block().unwrap();
         state.in_mem_mut().block.height =
             state.in_mem().block.height.next_height();
@@ -1260,23 +1253,7 @@ mod tests {
         )
         .prop_map(|kvs| {
             kvs.into_iter()
-                .map(|(mut key, val)| {
-                    if let DbKeySeg::AddressSeg(Address::Internal(
-                        InternalAddress::EthBridgePool,
-                    )) = key.segments[0]
-                    {
-                        // This is needed to be able to write this key to DB -
-                        // the merkle tree's `BridgePoolTree::parse_key`
-                        // requires a `KeccakHash` on the 2nd segment
-                        key.segments.insert(
-                            1,
-                            DbKeySeg::StringSeg(
-                                KeccakHash::default().to_string(),
-                            ),
-                        );
-                    }
-                    (key, Level::Storage(val))
-                })
+                .map(|(key, val)| (key, Level::Storage(val)))
                 .collect::<Vec<_>>()
         });
 

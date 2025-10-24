@@ -126,8 +126,6 @@ pub const TX_WITHDRAW_WASM: &str = "tx_withdraw.wasm";
 /// Claim-rewards WASM path
 pub const TX_CLAIM_REWARDS_WASM: &str = "tx_claim_rewards.wasm";
 /// Bridge pool WASM path
-pub const TX_BRIDGE_POOL_WASM: &str = "tx_bridge_pool.wasm";
-/// Change commission WASM path
 pub const TX_CHANGE_COMMISSION_WASM: &str =
     "tx_change_validator_commission.wasm";
 /// Change consensus key WASM path
@@ -606,6 +604,8 @@ pub fn display_batch_resp(context: &impl Namada, resp: &TxResponse) {
             resp.gas_used,
         );
     }
+
+    display_line!(context.io(), "CometBFT tx hash: {}", resp.comet_tx_hash);
 
     tracing::debug!(
         "Full result: {}",

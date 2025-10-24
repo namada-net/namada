@@ -100,7 +100,7 @@ use namada_sdk::tx::{
     Authorization, BatchedTx, BatchedTxRef, Code, Data, IndexedTx, Section, Tx,
 };
 pub use namada_sdk::tx::{
-    TX_BECOME_VALIDATOR_WASM, TX_BOND_WASM, TX_BRIDGE_POOL_WASM,
+    TX_BECOME_VALIDATOR_WASM, TX_BOND_WASM,
     TX_CHANGE_COMMISSION_WASM as TX_CHANGE_VALIDATOR_COMMISSION_WASM,
     TX_CHANGE_CONSENSUS_KEY_WASM,
     TX_CHANGE_METADATA_WASM as TX_CHANGE_VALIDATOR_METADATA_WASM,
@@ -569,7 +569,6 @@ impl Default for BenchShell {
             config::Ledger::new(path, Default::default(), TendermintMode::Full),
             WASM_DIR.into(),
             sender,
-            None,
             None,
             None,
             50 * 1024 * 1024, // 50 kiB

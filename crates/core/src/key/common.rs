@@ -11,7 +11,6 @@ use namada_migrations::*;
 use rand::{CryptoRng, RngCore};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use thiserror::Error;
 
 use super::{
     ParsePublicKeyError, ParseSecretKeyError, ParseSignatureError, RefTo,
@@ -19,7 +18,6 @@ use super::{
     secp256k1,
 };
 use crate::borsh::BorshSerializeExt;
-use crate::ethereum_events::EthAddress;
 use crate::key::{SignableBytes, StorageHasher};
 use crate::{impl_display_and_from_str_via_format, string_encoding};
 
@@ -155,24 +153,6 @@ impl From<PublicKey> for crate::tendermint::PublicKey {
             PublicKey::Secp256k1(secp256k1::PublicKey(pk)) => {
                 TmPK::from_raw_secp256k1(&pk.to_sec1_bytes()).unwrap()
             }
-        }
-    }
-}
-
-#[allow(missing_docs)]
-#[derive(Error, Debug)]
-pub enum EthAddressConvError {
-    #[error("Eth key cannot be ed25519, only secp256k1")]
-    CannotBeEd25519,
-}
-
-impl TryFrom<&PublicKey> for EthAddress {
-    type Error = EthAddressConvError;
-
-    fn try_from(value: &PublicKey) -> Result<Self, Self::Error> {
-        match value {
-            PublicKey::Ed25519(_) => Err(EthAddressConvError::CannotBeEd25519),
-            PublicKey::Secp256k1(pk) => Ok(EthAddress::from(pk)),
         }
     }
 }

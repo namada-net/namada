@@ -21,8 +21,7 @@ use thiserror::Error;
 
 use crate::address;
 use crate::borsh::BorshSerializeExt;
-use crate::hash::{KeccakHasher, Sha256Hasher, StorageHasher};
-use crate::keccak::{KeccakHash, keccak_hash};
+use crate::hash::{Sha256Hasher, StorageHasher};
 
 /// Represents an error in signature verification
 #[allow(missing_docs)]
@@ -420,30 +419,12 @@ pub trait Signable<T> {
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct SerializeWithBorsh;
 
-/// Tag type that indicates we should use ABI serialization
-/// to sign data in a [`Signable`] wrapper.
-#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
-pub struct SignableEthMessage;
-
 impl<T: BorshSerialize> Signable<T> for SerializeWithBorsh {
     type Hasher = Sha256Hasher;
     type Output = Vec<u8>;
 
     fn as_signable(data: &T) -> Vec<u8> {
         data.serialize_to_vec()
-    }
-}
-
-impl Signable<KeccakHash> for SignableEthMessage {
-    type Hasher = KeccakHasher;
-    type Output = KeccakHash;
-
-    fn as_signable(hash: &KeccakHash) -> KeccakHash {
-        keccak_hash({
-            let mut eth_message = Vec::from("\x19Ethereum Signed Message:\n32");
-            eth_message.extend_from_slice(hash.as_ref());
-            eth_message
-        })
     }
 }
 
@@ -469,18 +450,6 @@ impl SignableBytes for crate::hash::Hash {
 }
 
 impl SignableBytes for &crate::hash::Hash {
-    fn signable_hash<H: StorageHasher>(&self) -> [u8; 32] {
-        self.0
-    }
-}
-
-impl SignableBytes for crate::keccak::KeccakHash {
-    fn signable_hash<H: StorageHasher>(&self) -> [u8; 32] {
-        self.0
-    }
-}
-
-impl SignableBytes for &crate::keccak::KeccakHash {
     fn signable_hash<H: StorageHasher>(&self) -> [u8; 32] {
         self.0
     }

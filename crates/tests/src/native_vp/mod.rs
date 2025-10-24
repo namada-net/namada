@@ -1,4 +1,3 @@
-pub mod eth_bridge_pool;
 pub mod pos;
 
 use std::cell::RefCell;

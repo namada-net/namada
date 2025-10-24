@@ -38,7 +38,6 @@ harness = false
 path = "mempool_validate.rs"
 
 [features]
-namada-eth-bridge = ["namada_apps_lib/namada-eth-bridge"]
 
 [dependencies]
 

@@ -10,14 +10,11 @@ use namada_migrations::*;
 use namada_sdk::address::Address;
 use namada_sdk::borsh::{BorshDeserialize, BorshSerialize};
 use namada_sdk::dec::Dec;
-use namada_sdk::eth_bridge::storage::parameters::{
-    Contracts, Erc20WhitelistEntry, MinimumConfirmations,
-};
 use namada_sdk::parameters::ProposalBytes;
+use namada_sdk::token;
 use namada_sdk::token::{
     Amount, DenominatedAmount, Denomination, NATIVE_MAX_DECIMAL_PLACES,
 };
-use namada_sdk::{ethereum_structs, token};
 use serde::{Deserialize, Serialize};
 
 use super::transactions::{self, Transactions};
@@ -233,7 +230,6 @@ pub struct Parameters<T: TemplateValidation> {
     pub pos_params: PosParams,
     pub gov_params: GovernanceParams,
     pub pgf_params: PgfParams<T>,
-    pub eth_bridge_params: Option<EthBridgeParams>,
     pub ibc_params: IbcParams,
 }
 
@@ -473,30 +469,6 @@ pub struct PgfParams<T: TemplateValidation> {
     #[serde(skip_serializing)]
     #[cfg(not(test))]
     valid: PhantomData<T>,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Serialize,
-    BorshDeserialize,
-    BorshDeserializer,
-    BorshSerialize,
-    PartialEq,
-    Eq,
-)]
-pub struct EthBridgeParams {
-    /// Initial Ethereum block height when events will first be extracted from.
-    pub eth_start_height: ethereum_structs::BlockHeight,
-    /// Minimum number of confirmations needed to trust an Ethereum branch.
-    /// This must be at least one.
-    pub min_confirmations: MinimumConfirmations,
-    /// List of ERC20 token types whitelisted at genesis time.
-    pub erc20_whitelist: Vec<Erc20WhitelistEntry>,
-    /// The addresses of the Ethereum contracts that need to be directly known
-    /// by validators.
-    pub contracts: Contracts,
 }
 
 #[derive(
@@ -888,7 +860,6 @@ pub fn validate_parameters(
         pos_params,
         gov_params,
         pgf_params,
-        eth_bridge_params,
         ibc_params,
     } = parameters;
     match parameters.denominate(tokens) {
@@ -908,7 +879,6 @@ pub fn validate_parameters(
                     .maximum_number_of_stewards,
                 valid: Default::default(),
             },
-            eth_bridge_params,
             ibc_params,
         }),
     }

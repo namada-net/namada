@@ -22,8 +22,6 @@ pub use {
     tendermint_rpc, zeroize,
 };
 
-pub mod eth_bridge;
-
 pub mod rpc;
 
 pub mod args;
@@ -48,7 +46,6 @@ use args::{DeviceTransport, InputAmount, SdkTypes};
 use masp_primitives::zip32::PseudoExtendedKey;
 use namada_core::address::Address;
 use namada_core::dec::Dec;
-use namada_core::ethereum_events::EthAddress;
 use namada_core::ibc::core::host::types::identifiers::{ChannelId, PortId};
 use namada_core::key::*;
 pub use namada_core::masp::{
@@ -61,16 +58,16 @@ pub use namada_io::{MaybeSend, MaybeSync};
 pub use namada_token::masp::{ShieldedUtils, ShieldedWallet};
 use namada_tx::Tx;
 use rpc::{denominate_amount, format_denominated_amount, query_native_token};
-use token::{DenominatedAmount, NATIVE_MAX_DECIMAL_PLACES};
+use token::DenominatedAmount;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tx::{
     ProcessTxResponse, TX_BECOME_VALIDATOR_WASM, TX_BOND_WASM,
-    TX_BRIDGE_POOL_WASM, TX_CHANGE_COMMISSION_WASM,
-    TX_CHANGE_CONSENSUS_KEY_WASM, TX_CHANGE_METADATA_WASM,
-    TX_CLAIM_REWARDS_WASM, TX_DEACTIVATE_VALIDATOR_WASM, TX_IBC_WASM,
-    TX_INIT_ACCOUNT_WASM, TX_INIT_PROPOSAL, TX_REACTIVATE_VALIDATOR_WASM,
-    TX_REDELEGATE_WASM, TX_RESIGN_STEWARD, TX_REVEAL_PK, TX_TRANSFER_WASM,
-    TX_UNBOND_WASM, TX_UNJAIL_VALIDATOR_WASM, TX_UPDATE_ACCOUNT_WASM,
+    TX_CHANGE_COMMISSION_WASM, TX_CHANGE_CONSENSUS_KEY_WASM,
+    TX_CHANGE_METADATA_WASM, TX_CLAIM_REWARDS_WASM,
+    TX_DEACTIVATE_VALIDATOR_WASM, TX_IBC_WASM, TX_INIT_ACCOUNT_WASM,
+    TX_INIT_PROPOSAL, TX_REACTIVATE_VALIDATOR_WASM, TX_REDELEGATE_WASM,
+    TX_RESIGN_STEWARD, TX_REVEAL_PK, TX_TRANSFER_WASM, TX_UNBOND_WASM,
+    TX_UNJAIL_VALIDATOR_WASM, TX_UPDATE_ACCOUNT_WASM,
     TX_UPDATE_STEWARD_COMMISSION, TX_VOTE_PROPOSAL, TX_WITHDRAW_WASM,
     VP_USER_WASM,
 };
@@ -534,33 +531,6 @@ pub trait Namada: NamadaIo {
         }
     }
 
-    /// Make a Withdraw builder from the given minimum set of arguments
-    fn new_add_erc20_transfer(
-        &self,
-        sender: Address,
-        recipient: EthAddress,
-        asset: EthAddress,
-        amount: InputAmount,
-    ) -> args::EthereumBridgePool {
-        args::EthereumBridgePool {
-            sender,
-            recipient,
-            asset,
-            amount,
-            fee_amount: InputAmount::Unvalidated(
-                token::DenominatedAmount::new(
-                    token::Amount::default(),
-                    NATIVE_MAX_DECIMAL_PLACES.into(),
-                ),
-            ),
-            fee_payer: None,
-            fee_token: self.native_token(),
-            nut: false,
-            code_path: PathBuf::from(TX_BRIDGE_POOL_WASM),
-            tx: self.tx_builder(),
-        }
-    }
-
     /// Make a ResignSteward builder from the given minimum set of arguments
     fn new_resign_steward(&self, steward: Address) -> args::ResignSteward {
         args::ResignSteward {
@@ -847,7 +817,6 @@ pub mod testing {
     use namada_account::{InitAccount, UpdateAccount};
     use namada_core::address::testing::arb_non_internal_address;
     use namada_core::collections::{HashMap, HashSet};
-    use namada_core::eth_bridge_pool::PendingTransfer;
     use namada_core::hash::testing::arb_hash;
     use namada_core::key::testing::arb_common_keypair;
     use namada_core::masp::AssetData;
@@ -880,7 +849,6 @@ pub mod testing {
         BorshDeserialize, BorshSchema, BorshSerialize, BorshSerializeExt,
     };
     use crate::chain::ChainId;
-    use crate::eth_bridge_pool::testing::arb_pending_transfer;
     use crate::key::testing::arb_common_pk;
     use crate::time::{DateTime, DateTimeUtc, TimeZone, Utc};
     use crate::tx::data::pgf::tests::arb_update_steward_commission;
@@ -920,7 +888,6 @@ pub mod testing {
         Redelegation(Redelegation),
         UpdateStewardCommission(UpdateStewardCommission),
         ResignSteward(Address),
-        PendingTransfer(PendingTransfer),
         IbcMsgTransfer(
             MsgTransfer<token::Transfer>,
             Option<(StoredBuildParams, String)>,
@@ -1499,22 +1466,6 @@ pub mod testing {
     }
 
     prop_compose! {
-        /// Generate an arbitrary pending transfer transaction
-        pub fn arb_pending_transfer_tx()(
-            mut header in arb_header(0),
-            wrapper in arb_wrapper_tx(),
-            pending_transfer in arb_pending_transfer(),
-            code_hash in arb_hash(),
-        ) -> (Tx, TxData) {
-            header.tx_type = TxType::Wrapper(Box::new(wrapper));
-            let mut tx = Tx { header, sections: vec![] };
-            tx.add_data(pending_transfer.clone());
-            tx.add_code_from_hash(code_hash, Some(TX_BRIDGE_POOL_WASM.to_owned()));
-            (tx, TxData::PendingTransfer(pending_transfer))
-        }
-    }
-
-    prop_compose! {
         /// Generate an arbitrary IBC transfer message
         pub fn arb_msg_transfer()(
             message in arb_ibc_msg_transfer(),
@@ -1637,7 +1588,6 @@ pub mod testing {
             arb_redelegation_tx(),
             arb_update_steward_commission_tx(),
             arb_resign_steward_tx(),
-            arb_pending_transfer_tx(),
             arb_ibc_msg_transfer_tx(),
             arb_ibc_msg_nft_transfer_tx(),
         ]

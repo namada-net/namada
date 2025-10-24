@@ -708,16 +708,6 @@ impl Tx {
                         ))
                     })
             }
-            // verify signature and extract signed data
-            TxType::Protocol(protocol) => self
-                .verify_signature(&protocol.pk, &self.unique_sechashes())
-                .map(Option::Some)
-                .map_err(|err| {
-                    TxError::SigError(format!(
-                        "ProtocolTx signature verification failed: {}",
-                        err
-                    ))
-                }),
             // return as is
             TxType::Raw => Ok(None),
         }
@@ -1171,7 +1161,6 @@ mod test {
 
     use super::*;
     use crate::data;
-    use crate::data::protocol::{ProtocolTx, ProtocolTxType};
 
     /// Test that the BorshSchema for Tx gets generated without any name
     /// conflicts
@@ -1255,48 +1244,6 @@ mod test {
             let mut tx = tx.clone();
             // Sign the tx with a wrong key
             tx.sign_wrapper(sk2);
-
-            // Should be rejected
-            tx.validate_tx().expect_err("invalid signature - wrong key");
-        }
-    }
-
-    #[test]
-    fn test_protocol_tx_signing() {
-        let sk1 = key::testing::keypair_1();
-        let sk2 = key::testing::keypair_2();
-        let pk1 = sk1.to_public();
-        let tx = Tx::from_type(TxType::Protocol(Box::new(ProtocolTx {
-            pk: pk1,
-            tx: ProtocolTxType::BridgePool,
-        })));
-
-        // Unsigned tx should fail validation
-        tx.validate_tx().expect_err("Unsigned");
-
-        {
-            let mut tx = tx.clone();
-            // Sign the tx
-            tx.add_section(Section::Authorization(Authorization::new(
-                tx.sechashes(),
-                BTreeMap::from_iter([(0, sk1)]),
-                None,
-            )));
-
-            // Signed tx should pass validation
-            tx.validate_tx()
-                .expect("valid tx")
-                .expect("with authorization");
-        }
-
-        {
-            let mut tx = tx.clone();
-            // Sign the tx with a wrong key
-            tx.add_section(Section::Authorization(Authorization::new(
-                tx.sechashes(),
-                BTreeMap::from_iter([(0, sk2)]),
-                None,
-            )));
 
             // Should be rejected
             tx.validate_tx().expect_err("invalid signature - wrong key");

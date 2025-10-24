@@ -59,13 +59,9 @@ mod tests {
     use namada_sdk::borsh::BorshDeserialize;
     use namada_sdk::chain::{BlockHeight, ChainId};
     use namada_sdk::collections::HashMap;
-    use namada_sdk::eth_bridge::storage::bridge_pool;
-    use namada_sdk::eth_bridge::storage::proof::BridgePoolRootProof;
-    use namada_sdk::ethereum_events::Uint;
     use namada_sdk::gas::STORAGE_ACCESS_GAS_PER_BYTE;
     use namada_sdk::hash::Hash;
     use namada_sdk::ibc::storage::{client_counter_key, ibc_key, is_ibc_key};
-    use namada_sdk::keccak::KeccakHash;
     use namada_sdk::parameters::Parameters;
     use namada_sdk::state::merkle_tree::NO_DIFF_KEY_PREFIX;
     use namada_sdk::state::{
@@ -478,11 +474,6 @@ mod tests {
             let value_bytes = encode(&state.in_mem().block.height);
             state.db_write(&key, value_bytes)?;
         }
-        let key = bridge_pool::get_signed_root_key();
-        let root_proof =
-            BridgePoolRootProof::new((KeccakHash::default(), Uint::default()));
-        let bytes = encode(&root_proof);
-        state.db_write(&key, bytes)?;
 
         // Update and commit
         let height = BlockHeight(1);
@@ -668,9 +659,6 @@ mod tests {
             is_key_diff_storable,
         );
         let new_epoch_start = BlockHeight(1);
-        let signed_root_key = bridge_pool::get_signed_root_key();
-        // the first nonce isn't written for a test skipping pruning
-        let nonce = Uint::default();
 
         state
             .in_mem_mut()
@@ -699,9 +687,6 @@ mod tests {
         let value: u64 = 2;
         state.db_write(&key, encode(&value)).expect("write failed");
 
-        // the second nonce isn't written for a test skipping pruning
-        let nonce = nonce + 1;
-
         state.in_mem_mut().block.epoch = state.in_mem().block.epoch.next();
         state
             .in_mem_mut()
@@ -719,12 +704,6 @@ mod tests {
             .in_mem_mut()
             .begin_block(new_epoch_start)
             .expect("begin_block failed");
-
-        let nonce = nonce + 1;
-        let root_proof =
-            BridgePoolRootProof::new((KeccakHash::default(), nonce));
-        let bytes = encode(&root_proof);
-        state.db_write(&signed_root_key, bytes).unwrap();
 
         state.in_mem_mut().block.epoch = state.in_mem().block.epoch.next();
         state
@@ -744,20 +723,12 @@ mod tests {
         );
         let result = state.get_merkle_tree(6.into(), Some(StoreType::Ibc));
         assert!(result.is_ok(), "The ibc tree should be restored");
-        let result =
-            state.get_merkle_tree(6.into(), Some(StoreType::BridgePool));
-        assert!(result.is_ok(), "The bridge pool tree should be restored");
 
         state
             .in_mem_mut()
             .begin_block(BlockHeight(12))
             .expect("begin_block failed");
 
-        let nonce = nonce + 1;
-        let root_proof =
-            BridgePoolRootProof::new((KeccakHash::default(), nonce));
-        let bytes = encode(&root_proof);
-        state.db_write(&signed_root_key, bytes).unwrap();
         state.in_mem_mut().block.epoch = state.in_mem().block.epoch.next();
         state
             .in_mem_mut()
@@ -771,9 +742,6 @@ mod tests {
         let result = state.get_merkle_tree(6.into(), Some(StoreType::Ibc));
         assert!(result.is_ok(), "The ibc tree should be restored");
         // bridge pool tree should be pruned because of the nonce
-        let result =
-            state.get_merkle_tree(6.into(), Some(StoreType::BridgePool));
-        assert!(result.is_err(), "The bridge pool tree should be pruned");
 
         let result = state.get_merkle_tree(10.into(), Some(StoreType::NoDiff));
         assert!(result.is_err(), "The tree at Height 10 should be pruned");

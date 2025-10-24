@@ -7,7 +7,7 @@ use namada_vp::VpEnv;
 use namada_vp::native_vp::{self, CtxPostStorageRead, CtxPreStorageRead};
 
 use crate::state::StateRead;
-use crate::{eth_bridge, governance, ibc, parameters, proof_of_stake, token};
+use crate::{governance, ibc, parameters, proof_of_stake, token};
 
 /// Native VP context
 pub type NativeVpCtx<'a, S, CA> =
@@ -85,18 +85,6 @@ pub type MaspVp<'ctx, CTX> = token::vp::MaspVp<
     token::Store<<CTX as VpEnv<'ctx>>::Pre>,
     token::Transfer,
 >;
-
-/// Native ETH bridge VP
-pub type EthBridgeVp<'ctx, CTX> =
-    eth_bridge::vp::EthBridge<'ctx, CTX, TokenKeys>;
-
-/// Native ETH bridge pool VP
-pub type EthBridgePoolVp<'ctx, CTX> =
-    eth_bridge::vp::BridgePool<'ctx, CTX, TokenKeys>;
-
-/// Native ETH bridge NUT VP
-pub type EthBridgeNutVp<'ctx, CTX> =
-    eth_bridge::vp::NonUsableTokens<'ctx, CTX, TokenKeys>;
 
 /// Governance store implementation over the native prior context
 pub type GovPreStore<'a, S, CA> =

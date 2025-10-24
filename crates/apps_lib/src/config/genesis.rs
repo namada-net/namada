@@ -17,7 +17,6 @@ use namada_migrations::*;
 use namada_sdk::address::{Address, EstablishedAddress};
 use namada_sdk::borsh::{BorshDeserialize, BorshSerialize};
 use namada_sdk::collections::HashMap;
-use namada_sdk::eth_bridge::EthereumBridgeParams;
 use namada_sdk::governance::parameters::GovernanceParameters;
 use namada_sdk::governance::pgf::parameters::PgfParameters;
 use namada_sdk::key::*;
@@ -261,8 +260,6 @@ pub struct Genesis {
     pub pos_params: OwnedPosParams,
     pub gov_params: GovernanceParameters,
     pub pgf_params: PgfParameters,
-    // Ethereum bridge config
-    pub ethereum_bridge_params: Option<EthereumBridgeParams>,
 }
 
 impl Genesis {
@@ -420,8 +417,7 @@ pub struct Parameters {
 /// Modify the default genesis file (namada/genesis/localnet/) to
 /// accommodate testing.
 ///
-/// This includes adding the Ethereum bridge parameters and
-/// adding a specified number of validators.
+/// This includes adding a specified number of validators.
 #[allow(clippy::arithmetic_side_effects)]
 #[cfg(any(test, feature = "benches", feature = "testing"))]
 pub fn make_dev_genesis(
@@ -431,10 +427,7 @@ pub fn make_dev_genesis(
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::Duration;
 
-    use namada_sdk::address::testing::wnam;
     use namada_sdk::chain::ChainIdPrefix;
-    use namada_sdk::eth_bridge::{Contracts, UpgradeableContract};
-    use namada_sdk::ethereum_events::EthAddress;
     use namada_sdk::key::*;
     use namada_sdk::proof_of_stake::types::ValidatorMetaData;
     use namada_sdk::tx::standalone_signature;
@@ -463,20 +456,6 @@ pub fn make_dev_genesis(
         DateTimeUtc::now(),
         Duration::from_secs(30).into(),
     );
-
-    // Add Ethereum bridge params.
-    genesis.parameters.eth_bridge_params = Some(templates::EthBridgeParams {
-        eth_start_height: Default::default(),
-        min_confirmations: Default::default(),
-        contracts: Contracts {
-            native_erc20: wnam(),
-            bridge: UpgradeableContract {
-                address: EthAddress([0; 20]),
-                version: Default::default(),
-            },
-        },
-        erc20_whitelist: vec![],
-    });
 
     // Use the default token address for matching tokens
     let default_tokens: HashMap<Alias, Address> = defaults::tokens()

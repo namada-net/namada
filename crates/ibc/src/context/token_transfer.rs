@@ -279,13 +279,6 @@ where
 
         self.add_withdraw(&ibc_token, amount)?;
 
-        // A transfer of NUT tokens must be verified by their VP
-        if ibc_token.is_internal()
-            && matches!(ibc_token, Address::Internal(InternalAddress::Nut(_)))
-        {
-            self.insert_verifier(&ibc_token);
-        }
-
         let from_account = if self.is_shielded {
             &MASP
         } else {
@@ -331,13 +324,6 @@ where
         self.update_mint_amount(&ibc_token, amount, true)?;
         self.add_deposit(&ibc_token, amount)?;
 
-        // A transfer of NUT tokens must be verified by their VP
-        if ibc_token.is_internal()
-            && matches!(ibc_token, Address::Internal(InternalAddress::Nut(_)))
-        {
-            self.insert_verifier(&ibc_token);
-        }
-
         // Store the IBC denom with the token hash to be able to retrieve it
         // later
         self.maybe_store_ibc_denom(account, coin)?;
@@ -358,13 +344,6 @@ where
 
         self.update_mint_amount(&ibc_token, amount, false)?;
         self.add_withdraw(&ibc_token, amount)?;
-
-        // A transfer of NUT tokens must be verified by their VP
-        if ibc_token.is_internal()
-            && matches!(ibc_token, Address::Internal(InternalAddress::Nut(_)))
-        {
-            self.insert_verifier(&ibc_token);
-        }
 
         let account = if self.is_shielded { &MASP } else { account };
 

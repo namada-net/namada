@@ -59,10 +59,8 @@ pub mod types {
 /// already filled in.
 pub fn new_tx_event(tx: &Tx, height: u64) -> Event {
     let base_event = match tx.header().tx_type {
-        TxType::Wrapper(_) | TxType::Protocol(_) => {
-            Event::new(types::APPLIED, EventLevel::Tx)
-                .with(TxHash(tx.header_hash()))
-        }
+        TxType::Wrapper(_) => Event::new(types::APPLIED, EventLevel::Tx)
+            .with(TxHash(tx.header_hash())),
         _ => unreachable!(),
     };
     let comet_tx_hash = tx.comet_tx_hash();

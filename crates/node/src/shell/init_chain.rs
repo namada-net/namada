@@ -7,15 +7,14 @@ use masp_primitives::sapling::Node;
 use masp_proofs::bls12_381;
 use namada_sdk::account::protocol_pk_key;
 use namada_sdk::collections::HashMap;
-use namada_sdk::eth_bridge::EthBridgeStatus;
 use namada_sdk::hash::Hash as CodeHash;
+use namada_sdk::ibc;
 use namada_sdk::parameters::Parameters;
 use namada_sdk::proof_of_stake::{self, BecomeValidator, PosParams};
 use namada_sdk::state::StorageWrite;
 use namada_sdk::time::{TimeZone, Utc};
 use namada_sdk::token::storage_key::masp_token_map_key;
 use namada_sdk::token::{credit_tokens, write_denom};
-use namada_sdk::{eth_bridge, ibc};
 use namada_vm::validate_untrusted_wasm;
 
 use super::*;
@@ -81,7 +80,6 @@ where
     /// 2. Setting up the validity predicates for both users and tokens
     /// 3. Validators
     /// 4. The PoS system
-    /// 5. The Ethereum bridge parameters
     ///
     /// INVARIANT: This method must not commit the state changes to DB.
     pub fn init_chain(
@@ -225,20 +223,6 @@ where
         // Initialize governance parameters
         let gov_params = genesis.get_gov_params();
         gov_params.init_storage(&mut self.state).unwrap();
-
-        // configure the Ethereum bridge if the configuration is set.
-        if let Some(config) = genesis.get_eth_bridge_params() {
-            tracing::debug!("Initializing Ethereum bridge storage.");
-            config.init_storage(&mut self.state);
-            self.update_eth_oracle(&Default::default());
-        } else {
-            self.state
-                .write(
-                    &eth_bridge::storage::active_key(),
-                    EthBridgeStatus::Disabled,
-                )
-                .unwrap();
-        }
 
         // Initialize IBC parameters
         let ibc_params = genesis.get_ibc_params();
@@ -989,7 +973,7 @@ mod test {
     /// DB.
     #[test]
     fn test_init_chain_doesnt_commit_db() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let (shell, _recv) = test_utils::setup();
 
         // Collect all storage key-vals into a sorted map
         let store_block_state = |shell: &TestShell| -> BTreeMap<_, _> {
@@ -1022,7 +1006,7 @@ mod test {
     /// * cannot be read from disk.
     #[test]
     fn test_dry_run_lookup_vp() {
-        let (mut shell, _x, _y, _z) = TestShell::new_at_height(0);
+        let (mut shell, _x) = TestShell::new_at_height(0);
         shell.wasm_dir = PathBuf::new();
         let mut genesis = genesis::make_dev_genesis(1, &shell.base_dir);
         let mut initializer = InitChainValidation::new(&mut shell, true);
@@ -1061,7 +1045,7 @@ mod test {
     /// * no vp_implicit wasm is stored
     #[test]
     fn test_dry_run_store_wasms() {
-        let (mut shell, _x, _y, _z) = TestShell::new_at_height(0);
+        let (mut shell, _x) = TestShell::new_at_height(0);
         let test_dir = tempfile::tempdir().unwrap();
         shell.wasm_dir = test_dir.path().into();
 
@@ -1129,7 +1113,7 @@ mod test {
     /// corresponding config is encountered.
     #[test]
     fn test_dry_run_init_token_balance() {
-        let (mut shell, _x, _y, _z) = TestShell::new_at_height(0);
+        let (mut shell, _x) = TestShell::new_at_height(0);
         shell.wasm_dir = PathBuf::new();
         let mut genesis = genesis::make_dev_genesis(1, &shell.base_dir);
         let mut initializer = InitChainValidation::new(&mut shell, true);
@@ -1154,7 +1138,7 @@ mod test {
     /// * bonding to a non-validator
     #[test]
     fn test_dry_run_genesis_bonds() {
-        let (mut shell, _x, _y, _z) = TestShell::new_at_height(0);
+        let (mut shell, _x) = TestShell::new_at_height(0);
         shell.wasm_dir = PathBuf::new();
         let mut genesis = genesis::make_dev_genesis(1, &shell.base_dir);
         let mut initializer = InitChainValidation::new(&mut shell, true);
@@ -1227,7 +1211,7 @@ mod test {
 
     #[test]
     fn test_dry_run_native_token_masp_params() {
-        let (mut shell, _x, _y, _z) = TestShell::new_at_height(0);
+        let (mut shell, _x) = TestShell::new_at_height(0);
         shell.wasm_dir = PathBuf::new();
         let mut genesis = genesis::make_dev_genesis(1, &shell.base_dir);
         let mut initializer = InitChainValidation::new(&mut shell, true);

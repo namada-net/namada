@@ -5818,47 +5818,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "namada_ethereum_bridge"
-version = "0.251.0"
-dependencies = [
- "assert_matches",
- "borsh",
- "data-encoding",
- "ethabi",
- "ethers",
- "eyre",
- "itertools 0.14.0",
- "konst",
- "linkme",
- "namada_account",
- "namada_core",
- "namada_events",
- "namada_gas",
- "namada_governance",
- "namada_macros",
- "namada_migrations",
- "namada_parameters",
- "namada_proof_of_stake",
- "namada_state",
- "namada_storage",
- "namada_systems",
- "namada_token",
- "namada_trans_token",
- "namada_tx",
- "namada_vm",
- "namada_vote_ext",
- "namada_vp",
- "namada_vp_env",
- "proptest",
- "rand",
- "serde",
- "smooth-operator",
- "thiserror 2.0.12",
- "toml",
- "tracing",
-]
-
-[[package]]
 name = "namada_events"
 version = "0.251.0"
 dependencies = [
@@ -6022,19 +5981,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "namada_light_sdk"
-version = "0.251.0"
-dependencies = [
- "borsh",
- "namada_sdk",
- "prost 0.13.5",
- "serde_json",
- "tendermint-config",
- "tendermint-rpc",
- "tokio",
-]
-
-[[package]]
 name = "namada_macros"
 version = "0.251.0"
 dependencies = [
@@ -6108,7 +6054,6 @@ dependencies = [
  "namada_sdk",
  "namada_test_utils",
  "namada_vm",
- "namada_vote_ext",
  "namada_vp",
  "num-rational",
  "num-traits",
@@ -6228,7 +6173,6 @@ dependencies = [
  "nam-jubjub",
  "namada_account",
  "namada_core",
- "namada_ethereum_bridge",
  "namada_events",
  "namada_gas",
  "namada_governance",
@@ -6243,7 +6187,6 @@ dependencies = [
  "namada_token",
  "namada_tx",
  "namada_vm",
- "namada_vote_ext",
  "namada_vp",
  "namada_wallet",
  "num-traits",
@@ -6611,20 +6554,6 @@ name = "namada_vm_env"
 version = "0.251.0"
 dependencies = [
  "namada_core",
-]
-
-[[package]]
-name = "namada_vote_ext"
-version = "0.251.0"
-dependencies = [
- "borsh",
- "data-encoding",
- "linkme",
- "namada_core",
- "namada_macros",
- "namada_migrations",
- "namada_tx",
- "serde",
 ]
 
 [[package]]

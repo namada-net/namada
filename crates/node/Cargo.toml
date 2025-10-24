@@ -32,7 +32,6 @@ benches = [
 ]
 jemalloc = ["rocksdb/jemalloc"]
 migrations = ["namada_migrations", "namada_sdk/migrations", "linkme"]
-namada-eth-bridge = ["namada_sdk/namada-eth-bridge"]
 
 [dependencies]
 namada_apps_lib.workspace = true
@@ -43,7 +42,6 @@ namada_sdk = { workspace = true, default-features = true, features = [
 ] }
 namada_test_utils = { workspace = true, optional = true }
 namada_vm.workspace = true
-namada_vote_ext.workspace = true
 namada_vp.workspace = true
 
 arse-merkle-tree = { workspace = true, features = ["blake2b"] }

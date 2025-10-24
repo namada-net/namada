@@ -27,6 +27,7 @@ use namada_state::{Error, Result, StateRead};
 use namada_systems::trans_token::{self as token, Amount};
 use namada_systems::{governance, parameters, proof_of_stake, shielded_token};
 use namada_tx::BatchedTxRef;
+use namada_tx::event::MaspEvent;
 use namada_vp::VpEnv;
 use namada_vp::native_vp::{Ctx, CtxPreStorageRead, NativeVp, VpEvaluator};
 use thiserror::Error;
@@ -326,8 +327,21 @@ where
             .ctx
             .state
             .write_log()
+            // events originating from ibc nft/token transfers
             .get_events_of::<IbcEvent>()
             .cloned()
+            .chain(
+                self.ctx
+                    .state
+                    .write_log()
+                    // events originating from masp shielding transfers over ibc
+                    .get_events_of::<MaspEvent>()
+                    .filter(|masp_event| {
+                        masp_event
+                            .has_attribute::<namada_tx::event::ProtocolIbcShielding>()
+                    })
+                    .cloned(),
+            )
             .map(|mut event| {
                 // NB: these attributes are attached to wasm txs
                 // by the protocol.

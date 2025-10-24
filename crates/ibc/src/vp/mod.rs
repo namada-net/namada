@@ -25,7 +25,7 @@ use namada_gas::{IBC_ACTION_EXECUTE_GAS, IBC_ACTION_VALIDATE_GAS};
 use namada_state::write_log::StorageModification;
 use namada_state::{Error, Result, StateRead};
 use namada_systems::trans_token::{self as token, Amount};
-use namada_systems::{governance, parameters, proof_of_stake};
+use namada_systems::{governance, parameters, proof_of_stake, shielded_token};
 use namada_tx::BatchedTxRef;
 use namada_vp::VpEnv;
 use namada_vp::native_vp::{Ctx, CtxPreStorageRead, NativeVp, VpEvaluator};
@@ -84,6 +84,9 @@ pub struct Ibc<
     ParamsPseudo,
     Gov,
     Token,
+    TokenPseudo,
+    ShieldedToken,
+    ShieldedTokenPseudo,
     PoS,
     Transfer,
 > where
@@ -92,12 +95,16 @@ pub struct Ibc<
     /// Context to interact with the host structures.
     pub ctx: Ctx<'ctx, S, CA, EVAL>,
     /// Generic types for DI
+    #[allow(clippy::type_complexity)]
     pub _marker: PhantomData<(
         Params,
         ParamsPre,
         ParamsPseudo,
         Gov,
         Token,
+        TokenPseudo,
+        ShieldedToken,
+        ShieldedTokenPseudo,
         PoS,
         Transfer,
     )>,
@@ -114,6 +121,9 @@ impl<
     ParamsPseudo,
     Gov,
     Token,
+    TokenPseudo,
+    ShieldedToken,
+    ShieldedTokenPseudo,
     PoS,
     Transfer,
 > NativeVp<'view>
@@ -127,6 +137,9 @@ impl<
         ParamsPseudo,
         Gov,
         Token,
+        TokenPseudo,
+        ShieldedToken,
+        ShieldedTokenPseudo,
         PoS,
         Transfer,
     >
@@ -135,13 +148,22 @@ where
     EVAL: 'static + VpEvaluator<'ctx, S, CA, EVAL> + Debug,
     CA: 'static + Clone + Debug,
     Gov: governance::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>,
-    Params: parameters::Read<VpValidationContext<'view, 'ctx, S, CA, EVAL>>,
+    Params:
+        parameters::Read<VpValidationContext<'view, 'ctx, S, CA, EVAL>> + Debug,
     ParamsPre: parameters::Keys
-        + parameters::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>,
-    ParamsPseudo:
-        parameters::Read<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>,
+        + parameters::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    ParamsPseudo: parameters::Read<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
     Token: token::Keys
+        + token::Write<VpValidationContext<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    TokenPseudo: token::Keys
         + token::Write<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    ShieldedToken: shielded_token::Write<VpValidationContext<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    ShieldedTokenPseudo: shielded_token::Write<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
         + Debug,
     PoS: proof_of_stake::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>,
     Transfer: BorshDeserialize,
@@ -196,6 +218,9 @@ impl<
     ParamsPseudo,
     Gov,
     Token,
+    TokenPseudo,
+    ShieldedToken,
+    ShieldedTokenPseudo,
     PoS,
     Transfer,
 >
@@ -209,6 +234,9 @@ impl<
         ParamsPseudo,
         Gov,
         Token,
+        TokenPseudo,
+        ShieldedToken,
+        ShieldedTokenPseudo,
         PoS,
         Transfer,
     >
@@ -216,13 +244,22 @@ where
     S: 'static + StateRead,
     EVAL: 'static + VpEvaluator<'ctx, S, CA, EVAL> + Debug,
     CA: 'static + Clone + Debug,
-    Params: parameters::Read<VpValidationContext<'view, 'ctx, S, CA, EVAL>>,
+    Params:
+        parameters::Read<VpValidationContext<'view, 'ctx, S, CA, EVAL>> + Debug,
     ParamsPre: parameters::Keys
-        + parameters::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>,
-    ParamsPseudo:
-        parameters::Read<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>,
+        + parameters::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    ParamsPseudo: parameters::Read<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
     Token: token::Keys
+        + token::Write<VpValidationContext<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    TokenPseudo: token::Keys
         + token::Write<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    ShieldedToken: shielded_token::Write<VpValidationContext<'view, 'ctx, S, CA, EVAL>>
+        + Debug,
+    ShieldedTokenPseudo: shielded_token::Write<PseudoExecutionStorage<'view, 'ctx, S, CA, EVAL>>
         + Debug,
     PoS: proof_of_stake::Read<CtxPreStorageRead<'view, 'ctx, S, CA, EVAL>>,
     Transfer: BorshDeserialize,
@@ -241,7 +278,7 @@ where
         keys_changed: &BTreeSet<Key>,
     ) -> Result<()> {
         let exec_ctx =
-            PseudoExecutionContext::<'_, '_, S, CA, EVAL, Token>::new(
+            PseudoExecutionContext::<'_, '_, S, CA, EVAL, TokenPseudo>::new(
                 self.ctx.pre(),
             );
         let ctx = Rc::new(RefCell::new(exec_ctx));
@@ -249,16 +286,20 @@ where
         // needed in actual txs to addresses whose VPs should be triggered
         let verifiers = Rc::new(RefCell::new(BTreeSet::<Address>::new()));
 
-        let mut actions = IbcActions::<_, ParamsPseudo, Token>::new(
-            ctx.clone(),
-            verifiers.clone(),
-        );
-        let module = create_transfer_middlewares::<_, ParamsPseudo>(
-            ctx.clone(),
-            verifiers,
-        );
+        let mut actions = IbcActions::<
+            _,
+            ParamsPseudo,
+            TokenPseudo,
+            ShieldedTokenPseudo,
+        >::new(ctx.clone(), verifiers.clone());
+        let module = create_transfer_middlewares::<
+            _,
+            ParamsPseudo,
+            TokenPseudo,
+            ShieldedTokenPseudo,
+        >(ctx.clone(), verifiers);
         actions.add_transfer_module(module);
-        let module = NftTransferModule::<_, Token>::new(ctx.clone());
+        let module = NftTransferModule::<_, TokenPseudo>::new(ctx.clone());
         actions.add_transfer_module(module);
         // Charge gas for the expensive execution
         self.ctx.charge_gas(IBC_ACTION_EXECUTE_GAS.into())?;
@@ -316,12 +357,17 @@ where
         // needed in actual txs to addresses whose VPs should be triggered
         let verifiers = Rc::new(RefCell::new(BTreeSet::<Address>::new()));
 
-        let mut actions =
-            IbcActions::<_, Params, Token>::new(ctx.clone(), verifiers.clone());
+        let mut actions = IbcActions::<_, Params, Token, ShieldedToken>::new(
+            ctx.clone(),
+            verifiers.clone(),
+        );
         actions.set_validation_params(self.validation_params()?);
 
         let module =
-            create_transfer_middlewares::<_, Params>(ctx.clone(), verifiers);
+            create_transfer_middlewares::<_, Params, Token, ShieldedToken>(
+                ctx.clone(),
+                verifiers,
+            );
         actions.add_transfer_module(module);
         let module = NftTransferModule::<_, Token>::new(ctx);
         actions.add_transfer_module(module);
@@ -423,7 +469,7 @@ where
         let tokens: BTreeSet<&Address> = keys_changed
             .iter()
             .filter_map(|k| {
-                Token::is_any_token_balance_key(k).map(|[key, _]| key)
+                TokenPseudo::is_any_token_balance_key(k).map(|[key, _]| key)
             })
             .collect();
         for token in tokens {
@@ -528,7 +574,6 @@ mod tests {
     use namada_core::chain::testing::get_dummy_header;
     use namada_core::chain::{BlockHeight, Epoch};
     use namada_core::key::testing::keypair_1;
-    use namada_core::storage::TxIndex;
     use namada_core::tendermint::time::Time as TmTime;
     use namada_core::time::DurationSecs;
     use namada_gas::{GasMeterKind, TxGasMeter, VpGasMeter};
@@ -541,7 +586,7 @@ mod tests {
     use namada_token::Transfer;
     use namada_token::storage_key::balance_key;
     use namada_tx::data::TxType;
-    use namada_tx::{Authorization, Code, Data, Section, Tx};
+    use namada_tx::{Authorization, Code, Data, IndexedTx, Section, Tx};
     use namada_vm::wasm::VpCache;
     use namada_vm::wasm::run::VpEvalWasm;
     use namada_vm::{WasmCacheRwAccess, wasm};
@@ -657,6 +702,15 @@ mod tests {
             CtxPreStorageRead<'ctx, 'ctx, TestState, VpCache<CA>, Eval>,
         >,
         namada_token::Store<
+            VpValidationContext<'ctx, 'ctx, TestState, VpCache<CA>, Eval>,
+        >,
+        namada_token::Store<
+            PseudoExecutionStorage<'ctx, 'ctx, TestState, VpCache<CA>, Eval>,
+        >,
+        namada_token::ShieldedStore<
+            VpValidationContext<'ctx, 'ctx, TestState, VpCache<CA>, Eval>,
+        >,
+        namada_token::ShieldedStore<
             PseudoExecutionStorage<'ctx, 'ctx, TestState, VpCache<CA>, Eval>,
         >,
         namada_proof_of_stake::Store<
@@ -1066,7 +1120,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -1092,7 +1146,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1146,7 +1200,7 @@ mod tests {
             signer: "account0".to_string().into(),
         };
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -1169,7 +1223,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1273,7 +1327,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -1296,7 +1350,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1380,7 +1434,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -1406,7 +1460,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1478,7 +1532,7 @@ mod tests {
         keys_changed.insert(conn_counter_key);
         // No event
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -1501,7 +1555,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1601,7 +1655,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -1623,7 +1677,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1709,7 +1763,7 @@ mod tests {
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
         let tx_code = vec![];
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
         let mut outer_tx = Tx::from_type(TxType::Raw);
@@ -1734,7 +1788,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1805,7 +1859,7 @@ mod tests {
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
         let tx_code = vec![];
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
         let mut outer_tx = Tx::from_type(TxType::Raw);
@@ -1830,7 +1884,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1928,7 +1982,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -1954,7 +2008,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2051,7 +2105,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -2077,7 +2131,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2159,7 +2213,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -2185,7 +2239,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2265,7 +2319,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -2288,7 +2342,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2419,7 +2473,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(message_event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let tx_data = MsgTransfer::<Transfer> {
             message: msg,
@@ -2445,7 +2499,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2627,7 +2681,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -2650,7 +2704,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2783,7 +2837,7 @@ mod tests {
             },
         });
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -2806,7 +2860,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -2942,7 +2996,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -2965,7 +3019,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -3101,7 +3155,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -3124,7 +3178,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -3277,7 +3331,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let tx_data = MsgNftTransfer::<Transfer> {
             message: msg,
@@ -3303,7 +3357,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -3508,7 +3562,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let mut tx_data = vec![];
         msg.to_any().encode(&mut tx_data).expect("encoding failed");
@@ -3531,7 +3585,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -3666,7 +3720,7 @@ mod tests {
             .write_log_mut()
             .emit_event::<IbcEvent>(message_event.try_into().unwrap());
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let tx_code = vec![];
         let tx_data = MsgTransfer::<Transfer> {
             message: msg,
@@ -3692,7 +3746,7 @@ mod tests {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,

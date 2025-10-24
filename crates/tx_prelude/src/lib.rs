@@ -36,6 +36,7 @@ pub use namada_core::chain::{
 pub use namada_core::ethereum_events::EthAddress;
 use namada_core::internal::HostEnvResult;
 use namada_core::key::common;
+use namada_core::masp_primitives::asset_type::AssetType;
 use namada_core::storage::TxIndex;
 pub use namada_core::{address, encode, eth_bridge_pool, storage, *};
 pub use namada_events::extend::Log;
@@ -50,7 +51,9 @@ pub use namada_state::{
     collections, iter_prefix, iter_prefix_bytes,
 };
 use namada_token::MaspTransaction;
-pub use namada_tx::{BatchedTx, Section, Tx, action, data as transaction};
+pub use namada_tx::{
+    BatchedTx, IndexedTx, Section, Tx, action, data as transaction,
+};
 pub use namada_tx_env::TxEnv;
 use namada_vm_env::tx::*;
 use namada_vm_env::{read_from_buffer, read_key_val_bytes_from_buffer};
@@ -160,6 +163,17 @@ impl StorageRead for Ctx {
         Ok(HostEnvResult::is_success(found))
     }
 
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        let asset_type = asset_type.serialize_to_vec();
+        let found = unsafe {
+            namada_tx_has_conversion(
+                asset_type.as_ptr() as _,
+                asset_type.len() as _,
+            )
+        };
+        Ok(HostEnvResult::is_success(found))
+    }
+
     fn get_chain_id(&self) -> Result<ChainId> {
         let result = Vec::with_capacity(CHAIN_ID_LENGTH);
         unsafe {
@@ -240,9 +254,19 @@ impl StorageRead for Ctx {
         ))
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex> {
-        let tx_index = unsafe { namada_tx_get_tx_index() };
-        Ok(TxIndex(tx_index))
+    fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)> {
+        // NOTE: the conversion to i64 is infallible
+        let read_result = unsafe { namada_tx_get_tx_index() } as i64;
+        let bytes = read_from_buffer(read_result, namada_tx_result_buffer)
+            .ok_or(Error::SimpleMessage(
+                "Missing result from `namada_tx_get_tx_index` call",
+            ))?;
+        let IndexedTx {
+            block_height,
+            block_index,
+            batch_index,
+        } = namada_core::decode(bytes).expect("Cannot decode tx index");
+        Ok((block_height, block_index, batch_index))
     }
 }
 

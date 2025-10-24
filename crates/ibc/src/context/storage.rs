@@ -3,9 +3,8 @@
 pub use ics23::ProofSpec;
 use namada_core::address::Address;
 use namada_core::token::Amount;
+use namada_events::Event;
 use namada_state::{Result, StorageRead, StorageWrite};
-
-use crate::event::IbcEvent;
 
 /// IBC context trait to be implemented in integration that can read and write
 pub trait IbcStorageContext {
@@ -18,8 +17,8 @@ pub trait IbcStorageContext {
     /// Read/write storage access
     fn storage_mut(&mut self) -> &mut Self::Storage;
 
-    /// Emit an IBC event
-    fn emit_ibc_event(&mut self, event: IbcEvent) -> Result<()>;
+    /// Emit an event
+    fn emit_event(&mut self, event: Event) -> Result<()>;
 
     /// Transfer token
     fn transfer_token(

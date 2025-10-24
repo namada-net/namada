@@ -270,6 +270,19 @@ macro_rules! impl_storage_read {
                 }
             }
 
+            fn has_conversion(
+                &self,
+                asset_type: &namada_storage::conversion_state::AssetType,
+            ) -> namada_storage::Result<bool> {
+                Ok(
+                    self
+                    .in_mem()
+                    .conversion_state
+                    .assets
+                    .contains_key(asset_type),
+                )
+            }
+
             fn iter_prefix<'iter>(
                 &'iter self,
                 prefix: &storage::Key,
@@ -334,11 +347,23 @@ macro_rules! impl_storage_read {
 
             fn get_tx_index(
                 &self,
-            ) -> std::result::Result<storage::TxIndex, namada_storage::Error> {
+            ) -> std::result::Result<
+                (BlockHeight, storage::TxIndex, Option<u32>),
+                namada_storage::Error,
+            > {
                 self.charge_gas(
                     namada_gas::STORAGE_ACCESS_GAS_PER_BYTE.into(),
                 ).into_storage_result()?;
-                Ok(self.in_mem().tx_index)
+                let namada_tx::IndexedTx {
+                    block_height,
+                    block_index,
+                    batch_index,
+                } = self.in_mem().indexed_tx;
+                Ok((
+                    block_height,
+                    block_index,
+                    batch_index,
+                ))
             }
 
             fn get_native_token(&self) -> namada_storage::Result<Address> {
@@ -642,7 +667,7 @@ pub mod testing {
                     "Test address generator seed",
                 ),
                 update_epoch_blocks_delay: None,
-                tx_index: TxIndex::default(),
+                indexed_tx: namada_tx::IndexedTx::default(),
                 conversion_state: ConversionState::default(),
                 expired_txs_queue: ExpiredTxsQueue::default(),
                 native_token: address::testing::nam(),

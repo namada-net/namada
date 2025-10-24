@@ -90,6 +90,9 @@ fn extract_masp_tx(
                 ))
             }
         }
+        MaspTxRef::Unencrypted(_notes) => {
+            todo!()
+        }
     }
 }
 

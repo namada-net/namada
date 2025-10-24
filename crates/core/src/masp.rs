@@ -2,12 +2,14 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Display;
+use std::io::{Read, Write};
 use std::num::ParseIntError;
 use std::str::FromStr;
 
 use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
+use data_encoding::HEXUPPER;
 use masp_primitives::asset_type::AssetType;
-use masp_primitives::sapling::ViewingKey;
+use masp_primitives::sapling::{Diversifier, Note, ViewingKey};
 use masp_primitives::transaction::TransparentAddress;
 pub use masp_primitives::transaction::{
     Transaction as MaspTransaction, TxId as TxIdInner,
@@ -554,6 +556,39 @@ impl PaymentAddress {
         // hex of the first 40 chars of the hash
         format!("{:.width$X}", hasher.finalize(), width = HASH_HEX_LEN)
     }
+
+    /// Encode a payment address in compatibility mode (i.e. with the legacy
+    /// Bech32 encoding)
+    pub fn encode_compat(&self) -> String {
+        use crate::string_encoding::Format;
+
+        bech32::encode::<bech32::Bech32>(Self::HRP, self.to_bytes().as_ref())
+            .unwrap_or_else(|_| {
+                panic!(
+                    "The human-readable part {} should never cause a failure",
+                    Self::HRP
+                )
+            })
+    }
+
+    /// Create a note owned by this payment address
+    ///
+    /// ## Caution
+    ///
+    /// The value of `rseed` must be unique between each note appended
+    /// to the commitment tree, in order to avoid nullifier collisions,
+    /// when generating notes deterministically.
+    pub fn create_note(
+        &self,
+        asset_type: AssetType,
+        value: u64,
+        rseed: [u8; 32],
+    ) -> Option<masp_primitives::sapling::Note> {
+        use masp_primitives::sapling::Rseed;
+
+        self.0
+            .create_note(asset_type, value, Rseed::AfterZip212(rseed))
+    }
 }
 
 impl From<PaymentAddress> for masp_primitives::sapling::PaymentAddress {
@@ -950,6 +985,138 @@ impl FromStr for MaspValue {
             .or_else(|_err| {
                 ExtendedViewingKey::from_str(s).map(Self::FullViewingKey)
             })
+    }
+}
+
+/// Compact representation of a [`Note`].
+#[derive(Debug, Clone, Copy)]
+#[allow(missing_docs)]
+pub struct CompactNote {
+    pub asset_type: AssetType,
+    pub value: u64,
+    pub diversifier: Diversifier,
+    pub pk_d: masp_primitives::jubjub::SubgroupPoint,
+    pub rseed: masp_primitives::sapling::Rseed,
+}
+
+impl BorshSerialize for CompactNote {
+    fn serialize<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        use group::GroupEncoding;
+
+        BorshSerialize::serialize(&self.asset_type, writer)?;
+        BorshSerialize::serialize(&self.value, writer)?;
+        BorshSerialize::serialize(&self.diversifier, writer)?;
+        BorshSerialize::serialize(&self.pk_d.to_bytes(), writer)?;
+        BorshSerialize::serialize(&self.rseed, writer)
+    }
+}
+
+impl BorshDeserialize for CompactNote {
+    fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
+        use group::GroupEncoding;
+
+        let asset_type =
+            <AssetType as BorshDeserialize>::deserialize_reader(reader)?;
+        let value = <u64 as BorshDeserialize>::deserialize_reader(reader)?;
+        let diversifier =
+            <Diversifier as BorshDeserialize>::deserialize_reader(reader)?;
+        let pk_d = masp_primitives::jubjub::SubgroupPoint::from_bytes(
+            &<[u8; 32] as BorshDeserialize>::deserialize_reader(reader)?,
+        )
+        .into_option()
+        .ok_or_else(|| std::io::Error::other("Invalid pk_d in CompactNote"))?;
+        let rseed = <masp_primitives::sapling::Rseed as BorshDeserialize>::deserialize_reader(reader)?;
+
+        Ok(Self {
+            asset_type,
+            value,
+            diversifier,
+            pk_d,
+            rseed,
+        })
+    }
+}
+
+impl serde::Serialize for CompactNote {
+    fn serialize<S>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let encoded = HEXUPPER.encode(&self.serialize_to_vec());
+        serde::Serialize::serialize(&encoded, serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for CompactNote {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let encoded: String = serde::Deserialize::deserialize(deserializer)?;
+
+        let borsh_bytes =
+            HEXUPPER.decode(encoded.as_bytes()).map_err(Error::custom)?;
+
+        <Self as BorshDeserialize>::try_from_slice(&borsh_bytes)
+            .map_err(Error::custom)
+    }
+}
+
+impl CompactNote {
+    /// Create a compact version of a [`Note`].
+    pub fn new(
+        note: Note,
+        pa: masp_primitives::sapling::PaymentAddress,
+    ) -> Option<Self> {
+        let g_d = pa.g_d()?;
+        let pk_d = *pa.pk_d();
+
+        if g_d != note.g_d || pk_d != note.pk_d {
+            return None;
+        }
+
+        let diversifier = *pa.diversifier();
+        let Note {
+            asset_type,
+            value,
+            pk_d,
+            rseed,
+            ..
+        } = note;
+
+        Some(Self {
+            asset_type,
+            value,
+            diversifier,
+            pk_d,
+            rseed,
+        })
+    }
+
+    /// Convert this [`CompactNote`] back into a [`Note`].
+    pub fn into_note(self) -> Option<Note> {
+        let g_d = self.diversifier.g_d()?;
+
+        let Self {
+            asset_type,
+            value,
+            pk_d,
+            rseed,
+            ..
+        } = self;
+
+        Some(Note {
+            asset_type,
+            value,
+            g_d,
+            pk_d,
+            rseed,
+        })
     }
 }
 

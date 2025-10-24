@@ -222,3 +222,38 @@ impl EventAttributeEntry<'static> for IndexedTx {
         self
     }
 }
+
+/// Marker event attribute used to signal a MASP note
+/// was created by the protocol via IBC.
+#[derive(Debug)]
+pub struct ProtocolIbcShielding;
+
+impl Display for ProtocolIbcShielding {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Ok(())
+    }
+}
+
+impl FromStr for ProtocolIbcShielding {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if !s.is_empty() {
+            return Err(
+                "ProtocolIbcShielding is just a marker, no value expected"
+            );
+        }
+        Ok(Self)
+    }
+}
+
+impl EventAttributeEntry<'static> for ProtocolIbcShielding {
+    type Value = Self;
+    type ValueOwned = Self;
+
+    const KEY: &'static str = "protocol-ibc-shielding";
+
+    fn into_value(self) -> Self::Value {
+        self
+    }
+}

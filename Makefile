@@ -335,6 +335,12 @@ build-wasm-scripts:
 	make opt-wasm
 	make checksum-wasm
 
+build-wasm-scripts-with-unwind:
+	rm $(wasms)/*.wasm || true
+	make -C $(wasms) release-unwind
+	make opt-wasm
+	make checksum-wasm
+
 # Debug build the validity predicate and transactions wasm
 debug-wasm-scripts:
 	rm wasm/*.wasm || true
@@ -346,6 +352,11 @@ debug-wasm-scripts:
 build-wasm-tests-scripts:
 	rm $(wasms_for_tests)/*.wasm || true
 	make -C $(wasms_for_tests)
+	make opt-wasm-tests
+
+build-wasm-tests-scripts-with-unwind:
+	rm $(wasms_for_tests)/*.wasm || true
+	make -C $(wasms_for_tests) release-unwind
 	make opt-wasm-tests
 
 # Debug build the validity predicate and transactions wasm for tests

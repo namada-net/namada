@@ -282,12 +282,6 @@ where
     /// Commit the current block's write log to the storage and commit the block
     /// to DB. Starts a new block write log.
     pub fn commit_block(&mut self) -> Result<()> {
-        if self.in_mem.last_epoch != self.in_mem.block.epoch {
-            self.in_mem_mut()
-                .update_epoch_in_merkle_tree()
-                .into_storage_result()?;
-        }
-
         let mut batch = D::batch();
         self.commit_write_log_block(&mut batch)
             .into_storage_result()?;
@@ -295,6 +289,20 @@ where
 
         // Clear the tx gas map
         self.in_mem.commit_only_data.tx_gas = Default::default();
+
+        Ok(())
+    }
+
+    /// Pre-commit the current block's write log to the pre-commit merkle tree.
+    pub fn pre_commit_block(&mut self) -> Result<()> {
+        if self.in_mem.last_epoch != self.in_mem.block.epoch {
+            self.in_mem_mut()
+                .update_epoch_in_merkle_tree()
+                .into_storage_result()?;
+        }
+
+        self.pre_commit_write_log_block().into_storage_result()?;
+        self.commit_only_data()?;
 
         Ok(())
     }
@@ -352,6 +360,63 @@ where
         Ok(())
     }
 
+    /// Pre-commit the current block's write log to the pre-commit merkle tree
+    pub fn pre_commit_write_log_block(&mut self) -> Result<()> {
+        let block_height = self.in_mem.block.height;
+        for (key, entry) in self.0.write_log.block_write_log.iter() {
+            let persist_diffs = (self.diff_key_filter)(key);
+            match entry {
+                StorageModification::Write { value } => {
+                    Self::pre_commit_write_subspace_val(
+                        &mut self.0.in_mem.block.tree,
+                        block_height,
+                        key,
+                        value,
+                        persist_diffs,
+                    )?;
+                }
+                StorageModification::Delete => {
+                    Self::pre_commit_delete_subspace_val(
+                        &mut self.0.in_mem.block.tree,
+                        key,
+                        persist_diffs,
+                    )?;
+                }
+                StorageModification::InitAccount { vp_code_hash } => {
+                    Self::pre_commit_write_subspace_val(
+                        &mut self.0.in_mem.block.tree,
+                        block_height,
+                        key,
+                        vp_code_hash,
+                        persist_diffs,
+                    )?;
+                }
+            }
+        }
+
+        let replay_prot_key = replay_protection::commitment_key();
+        let commitment: Hash = self
+            .read(&replay_prot_key)
+            .expect("Could not read db")
+            .unwrap_or_default();
+        let new_commitment = self
+            .0
+            .write_log
+            .replay_protection
+            .iter()
+            .fold(commitment, |acc, hash| acc.concat(hash));
+        let persist_diffs = (self.diff_key_filter)(&replay_prot_key);
+        Self::pre_commit_write_subspace_val(
+            &mut self.0.in_mem.block.tree,
+            self.0.in_mem.block.height,
+            &replay_prot_key,
+            new_commitment,
+            persist_diffs,
+        )?;
+
+        Ok(())
+    }
+
     /// Start write batch.
     pub fn batch() -> D::WriteBatch {
         D::batch()
@@ -373,22 +438,6 @@ where
     ) -> Result<i64> {
         let value = value.as_ref();
         let persist_diffs = (self.diff_key_filter)(key);
-
-        if is_pending_transfer_key(key) {
-            // The tree of the bridge pool stores the current height for the
-            // pending transfer
-            let height = self.in_mem.block.height.serialize_to_vec();
-            self.in_mem.block.tree.update(key, height)?;
-        } else {
-            // Update the merkle tree
-            if !persist_diffs {
-                let prefix =
-                    Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
-                self.in_mem.block.tree.update(&prefix.join(key), value)?;
-            } else {
-                self.in_mem.block.tree.update(key, value)?;
-            };
-        }
         Ok(self.db.batch_write_subspace_val(
             batch,
             self.in_mem.block.height,
@@ -407,19 +456,58 @@ where
         key: &Key,
     ) -> Result<i64> {
         let persist_diffs = (self.diff_key_filter)(key);
-        // Update the merkle tree
-        if !persist_diffs {
-            let prefix = Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
-            self.in_mem.block.tree.delete(&prefix.join(key))?;
-        } else {
-            self.in_mem.block.tree.delete(key)?;
-        }
         Ok(self.db.batch_delete_subspace_val(
             batch,
             self.in_mem.block.height,
             key,
             persist_diffs,
         )?)
+    }
+
+    /// Pre-commit write the value with the given height and account subspace
+    /// key to the pre-commit merkle tree.
+    pub fn pre_commit_write_subspace_val(
+        tree: &mut MerkleTree<H>,
+        block_height: BlockHeight,
+        key: &Key,
+        value: impl AsRef<[u8]>,
+        persist_diffs: bool,
+    ) -> Result<()> {
+        let value = value.as_ref();
+
+        if is_pending_transfer_key(key) {
+            // The tree of the bridge pool stores the current height for the
+            // pending transfer
+            let height = block_height.serialize_to_vec();
+            tree.update(key, height)?;
+        } else {
+            // Update the merkle tree
+            if !persist_diffs {
+                let prefix =
+                    Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
+                tree.update(&prefix.join(key), value)?;
+            } else {
+                tree.update(key, value)?;
+            };
+        }
+        Ok(())
+    }
+
+    /// Pre-commit delete the value with the given height and account subspace
+    /// key from the pre-commit merkle tree.
+    pub fn pre_commit_delete_subspace_val(
+        tree: &mut MerkleTree<H>,
+        key: &Key,
+        persist_diffs: bool,
+    ) -> Result<()> {
+        // Update the merkle tree
+        if !persist_diffs {
+            let prefix = Key::from(NO_DIFF_KEY_PREFIX.to_string().to_db_key());
+            tree.delete(&prefix.join(key))?;
+        } else {
+            tree.delete(key)?;
+        }
+        Ok(())
     }
 
     // Prune merkle tree stores. Use after updating self.block.height in the
@@ -663,8 +751,6 @@ where
                 });
             }
         }
-
-        self.commit_only_data()?;
 
         let state = BlockStateWrite {
             merkle_tree_stores: self.in_mem.block.tree.stores(),

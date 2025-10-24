@@ -77,11 +77,11 @@ mod test_bp_vote_extensions {
     use namada_sdk::state::StorageWrite;
     use namada_sdk::tendermint::abci::types::VoteInfo;
     use namada_sdk::tx::Signed;
-    use namada_sdk::{governance, token};
+    use namada_sdk::{governance, tendermint, token};
     use namada_vote_ext::bridge_pool_roots;
 
+    use crate::shell::FinalizeBlockRequest;
     use crate::shell::test_utils::*;
-    use crate::shims::abcipp_shim_types::shim::request::FinalizeBlock;
 
     /// Make Bertha a validator.
     fn add_validator(shell: &mut TestShell) {
@@ -150,8 +150,9 @@ mod test_bp_vote_extensions {
             sig_info:
                 crate::tendermint::abci::types::BlockSignatureInfo::LegacySigned,
         }];
-        let req = FinalizeBlock {
-            proposer_address: pkh1.to_vec(),
+        let req = FinalizeBlockRequest {
+            proposer_address: tendermint::account::Id::try_from(pkh1.to_vec())
+                .unwrap(),
             decided_last_commit: crate::tendermint::abci::types::CommitInfo {
                 round: 0u8.into(),
                 votes,

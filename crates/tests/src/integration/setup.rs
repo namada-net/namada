@@ -40,15 +40,27 @@ pub fn setup() -> Result<(MockNode, MockServicesController)> {
 
 /// Setup folders with genesis, configs, wasm, etc.
 pub fn initialize_genesis(
-    mut update_genesis: impl FnMut(
+    update_genesis: impl FnMut(
         templates::All<templates::Unvalidated>,
     ) -> templates::All<templates::Unvalidated>,
 ) -> Result<(MockNode, MockServicesController)> {
+    initialize_genesis_aux(update_genesis, None)
+}
+
+/// Setup folders with genesis, configs, wasm, etc. Allows to override
+/// `keep_temp` irrespective of the `ENV_VAR_KEEP_TEMP` env var.
+pub fn initialize_genesis_aux(
+    mut update_genesis: impl FnMut(
+        templates::All<templates::Unvalidated>,
+    ) -> templates::All<templates::Unvalidated>,
+    keep_temp: Option<bool>,
+) -> Result<(MockNode, MockServicesController)> {
     let working_dir = std::fs::canonicalize("../..").unwrap();
-    let keep_temp = match std::env::var(ENV_VAR_KEEP_TEMP) {
-        Ok(val) => !val.eq_ignore_ascii_case("false"),
-        _ => false,
-    };
+    let keep_temp =
+        keep_temp.unwrap_or_else(|| match std::env::var(ENV_VAR_KEEP_TEMP) {
+            Ok(val) => !val.eq_ignore_ascii_case("false"),
+            _ => false,
+        });
     let test_dir = TestDir::new();
     let template_dir = derive_template_dir(&working_dir);
 

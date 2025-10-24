@@ -1,23 +1,30 @@
 use std::collections::BTreeSet;
 use std::fs;
+use std::mem::ManuallyDrop;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 use assert_matches::assert_matches;
 use borsh::BorshDeserialize;
 use color_eyre::eyre::Result;
 use data_encoding::HEXLOWER;
+use namada_apps_lib::cli::args;
+use namada_apps_lib::config::{self, TendermintMode};
 use namada_apps_lib::wallet::defaults::{self, is_use_device};
 use namada_core::chain::Epoch;
 use namada_core::dec::Dec;
 use namada_core::hash::Hash;
 use namada_core::storage::{DbColFam, Key};
 use namada_core::token::NATIVE_MAX_DECIMAL_PLACES;
-use namada_node::shell::SnapshotSync;
 use namada_node::shell::testing::client::run;
-use namada_node::shell::testing::node::NodeResults;
-use namada_node::shell::testing::utils::{Bin, CapturedOutput};
+use namada_node::shell::testing::node::{
+    InnerMockNode, MockNode, MockServicesCfg, MockServicesPackage, NodeResults,
+    SalvageableTestDir, mock_services,
+};
+use namada_node::shell::testing::utils::{Bin, CapturedOutput, TestDir};
+use namada_node::shell::{Shell, SnapshotSync};
 use namada_node::storage::DbSnapshot;
 use namada_sdk::account::AccountPublicKeysMap;
 use namada_sdk::borsh::BorshSerializeExt;
@@ -32,12 +39,12 @@ use namada_test_utils::TestWasms;
 use test_log::test;
 
 use crate::e2e::ledger_tests::prepare_proposal_data;
-use crate::e2e::setup::apply_use_device;
 use crate::e2e::setup::constants::{
     ALBERT, ALBERT_KEY, APFEL, BERTHA, BERTHA_KEY, BTC, CHRISTEL, CHRISTEL_KEY,
     DAEWON, DOT, ESTER, ETH, GOVERNANCE_ADDRESS, KARTOFFEL, NAM, PGF_ADDRESS,
     SCHNITZEL,
 };
+use crate::e2e::setup::{ENV_VAR_KEEP_TEMP, apply_use_device};
 use crate::integration::helpers::{
     find_address, make_temp_account, prepare_steward_commission_update_data,
 };
@@ -3344,4 +3351,121 @@ pub fn find_files_with_ext(
     }
 
     Ok(result)
+}
+
+/// Test that when a node is restarted after FinalizeBlock but before Commit,
+/// the merkle tree is restarted correctly and matches the next FinalizeBlock
+/// attempt at the same height.
+#[test]
+fn test_merkle_tree_restore() -> Result<()> {
+    // NOTE: Force keep temp to avoid clearing the test dir on node restart
+    let keep_temp = true;
+    let (node, services) =
+        setup::initialize_genesis_aux(|genesis| genesis, Some(keep_temp))?;
+
+    // Submit some tx to have non-empty merkle tree
+    let tx_args = apply_use_device(vec![
+        "transparent-transfer",
+        "--source",
+        BERTHA,
+        "--target",
+        ALBERT,
+        "--token",
+        NAM,
+        "--amount",
+        "10.1",
+        "--signing-keys",
+        BERTHA_KEY,
+    ]);
+    let captured = CapturedOutput::of(|| run(&node, Bin::Client, tx_args));
+    assert_matches!(captured.result, Ok(_));
+    assert!(captured.contains(TX_APPLIED_SUCCESS));
+
+    // Attempt to finalize block without Commit
+    node.finalize_block(None);
+
+    let (height_fst, root_fst) = {
+        let shell = node.shell.lock().unwrap();
+        let block = &shell.state.in_mem().block;
+        (block.height, block.tree.root())
+    };
+
+    // Restart the node before Commit to reload its state
+    let (mut node, _services) = {
+        let chain_id = node.shell.lock().unwrap().chain_id.clone();
+        let test_dir = node.test_dir.test_dir.path().to_path_buf();
+
+        drop(node);
+        drop(services);
+
+        let services_cfg = MockServicesCfg {
+            auto_drive_services: false,
+            enable_eth_oracle: false,
+        };
+        let MockServicesPackage {
+            auto_drive_services,
+            services,
+            shell_handlers,
+            controller,
+        } = mock_services(services_cfg);
+
+        let global_args = args::Global {
+            is_pre_genesis: true,
+            chain_id: Some(chain_id.clone()),
+            base_dir: test_dir.clone(),
+            wasm_dir: Some(test_dir.join(chain_id.as_str()).join("wasm")),
+        };
+        let keep_temp = match std::env::var(ENV_VAR_KEEP_TEMP) {
+            Ok(val) => !val.eq_ignore_ascii_case("false"),
+            _ => false,
+        };
+
+        let node = MockNode(Arc::new(InnerMockNode {
+            shell: Mutex::new(Shell::new(
+                config::Ledger::new(
+                    global_args.base_dir,
+                    chain_id.clone(),
+                    TendermintMode::Validator,
+                ),
+                global_args.wasm_dir.expect(
+                    "Wasm path not provided to integration test setup.",
+                ),
+                shell_handlers.tx_broadcaster,
+                shell_handlers.eth_oracle_channels,
+                None,
+                None,
+                50 * 1024 * 1024, // 50 kiB
+                50 * 1024 * 1024, // 50 kiB
+            )),
+            test_dir: SalvageableTestDir {
+                keep_temp,
+                test_dir: ManuallyDrop::new(TestDir(test_dir)),
+            },
+            services,
+            tx_result_codes: Mutex::new(vec![]),
+            tx_results: Mutex::new(vec![]),
+            blocks: Mutex::new(HashMap::new()),
+            auto_drive_services,
+        }));
+        (node, controller)
+    };
+
+    // Finalize the same block again
+    node.finalize_block(None);
+
+    let (height_snd, root_snd) = {
+        let shell = node.shell.lock().unwrap();
+        let block = &shell.state.in_mem().block;
+        (block.height, block.tree.root())
+    };
+
+    // Check that the merkle tree root is the same as after the first
+    // `FinalizeBlock` block attempt
+    assert_eq!(height_fst, height_snd);
+    assert_eq!(root_fst, root_snd);
+
+    node.finalize_and_commit(None);
+    node.next_epoch();
+
+    Ok(())
 }

@@ -10,11 +10,13 @@ mod finalize_block;
 mod init_chain;
 pub use init_chain::InitChainValidation;
 use namada_apps_lib::config::NodeLocalConfig;
+use namada_sdk::state;
 use namada_sdk::state::StateRead;
 use namada_vm::wasm::run::check_tx_allowed;
 pub mod prepare_proposal;
 use namada_sdk::ibc;
-use namada_sdk::state::State;
+use namada_sdk::state::{DbError, ProcessProposalCachedResult, State};
+pub mod abci;
 pub mod process_proposal;
 pub(super) mod queries;
 mod snapshots;
@@ -31,9 +33,13 @@ use std::path::{Path, PathBuf};
 #[allow(unused_imports)]
 use std::rc::Rc;
 
+use abci::TxResult;
+pub use finalize_block::{
+    Request as FinalizeBlockRequest, Response as FinalizeBlockResponse,
+};
 use namada_apps_lib::wallet::{self, ValidatorData, ValidatorKeys};
 use namada_sdk::address::Address;
-use namada_sdk::borsh::{BorshDeserialize, BorshSerializeExt};
+use namada_sdk::borsh::BorshDeserialize;
 use namada_sdk::chain::{BlockHeight, ChainId};
 use namada_sdk::collections::HashMap;
 use namada_sdk::eth_bridge::protocol::validation::bridge_pool_roots::validate_bp_roots_vext;
@@ -75,29 +81,13 @@ use tokio::sync::mpsc::{Receiver, UnboundedSender};
 use super::ethereum_oracle::{self as oracle, last_processed_block};
 use crate::config::{self, TendermintMode, ValidatorLocalConfig, genesis};
 use crate::protocol::ShellParams;
-use crate::shims::abcipp_shim_types::shim;
-use crate::shims::abcipp_shim_types::shim::TakeSnapshot;
-use crate::shims::abcipp_shim_types::shim::response::TxResult;
+use crate::storage::DbSnapshot;
 use crate::tendermint::abci::{request, response};
 use crate::tendermint::{self, validator};
-use crate::tendermint_proto::crypto::public_key;
 use crate::{protocol, storage, tendermint_node};
 
 /// A cap on a number of tx sections
 pub const MAX_TX_SECTIONS_LEN: usize = 10_000;
-
-fn key_to_tendermint(
-    pk: &common::PublicKey,
-) -> std::result::Result<public_key::Sum, ParsePublicKeyError> {
-    match pk {
-        common::PublicKey::Ed25519(_) => ed25519::PublicKey::try_from_pk(pk)
-            .map(|pk| public_key::Sum::Ed25519(pk.serialize_to_vec())),
-        common::PublicKey::Secp256k1(_) => {
-            secp256k1::PublicKey::try_from_pk(pk)
-                .map(|pk| public_key::Sum::Secp256k1(pk.serialize_to_vec()))
-        }
-    }
-}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -136,6 +126,11 @@ pub enum Error {
     RejectedBlockProposal,
     #[error("Received an invalid block proposal")]
     InvalidBlockProposal,
+    #[error("Unexpected block height, expected: {expected}, got: {got}")]
+    UnexpectedBlockHeight {
+        expected: BlockHeight,
+        got: BlockHeight,
+    },
 }
 
 impl From<Error> for TxResult {
@@ -391,9 +386,12 @@ where
     /// When set, indicates after how many blocks a new snapshot
     /// will be taken (counting from the first block)
     pub blocks_between_snapshots: Option<NonZeroU64>,
+    snapshot_task: Option<std::thread::JoinHandle<Result<(), DbError>>>,
+    snapshots_to_keep: u64,
     /// Data for a node downloading and apply snapshots as part of
     /// the fast sync protocol.
     pub syncing: Option<SnapshotSync>,
+    pub finalized_merkle_tree: Option<BlockHeight>,
 }
 
 /// Storage key filter to store the diffs into the storage. Return `false` for
@@ -659,6 +657,8 @@ where
             }
         }
 
+        let snapshots_to_keep =
+            config.shell.snapshots_to_keep.map(|n| n.get()).unwrap_or(1);
         let mut shell = Self {
             chain_id,
             state,
@@ -682,7 +682,10 @@ where
             event_log: EventLog::default(),
             scheduled_migration,
             blocks_between_snapshots: config.shell.blocks_between_snapshots,
+            snapshot_task: None,
+            snapshots_to_keep,
             syncing: None,
+            finalized_merkle_tree: None,
         };
         shell.update_eth_oracle(&Default::default());
         shell
@@ -803,51 +806,39 @@ where
 
     /// Commit a block. Persist the application state and return the Merkle root
     /// hash.
-    pub fn commit(&mut self) -> shim::Response {
+    pub fn commit(&mut self) -> response::Commit {
+        let merkle_root_pre = self.state.in_mem().block.tree.root();
+
         self.bump_last_processed_eth_block();
         let height_to_commit = self.state.in_mem().block.height;
 
-        let migration = match self.scheduled_migration.as_ref() {
-            Some(migration) if height_to_commit == migration.height => Some(
-                self.scheduled_migration
-                    .take()
-                    .unwrap()
-                    .load_and_validate()
-                    .expect("The scheduled migration is not valid."),
-            ),
-            _ => None,
-        };
+        if let Some(migration) = self.scheduled_migration.as_ref() {
+            if height_to_commit == migration.height {
+                // Remove migration applied in FinalizeBlock
+                self.scheduled_migration.take().unwrap();
+            }
+        }
 
         self.state
             .commit_block()
             .expect("Encountered a storage error while committing a block");
 
-        if let Some(migration) = migration {
-            migrations::commit(&mut self.state, migration);
-            self.state
-                .update_last_block_merkle_tree()
-                .expect("Must update merkle tree after migration");
-        }
-
         let merkle_root = self.state.in_mem().merkle_root();
+        assert_eq!(merkle_root_pre, merkle_root);
 
         tracing::info!(
             "Committed block hash: {merkle_root}, height: {height_to_commit}",
         );
 
         self.broadcast_queued_txs();
-        let take_snapshot = self.check_snapshot_required();
 
-        shim::Response::Commit(
-            response::Commit {
-                // NB: by passing 0, we forbid CometBFT from deleting
-                // data pertaining to past blocks
-                retain_height: tendermint::block::Height::from(0_u32),
-                // NB: current application hash
-                data: merkle_root.0.to_vec().into(),
-            },
-            take_snapshot,
-        )
+        response::Commit {
+            // NB: by passing 0, we forbid CometBFT from deleting
+            // data pertaining to past blocks
+            retain_height: tendermint::block::Height::from(0_u32),
+            // NB: current application hash
+            data: merkle_root.0.to_vec().into(),
+        }
     }
 
     /// Check if we have reached a block height at which we should take a
@@ -1456,6 +1447,157 @@ where
     pub fn is_deciding_offset_within_epoch(&self, height_offset: u64) -> bool {
         self.state.is_deciding_offset_within_epoch(height_offset)
     }
+
+    // Retrieve the cached result of process proposal for the given block or
+    // compute it if missing
+    fn get_process_proposal_result(
+        &mut self,
+        request: request::FinalizeBlock,
+    ) -> ProcessProposalCachedResult {
+        match namada_sdk::hash::Hash::try_from(request.hash) {
+            Ok(block_hash) => {
+                match self
+                    .state
+                    .in_mem_mut()
+                    .block_proposals_cache
+                    .get(&block_hash)
+                {
+                    // We already have the result of process proposal for
+                    // this block cached in memory
+                    Some(res) => res.to_owned(),
+                    None => {
+                        // Need to run process proposal to extract the data we
+                        // need for finalize block (tx results)
+                        let process_req =
+                            abci::finalize_block_to_process_proposal(request);
+
+                        let (process_resp, res) =
+                            self.process_proposal(process_req.into());
+                        let result = if let response::ProcessProposal::Accept =
+                            process_resp
+                        {
+                            ProcessProposalCachedResult::Accepted(
+                                res.into_iter().map(|res| res.into()).collect(),
+                            )
+                        } else {
+                            ProcessProposalCachedResult::Rejected
+                        };
+
+                        // Cache the result
+                        self.state
+                            .in_mem_mut()
+                            .block_proposals_cache
+                            .put(block_hash.to_owned(), result.clone());
+
+                        result
+                    }
+                }
+            }
+            Err(_) => {
+                // Need to run process proposal to extract the data we need for
+                // finalize block (tx results)
+                let process_req =
+                    abci::finalize_block_to_process_proposal(request);
+
+                // Do not cache the result in this case since we
+                // don't have the hash of the block
+                let (process_resp, res) =
+                    self.process_proposal(process_req.into());
+                if let response::ProcessProposal::Accept = process_resp {
+                    ProcessProposalCachedResult::Accepted(
+                        res.into_iter().map(|res| res.into()).collect(),
+                    )
+                } else {
+                    ProcessProposalCachedResult::Rejected
+                }
+            }
+        }
+    }
+
+    fn update_snapshot_task(&mut self, take_snapshot: TakeSnapshot) {
+        let snapshot_taken =
+            self.snapshot_task.as_ref().map(|t| t.is_finished());
+        match snapshot_taken {
+            Some(true) => {
+                let task = self.snapshot_task.take().unwrap();
+                match task.join() {
+                    Ok(Err(e)) => tracing::error!(
+                        "Failed to create snapshot with error: {:?}",
+                        e
+                    ),
+                    Err(e) => tracing::error!(
+                        "Failed to join thread creating snapshot: {:?}",
+                        e
+                    ),
+                    _ => {}
+                }
+            }
+            Some(false) => {
+                // if a snapshot task is still running,
+                // we don't start a new one. This is not
+                // expected to happen if snapshots are spaced
+                // far enough apart.
+                tracing::warn!(
+                    "Previous snapshot task was still running when a new \
+                     snapshot was scheduled"
+                );
+                return;
+            }
+            _ => {}
+        }
+
+        let TakeSnapshot::Yes(db_path, height) = take_snapshot else {
+            return;
+        };
+        // Ensure that the DB is flushed before making a checkpoint
+        state::DB::flush(self.state.db(), true).unwrap();
+        let base_dir = self.base_dir.clone();
+
+        let (snap_send, snap_recv) = tokio::sync::oneshot::channel();
+
+        let snapshots_to_keep = self.snapshots_to_keep;
+        let snapshot_task = std::thread::spawn(move || {
+            let db = crate::storage::open(db_path, true, None)
+                .expect("Could not open DB");
+            let snapshot = db.checkpoint(base_dir.clone(), height)?;
+            // signal to main thread that the snapshot has finished
+            snap_send.send(()).unwrap();
+            DbSnapshot::cleanup(height, &base_dir, snapshots_to_keep)
+                .map_err(|e| DbError::DBError(e.to_string()))?;
+            snapshot
+                .package()
+                .map_err(|e| DbError::DBError(e.to_string()))
+        });
+
+        // it's important that the thread is
+        // blocked until the snapshot is created so that no writes
+        // happen to the db while snapshotting. We want the db frozen
+        // at this specific point in time.
+        if snap_recv.blocking_recv().is_err() {
+            tracing::error!("Failed to start snapshot task.")
+        } else {
+            self.snapshot_task.replace(snapshot_task);
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+/// Indicate whether a state snapshot should be created
+/// at a certain point in time
+pub enum TakeSnapshot {
+    No,
+    Yes(PathBuf, BlockHeight),
+}
+
+impl<T: AsRef<std::path::Path>> From<Option<(T, BlockHeight)>>
+    for TakeSnapshot
+{
+    fn from(value: Option<(T, BlockHeight)>) -> Self {
+        match value {
+            None => TakeSnapshot::No,
+            Some(p) => TakeSnapshot::Yes(p.0.as_ref().to_path_buf(), p.1),
+        }
+    }
 }
 
 /// Checks that neither the wrapper nor the inner transaction batch have already
@@ -1572,24 +1714,21 @@ pub mod test_utils {
     use data_encoding::HEXUPPER;
     use namada_sdk::ethereum_events::Uint;
     use namada_sdk::events::Event;
-    use namada_sdk::hash::Hash;
     use namada_sdk::keccak::KeccakHash;
     use namada_sdk::key::*;
     use namada_sdk::proof_of_stake::parameters::PosParams;
     use namada_sdk::proof_of_stake::storage::validator_consensus_key_handle;
     use namada_sdk::state::mockdb::MockDB;
     use namada_sdk::state::{LastBlock, StorageWrite};
-    use namada_sdk::storage::{BlockHeader, Epoch};
+    use namada_sdk::storage::Epoch;
     use namada_sdk::tendermint::abci::types::VoteInfo;
+    use namada_sdk::time::Duration;
     use tempfile::tempdir;
     use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
     use super::*;
     use crate::config::ethereum_bridge::ledger::ORACLE_CHANNEL_BUFFER_SIZE;
-    use crate::shims::abcipp_shim_types;
-    use crate::shims::abcipp_shim_types::shim::request::{
-        FinalizeBlock, ProcessedTx,
-    };
+    use crate::shell::abci::ProcessedTx;
     use crate::tendermint::abci::types::Misbehavior;
     use crate::tendermint_proto::abci::{
         RequestPrepareProposal, RequestProcessProposal,
@@ -1834,19 +1973,16 @@ pub mod test_utils {
         /// the events created for each transaction
         pub fn finalize_block(
             &mut self,
-            req: FinalizeBlock,
+            req: finalize_block::Request,
         ) -> ShellResult<Vec<Event>> {
-            match self.shell.finalize_block(req) {
-                Ok(resp) => Ok(resp.events),
-                Err(err) => Err(err),
-            }
+            self.shell.finalize_block(req).map(|resp| resp.events)
         }
 
         /// Forward a PrepareProposal request
         pub fn prepare_proposal(
             &self,
             mut req: RequestPrepareProposal,
-        ) -> abcipp_shim_types::shim::response::PrepareProposal {
+        ) -> response::PrepareProposal {
             req.proposer_address = HEXUPPER
                 .decode(
                     wallet::defaults::validator_keypair()
@@ -1864,26 +2000,29 @@ pub mod test_utils {
             self.state.in_mem_mut().next_epoch_min_start_height =
                 self.state.in_mem().get_last_block_height() + num_blocks;
             self.state.in_mem_mut().next_epoch_min_start_time = {
-                #[allow(clippy::disallowed_methods)]
-                DateTimeUtc::now()
+                ({
+                    #[allow(clippy::disallowed_methods)]
+                    DateTimeUtc::now()
+                }) - Duration::seconds(1)
             };
         }
 
         /// Simultaneously call the `FinalizeBlock` and
         /// `Commit` handlers.
-        pub fn finalize_and_commit(&mut self, req: Option<FinalizeBlock>) {
-            let mut req = req.unwrap_or_default();
-            req.header.time = {
-                #[allow(clippy::disallowed_methods)]
-                DateTimeUtc::now()
-            };
-
+        pub fn finalize_and_commit(
+            &mut self,
+            req: Option<finalize_block::Request>,
+        ) {
+            let req = req.unwrap_or_default();
             self.finalize_block(req).expect("Test failed");
             self.commit();
         }
 
         /// Immediately change to the next epoch.
-        pub fn start_new_epoch(&mut self, req: Option<FinalizeBlock>) -> Epoch {
+        pub fn start_new_epoch(
+            &mut self,
+            req: Option<finalize_block::Request>,
+        ) -> Epoch {
             self.start_new_epoch_in(1);
 
             let next_epoch_min_start_height =
@@ -2016,37 +2155,6 @@ pub mod test_utils {
         setup_with_cfg(SetupCfg::<u64>::default())
     }
 
-    /// This is just to be used in testing. It is not
-    /// a meaningful default.
-    impl Default for FinalizeBlock {
-        fn default() -> Self {
-            FinalizeBlock {
-                header: BlockHeader {
-                    hash: Hash([0; 32]),
-                    #[allow(clippy::disallowed_methods)]
-                    time: DateTimeUtc::now(),
-                    next_validators_hash: Hash([0; 32]),
-                },
-                block_hash: Hash([0; 32]),
-                byzantine_validators: vec![],
-                txs: vec![],
-                proposer_address: HEXUPPER
-                    .decode(
-                        wallet::defaults::validator_keypair()
-                            .to_public()
-                            .tm_raw_hash()
-                            .as_bytes(),
-                    )
-                    .unwrap(),
-                height: 0u8.into(),
-                decided_last_commit: tendermint::abci::types::CommitInfo {
-                    round: 0u8.into(),
-                    votes: vec![],
-                },
-            }
-        }
-    }
-
     /// Set the Ethereum bridge to be inactive
     pub fn deactivate_bridge(shell: &mut TestShell) {
         use eth_bridge::storage::active_key;
@@ -2081,14 +2189,14 @@ pub mod test_utils {
         votes: Vec<VoteInfo>,
         byzantine_validators: Option<Vec<Misbehavior>>,
     ) {
-        // Let the header time be always ahead of the next epoch min start time
-        let header = BlockHeader {
+        let mut req = finalize_block::Request {
+            // Let the header time be always ahead of the next epoch min start
+            // time
             time: shell.state.in_mem().next_epoch_min_start_time.next_second(),
-            ..Default::default()
-        };
-        let mut req = FinalizeBlock {
-            header,
-            proposer_address,
+            proposer_address: tendermint::account::Id::try_from(
+                proposer_address,
+            )
+            .unwrap(),
             decided_last_commit: tendermint::abci::types::CommitInfo {
                 round: 0u8.into(),
                 votes,
@@ -2096,7 +2204,7 @@ pub mod test_utils {
             ..Default::default()
         };
         if let Some(byz_vals) = byzantine_validators {
-            req.byzantine_validators = byz_vals;
+            req.misbehavior = byz_vals;
         }
         shell.finalize_block(req).unwrap();
         shell.commit();
@@ -2111,6 +2219,7 @@ mod shell_tests {
     use eth_bridge::storage::eth_bridge_queries::is_bridge_comptime_enabled;
     use namada_apps_lib::state::StorageWrite;
     use namada_sdk::address;
+    use namada_sdk::borsh::BorshSerializeExt;
     use namada_sdk::chain::Epoch;
     use namada_sdk::token::read_denom;
     use namada_sdk::tx::data::Fee;
@@ -3071,7 +3180,7 @@ mod shell_tests {
             .expect("Test failed");
         shell.state.commit_block().expect("Test failed");
         let new_root = shell.state.in_mem().merkle_root();
-        assert_ne!(new_root, original_root);
+        assert_eq!(new_root, original_root);
 
         shell.restore_database_from_state_sync();
         assert_eq!(shell.state.in_mem().merkle_root(), new_root,);

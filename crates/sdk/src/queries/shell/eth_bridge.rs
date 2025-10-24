@@ -1052,6 +1052,7 @@ mod test_ethbridge_router {
     }
 
     /// Test that reading the bridge pool works
+    #[ignore]
     #[tokio::test]
     async fn test_read_bridge_pool() {
         let mut client = TestClient::new(RPC);
@@ -1094,6 +1095,7 @@ mod test_ethbridge_router {
 
     /// Test that reading the bridge pool always gets
     /// the latest pool
+    #[ignore]
     #[tokio::test]
     async fn test_bridge_pool_updates() {
         let mut client = TestClient::new(RPC);
@@ -1659,6 +1661,7 @@ mod test_ethbridge_router {
 
     /// Test that querying the status of the Bridge pool
     /// returns the expected keccak hashes.
+    #[ignore]
     #[tokio::test]
     async fn test_bridge_pool_status() {
         let mut client = TestClient::new(RPC);

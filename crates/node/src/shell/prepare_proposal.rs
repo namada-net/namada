@@ -23,7 +23,7 @@ use super::block_alloc::{AllocFailure, BlockAllocator, BlockResources};
 use crate::config::ValidatorLocalConfig;
 use crate::protocol::{self, ShellParams};
 use crate::shell::ShellMode;
-use crate::shims::abcipp_shim_types::shim::{TxBytes, response};
+use crate::shell::abci::{TxBytes, response};
 use crate::tendermint_proto::abci::RequestPrepareProposal;
 use crate::tendermint_proto::google::protobuf::Timestamp;
 
@@ -443,11 +443,10 @@ mod test_prepare_proposal {
     use namada_vote_ext::{ethereum_events, ethereum_tx_data_variants};
 
     use super::*;
-    use crate::shell::EthereumTxData;
     use crate::shell::test_utils::{
         self, TestShell, gen_keypair, get_pkh_from_address,
     };
-    use crate::shims::abcipp_shim_types::shim::request::FinalizeBlock;
+    use crate::shell::{EthereumTxData, FinalizeBlockRequest};
 
     /// Check if we are filtering out an invalid vote extension `vext`
     fn check_eth_events_filtering(
@@ -705,8 +704,9 @@ mod test_prepare_proposal {
                 sig_info: crate::tendermint::abci::types::BlockSignatureInfo::LegacySigned,
             },
         ];
-        let req = FinalizeBlock {
-            proposer_address: pkh1.to_vec(),
+        let req = FinalizeBlockRequest {
+            proposer_address: tendermint::account::Id::try_from(pkh1.to_vec())
+                .unwrap(),
             decided_last_commit: crate::tendermint::abci::types::CommitInfo {
                 round: 0u8.into(),
                 votes,

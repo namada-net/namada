@@ -3,8 +3,8 @@
 use lazy_static::lazy_static;
 use libfuzzer_sys::fuzz_target;
 use namada_node::shell;
+use namada_node::shell::abci::TxBytes;
 use namada_node::shell::test_utils::TestShell;
-use namada_node::shims::abcipp_shim_types::shim::TxBytes;
 use namada_node::tendermint_proto::abci::RequestPrepareProposal;
 use namada_tx::Tx;
 

@@ -4,12 +4,25 @@ use namada_core::address::Address;
 use namada_state::{Result, StorageRead, StorageWrite};
 use namada_systems::{parameters, trans_token};
 
+use crate::pgf::storage::keys::fundings_handle;
 use crate::pgf::storage::{
     get_continuous_pgf_payments, get_parameters, get_stewards,
 };
 use crate::storage::proposal::{PGFIbcTarget, PGFTarget};
 
-/// Apply the PGF inflation.
+fn remove_cpgf_target<S>(
+    storage: &mut S,
+    id: &u64,
+    target_address: &String,
+) -> Result<()>
+where
+    S: StorageRead + StorageWrite,
+{
+    fundings_handle().at(target_address).remove(storage, id)?;
+    Ok(())
+}
+
+/// Apply the PGF inflation. Also
 pub fn apply_inflation<S, Params, TransToken, F>(
     storage: &mut S,
     transfer_over_ibc: F,
@@ -26,6 +39,7 @@ where
     let epochs_per_year = Params::epochs_per_year(storage)?;
     let total_supply = TransToken::get_effective_total_native_supply(storage)?;
 
+    // Mint tokens into the PGF address
     let pgf_inflation_amount = total_supply
         .mul_floor(pgf_parameters.pgf_inflation_rate)?
         .checked_div_u64(epochs_per_year)
@@ -39,46 +53,60 @@ where
     )?;
 
     tracing::info!(
-        "Minting {} tokens for PGF rewards distribution into the PGF account \
-         (total supply {}).",
+        "Minting {} native tokens for PGF rewards distribution into the PGF \
+         account (total supply: {}).",
         pgf_inflation_amount.to_string_native(),
         total_supply.to_string_native()
     );
 
-    let mut pgf_fundings = get_continuous_pgf_payments(storage)?;
-    // prioritize the payments by oldest gov proposal ID
-    pgf_fundings.sort_by(|a, b| a.id.cmp(&b.id));
+    // TODO: make sure this is still sorted prioritizing older proposals
+    let pgf_fundings = get_continuous_pgf_payments(storage)?;
 
-    for funding in pgf_fundings {
-        let result = match &funding.detail {
-            PGFTarget::Internal(target) => TransToken::transfer(
-                storage,
-                &staking_token,
-                &super::ADDRESS,
-                &target.target,
-                target.amount,
-            ),
-            PGFTarget::Ibc(target) => transfer_over_ibc(
-                storage,
-                &staking_token,
-                &super::ADDRESS,
-                target,
-            ),
-        };
-        match result {
-            Ok(()) => {
-                tracing::info!(
-                    "Paying {} tokens for {} project.",
-                    funding.detail.amount().to_string_native(),
-                    &funding.detail.target(),
-                );
+    let current_epoch = storage.get_block_epoch()?;
+
+    // Act on the continuous PGF fundings in storage: either distribute or
+    // remove expired ones
+    for (str_target_address, targets) in pgf_fundings {
+        for (proposal_id, c_target) in targets {
+            // Remove expired fundings from storage
+            if c_target.is_expired(current_epoch) {
+                remove_cpgf_target(storage, &proposal_id, &str_target_address)?;
+                continue;
             }
-            Err(_) => {
-                tracing::warn!(
-                    "Failed to pay {} tokens for {} project.",
-                    funding.detail.amount().to_string_native(),
-                    &funding.detail.target(),
-                );
+
+            // Transfer PGF payment to target
+            let result = match &c_target.target {
+                PGFTarget::Internal(target) => TransToken::transfer(
+                    storage,
+                    &staking_token,
+                    &super::ADDRESS,
+                    &target.target,
+                    target.amount,
+                ),
+                PGFTarget::Ibc(target) => transfer_over_ibc(
+                    storage,
+                    &staking_token,
+                    &super::ADDRESS,
+                    target,
+                ),
+            };
+            match result {
+                // TODO: not hardcode "NAM" below??
+                Ok(()) => {
+                    tracing::info!(
+                        "Successfully transferred CPGF payment of {} NAM to \
+                         {}.",
+                        c_target.amount().to_string_native(),
+                        &c_target.target(),
+                    );
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "Failed to transfer CPGF payment of {} NAM to {}.",
+                        c_target.amount().to_string_native(),
+                        &c_target.target(),
+                    );
+                }
             }
         }
     }
@@ -104,15 +132,16 @@ where
             .is_ok()
             {
                 tracing::info!(
-                    "Minting {} tokens for steward {} (total supply {})..",
+                    "Minting {} native tokens for steward {} (total supply: \
+                     {})..",
                     pgf_steward_reward.to_string_native(),
                     address,
                     total_supply.to_string_native()
                 );
             } else {
                 tracing::warn!(
-                    "Failed minting {} tokens for steward {} (total supply \
-                     {})..",
+                    "Failed minting {} native tokens for steward {} (total \
+                     supply: {})..",
                     pgf_steward_reward.to_string_native(),
                     address,
                     total_supply.to_string_native()

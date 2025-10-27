@@ -65,6 +65,14 @@ impl<S: StorageRead> shielded_token_sys::Read<S> for ShieldedStore<S> {
 
         Ok(commitment_tree)
     }
+
+    #[inline]
+    fn read_undated_balance(
+        storage: &S,
+        token_address: &namada_core::address::Address,
+    ) -> Result<namada_core::token::Amount> {
+        read_undated_balance(storage, token_address)
+    }
 }
 
 impl<S: StorageRead + StorageWrite> shielded_token_sys::Write<S>
@@ -78,6 +86,15 @@ impl<S: StorageRead + StorageWrite> shielded_token_sys::Write<S>
 
         let tree_key = masp_commitment_tree_key();
         storage.write(&tree_key, commitment_tree)
+    }
+
+    #[inline]
+    fn write_undated_balance(
+        storage: &mut S,
+        token_address: &namada_core::address::Address,
+        balance: namada_core::token::Amount,
+    ) -> Result<()> {
+        write_undated_balance(storage, token_address, balance)
     }
 }
 

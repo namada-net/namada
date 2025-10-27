@@ -1,13 +1,21 @@
 //! Shielded token abstract interfaces
 
+use namada_core::address::Address;
 use namada_core::masp_primitives::merkle_tree::CommitmentTree;
 use namada_core::masp_primitives::sapling::Node;
+use namada_core::token;
 pub use namada_storage::{Error, Result};
 
 /// Abstract shielded token storage read interface
 pub trait Read<S> {
     /// Read the commitment tree from storage.
     fn read_commitment_tree(storage: &S) -> Result<CommitmentTree<Node>>;
+
+    /// Read the undated balance of the given token in the MASP.
+    fn read_undated_balance(
+        storage: &S,
+        token_address: &Address,
+    ) -> Result<token::Amount>;
 }
 
 /// Abstract shielded token storage write interface
@@ -16,6 +24,13 @@ pub trait Write<S>: Read<S> {
     fn write_commitment_tree(
         storage: &mut S,
         commitment_tree: CommitmentTree<Node>,
+    ) -> Result<()>;
+
+    /// Write the undated balance of the given token in the MASP.
+    fn write_undated_balance(
+        storage: &mut S,
+        token_address: &Address,
+        balance: token::Amount,
     ) -> Result<()>;
 
     /// Update the commitment tree in storage.

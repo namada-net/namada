@@ -365,6 +365,37 @@ where
             .into(),
         )?;
 
+        // update the undated asset balance
+        if epoched_asset.is_none() {
+            let current_amount = ShieldedToken::read_undated_balance(
+                self.inner.borrow().storage(),
+                token,
+            )
+            .map_err(|err| HostError::Other {
+                description: format!(
+                    "Failed to read undated asset balance of {token}: {err}"
+                ),
+            })?;
+
+            ShieldedToken::write_undated_balance(
+                self.inner.borrow_mut().storage_mut(),
+                token,
+                current_amount.checked_add(*amount).ok_or_else(|| {
+                    HostError::Other {
+                        description: format!(
+                            "Arithmetic overflow in IBC shielding undated \
+                             asset balance increment of {token}",
+                        ),
+                    }
+                })?,
+            )
+            .map_err(|err| HostError::Other {
+                description: format!(
+                    "Failed to write undated asset balance of {token}: {err}"
+                ),
+            })?;
+        }
+
         ShieldedToken::update_commitment_tree(
             self.inner.borrow_mut().storage_mut(),
             note_commitments,

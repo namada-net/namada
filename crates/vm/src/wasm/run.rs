@@ -341,13 +341,7 @@ where
     let ok = result.map_err(|err| {
         tracing::debug!("Tx WASM failed with {}", err);
 
-        match *sentinel.borrow() {
-            TxSentinel::None => Error::RuntimeError(err),
-            TxSentinel::OutOfGas => Error::GasError(err.to_string()),
-            TxSentinel::InvalidCommitment => {
-                Error::MissingSection(err.to_string())
-            }
-        }
+        extract_tx_error(&mut yielded_value, &sentinel, Some(err))
     })?;
 
     // NB: early drop this data to avoid memory errors
@@ -359,20 +353,47 @@ where
         let _store = RefCell::into_inner(store);
         Ok(verifiers)
     } else {
-        let err = yielded_value.take().map_or_else(
-            || Ok("Execution ended abruptly with an unknown error".to_owned()),
-            |borsh_encoded_err| {
-                let tx_err = TxError::try_from_slice(&borsh_encoded_err)
-                    .map_err(|e| Error::ConversionError(e.to_string()))?;
-                Ok(tx_err)
-            },
-        )?;
+        Err(extract_tx_error(&mut yielded_value, &sentinel, None))
+    }
+}
 
-        Err(match *sentinel.borrow() {
-            TxSentinel::None => Error::TxError(err),
-            TxSentinel::OutOfGas => Error::GasError(err),
-            TxSentinel::InvalidCommitment => Error::MissingSection(err),
-        })
+fn extract_tx_error(
+    yielded_value: &mut Option<Vec<u8>>,
+    sentinel: &RefCell<TxSentinel>,
+    runtime_err: Option<wasmer::RuntimeError>,
+) -> Error {
+    #[inline]
+    fn take(
+        yielded_value: &mut Option<Vec<u8>>,
+        runtime_err: Option<wasmer::RuntimeError>,
+    ) -> Error {
+        const UNKNOWN: &str = "Runtime panic caused execution to end abruptly";
+
+        let yielded_err = yielded_value.take().map(|borsh_encoded_err| {
+            TxError::try_from_slice(&borsh_encoded_err).map_err(|err| {
+                Error::ConversionError(format!(
+                    "Failed to extract yielded tx error: {err}"
+                ))
+            })
+        });
+
+        if let Some(result) = yielded_err {
+            result.map_or_else(|err| err, Error::TxError)
+        } else if let Some(err) = runtime_err {
+            Error::RuntimeError(err)
+        } else {
+            Error::TxError(UNKNOWN.to_owned())
+        }
+    }
+
+    match *sentinel.borrow() {
+        TxSentinel::OutOfGas => {
+            Error::GasError(take(yielded_value, runtime_err).to_string())
+        }
+        TxSentinel::InvalidCommitment => {
+            Error::MissingSection(take(yielded_value, runtime_err).to_string())
+        }
+        TxSentinel::None => take(yielded_value, runtime_err),
     }
 }
 

@@ -52,6 +52,51 @@ pub fn transaction(_attr: TokenStream, input: TokenStream) -> TokenStream {
             // to "fake" it.
             let mut ctx = unsafe { namada_tx_prelude::Ctx::new() };
 
+            // Add a custom panic hook, in order to receive detailed
+            // information on the host of panicking transactions, to
+            // improve debugging
+            #[cfg(all(
+                target_family = "wasm",
+                feature = "debug-panic-hook"
+            ))]
+            std::panic::set_hook(Box::new(|panic_info| {
+                let mut ctx = unsafe { namada_tx_prelude::Ctx::new() };
+                ctx.yield_value({
+                    use std::fmt::Write;
+
+                    let mut buf = "Panic occurred".to_owned();
+
+                    // Append panic location
+                    if let Some(loc) = panic_info.location() {
+                        _ = write!(
+                            &mut buf,
+                            " in file {:?} at line {}",
+                            loc.file(),
+                            loc.line()
+                        );
+                    }
+
+                    // Append panic message
+                    if let Some(reason) = panic_info
+                        .payload()
+                        .downcast_ref::<&str>()
+                        .map(|&s| s)
+                        .or_else(|| {
+                            panic_info
+                                .payload()
+                                .downcast_ref::<String>()
+                                .map(String::as_str)
+                        })
+                    {
+                        _ = write!(&mut buf, ": {reason}");
+                    }
+
+                    // TODO(namada#2980): pass some proper error from txs, instead of a string
+                    buf.serialize_to_vec()
+                });
+                core::arch::wasm32::unreachable()
+            }));
+
             match #ident(&mut ctx, tx_data) {
                 Ok(()) => 1,
                 Err(err) => {

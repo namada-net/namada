@@ -14,7 +14,7 @@ version.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["namada_sdk/std", "namada_sdk/masp"]
+default = ["namada_sdk/std"]
 mainnet = ["namada_sdk/mainnet"]
 migrations = ["namada_sdk/migrations", "namada_core/migrations"]
 historic-masp = ["namada_sdk/historic-masp"]

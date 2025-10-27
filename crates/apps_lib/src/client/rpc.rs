@@ -6,6 +6,7 @@ use std::io;
 use color_eyre::owo_colors::OwoColorize;
 use data_encoding::HEXLOWER;
 use either::Either;
+use futures::StreamExt;
 use masp_primitives::asset_type::AssetType;
 use masp_primitives::merkle_tree::MerklePath;
 use masp_primitives::sapling::Node;
@@ -2140,9 +2141,23 @@ pub async fn query_conversions(
         .wallet()
         .await
         .get_addresses_with_vp_type(AddressVpType::Token);
-    let conversions = rpc::query_conversions(context.client())
+
+    // Download conversions from all epochs to facilitate decoding asset types
+    let from = MaspEpoch::zero();
+    let to = rpc::query_masp_epoch(context.client())
         .await
-        .expect("Conversions should be defined");
+        .expect("Unable to query current MASP epoch");
+    let epochs: Vec<_> = MaspEpoch::iter_bounds_inclusive(from, to).collect();
+    let conversion_tasks = epochs
+        .iter()
+        .map(|epoch| rpc::query_conversions(context.client(), epoch));
+    let conversions = futures::stream::iter(conversion_tasks)
+        .buffer_unordered(100)
+        .fold(BTreeMap::default(), async |mut acc, conversion| {
+            acc.append(&mut conversion.expect("Conversion should be defined"));
+            acc
+        })
+        .await;
 
     if args.dump_tree {
         display_line!(context.io(), "Conversions: {conversions:?}");
@@ -2150,6 +2165,7 @@ pub async fn query_conversions(
 
     // Track whether any non-sentinel conversions are found
     let mut conversions_found = false;
+
     for (addr, _denom, digit, epoch, amt) in conversions.values() {
         // If the user has specified any targets, then meet them
         // If we have a sentinel conversion, then skip printing

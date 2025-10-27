@@ -41,7 +41,7 @@ path = "mempool_validate.rs"
 
 [dependencies]
 
-# NOTE: this crate MUST NOT import any dependency with testing features to prevent benchmarking non-production code
+# WARNING: this crate MUST NOT import any dependency with testing features to prevent benchmarking non-production code
 [dev-dependencies]
 namada_apps_lib = { workspace = true, features = ["benches"] }
 namada_node = { workspace = true, features = ["benches"] }

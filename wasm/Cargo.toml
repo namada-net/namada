@@ -49,3 +49,8 @@ panic = "abort"
 # tell llvm to optimize for size (https://rustwasm.github.io/book/reference/code-size.html#tell-llvm-to-optimize-for-size-instead-of-speed)
 opt-level = 'z'
 strip = "debuginfo"
+
+[profile.release_unwind]
+inherits = "release"
+# unwind on panics, to extract debug information
+panic = "unwind"

@@ -1118,6 +1118,100 @@ impl CompactNote {
             rseed,
         })
     }
+
+    /// Extract a dummy [`MaspTransaction`], from unencrypted notes minted
+    /// by the protocol.
+    #[allow(clippy::result_large_err)]
+    pub fn extract_dummy_tx(
+        notes: &[Self],
+    ) -> std::io::Result<MaspTransaction> {
+        use group::GroupEncoding;
+        use masp_primitives::consensus::{BranchId, MainNetwork};
+        use masp_primitives::sapling::note_encryption::sapling_note_encryption;
+        use masp_primitives::transaction::components::{
+            I128Sum, OutputDescription, sapling, transparent,
+        };
+        use masp_primitives::transaction::{TransactionData, TxVersion};
+
+        // dummy signature
+        let sig = [0u8; 64];
+
+        let (transparent_inputs, shielded_outputs, sapling_value_balance) =
+            notes.iter().try_fold(
+                (vec![], vec![], I128Sum::zero()),
+                |(mut t, mut s, mut bal), cnote| {
+                    const GROTH_PROOF_BYTES: usize = 48 + 96 + 48;
+
+                    let payment_addr =
+                        masp_primitives::sapling::PaymentAddress::from_parts(
+                            cnote.diversifier,
+                            cnote.pk_d,
+                        )
+                        .ok_or_else(|| std::io::Error::other("invalid payment address in CompactNote"))?;
+                    let note = cnote.into_note().unwrap();
+
+                    let note_ciphertexts = sapling_note_encryption::<MainNetwork>(
+                        None,
+                        note,
+                        payment_addr,
+                        masp_primitives::memo::MemoBytes::empty(),
+                    );
+
+                    t.push(transparent::TxIn {
+                        asset_type: note.asset_type,
+                        value: note.value,
+                        address: TAddrData::Addr(IBC).taddress(),
+                        transparent_sig: (),
+                    });
+
+                    s.push(OutputDescription {
+                        cv: Default::default(),
+                        cmu: note.cmu(),
+                        ephemeral_key: note_ciphertexts.epk().to_bytes().into(),
+                        enc_ciphertext: note_ciphertexts.encrypt_note_plaintext(),
+                        out_ciphertext: [0; 80],
+                        zkproof: [0u8; GROTH_PROOF_BYTES],
+                    });
+
+                    #[allow(clippy::arithmetic_side_effects)]
+                    {
+                        bal += I128Sum::from_pair(note.asset_type, -i128::from(note.value));
+                    }
+
+                    Ok::<_, std::io::Error>((t, s, bal))
+                },
+            )?;
+
+        let data = TransactionData::from_parts(
+            TxVersion::MASPv5,
+            BranchId::MASP,
+            // bogus values for these two heights
+            0,
+            0.into(),
+            // transparent bundle - here we have transparent inputs
+            Some(transparent::Bundle {
+                vin: transparent_inputs,
+                vout: vec![],
+                authorization: transparent::Authorized,
+            }),
+            // sapling bundle - here we have shielded outputs
+            Some(sapling::Bundle {
+                shielded_spends: vec![],
+                shielded_converts: vec![],
+                shielded_outputs,
+                value_balance: sapling_value_balance,
+                authorization: sapling::Authorized {
+                    binding_sig:
+                        masp_primitives::sapling::redjubjub::Signature::read(
+                            &mut sig.as_slice(),
+                        )
+                        .expect("reading the sig shouldn't fail"),
+                },
+            }),
+        );
+
+        data.freeze()
+    }
 }
 
 #[cfg(test)]

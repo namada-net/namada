@@ -11,7 +11,7 @@ use masp_primitives::transaction::Transaction;
 use masp_primitives::transaction::components::I128Sum;
 use namada_core::address::Address;
 use namada_core::chain::BlockHeight;
-use namada_core::masp::MaspEpoch;
+use namada_core::masp::{CompactNote, MaspEpoch};
 use namada_core::time::DurationSecs;
 use namada_core::token::{Denomination, MaspDigitPos};
 use namada_events::extend::ReadFromEventAttributes;
@@ -90,9 +90,13 @@ pub fn extract_masp_tx(
                 ))
             }
         }
-        MaspTxRef::Unencrypted(_notes) => {
-            todo!()
-        }
+        MaspTxRef::Unencrypted(notes) => CompactNote::extract_dummy_tx(notes)
+            .map_err(|err| {
+                Error::Other(format!(
+                    "Failed to build dummy MASP tx from unencrypted note \
+                     outputs: {err}"
+                ))
+            }),
     }
 }
 

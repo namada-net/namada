@@ -13,7 +13,8 @@
 //!
 //! # How space is allocated
 //!
-//! In the current implementation, we allot space for user submitted txs until the block is filled.
+//! In the current implementation, we allot space for user submitted txs until
+//! the block is filled.
 //!
 //! # How gas is allocated
 //!

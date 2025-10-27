@@ -149,7 +149,7 @@ fn ibc_to_and_from_payment_addrs() -> Result<()> {
         None,
         None,
         None,
-        true,
+        false,
         None,
         None,
     )?;
@@ -159,6 +159,34 @@ fn ibc_to_and_from_payment_addrs() -> Result<()> {
         &channel_id_namada,
         &test,
     )?;
+    check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 100)?;
+    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 900)?;
+
+    // Get refunded by unshielding to an invalid address on Gaia
+    transfer(
+        &test,
+        A_SPENDING_KEY,
+        "invalid_receiver",
+        &ibc_denom_on_namada,
+        100,
+        Some(BERTHA_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        None,
+        None,
+        None,
+        None,
+        false,
+        None,
+        None,
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+    // The balance should not be changed
     check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 100)?;
     check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 900)?;
 

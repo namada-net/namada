@@ -1220,6 +1220,51 @@ mod test {
     use crate::address;
 
     #[test]
+    fn test_trial_decrypt_protocol_shielding() {
+        use masp_primitives::consensus::MainNetwork;
+        use masp_primitives::sapling::note_encryption::{
+            PreparedIncomingViewingKey, try_sapling_note_decryption,
+        };
+        use masp_primitives::transaction::components::OutputDescription;
+        use masp_primitives::transaction::{Authorization, Authorized};
+
+        type Proof = OutputDescription<
+            <
+            <Authorized as Authorization>::SaplingAuth
+            as masp_primitives::transaction::components::sapling::Authorization
+            >::Proof
+        >;
+
+        let sk = ExtendedSpendingKey::from(
+            masp_primitives::zip32::ExtendedSpendingKey::master(&[0_u8]),
+        );
+        let vk = sk.to_viewing_key().as_viewing_key();
+        let (_, pa) = sk.0.default_address();
+
+        let cnote = CompactNote {
+            asset_type: AssetType::new(b"test").unwrap(),
+            value: 1234u64,
+            diversifier: *pa.diversifier(),
+            pk_d: *pa.pk_d(),
+            rseed: masp_primitives::sapling::Rseed::AfterZip212([0xff; 32]),
+        };
+
+        let dummy_tx = CompactNote::extract_dummy_tx(&[cnote]).unwrap();
+
+        for so in dummy_tx.sapling_bundle().unwrap().shielded_outputs.iter() {
+            assert!(
+                try_sapling_note_decryption::<_, Proof>(
+                    &MainNetwork,
+                    1.into(),
+                    &PreparedIncomingViewingKey::new(&vk.ivk()),
+                    so,
+                )
+                .is_some()
+            );
+        }
+    }
+
+    #[test]
     fn test_extended_spending_key_serialize() {
         let sk = ExtendedSpendingKey::from(
             masp_primitives::zip32::ExtendedSpendingKey::master(&[0_u8]),

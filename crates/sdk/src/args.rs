@@ -539,8 +539,8 @@ pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
     /// REST rpc endpoint to Osmosis SQS
     pub osmosis_sqs_rpc: Option<String>,
     /// The optional data for the frontend sustainability fee
-    /// NOTE: if the swap is shielded (from MASP to MASP), no sustainability
-    /// fee should be taken
+    // NOTE: if the swap is shielded (from MASP to MASP), no sustainability
+    // fee should be taken
     pub frontend_sus_fee: Option<(C::PaymentAddress, Dec)>,
 }
 
@@ -3229,8 +3229,8 @@ pub struct GenIbcShieldingTransfer<C: NamadaTypes = SdkTypes> {
     /// The optional data for the frontend sustainability fee (the target and
     /// the amount, the token must be the same as the one involved in the
     /// shielding transaction since ics-20 only supports a single asset)
-    /// NOTE: if the shielding operation is part of a swap, and this is
-    /// shielded (from MASP to MASP), no sustainability fee should be taken
+    // NOTE: if the shielding operation is part of a swap, and this is
+    // shielded (from MASP to MASP), no sustainability fee should be taken
     pub frontend_sus_fee: Option<(C::PaymentAddress, Dec)>,
 }
 

@@ -93,6 +93,19 @@ where
     Ok(undated_balance)
 }
 
+/// Write the undated balance of the given token in the MASP.
+pub fn write_undated_balance<S>(
+    storage: &mut S,
+    token_address: &Address,
+    balance: token::Amount,
+) -> Result<()>
+where
+    S: StorageWrite,
+{
+    let undated_balance_key = masp_undated_balance_key(token_address);
+    storage.write(&undated_balance_key, balance)
+}
+
 /// Read the masp token map.
 pub fn read_token_map<S>(storage: &S) -> Result<TokenMap>
 where

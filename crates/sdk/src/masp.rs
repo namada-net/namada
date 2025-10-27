@@ -35,7 +35,7 @@ use crate::{MaybeSend, MaybeSync, token};
 /// Extract the relevant shield portions from a [`Tx`] MASP section or an IBC
 /// message, if any.
 #[allow(clippy::result_large_err)]
-fn extract_masp_tx(
+pub fn extract_masp_tx(
     tx: &Tx,
     masp_ref: &MaspTxRef,
 ) -> Result<Transaction, Error> {

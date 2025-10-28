@@ -530,10 +530,6 @@ pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
     pub osmosis_lcd_rpc: Option<String>,
     /// REST rpc endpoint to Osmosis SQS
     pub osmosis_sqs_rpc: Option<String>,
-    /// The optional data for the frontend sustainability fee
-    // NOTE: if the swap is shielded (from MASP to MASP), no sustainability
-    // fee should be taken
-    pub frontend_sus_fee: Option<(C::PaymentAddress, Dec)>,
 }
 
 impl TxOsmosisSwap<SdkTypes> {
@@ -600,7 +596,6 @@ impl TxOsmosisSwap<SdkTypes> {
             osmosis_lcd_rpc,
             osmosis_sqs_rpc,
             output_denom: namada_output_denom,
-            frontend_sus_fee: _,
         } = self;
 
         let osmosis_lcd_rpc = osmosis_lcd_rpc

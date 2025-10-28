@@ -5319,7 +5319,6 @@ pub mod args {
                 route: self.route,
                 osmosis_lcd_rpc: self.osmosis_lcd_rpc,
                 osmosis_sqs_rpc: self.osmosis_sqs_rpc,
-                frontend_sus_fee: None,
             })
         }
     }
@@ -5370,7 +5369,6 @@ pub mod args {
                 route,
                 osmosis_lcd_rpc,
                 osmosis_sqs_rpc,
-                frontend_sus_fee: None,
             }
         }
 

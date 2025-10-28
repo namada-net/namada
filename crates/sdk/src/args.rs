@@ -9,7 +9,7 @@ use std::time::Duration as StdDuration;
 use either::Either;
 use masp_primitives::transaction::components::sapling::builder::BuildParams;
 use masp_primitives::zip32::PseudoExtendedKey;
-use namada_core::address::{Address, MASP};
+use namada_core::address::Address;
 use namada_core::chain::{BlockHeight, ChainId, Epoch};
 use namada_core::collections::HashMap;
 use namada_core::dec::Dec;
@@ -17,7 +17,6 @@ use namada_core::ethereum_events::EthAddress;
 use namada_core::keccak::KeccakHash;
 use namada_core::key::{SchemeType, common};
 use namada_core::masp::{DiversifierIndex, MaspEpoch, PaymentAddress};
-use namada_core::string_encoding::StringEncoded;
 use namada_core::time::DateTimeUtc;
 use namada_core::token::Amount;
 use namada_core::{storage, token};
@@ -25,7 +24,6 @@ use namada_governance::cli::onchain::{
     DefaultProposal, PgfFundingProposal, PgfStewardProposal,
 };
 use namada_ibc::IbcShieldingData;
-use namada_io::{Io, display_line};
 use namada_token::masp::utils::RetryStrategy;
 use namada_tx::Memo;
 use namada_tx::data::GasLimit;
@@ -40,7 +38,7 @@ use crate::rpc::{
     get_registry_from_xcs_osmosis_contract, osmosis_denom_from_namada_denom,
     query_ibc_denom, query_osmosis_route_and_min_out,
 };
-use crate::signing::{SigningData, gen_disposable_signing_key};
+use crate::signing::SigningData;
 use crate::wallet::{DatedSpendingKey, DatedViewingKey};
 use crate::{Namada, rpc, tx};
 
@@ -522,12 +520,6 @@ pub struct TxOsmosisSwap<C: NamadaTypes = SdkTypes> {
     pub output_denom: String,
     /// Address of the recipient on Namada
     pub recipient: Either<C::Address, C::PaymentAddress>,
-    /// Address to receive funds exceeding the minimum amount,
-    /// in case of IBC shieldings
-    ///
-    /// If unspecified, a disposable address is generated to
-    /// receive funds with
-    pub overflow: Option<C::Address>,
     ///  Constraints on the  osmosis swap
     pub slippage: Option<Slippage>,
     /// Recovery address (on Osmosis) in case of failure
@@ -605,34 +597,16 @@ impl TxOsmosisSwap<SdkTypes> {
             slippage,
             local_recovery_addr,
             route: fixed_route,
-            overflow,
             osmosis_lcd_rpc,
             osmosis_sqs_rpc,
             output_denom: namada_output_denom,
-            frontend_sus_fee,
+            frontend_sus_fee: _,
         } = self;
 
         let osmosis_lcd_rpc = osmosis_lcd_rpc
             .map_or(Cow::Borrowed(OSMOSIS_LCD_SERVER), Cow::Owned);
         let osmosis_sqs_rpc = osmosis_sqs_rpc
             .map_or(Cow::Borrowed(OSMOSIS_SQS_SERVER), Cow::Owned);
-
-        let recipient = recipient.map_either(
-            |addr| addr,
-            |payment_addr| async move {
-                let overflow_receiver = if let Some(overflow) = overflow {
-                    overflow
-                } else {
-                    let addr = (&gen_disposable_signing_key(ctx).await).into();
-                    display_line!(
-                        ctx.io(),
-                        "Sending unshielded funds to disposable address {addr}",
-                    );
-                    addr
-                };
-                (payment_addr, overflow_receiver)
-            },
-        );
 
         // validate `local_recovery_addr` and the contract addr
         if !bech32::decode(&local_recovery_addr)
@@ -666,7 +640,7 @@ impl TxOsmosisSwap<SdkTypes> {
         )
         .await?;
 
-        let (osmosis_output_denom, namada_output_addr) =
+        let (osmosis_output_denom, _namada_output_addr) =
             osmosis_denom_from_namada_denom(
                 &osmosis_lcd_rpc,
                 &registry_xcs_addr,
@@ -691,59 +665,10 @@ impl TxOsmosisSwap<SdkTypes> {
             return Err(Error::Other("Swap has been cancelled".to_owned()));
         }
 
-        let (receiver, final_memo) = match recipient {
-            Either::Left(transparent_recipient) => {
-                (transparent_recipient.encode_compat(), None)
-            }
-            Either::Right(fut) => {
-                let (payment_addr, overflow_receiver) = fut.await;
-
-                let amount_to_shield = trade_min_output_amount;
-                let shielding_tx = tx::gen_ibc_shielding_transfer(
-                    ctx,
-                    GenIbcShieldingTransfer {
-                        query: Query {
-                            ledger_address: transfer.tx.ledger_address.clone(),
-                        },
-                        output_folder: None,
-                        target: payment_addr,
-                        asset: IbcShieldingTransferAsset::Address(
-                            namada_output_addr,
-                        ),
-                        amount: InputAmount::Validated(
-                            token::DenominatedAmount::new(
-                                amount_to_shield,
-                                0u8.into(),
-                            ),
-                        ),
-                        expiration: transfer.tx.expiration.clone(),
-                        frontend_sus_fee,
-                    },
-                )
-                .await?
-                .ok_or_else(|| {
-                    Error::Other(
-                        "Failed to generate IBC shielding transfer".to_owned(),
-                    )
-                })?;
-
-                let memo = assert_json_obj(
-                    serde_json::to_value(&NamadaMemo {
-                        namada: NamadaMemoData::OsmosisSwap {
-                            shielding_data: StringEncoded::new(
-                                IbcShieldingData(shielding_tx),
-                            ),
-                            shielded_amount: amount_to_shield,
-                            overflow_receiver,
-                        },
-                    })
-                    .unwrap(),
-                );
-
-                (MASP.encode_compat(), Some(memo))
-            }
-        };
-
+        let receiver = recipient.either(
+            |transparent_recipient| transparent_recipient.encode_compat(),
+            |shielded_recipient| shielded_recipient.encode_compat(),
+        );
         let cosmwasm_memo = Memo {
             wasm: Wasm {
                 contract: transfer.receiver.clone(),
@@ -753,12 +678,12 @@ impl TxOsmosisSwap<SdkTypes> {
                         slippage: Slippage::MinOutputAmount(
                             trade_min_output_amount,
                         ),
-                        final_memo,
                         receiver,
                         on_failed_delivery: LocalRecoveryAddr {
                             local_recovery_addr,
                         },
                         route,
+                        final_memo: None,
                     },
                 },
             },

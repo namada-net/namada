@@ -302,6 +302,7 @@ where
         acknowledgement: &Acknowledgement,
         relayer: &Signer,
     ) -> (ModuleExtras, Result<(), ChannelError>) {
+        self.ctx.enable_refund_transfer();
         let (extras, result) = on_acknowledgement_packet_execute(
             &mut self.ctx,
             packet,
@@ -325,6 +326,7 @@ where
         packet: &Packet,
         relayer: &Signer,
     ) -> (ModuleExtras, Result<(), ChannelError>) {
+        self.ctx.enable_refund_transfer();
         let (extras, result) =
             on_timeout_packet_execute(&mut self.ctx, packet, relayer);
         (extras, result.map_err(into_channel_error))

@@ -190,7 +190,7 @@ pub fn open(
     let mut diffs_cf_opts = Options::default();
     diffs_cf_opts.set_compression_type(DBCompressionType::Zstd);
     diffs_cf_opts.set_compression_options(0, 0, 0, 1024 * 1024);
-    diffs_cf_opts.set_compaction_style(DBCompactionStyle::Universal);
+    diffs_cf_opts.set_compaction_style(DBCompactionStyle::Level);
     diffs_cf_opts.set_block_based_table_factory(&table_opts);
     cfs.push(ColumnFamilyDescriptor::new(DIFFS_CF, diffs_cf_opts));
 

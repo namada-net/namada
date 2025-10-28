@@ -1354,6 +1354,7 @@ fn ibc_upgrade_client() -> Result<()> {
 ///   - Transfer 1 NAM in an epoch will succeed
 ///   - Transfer 1 NAM in the same epoch will fail
 ///   - Transfer 1 NAM in the next epoch will succeed
+///   - Refund will succeed after sending 1 NAM
 /// 2. Test the mint limit
 ///   - The mint limit is 1
 ///   - Receiving 2 samoleans from Gaia will fail
@@ -1513,6 +1514,33 @@ fn ibc_rate_limit() -> Result<()> {
         sleep(5);
         epoch = get_epoch(&test, &rpc).unwrap();
     }
+
+    // Send 1 Apfel from Namada to an invalid Gaia address to trigger a refund
+    transfer(
+        &test,
+        ALBERT,
+        "invalid_receiver",
+        APFEL,
+        1,
+        Some(ALBERT_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        None,
+        None,
+        None,
+        None,
+        false,
+        None,
+        None,
+    )?;
+    // the per-epoch limit has reached but the refund should succeed
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+    check_balance(&test, ALBERT, APFEL, 1_000_000)?;
 
     // Transfer 2 samoleans from Gaia to Namada will succeed, but Namada can't
     // receive due to the mint limit and the packet will be timed out

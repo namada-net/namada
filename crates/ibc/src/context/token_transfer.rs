@@ -34,6 +34,7 @@ where
     pub(crate) inner: Rc<RefCell<C>>,
     pub(crate) verifiers: Rc<RefCell<BTreeSet<Address>>>,
     has_masp_tx: bool,
+    is_refund: bool,
     _marker: PhantomData<(Params, Token, ShieldedToken)>,
 }
 
@@ -51,6 +52,7 @@ where
             inner,
             verifiers,
             has_masp_tx: false,
+            is_refund: false,
             _marker: PhantomData,
         }
     }
@@ -63,6 +65,11 @@ where
     /// Set to enable a shielded transfer
     pub fn enable_shielded_transfer(&mut self) {
         self.has_masp_tx = true;
+    }
+
+    /// Set the transfer as refund
+    pub fn enable_refund_transfer(&mut self) {
+        self.is_refund = true;
     }
 
     fn validate_sent_coin(&self, coin: &PrefixedCoin) -> Result<(), HostError> {
@@ -133,6 +140,9 @@ where
         token: &Address,
         amount: Amount,
     ) -> Result<(), HostError> {
+        if self.is_refund {
+            return Ok(());
+        }
         let deposit = self.inner.borrow().deposit(token)?;
         let added_deposit =
             deposit

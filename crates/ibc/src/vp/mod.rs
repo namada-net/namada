@@ -2977,16 +2977,8 @@ mod tests {
             .delete(&commitment_key)
             .expect("delete failed");
         keys_changed.insert(commitment_key);
-        // deposit
         let data = serde_json::from_slice::<PacketData>(&packet.data)
             .expect("decoding packet data failed");
-        let deposit_key = deposit_key(&nam());
-        let bytes = amount.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&deposit_key, bytes)
-            .expect("write failed");
-        keys_changed.insert(deposit_key);
         // event
         let timeout_event = TimeoutEvent {
             refund_receiver: data.sender,
@@ -3136,16 +3128,8 @@ mod tests {
             .delete(&commitment_key)
             .expect("delete failed");
         keys_changed.insert(commitment_key);
-        // deposit
         let data = serde_json::from_slice::<PacketData>(&packet.data)
             .expect("decoding packet data failed");
-        let deposit_key = deposit_key(&nam());
-        let bytes = amount.serialize_to_vec();
-        let _ = state
-            .write_log_mut()
-            .write(&deposit_key, bytes)
-            .expect("write failed");
-        keys_changed.insert(deposit_key);
         // event
         let timeout_event = TimeoutEvent {
             refund_receiver: data.sender,

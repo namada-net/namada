@@ -9,10 +9,7 @@ use namada_node::tendermint_proto::abci::RequestPrepareProposal;
 use namada_tx::Tx;
 
 lazy_static! {
-    static ref SHELL: TestShell = {
-        let (shell, _recv) = shell::test_utils::setup();
-        shell
-    };
+    static ref SHELL: TestShell = shell::test_utils::setup();
 }
 
 fuzz_target!(|txs: Vec<Tx>| {

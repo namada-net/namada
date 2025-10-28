@@ -192,7 +192,6 @@ fn create_node(
     // instantiate and initialize the ledger node.
     let MockServicesPackage {
         services,
-        shell_handlers,
         controller,
     } = mock_services();
     let node = MockNode(Arc::new(InnerMockNode {
@@ -205,7 +204,6 @@ fn create_node(
             global_args
                 .wasm_dir
                 .expect("Wasm path not provided to integration test setup."),
-            shell_handlers.tx_broadcaster,
             None,
             None,
             50 * 1024 * 1024, // 50 kiB

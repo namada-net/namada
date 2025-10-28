@@ -100,19 +100,10 @@ pub struct MockServicesController {
     pub tx_broadcaster: mpsc::UnboundedSender<Vec<u8>>,
 }
 
-/// Service handlers to be passed to a [`Shell`], when building
-/// a mock node.
-pub struct MockServiceShellHandlers {
-    /// Transaction broadcaster handle.
-    pub tx_broadcaster: mpsc::UnboundedSender<Vec<u8>>,
-}
-
 /// Mock services data returned by [`mock_services`].
 pub struct MockServicesPackage {
     /// Mock services stored by the [`MockNode`].
     pub services: MockServices,
-    /// Handlers to mock services stored by the [`Shell`].
-    pub shell_handlers: MockServiceShellHandlers,
     /// Handler to the mock services controller.
     pub controller: MockServicesController,
 }
@@ -123,9 +114,6 @@ pub fn mock_services() -> MockServicesPackage {
     MockServicesPackage {
         services: MockServices {
             tx_receiver: tokio::sync::Mutex::new(tx_receiver),
-        },
-        shell_handlers: MockServiceShellHandlers {
-            tx_broadcaster: tx_broadcaster.clone(),
         },
         controller: MockServicesController { tx_broadcaster },
     }

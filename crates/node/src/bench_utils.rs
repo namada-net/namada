@@ -567,14 +567,12 @@ impl Default for BenchShell {
                 .init();
         });
 
-        let (sender, _) = tokio::sync::mpsc::unbounded_channel();
         let tempdir = tempfile::tempdir().unwrap();
         let path = tempdir.path().canonicalize().unwrap();
 
         let shell = Shell::new(
             config::Ledger::new(path, Default::default(), TendermintMode::Full),
             WASM_DIR.into(),
-            sender,
             None,
             None,
             50 * 1024 * 1024, // 50 kiB

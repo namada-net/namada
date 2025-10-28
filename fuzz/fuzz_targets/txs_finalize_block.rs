@@ -35,7 +35,7 @@ fuzz_target!(|txs: Vec<Tx>| {
         match SHELL.as_mut() {
             Some(shell) => shell,
             None => {
-                let (shell, _recv) = shell::test_utils::setup();
+                let shell = shell::test_utils::setup();
                 SHELL = Some(shell);
                 SHELL.as_mut().unwrap()
             }

@@ -16,7 +16,6 @@
 mod abortable;
 #[cfg(feature = "benches")]
 pub mod bench_utils;
-mod broadcaster;
 mod dry_run_tx;
 pub mod protocol;
 pub mod shell;
@@ -48,10 +47,8 @@ use namada_sdk::time::DateTimeUtc;
 use once_cell::unsync::Lazy;
 use shell::abci;
 use sysinfo::{MemoryRefreshKind, RefreshKind, System};
-use tokio::sync::mpsc;
 
 use self::abortable::AbortableSpawner;
-use crate::broadcaster::Broadcaster;
 use crate::config::TendermintMode;
 use crate::shell::{Error, Shell};
 use crate::tower_abci::{Server, split};
@@ -264,10 +261,6 @@ pub fn rollback(config: config::Ledger) -> Result<(), shell::Error> {
 ///   - A Tendermint node.
 ///   - A shell which contains an ABCI server, for talking to the Tendermint
 ///     node.
-///   - A [`Broadcaster`], for the ledger to submit txs to Tendermint's mempool.
-///   - An Ethereum full node.
-///   - An oracle, to receive events from the Ethereum full node, and forward
-///     them to the ledger.
 ///
 /// All must be alive for correct functioning.
 async fn run_aux(
@@ -290,9 +283,8 @@ async fn run_aux(
     let _ = namada_sdk::token::validation::preload_verifying_keys();
     tracing::info!("Done loading MASP verifying keys.");
 
-    // Start ABCI server and broadcaster (the latter only if we are a validator
-    // node)
-    start_abci_broadcaster_shell(
+    // Start ABCI server
+    start_abci_shell(
         &mut spawner,
         wasm_dir,
         setup_data,
@@ -412,53 +404,20 @@ async fn run_aux_setup(
     }
 }
 
-/// This function spawns an ABCI server and a [`Broadcaster`] into the
-/// asynchronous runtime. Additionally, it executes a shell in
-/// a new OS thread, to drive the ABCI server.
-fn start_abci_broadcaster_shell(
+/// This function spawns an ABCI server into the asynchronous runtime. Additionally, it executes a shell in a new OS thread, to drive the ABCI server.
+fn start_abci_shell(
     spawner: &mut AbortableSpawner,
     wasm_dir: PathBuf,
     setup_data: RunAuxSetup,
     config: config::Ledger,
     namada_version: &'static str,
 ) {
-    let rpc_address =
-        convert_tm_addr_to_socket_addr(&config.cometbft.rpc.laddr);
     let RunAuxSetup {
         vp_wasm_compilation_cache,
         tx_wasm_compilation_cache,
         db_block_cache_size_bytes,
         scheduled_migration,
     } = setup_data;
-
-    // Channels for validators to send protocol txs to be broadcast to the
-    // broadcaster service
-    let (broadcaster_sender, broadcaster_receiver) = mpsc::unbounded_channel();
-    let genesis_time = DateTimeUtc::try_from(config.genesis_time.clone())
-        .expect("Should be able to parse genesis time");
-    // Start broadcaster
-    if matches!(config.shell.tendermint_mode, TendermintMode::Validator) {
-        let (bc_abort_send, bc_abort_recv) =
-            tokio::sync::oneshot::channel::<()>();
-
-        spawner
-            .abortable("Broadcaster", move |aborter| async move {
-                // Construct a service for broadcasting protocol txs from
-                // the ledger
-                let mut broadcaster =
-                    Broadcaster::new(rpc_address, broadcaster_receiver);
-                broadcaster.run(bc_abort_recv, genesis_time).await;
-                tracing::info!("Broadcaster is no longer running.");
-
-                drop(aborter);
-
-                Ok(())
-            })
-            .with_cleanup(async move {
-                let _ = bc_abort_send.send(());
-            })
-            .spawn();
-    }
 
     // Setup DB cache, it must outlive the DB instance that's in the shell
     let db_cache = rocksdb::Cache::new_lru_cache(
@@ -476,7 +435,6 @@ fn start_abci_broadcaster_shell(
     let shell = Shell::new(
         config,
         wasm_dir,
-        broadcaster_sender,
         Some(&db_cache),
         scheduled_migration,
         vp_wasm_compilation_cache,
@@ -646,16 +604,11 @@ pub fn test_genesis_files(
     use namada_sdk::hash::Sha256Hasher;
     use namada_sdk::state::mockdb::MockDB;
 
-    // Channels for validators to send protocol txs to be broadcast to the
-    // broadcaster service
-    let (broadcast_sender, _broadcaster_receiver) = mpsc::unbounded_channel();
-
     let chain_id = config.chain_id.to_string();
     // start an instance of the ledger
     let mut shell = Shell::<MockDB, Sha256Hasher>::new(
         config,
         wasm_dir,
-        broadcast_sender,
         None,
         None,
         50 * 1024 * 1024,

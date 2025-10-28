@@ -27,7 +27,7 @@ use namada_tx::data::{pgf, pos};
 
 lazy_static! {
     static ref SHELL: Mutex<TestShell> = {
-        let (shell, _recv) = shell::test_utils::setup();
+        let shell = shell::test_utils::setup();
         Mutex::new(shell)
     };
 }

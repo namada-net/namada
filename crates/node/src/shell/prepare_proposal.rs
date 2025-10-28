@@ -334,7 +334,7 @@ mod test_prepare_proposal {
     /// proposed block.
     #[test]
     fn test_prepare_proposal_rejects_non_wrapper_tx() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
         let mut tx = Tx::from_type(TxType::Raw);
         tx.push_default_inner_tx();
         tx.header.chain_id = shell.chain_id.clone();
@@ -350,7 +350,7 @@ mod test_prepare_proposal {
     /// we simply exclude it from the proposal
     #[test]
     fn test_error_in_processing_tx() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
         let keypair = gen_keypair();
         // an unsigned wrapper will cause an error in processing
         let mut wrapper =
@@ -380,7 +380,7 @@ mod test_prepare_proposal {
     /// transaction is not included in the block
     #[test]
     fn test_wrapper_tx_hash() {
-        let (mut shell, _recv) = test_utils::setup();
+        let mut shell = test_utils::setup();
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
         let mut wrapper =
@@ -418,7 +418,7 @@ mod test_prepare_proposal {
     /// one gets accepted
     #[test]
     fn test_wrapper_tx_hash_same_block() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
         let mut wrapper =
@@ -447,7 +447,7 @@ mod test_prepare_proposal {
     /// transaction is not included in the block
     #[test]
     fn test_inner_tx_hash() {
-        let (mut shell, _recv) = test_utils::setup();
+        let mut shell = test_utils::setup();
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
         let mut wrapper =
@@ -487,7 +487,7 @@ mod test_prepare_proposal {
     /// both get accepted
     #[test]
     fn test_inner_tx_hash_same_block() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
         let keypair_2 = namada_apps_lib::wallet::defaults::albert_keypair();
@@ -529,7 +529,7 @@ mod test_prepare_proposal {
     /// Test that expired wrapper transactions are not included in the block
     #[test]
     fn test_expired_wrapper_tx() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
         let keypair = gen_keypair();
         let mut wrapper_tx =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -568,7 +568,7 @@ mod test_prepare_proposal {
     /// in the block
     #[test]
     fn test_exceeding_max_block_gas_tx() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let block_gas_limit =
             namada_sdk::parameters::get_max_block_gas(&shell.state).unwrap();
@@ -603,7 +603,7 @@ mod test_prepare_proposal {
     /// included
     #[test]
     fn test_exceeding_available_block_gas_tx() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let block_gas_limit =
             namada_sdk::parameters::get_max_block_gas(&shell.state).unwrap();
@@ -645,7 +645,7 @@ mod test_prepare_proposal {
     // the block
     #[test]
     fn test_exceeding_gas_limit_wrapper() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
         let keypair = gen_keypair();
 
         let wrapper = WrapperTx::new(
@@ -678,7 +678,7 @@ mod test_prepare_proposal {
     // payment is not included in the block
     #[test]
     fn test_fee_non_accepted_token() {
-        let (mut shell, _recv) = test_utils::setup();
+        let mut shell = test_utils::setup();
         // Update local validator configuration for gas tokens
         if let ShellMode::Validator {
             validator_local_config,
@@ -731,7 +731,7 @@ mod test_prepare_proposal {
     // included in the block
     #[test]
     fn test_fee_non_whitelisted_token() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let apfel_denom = read_denom(&shell.state, &address::testing::apfel())
             .expect("unable to read denomination from storage")
@@ -771,7 +771,7 @@ mod test_prepare_proposal {
     // is included in the block
     #[test]
     fn test_fee_whitelisted_non_native_token() {
-        let (mut shell, _recv) = test_utils::setup();
+        let mut shell = test_utils::setup();
 
         let apfel_denom = read_denom(&shell.state, &address::testing::apfel())
             .expect("unable to read denomination from storage")
@@ -836,7 +836,7 @@ mod test_prepare_proposal {
     // by the validator is not included in the block
     #[test]
     fn test_fee_wrong_minimum_accepted_amount() {
-        let (mut shell, _recv) = test_utils::setup();
+        let mut shell = test_utils::setup();
         // Update local validator configuration for gas tokens
         if let ShellMode::Validator {
             validator_local_config,
@@ -881,7 +881,7 @@ mod test_prepare_proposal {
     // is not included in the block
     #[test]
     fn test_fee_wrong_minimum_amount() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let wrapper = WrapperTx::new(
             Fee {
@@ -912,7 +912,7 @@ mod test_prepare_proposal {
     // Check that a wrapper transactions whose fees cannot be paid is rejected
     #[test]
     fn test_insufficient_balance_for_fee() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let wrapper = WrapperTx::new(
             Fee {
@@ -945,7 +945,7 @@ mod test_prepare_proposal {
     // Check that a fee overflow in the wrapper transaction is rejected
     #[test]
     fn test_wrapper_fee_overflow() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let wrapper = WrapperTx::new(
             Fee {
@@ -980,7 +980,7 @@ mod test_prepare_proposal {
     /// validator defaults to the latter.
     #[test]
     fn test_default_validator_min_gas_price() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
         let temp_state = shell.state.with_temp_write_log();
 
         let validator_min_gas_price = Amount::zero();

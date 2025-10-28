@@ -1561,7 +1561,7 @@ mod test_finalize_block {
     /// correct event is returned.
     #[test]
     fn test_process_proposal_rejected_wrapper_tx() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
         let keypair = gen_keypair();
         let mut processed_txs = vec![];
 
@@ -1616,7 +1616,7 @@ mod test_finalize_block {
     /// Test the correct transition to a new masp epoch
     #[test]
     fn test_masp_epoch_progression() {
-        let (mut shell, _broadcaster) = setup();
+        let mut shell = setup();
 
         let masp_epoch_multiplier =
             namada_sdk::parameters::read_masp_epoch_multiplier_parameter(
@@ -1648,7 +1648,7 @@ mod test_finalize_block {
     /// the DB.
     #[test]
     fn test_finalize_doesnt_commit_db() {
-        let (mut shell, _broadcaster) = setup();
+        let mut shell = setup();
 
         // Update epoch duration to make sure we go through couple epochs
         let epoch_duration = EpochDuration {
@@ -1824,7 +1824,7 @@ mod test_finalize_block {
         // properly. At the end of the epoch, check that the validator rewards
         // products are appropriately updated.
 
-        let (mut shell, _recv) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators: 4,
         });
@@ -2109,7 +2109,7 @@ mod test_finalize_block {
     /// A unit test for PoS inflationary rewards claiming and querying
     #[test]
     fn test_claim_rewards() {
-        let (mut shell, _recv) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators: 1,
         });
@@ -2383,7 +2383,7 @@ mod test_finalize_block {
     /// A unit test for PoS inflationary rewards claiming
     #[test]
     fn test_claim_validator_commissions() {
-        let (mut shell, _recv) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators: 1,
         });
@@ -2549,7 +2549,7 @@ mod test_finalize_block {
     /// A unit test for changing consensus keys and communicating to CometBFT
     #[test]
     fn test_change_validator_consensus_key() {
-        let (mut shell, _recv) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators: 3,
         });
@@ -2877,7 +2877,7 @@ mod test_finalize_block {
     /// Test that replay protection keys are not added to the merkle tree
     #[test]
     fn test_replay_keys_not_merklized() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
 
         let (wrapper_tx, processed_tx) = mk_wrapper_tx(
             &shell,
@@ -2938,7 +2938,7 @@ mod test_finalize_block {
     /// Test that masp anchor keys are added to the merkle tree
     #[test]
     fn test_masp_anchors_merklized() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
 
         let convert_key =
             namada_sdk::token::storage_key::masp_convert_anchor_key();
@@ -2997,7 +2997,7 @@ mod test_finalize_block {
     /// doesn't get reapplied
     #[test]
     fn test_duplicated_tx_same_block() {
-        let (mut shell, _broadcaster) = setup();
+        let mut shell = setup();
         let keypair = namada_apps_lib::wallet::defaults::albert_keypair();
         let keypair_2 = namada_apps_lib::wallet::defaults::bertha_keypair();
 
@@ -3104,7 +3104,8 @@ mod test_finalize_block {
     // able to execute and pass
     #[test]
     fn test_duplicated_tx_same_block_with_failure() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
+
         let keypair = namada_apps_lib::wallet::defaults::albert_keypair();
         let keypair_2 = namada_apps_lib::wallet::defaults::bertha_keypair();
 
@@ -3213,7 +3214,7 @@ mod test_finalize_block {
     /// hash written to storage.
     #[test]
     fn test_tx_hash_handling() {
-        let (mut shell, _broadcaster) = setup();
+        let mut shell = setup();
         let keypair = namada_apps_lib::wallet::defaults::bertha_keypair();
         let mut out_of_gas_wrapper = {
             let mut wrapper_tx =
@@ -3426,7 +3427,8 @@ mod test_finalize_block {
     /// even if the wrapper tx fails. The inner transaction hash must not be
     /// inserted
     fn test_commits_hash_if_wrapper_failure() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
+
         let keypair = gen_keypair();
 
         let mut wrapper =
@@ -3494,7 +3496,8 @@ mod test_finalize_block {
     // modifications are dropped
     #[test]
     fn test_fee_payment_if_invalid_inner_tx() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
+
         let keypair = namada_apps_lib::wallet::defaults::albert_keypair();
 
         let mut wrapper =
@@ -3574,7 +3577,8 @@ mod test_finalize_block {
     // of the inner txs of the batch gets executed
     #[test]
     fn test_fee_payment_if_insufficient_balance() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
+
         let keypair = gen_keypair();
         let native_token = shell.state.in_mem().native_token.clone();
 
@@ -3644,7 +3648,8 @@ mod test_finalize_block {
     // one is accepted
     #[test]
     fn test_fee_payment_whitelisted_token() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
+
         let btc = namada_sdk::address::testing::btc();
         let btc_denom = read_denom(&shell.state, &btc).unwrap().unwrap();
         let fee_amount: Amount = WRAPPER_GAS_LIMIT.into();
@@ -3724,7 +3729,7 @@ mod test_finalize_block {
     // signer and credited to the block proposer
     #[test]
     fn test_fee_payment_to_block_proposer() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
 
         let validator = shell.mode.get_validator_address().unwrap().to_owned();
         let pos_params = read_pos_params(&shell.state).unwrap();
@@ -3824,7 +3829,7 @@ mod test_finalize_block {
     #[test]
     fn test_ledger_slashing() -> namada_sdk::state::Result<()> {
         let num_validators = 7_u64;
-        let (mut shell, _recv) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators,
         });
@@ -4218,7 +4223,7 @@ mod test_finalize_block {
     ) -> namada_sdk::state::Result<()> {
         // Setup the network with pipeline_len = 2, unbonding_len = 4
         // let num_validators = 8_u64;
-        let (mut shell, _recv) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators,
         });
@@ -5032,7 +5037,7 @@ mod test_finalize_block {
     #[test]
     fn test_jail_validator_for_inactivity() -> namada_sdk::state::Result<()> {
         let num_validators = 5_u64;
-        let (mut shell, _recv) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators,
         });
@@ -5409,7 +5414,7 @@ mod test_finalize_block {
     // Test a successful tx batch containing three valid transactions
     #[test]
     fn test_successful_batch() {
-        let (mut shell, _broadcaster) = setup();
+        let mut shell = setup();
         let sk = wallet::defaults::bertha_keypair();
 
         let (batch, processed_tx) =
@@ -5458,7 +5463,7 @@ mod test_finalize_block {
     // that the last transaction is never executed (batch short-circuit)
     #[test]
     fn test_failing_atomic_batch() {
-        let (mut shell, _broadcaster) = setup();
+        let mut shell = setup();
         let sk = wallet::defaults::bertha_keypair();
 
         let (batch, processed_tx) = mk_tx_batch(&shell, &sk, true, true, false);
@@ -5516,7 +5521,7 @@ mod test_finalize_block {
     // committed
     #[test]
     fn test_failing_non_atomic_batch() {
-        let (mut shell, _broadcaster) = setup();
+        let mut shell = setup();
         let sk = wallet::defaults::bertha_keypair();
 
         let (batch, processed_tx) =
@@ -5594,7 +5599,8 @@ mod test_finalize_block {
     // successful txs. Verify that no changes are committed
     #[test]
     fn test_gas_error_atomic_batch() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
+
         let sk = wallet::defaults::bertha_keypair();
 
         let (batch, processed_tx) = mk_tx_batch(&shell, &sk, true, false, true);
@@ -5651,7 +5657,8 @@ mod test_finalize_block {
     // successful txs. Verify that changes from the first tx are committed
     #[test]
     fn test_gas_error_non_atomic_batch() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
+
         let sk = wallet::defaults::bertha_keypair();
 
         let (batch, processed_tx) =
@@ -5715,7 +5722,7 @@ mod test_finalize_block {
 
     #[test]
     fn test_multiple_events_from_batch_tx_all_valid() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
 
         let sk = wallet::defaults::bertha_keypair();
 
@@ -5797,7 +5804,7 @@ mod test_finalize_block {
     #[test]
     fn test_multiple_identical_events_from_batch_tx_all_valid() {
         const EVENT_MSG: &str = "bing";
-        let (mut shell, _) = setup();
+        let mut shell = setup();
 
         let sk = wallet::defaults::bertha_keypair();
 
@@ -5875,7 +5882,7 @@ mod test_finalize_block {
 
     #[test]
     fn test_multiple_events_from_batch_tx_one_valid_other_invalid() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
 
         let sk = wallet::defaults::bertha_keypair();
 
@@ -5946,7 +5953,7 @@ mod test_finalize_block {
 
     #[test]
     fn test_multiple_events_from_atomic_batch_tx_one_valid_other_invalid() {
-        let (mut shell, _) = setup();
+        let mut shell = setup();
 
         let sk = wallet::defaults::bertha_keypair();
 

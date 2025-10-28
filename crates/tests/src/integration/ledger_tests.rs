@@ -3400,7 +3400,6 @@ fn test_merkle_tree_restore() -> Result<()> {
 
         let MockServicesPackage {
             services,
-            shell_handlers,
             controller,
         } = mock_services();
 
@@ -3425,7 +3424,6 @@ fn test_merkle_tree_restore() -> Result<()> {
                 global_args.wasm_dir.expect(
                     "Wasm path not provided to integration test setup.",
                 ),
-                shell_handlers.tx_broadcaster,
                 None,
                 None,
                 50 * 1024 * 1024, // 50 kiB

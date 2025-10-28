@@ -65,7 +65,6 @@ use namada_sdk::{governance, migrations, parameters, proof_of_stake, token};
 use namada_vm::wasm::{TxCache, VpCache};
 use namada_vm::{WasmCacheAccess, WasmCacheRwAccess};
 use thiserror::Error;
-use tokio::sync::mpsc::UnboundedSender;
 
 use crate::config::{self, TendermintMode, ValidatorLocalConfig, genesis};
 use crate::protocol::ShellParams;
@@ -169,7 +168,6 @@ pub fn rollback(config: config::Ledger) -> ShellResult<()> {
 pub(super) enum ShellMode {
     Validator {
         data: ValidatorData,
-        broadcast_sender: UnboundedSender<Vec<u8>>,
         validator_local_config: Option<ValidatorLocalConfig>,
         local_config: Option<NodeLocalConfig>,
     },
@@ -316,7 +314,6 @@ where
     pub fn new(
         config: config::Ledger,
         wasm_dir: PathBuf,
-        broadcast_sender: UnboundedSender<Vec<u8>>,
         db_cache: Option<&D::Cache>,
         scheduled_migration: Option<ScheduledMigration>,
         vp_wasm_compilation_cache: u64,
@@ -418,7 +415,6 @@ where
                         .take_validator_data()
                         .map(|data| ShellMode::Validator {
                             data,
-                            broadcast_sender,
                             validator_local_config,
                             local_config,
                         })
@@ -439,7 +435,6 @@ where
                                 eth_bridge_keypair,
                             },
                         },
-                        broadcast_sender,
                         validator_local_config: None,
                         local_config: None,
                     }
@@ -1245,7 +1240,6 @@ pub mod test_utils {
     use namada_sdk::tendermint::abci::types::VoteInfo;
     use namada_sdk::time::Duration;
     use tempfile::tempdir;
-    use tokio::sync::mpsc::UnboundedReceiver;
 
     use super::*;
     use crate::shell::abci::ProcessedTx;
@@ -1355,17 +1349,8 @@ pub mod test_utils {
     }
 
     impl TestShell {
-        /// Returns a new shell with
-        ///    - A broadcast receiver, which will receive any protocol txs sent
-        ///      by the shell.
-        ///    - A sender that can send Ethereum events into the ledger, mocking
-        ///      the Ethereum fullnode process
-        ///    - A receiver for control commands sent by the shell to the
-        ///      Ethereum oracle
-        pub fn new_at_height<H: Into<BlockHeight>>(
-            height: H,
-        ) -> (Self, UnboundedReceiver<Vec<u8>>) {
-            let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        /// Returns a new shell
+        pub fn new_at_height<H: Into<BlockHeight>>(height: H) -> Self {
             let base_dir = tempdir().unwrap().as_ref().canonicalize().unwrap();
             let vp_wasm_compilation_cache = 50 * 1024 * 1024; // 50 kiB
             let tx_wasm_compilation_cache = 50 * 1024 * 1024; // 50 kiB
@@ -1376,21 +1361,20 @@ pub mod test_utils {
                     TendermintMode::Validator,
                 ),
                 top_level_directory().join("wasm"),
-                sender,
                 None,
                 None,
                 vp_wasm_compilation_cache,
                 tx_wasm_compilation_cache,
             );
             shell.state.in_mem_mut().block.height = height.into();
-            (Self { shell }, receiver)
+            Self { shell }
         }
 
         /// Same as [`TestShell::new_at_height`], but returns a shell at block
         /// height 0.
         #[inline]
         #[allow(dead_code)]
-        pub fn new() -> (Self, UnboundedReceiver<Vec<u8>>) {
+        pub fn new() -> Self {
             Self::new_at_height(BlockHeight(1))
         }
 
@@ -1552,8 +1536,8 @@ pub mod test_utils {
             last_height,
             num_validators,
         }: SetupCfg<H>,
-    ) -> (TestShell, UnboundedReceiver<Vec<u8>>) {
-        let (mut test, receiver) = TestShell::new_at_height(last_height);
+    ) -> TestShell {
+        let mut test = TestShell::new_at_height(last_height);
         let req = request::InitChain {
             time: Timestamp {
                 seconds: 0,
@@ -1589,15 +1573,13 @@ pub mod test_utils {
         };
         test.init_chain(req, num_validators);
         test.state.commit_block().expect("Test failed");
-        (test, receiver)
+        test
     }
 
     /// Same as [`setup_at_height`], but returns a shell at the given block
     /// height, with a single validator.
     #[inline]
-    pub fn setup_at_height<H: Into<BlockHeight>>(
-        last_height: H,
-    ) -> (TestShell, UnboundedReceiver<Vec<u8>>) {
+    pub fn setup_at_height<H: Into<BlockHeight>>(last_height: H) -> TestShell {
         let last_height = last_height.into();
         setup_with_cfg(SetupCfg {
             last_height,
@@ -1608,7 +1590,7 @@ pub mod test_utils {
     /// Same as [`setup_with_cfg`], but returns a shell at block height 0,
     /// with a single validator.
     #[inline]
-    pub fn setup() -> (TestShell, UnboundedReceiver<Vec<u8>>) {
+    pub fn setup() -> TestShell {
         setup_with_cfg(SetupCfg::<u64>::default())
     }
 
@@ -1681,7 +1663,7 @@ mod shell_tests {
     /// Mempool validation must reject unsigned wrappers
     #[test]
     fn test_missing_signature() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let keypair = super::test_utils::gen_keypair();
 
@@ -1718,7 +1700,7 @@ mod shell_tests {
     /// Mempool validation must reject wrappers with an invalid signature
     #[test]
     fn test_invalid_signature() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let keypair = super::test_utils::gen_keypair();
 
@@ -1763,7 +1745,7 @@ mod shell_tests {
     /// Mempool validation must reject non-wrapper txs
     #[test]
     fn test_wrong_tx_type() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let mut tx = Tx::new(shell.chain_id.clone(), None);
         tx.add_code("wasm_code".as_bytes().to_owned(), None);
@@ -1784,7 +1766,7 @@ mod shell_tests {
     /// transactions
     #[test]
     fn test_replay_attack() {
-        let (mut shell, _recv) = test_utils::setup();
+        let mut shell = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -1894,7 +1876,7 @@ mod shell_tests {
     /// Check that a transaction with a wrong chain id gets discarded
     #[test]
     fn test_wrong_chain_id() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let keypair = super::test_utils::gen_keypair();
 
@@ -1922,7 +1904,7 @@ mod shell_tests {
     /// Check that an expired transaction gets rejected
     #[test]
     fn test_expired_tx() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let keypair = super::test_utils::gen_keypair();
 
@@ -1942,7 +1924,7 @@ mod shell_tests {
     /// Check that a tx requiring more gas than the block limit gets rejected
     #[test]
     fn test_exceeding_max_block_gas_tx() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let block_gas_limit =
             parameters::get_max_block_gas(&shell.state).unwrap();
@@ -1972,7 +1954,7 @@ mod shell_tests {
     // Check that a tx requiring more gas than its limit gets rejected
     #[test]
     fn test_exceeding_gas_limit_tx() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
         let keypair = super::test_utils::gen_keypair();
 
         let mut wrapper =
@@ -2000,7 +1982,7 @@ mod shell_tests {
     // rejected
     #[test]
     fn test_fee_non_whitelisted_token() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
         let apfel_denom = read_denom(&shell.state, &address::testing::apfel())
             .expect("unable to read denomination from storage")
             .expect("unable to find denomination of apfels");
@@ -2033,7 +2015,7 @@ mod shell_tests {
     // is accepted
     #[test]
     fn test_fee_whitelisted_non_native_token() {
-        let (mut shell, _recv) = test_utils::setup();
+        let mut shell = test_utils::setup();
         let apfel_denom = read_denom(&shell.state, &address::testing::apfel())
             .expect("unable to read denomination from storage")
             .expect("unable to find denomination of apfels");
@@ -2092,7 +2074,7 @@ mod shell_tests {
     // is rejected
     #[test]
     fn test_fee_wrong_minimum_amount() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -2118,7 +2100,7 @@ mod shell_tests {
     // Check that a wrapper transactions whose fees cannot be paid is rejected
     #[test]
     fn test_insufficient_balance_for_fee() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -2146,7 +2128,7 @@ mod shell_tests {
     // Check that a fee overflow in the wrapper transaction is rejected
     #[test]
     fn test_wrapper_fee_overflow() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -2174,7 +2156,7 @@ mod shell_tests {
     /// Test max tx bytes parameter in CheckTx
     #[test]
     fn test_max_tx_bytes_check_tx() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let max_tx_bytes: u32 = {
             let key = parameters::storage::get_max_tx_bytes_key();
@@ -2225,7 +2207,7 @@ mod shell_tests {
     /// Test max tx sections limit in CheckTx
     #[test]
     fn test_max_tx_sections_check_tx() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let new_tx = |num_of_sections: usize| {
             let keypair = super::test_utils::gen_keypair();
@@ -2274,8 +2256,6 @@ mod shell_tests {
     /// from a snapshot if it is not syncing
     #[test]
     fn test_restore_database_from_snapshot() {
-        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
-
         let base_dir = tempdir().unwrap().as_ref().canonicalize().unwrap();
         let vp_wasm_compilation_cache = 50 * 1024 * 1024; // 50 kiB
         let tx_wasm_compilation_cache = 50 * 1024 * 1024; // 50 kiB
@@ -2287,7 +2267,6 @@ mod shell_tests {
         let mut shell = Shell::<PersistentDB, Sha256Hasher>::new(
             config.clone(),
             top_level_directory().join("wasm"),
-            sender,
             None,
             None,
             vp_wasm_compilation_cache,

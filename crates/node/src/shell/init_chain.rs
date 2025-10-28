@@ -973,7 +973,7 @@ mod test {
     /// DB.
     #[test]
     fn test_init_chain_doesnt_commit_db() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         // Collect all storage key-vals into a sorted map
         let store_block_state = |shell: &TestShell| -> BTreeMap<_, _> {
@@ -1006,7 +1006,7 @@ mod test {
     /// * cannot be read from disk.
     #[test]
     fn test_dry_run_lookup_vp() {
-        let (mut shell, _x) = TestShell::new_at_height(0);
+        let mut shell = TestShell::new_at_height(0);
         shell.wasm_dir = PathBuf::new();
         let mut genesis = genesis::make_dev_genesis(1, &shell.base_dir);
         let mut initializer = InitChainValidation::new(&mut shell, true);
@@ -1045,7 +1045,7 @@ mod test {
     /// * no vp_implicit wasm is stored
     #[test]
     fn test_dry_run_store_wasms() {
-        let (mut shell, _x) = TestShell::new_at_height(0);
+        let mut shell = TestShell::new_at_height(0);
         let test_dir = tempfile::tempdir().unwrap();
         shell.wasm_dir = test_dir.path().into();
 
@@ -1113,7 +1113,7 @@ mod test {
     /// corresponding config is encountered.
     #[test]
     fn test_dry_run_init_token_balance() {
-        let (mut shell, _x) = TestShell::new_at_height(0);
+        let mut shell = TestShell::new_at_height(0);
         shell.wasm_dir = PathBuf::new();
         let mut genesis = genesis::make_dev_genesis(1, &shell.base_dir);
         let mut initializer = InitChainValidation::new(&mut shell, true);
@@ -1138,7 +1138,7 @@ mod test {
     /// * bonding to a non-validator
     #[test]
     fn test_dry_run_genesis_bonds() {
-        let (mut shell, _x) = TestShell::new_at_height(0);
+        let mut shell = TestShell::new_at_height(0);
         shell.wasm_dir = PathBuf::new();
         let mut genesis = genesis::make_dev_genesis(1, &shell.base_dir);
         let mut initializer = InitChainValidation::new(&mut shell, true);
@@ -1211,7 +1211,7 @@ mod test {
 
     #[test]
     fn test_dry_run_native_token_masp_params() {
-        let (mut shell, _x) = TestShell::new_at_height(0);
+        let mut shell = TestShell::new_at_height(0);
         shell.wasm_dir = PathBuf::new();
         let mut genesis = genesis::make_dev_genesis(1, &shell.base_dir);
         let mut initializer = InitChainValidation::new(&mut shell, true);

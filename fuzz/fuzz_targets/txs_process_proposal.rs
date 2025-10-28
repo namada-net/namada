@@ -7,10 +7,7 @@ use namada_node::shell::test_utils::{ProcessProposal, TestShell};
 use namada_tx::Tx;
 
 lazy_static! {
-    static ref SHELL: TestShell = {
-        let (shell, _recv) = shell::test_utils::setup();
-        shell
-    };
+    static ref SHELL: TestShell = shell::test_utils::setup();
 }
 
 fuzz_target!(|txs: Vec<Tx>| {

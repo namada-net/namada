@@ -472,7 +472,7 @@ mod test_process_proposal {
     /// by [`process_proposal`].
     #[test]
     fn test_unsigned_wrapper_rejected() {
-        let (shell, _recv) = test_utils::setup_at_height(3u64);
+        let shell = test_utils::setup_at_height(3u64);
         let keypair = gen_keypair();
         let public_key = keypair.ref_to();
         let mut outer_tx =
@@ -523,7 +523,7 @@ mod test_process_proposal {
     /// rejected
     #[test]
     fn test_wrapper_bad_signature() {
-        let (shell, _recv) = test_utils::setup_at_height(3u64);
+        let shell = test_utils::setup_at_height(3u64);
 
         let mut runner = TestRunner::new(Config::default());
         // Test that the strategy produces valid txs first
@@ -571,7 +571,7 @@ mod test_process_proposal {
     /// payment
     #[test]
     fn test_wrapper_unknown_address() {
-        let (mut shell, _recv) = test_utils::setup_at_height(3u64);
+        let mut shell = test_utils::setup_at_height(3u64);
         let keypair = gen_keypair();
         let address = Address::from(&keypair.ref_to());
         let balance_key = token::storage_key::balance_key(
@@ -615,7 +615,7 @@ mod test_process_proposal {
     /// balance to pay the fee, [`process_proposal`] rejects the entire block
     #[test]
     fn test_wrapper_insufficient_balance_address() {
-        let (mut shell, _recv) = test_utils::setup_at_height(3u64);
+        let mut shell = test_utils::setup_at_height(3u64);
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
         // reduce address balance to match the 100 token min fee
         let balance_key = token::storage_key::balance_key(
@@ -673,7 +673,7 @@ mod test_process_proposal {
     /// Process Proposal should reject a block containing a RawTx, but not panic
     #[test]
     fn test_raw_tx_rejected() {
-        let (shell, _recv) = test_utils::setup_at_height(3u64);
+        let shell = test_utils::setup_at_height(3u64);
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 
@@ -711,7 +711,7 @@ mod test_process_proposal {
     /// block is rejected
     #[test]
     fn test_wrapper_tx_hash() {
-        let (mut shell, _recv) = test_utils::setup();
+        let mut shell = test_utils::setup();
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 
@@ -767,7 +767,7 @@ mod test_process_proposal {
     /// Test that a block containing two identical wrapper txs is rejected
     #[test]
     fn test_wrapper_tx_hash_same_block() {
-        let (mut shell, _recv) = test_utils::setup();
+        let mut shell = test_utils::setup();
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 
@@ -823,7 +823,7 @@ mod test_process_proposal {
     /// block is rejected
     #[test]
     fn test_inner_tx_hash() {
-        let (mut shell, _recv) = test_utils::setup();
+        let mut shell = test_utils::setup();
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 
@@ -879,7 +879,7 @@ mod test_process_proposal {
     /// accepted
     #[test]
     fn test_inner_tx_hash_same_block() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
         let keypair_2 = namada_apps_lib::wallet::defaults::albert_keypair();
@@ -923,7 +923,7 @@ mod test_process_proposal {
     /// entire block to be rejected
     #[test]
     fn test_wrong_chain_id() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 
         let mut wrapper =
@@ -971,7 +971,7 @@ mod test_process_proposal {
     /// Test that an expired wrapper transaction causes a block rejection
     #[test]
     fn test_expired_wrapper() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 
         let mut wrapper =
@@ -1008,7 +1008,7 @@ mod test_process_proposal {
     /// rejection
     #[test]
     fn test_exceeding_max_block_gas_tx() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let block_gas_limit =
             parameters::get_max_block_gas(&shell.state).unwrap();
@@ -1047,7 +1047,7 @@ mod test_process_proposal {
     /// causes a block rejection
     #[test]
     fn test_exceeding_available_block_gas_tx() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let block_gas_limit =
             parameters::get_max_block_gas(&shell.state).unwrap();
@@ -1093,7 +1093,7 @@ mod test_process_proposal {
     // rejection
     #[test]
     fn test_exceeding_gas_limit_wrapper() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
         let keypair = super::test_utils::gen_keypair();
 
         let mut wrapper =
@@ -1129,7 +1129,7 @@ mod test_process_proposal {
     // a block rejection
     #[test]
     fn test_fee_non_whitelisted_token() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let apfel_denom = read_denom(&shell.state, &address::testing::apfel())
             .expect("unable to read denomination from storage")
@@ -1172,7 +1172,7 @@ mod test_process_proposal {
     // is accepted
     #[test]
     fn test_fee_whitelisted_non_native_token() {
-        let (mut shell, _recv) = test_utils::setup();
+        let mut shell = test_utils::setup();
 
         let apfel_denom = read_denom(&shell.state, &address::testing::apfel())
             .expect("unable to read denomination from storage")
@@ -1232,7 +1232,7 @@ mod test_process_proposal {
     // causes a block rejection
     #[test]
     fn test_fee_wrong_minimum_amount() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -1268,7 +1268,7 @@ mod test_process_proposal {
     // block rejection
     #[test]
     fn test_insufficient_balance_for_fee() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -1306,7 +1306,7 @@ mod test_process_proposal {
     // rejection
     #[test]
     fn test_wrapper_fee_overflow() {
-        let (shell, _recv) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -1344,7 +1344,7 @@ mod test_process_proposal {
     #[test]
     fn test_max_tx_bytes_process_proposal() {
         use parameters::storage::get_max_tx_bytes_key;
-        let (shell, _recv) = test_utils::setup_at_height(3u64);
+        let shell = test_utils::setup_at_height(3u64);
 
         let max_tx_bytes: u32 = {
             let key = get_max_tx_bytes_key();
@@ -1406,7 +1406,7 @@ mod test_process_proposal {
     /// sections exceeding the limit
     #[test]
     fn test_max_sections_exceeded_tx_rejected() {
-        let (shell, _recv) = test_utils::setup_at_height(3u64);
+        let shell = test_utils::setup_at_height(3u64);
 
         let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
 

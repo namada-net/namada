@@ -404,7 +404,9 @@ async fn run_aux_setup(
     }
 }
 
-/// This function spawns an ABCI server into the asynchronous runtime. Additionally, it executes a shell in a new OS thread, to drive the ABCI server.
+/// This function spawns an ABCI server into the asynchronous runtime.
+/// Additionally, it executes a shell in a new OS thread, to drive the ABCI
+/// server.
 fn start_abci_shell(
     spawner: &mut AbortableSpawner,
     wasm_dir: PathBuf,

@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v201.0.7
+
+Namada apps v201.0.7
+
+### IMPROVEMENTS
+
+- Changed RocksDB compaction style to "Level" to avoid stalling on diffs
+  column family. ([\#4946](https://github.com/namada-net/namada/pull/4946))
+
 ## v201.0.6
 
 Namada apps v201.0.6

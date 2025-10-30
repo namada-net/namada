@@ -272,20 +272,14 @@ where
 {
     fn try_extract_masp_tx_from_envelope<Transfer: BorshDeserialize>(
         tx_data: &[u8],
-    ) -> StorageResult<Option<masp_primitives::transaction::Transaction>> {
-        let msg = decode_message::<Transfer>(tx_data)
-            .into_storage_result()
-            .ok();
-        let tx = if let Some(IbcMessage::Envelope(envelope)) = msg {
-            Some(extract_masp_tx_from_envelope(&envelope).ok_or_else(|| {
-                StorageError::new_const(
-                    "Missing MASP transaction in IBC message",
-                )
-            })?)
+    ) -> Option<masp_primitives::transaction::Transaction> {
+        let msg = decode_message::<Transfer>(tx_data).ok()?;
+
+        if let IbcMessage::Envelope(envelope) = msg {
+            extract_masp_tx_from_envelope(&envelope)
         } else {
             None
-        };
-        Ok(tx)
+        }
     }
 
     fn apply_ibc_packet<Transfer: BorshDeserialize>(

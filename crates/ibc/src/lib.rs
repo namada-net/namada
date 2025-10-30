@@ -71,8 +71,10 @@ use ibc::apps::transfer::types::{
 use ibc::core::channel::types::acknowledgement::AcknowledgementStatus;
 use ibc::core::channel::types::commitment::compute_ack_commitment;
 use ibc::core::channel::types::msgs::{
-    MsgRecvPacket as IbcMsgRecvPacket, PacketMsg,
+    MsgAcknowledgement as IbcMsgAcknowledgement,
+    MsgRecvPacket as IbcMsgRecvPacket, MsgTimeout as IbcMsgTimeout, PacketMsg,
 };
+use ibc::core::channel::types::packet::Packet;
 use ibc::core::channel::types::timeout::{TimeoutHeight, TimeoutTimestamp};
 use ibc::core::entrypoint::{execute, validate};
 use ibc::core::handler::types::error::HandlerError;
@@ -225,6 +227,41 @@ impl TryFrom<IbcMsgNftTransfer> for IbcTransferInfo {
     }
 }
 
+enum MaspPacketBalanceChange {
+    Recv,
+    Timeout,
+    AckFailure,
+}
+
+impl MaspPacketBalanceChange {
+    fn apply_msg<S>(
+        &self,
+        storage: &S,
+        accum: ChangedBalances,
+        packet: &Packet,
+        ibc_traces: Vec<String>,
+        amount: Amount,
+        keys_changed: &BTreeSet<Key>,
+    ) -> StorageResult<ChangedBalances>
+    where
+        S: StorageRead,
+    {
+        match self {
+            Self::Recv => apply_recv_msg(
+                storage,
+                accum,
+                packet,
+                ibc_traces,
+                amount,
+                keys_changed,
+            ),
+            Self::Timeout | Self::AckFailure => {
+                apply_refund_msg(accum, packet, ibc_traces, amount)
+            }
+        }
+    }
+}
+
 /// IBC storage `Keys/Read/Write` implementation
 #[derive(Debug)]
 pub struct Store<S>(PhantomData<S>);
@@ -292,22 +329,53 @@ where
                 )?;
             }
             // This event is emitted on the receiver
-            Some(IbcMessage::Envelope(envelope)) => {
-                if let MsgEnvelope::Packet(PacketMsg::Recv(msg)) = *envelope {
-                    if msg.packet.port_id_on_b.as_str() == PORT_ID_STR {
-                        let packet_data = serde_json::from_slice::<PacketData>(
-                            &msg.packet.data,
-                        )
-                        .map_err(StorageError::new)?;
+            Some(IbcMessage::Envelope(envelope)) => 'handle_envelope: {
+                if let MsgEnvelope::Packet(packet_msg) = *envelope {
+                    let (packet, packet_kind) = match packet_msg {
+                        PacketMsg::Recv(IbcMsgRecvPacket {
+                            packet, ..
+                        }) => (packet, MaspPacketBalanceChange::Recv),
+                        PacketMsg::Timeout(IbcMsgTimeout {
+                            packet, ..
+                        }) => (packet, MaspPacketBalanceChange::Timeout),
+                        PacketMsg::Ack(IbcMsgAcknowledgement {
+                            packet,
+                            acknowledgement,
+                            ..
+                        }) => {
+                            let success_ack_commitment = compute_ack_commitment(
+                                &AcknowledgementStatus::success(
+                                    ack_success_b64(),
+                                )
+                                .into(),
+                            );
+                            let ack_commitment =
+                                compute_ack_commitment(&acknowledgement);
+
+                            if ack_commitment == success_ack_commitment {
+                                break 'handle_envelope;
+                            }
+
+                            (packet, MaspPacketBalanceChange::AckFailure)
+                        }
+                        _ => {
+                            break 'handle_envelope;
+                        }
+                    };
+
+                    if packet.port_id_on_b.as_str() == PORT_ID_STR {
+                        let packet_data =
+                            serde_json::from_slice::<PacketData>(&packet.data)
+                                .map_err(StorageError::new)?;
                         let receiver = packet_data.receiver.to_string();
                         let addr = TAddrData::Ibc(receiver.clone());
                         accum.decoder.insert(ibc_taddr(receiver), addr);
                         let ibc_denom = packet_data.token.denom.to_string();
                         let amount: Amount = packet_data.token.amount.into();
-                        accum = apply_recv_msg(
+                        accum = packet_kind.apply_msg(
                             storage,
                             accum,
-                            &msg,
+                            &packet,
                             vec![ibc_denom],
                             amount,
                             keys_changed,
@@ -315,7 +383,7 @@ where
                     } else {
                         let packet_data =
                             serde_json::from_slice::<NftPacketData>(
-                                &msg.packet.data,
+                                &packet.data,
                             )
                             .map_err(StorageError::new)?;
                         let receiver = packet_data.receiver.to_string();
@@ -332,10 +400,10 @@ where
                                 )
                             })
                             .collect();
-                        accum = apply_recv_msg(
+                        accum = packet_kind.apply_msg(
                             storage,
                             accum,
-                            &msg,
+                            &packet,
                             ibc_traces,
                             Amount::from_u64(1),
                             keys_changed,
@@ -473,21 +541,19 @@ where
 
 // Check that the packet receipt key has been changed
 fn check_packet_receiving(
-    msg: &IbcMsgRecvPacket,
+    packet: &Packet,
     keys_changed: &BTreeSet<Key>,
 ) -> StorageResult<()> {
     let receipt_key = storage::receipt_key(
-        &msg.packet.port_id_on_b,
-        &msg.packet.chan_id_on_b,
-        msg.packet.seq_on_a,
+        &packet.port_id_on_b,
+        &packet.chan_id_on_b,
+        packet.seq_on_a,
     );
     if !keys_changed.contains(&receipt_key) {
         return Err(StorageError::new_alloc(format!(
             "The packet has not been received: Port ID {}, Channel ID {}, \
              Sequence {}",
-            msg.packet.port_id_on_b,
-            msg.packet.chan_id_on_b,
-            msg.packet.seq_on_a,
+            packet.port_id_on_b, packet.chan_id_on_b, packet.seq_on_a,
         )));
     }
     Ok(())
@@ -577,7 +643,7 @@ where
 fn apply_recv_msg<S>(
     storage: &S,
     mut accum: ChangedBalances,
-    msg: &IbcMsgRecvPacket,
+    packet: &Packet,
     ibc_traces: Vec<String>,
     amount: Amount,
     keys_changed: &BTreeSet<Key>,
@@ -586,14 +652,14 @@ where
     S: StorageRead,
 {
     // First check that the packet receipt is reflecteed in the state changes
-    check_packet_receiving(msg, keys_changed)?;
+    check_packet_receiving(packet, keys_changed)?;
     // If the transfer was a failure, then enable funds to
     // be withdrawn from the IBC internal address
     if is_receiving_success(
         storage,
-        &msg.packet.port_id_on_b,
-        &msg.packet.chan_id_on_b,
-        msg.packet.seq_on_a,
+        &packet.port_id_on_b,
+        &packet.chan_id_on_b,
+        packet.seq_on_a,
     )? {
         for ibc_trace in ibc_traces {
             // Only artificially increase the IBC internal address pre-balance
@@ -602,16 +668,16 @@ where
             // received.
             if !is_receiver_chain_source_str(
                 &ibc_trace,
-                &msg.packet.port_id_on_a,
-                &msg.packet.chan_id_on_a,
+                &packet.port_id_on_a,
+                &packet.chan_id_on_a,
             ) {
                 // Get the received token
                 let token = received_ibc_token(
                     ibc_trace,
-                    &msg.packet.port_id_on_a,
-                    &msg.packet.chan_id_on_a,
-                    &msg.packet.port_id_on_b,
-                    &msg.packet.chan_id_on_b,
+                    &packet.port_id_on_a,
+                    &packet.chan_id_on_a,
+                    &packet.port_id_on_b,
+                    &packet.chan_id_on_b,
                 )
                 .into_storage_result()?;
                 let delta = ValueSum::from_pair(token.clone(), amount);
@@ -632,6 +698,49 @@ where
             }
         }
     }
+    Ok(accum)
+}
+
+// Apply the given refund message (originating from an ACK error, or TIMEOUT)
+// to the changed balances structure
+fn apply_refund_msg(
+    mut accum: ChangedBalances,
+    packet: &Packet,
+    ibc_traces: Vec<String>,
+    amount: Amount,
+) -> StorageResult<ChangedBalances> {
+    for ibc_trace in ibc_traces {
+        // Only artificially increase the IBC internal address pre-balance
+        // if sending involves burning. We do not do this in the escrow
+        // case since the pre-balance already accounts for the amount being
+        // sent.
+        if !is_sender_chain_source(
+            &ibc_trace,
+            &packet.port_id_on_a,
+            &packet.chan_id_on_a,
+        ) {
+            // Get the sent token
+            let token = trace::convert_to_address(ibc_trace)
+                .map_err(|e| Error::Trace(format!("Invalid base token: {e}")))
+                .into_storage_result()?;
+            let delta = ValueSum::from_pair(token.clone(), amount);
+            // Enable funds to be taken from the IBC internal
+            // address and be deposited elsewhere
+            // Required for the IBC internal Address to release
+            // funds
+            let ibc_taddr = addr_taddr(address::IBC);
+            let pre_entry = accum
+                .pre
+                .get(&ibc_taddr)
+                .cloned()
+                .unwrap_or(ValueSum::zero());
+            accum.pre.insert(
+                ibc_taddr,
+                checked!(pre_entry + &delta).map_err(StorageError::new)?,
+            );
+        }
+    }
+
     Ok(accum)
 }
 

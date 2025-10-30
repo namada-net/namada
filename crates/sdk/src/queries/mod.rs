@@ -11,11 +11,6 @@ pub use types::{
 };
 use vp::{VP, Vp};
 
-pub use self::shell::eth_bridge::{
-    Erc20FlowControl, GenBridgePoolProofReq, GenBridgePoolProofRsp,
-    TransferToErcArgs, TransferToEthereumStatus,
-};
-
 #[macro_use]
 mod router;
 mod shell;

@@ -53,7 +53,6 @@ default = ["migrations"]
 mainnet = ["namada_apps_lib/mainnet"]
 jemalloc = ["namada_node/jemalloc"]
 migrations = ["namada_apps_lib/migrations"]
-namada-eth-bridge = ["namada_apps_lib/namada-eth-bridge"]
 
 [dependencies]
 namada_apps_lib.workspace = true

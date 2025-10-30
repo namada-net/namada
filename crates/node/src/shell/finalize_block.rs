@@ -19,20 +19,55 @@ use namada_sdk::state::{
     EPOCH_SWITCH_BLOCKS_DELAY, Result, ResultExt, StorageWrite,
 };
 use namada_sdk::storage::{BlockHeader, BlockResults, Epoch};
-use namada_sdk::tx::data::protocol::ProtocolTxType;
 use namada_sdk::tx::data::{VpStatusFlags, compute_inner_tx_hash};
 use namada_sdk::tx::event::{Batch, Code};
 use namada_sdk::tx::new_tx_event;
 use namada_sdk::{ibc, proof_of_stake};
-use namada_vote_ext::ethereum_events::MultiSignedEthEvent;
-use namada_vote_ext::ethereum_tx_data_variants;
 use tendermint::abci::types::Misbehavior;
 
 use super::*;
 use crate::protocol::{DispatchArgs, DispatchError};
 use crate::shell::stats::InternalStats;
 use crate::tendermint::abci::types::VoteInfo;
-use crate::tendermint_proto;
+
+#[derive(Debug, Clone)]
+pub struct Request {
+    /// List of transactions committed as part of the block.
+    pub txs: Vec<abci::ProcessedTx>,
+    /// Information about the last commit, obtained from the block that was
+    /// just decided.
+    ///
+    /// This includes the round, the list of validators, and which validators
+    /// signed the last block.
+    pub decided_last_commit: tendermint::abci::types::CommitInfo,
+    /// Evidence of validator misbehavior.
+    pub misbehavior: Vec<Misbehavior>,
+    /// Merkle root hash of the fields of the decided block.
+    pub hash: Hash,
+    /// The height of the finalized block.
+    pub height: BlockHeight,
+    /// Timestamp of the finalized block.
+    pub time: DateTimeUtc,
+    /// Merkle root of the next validator set.
+    pub next_validators_hash: Hash,
+    /// The address of the public key of the original proposer of the block.
+    pub proposer_address: tendermint::account::Id,
+}
+
+#[derive(Clone, Debug)]
+pub struct Response {
+    /// Set of block events emitted as part of executing the block
+    pub events: Vec<Event>,
+    /// The result of executing each transaction including the events
+    /// the particular transaction emitted. This should match the order
+    /// of the transactions delivered in the block itself
+    pub tx_results: Vec<tendermint::abci::types::ExecTxResult>,
+    /// A list of updates to the validator set.
+    /// These will reflect the validator set at current height + 2.
+    pub validator_updates: Vec<validator::Update>,
+    /// Merkle tree root hash
+    pub app_hash: AppHash,
+}
 
 impl<D, H> Shell<D, H>
 where
@@ -44,14 +79,54 @@ where
     /// etc. as necessary.
     ///
     /// Apply the transactions included in the block.
-    pub fn finalize_block(
-        &mut self,
-        req: shim::request::FinalizeBlock,
-    ) -> ShellResult<shim::response::FinalizeBlock> {
-        let mut response = shim::response::FinalizeBlock::default();
+    pub fn finalize_block(&mut self, req: Request) -> ShellResult<Response> {
+        let Request {
+            txs,
+            decided_last_commit,
+            misbehavior,
+            hash: _,
+            height: expected_height,
+            time,
+            next_validators_hash,
+            proposer_address,
+        } = req;
+
+        // If this height has been previously finalized, we need to do it again.
+        if self.finalized_merkle_tree == Some(expected_height) {
+            // For that we have to reload merkle tree from DB.
+            let tree = self
+                .state
+                .restrict_writes_to_write_log()
+                .get_merkle_tree(
+                    expected_height
+                        .checked_sub(1)
+                        .expect("There should be a previous height"),
+                    None,
+                )
+                .expect("Merkle tree should be restored");
+
+            tree.validate().unwrap();
+            self.state.in_mem_mut().block.tree = tree;
+        }
+
+        let mut tx_results: Vec<tendermint::abci::types::ExecTxResult> = vec![];
+        let mut validator_updates = vec![];
+        let mut events: Vec<Event> = vec![];
 
         // Begin the new block and check if a new epoch has begun
-        let (height, new_epoch) = self.update_state(req.header);
+        let header = BlockHeader {
+            hash: self.state.in_mem().merkle_root().into(),
+            time,
+            next_validators_hash,
+        };
+        let (height, new_epoch) = self.update_state(header);
+        if expected_height != height {
+            #[cfg(not(test))]
+            return Err(Error::UnexpectedBlockHeight {
+                expected: expected_height,
+                got: height,
+            });
+        }
         let masp_epoch_multiplier =
             parameters::read_masp_epoch_multiplier_parameter(&self.state)
                 .expect("Must have parameters");
@@ -86,10 +161,10 @@ where
             self.state.in_mem().update_epoch_blocks_delay
         );
 
-        let emit_events = &mut response.events;
+        let emit_events = &mut events;
         // Get the actual votes from cometBFT in the preferred format
         let votes =
-            pos_votes_from_abci(&self.state, &req.decided_last_commit.votes);
+            pos_votes_from_abci(&self.state, &decided_last_commit.votes);
         let validator_set_update_epoch =
             self.get_validator_set_update_epoch(current_epoch);
         let gas_scale = get_gas_scale(&self.state)
@@ -115,7 +190,7 @@ where
             new_epoch,
             validator_set_update_epoch,
             votes,
-            req.byzantine_validators,
+            misbehavior,
         )?;
         // - IBC
         ibc::finalize_block(&mut self.state, emit_events, new_epoch)?;
@@ -128,8 +203,7 @@ where
         let mut stats = InternalStats::default();
 
         let native_block_proposer_address = {
-            let tm_raw_hash_string =
-                tm_raw_hash_to_string(req.proposer_address);
+            let tm_raw_hash_string = tm_raw_hash_to_string(proposer_address);
             find_validator_by_raw_hash(&self.state, tm_raw_hash_string)
                 .unwrap()
                 .expect(
@@ -145,21 +219,22 @@ where
         // Execute wrapper and protocol transactions
         let successful_wrappers = self.retrieve_and_execute_transactions(
             &native_block_proposer_address,
-            &req.txs,
+            &txs,
             gas_scale,
             ExecutionArgs {
-                response: &mut response,
+                events: &mut events,
                 changed_keys: &mut changed_keys,
                 stats: &mut stats,
                 height,
             },
+            &mut tx_results,
         );
 
         // Execute inner transactions
         self.execute_tx_batches(
             successful_wrappers,
             ExecutionArgs {
-                response: &mut response,
+                events: &mut events,
                 changed_keys: &mut changed_keys,
                 stats: &mut stats,
                 height,
@@ -196,10 +271,7 @@ where
         }
 
         if update_for_tendermint {
-            self.update_epoch(&mut response);
-            // send the latest oracle configs. These may have changed due to
-            // governance.
-            self.update_eth_oracle(&changed_keys);
+            validator_updates = self.update_epoch();
         }
 
         write_last_block_proposer_address(
@@ -207,10 +279,34 @@ where
             native_block_proposer_address,
         )?;
 
-        self.event_log_mut().emit_many(response.events.clone());
+        self.event_log_mut().emit_many(events.clone());
         tracing::debug!("End finalize_block {height} of epoch {current_epoch}");
 
-        Ok(response)
+        debug_assert_eq!(txs.len(), tx_results.len());
+
+        self.state.pre_commit_block()?;
+
+        if let Some(migration) = &self.scheduled_migration {
+            if height == migration.height {
+                let migration = migration
+                    .load_and_validate()
+                    .expect("The scheduled migration is not valid.");
+                migrations::commit(&mut self.state, migration);
+            }
+        }
+
+        let merkle_root = self.state.in_mem().block.tree.root();
+        let app_hash = AppHash::try_from(merkle_root.0.to_vec())
+            .expect("expected a valid app hash");
+
+        self.finalized_merkle_tree = Some(height);
+
+        Ok(Response {
+            events,
+            tx_results,
+            validator_updates,
+            app_hash,
+        })
     }
 
     /// Sets the metadata necessary for a new block, including the height,
@@ -246,17 +342,15 @@ where
 
     /// If a new epoch begins, we update the response to include
     /// changes to the validator sets and consensus parameters
-    fn update_epoch(&mut self, response: &mut shim::response::FinalizeBlock) {
+    fn update_epoch(&mut self) -> Vec<tendermint::validator::Update> {
         // Apply validator set update
-        response.validator_updates = self
-            .get_abci_validator_updates(false, |pk, power| {
-                let pub_key = tendermint_proto::crypto::PublicKey {
-                    sum: Some(key_to_tendermint(&pk).unwrap()),
-                };
-                let pub_key = Some(pub_key);
-                tendermint_proto::abci::ValidatorUpdate { pub_key, power }
-            })
-            .expect("Must be able to update validator set");
+        self.get_abci_validator_updates(false, |pk, power| {
+            let pub_key = tendermint::PublicKey::from(pk);
+            // TODO use u64
+            let power = tendermint::vote::Power::try_from(power).unwrap();
+            tendermint::validator::Update { pub_key, power }
+        })
+        .expect("Must be able to update validator set")
     }
 
     /// Calculate the new inflation rate, mint the new tokens to the PoS
@@ -337,7 +431,7 @@ where
     // batch execution
     fn evaluate_tx_result(
         &mut self,
-        response: &mut shim::response::FinalizeBlock,
+        events: &mut Vec<Event>,
         extended_dispatch_result: std::result::Result<
             namada_sdk::tx::data::TxResult<protocol::Error>,
             Box<DispatchError>,
@@ -370,7 +464,7 @@ where
                                 // Take the events from the batch result to
                                 // avoid emitting them again after the exection
                                 // of the entire batch
-                                response.events.emit_many(
+                                events.emit_many(
                                     std::mem::take(&mut batched_result.events)
                                         .into_iter()
                                         .map(|event| {
@@ -391,7 +485,7 @@ where
                     });
                 }
                 _ => self.handle_inner_tx_results(
-                    response,
+                    events,
                     tx_result,
                     tx_data,
                     &mut tx_logs,
@@ -456,7 +550,7 @@ where
                         .extend(Code(ResultCode::WasmRuntimeError));
 
                     self.handle_batch_error(
-                        response,
+                        events,
                         &msg,
                         tx_result,
                         tx_data,
@@ -466,7 +560,7 @@ where
             },
         }
 
-        response.events.emit(tx_logs.tx_event);
+        events.emit(tx_logs.tx_event);
         None
     }
 
@@ -474,7 +568,7 @@ where
     // the storage changes, update stats and event, manage replay protection.
     fn handle_inner_tx_results(
         &mut self,
-        response: &mut shim::response::FinalizeBlock,
+        events: &mut Vec<Event>,
         mut tx_result: namada_sdk::tx::data::TxResult<protocol::Error>,
         tx_data: TxData<'_>,
         tx_logs: &mut TxLogs<'_>,
@@ -491,7 +585,7 @@ where
             .block
             .results
             .accept(tx_data.tx_index);
-        temp_log.commit(tx_logs, response);
+        temp_log.commit(tx_logs, events);
 
         // Atomic successful batches or non-atomic batches (even if the
         // inner txs failed) are marked as Ok
@@ -518,7 +612,7 @@ where
 
     fn handle_batch_error(
         &mut self,
-        response: &mut shim::response::FinalizeBlock,
+        events: &mut Vec<Event>,
         msg: &Error,
         mut tx_result: namada_sdk::tx::data::TxResult<protocol::Error>,
         tx_data: TxData<'_>,
@@ -550,7 +644,7 @@ where
                 .block
                 .results
                 .accept(tx_data.tx_index);
-            temp_log.commit(tx_logs, response);
+            temp_log.commit(tx_logs, events);
             // Commit the successful inner transactions before the error. Drop
             // the current tx write log which might be still populated with data
             // to be discarded (this is the case when we propagate an error
@@ -604,14 +698,15 @@ where
     fn retrieve_and_execute_transactions(
         &mut self,
         native_block_proposer_address: &Address,
-        processed_txs: &[shim::request::ProcessedTx],
+        processed_txs: &[abci::ProcessedTx],
         gas_scale: u64,
         ExecutionArgs {
-            response,
+            events,
             changed_keys,
             stats,
             height,
         }: ExecutionArgs<'_>,
+        tx_results: &mut Vec<tendermint::abci::types::ExecTxResult>,
     ) -> Vec<WrapperCache> {
         let mut successful_wrappers = vec![];
 
@@ -631,6 +726,12 @@ where
             let result_code = ResultCode::from_u32(processed_tx.result.code)
                 .expect("Result code conversion should not fail");
 
+            let tx_hash = tx.header_hash();
+            let result_info = serde_json::to_string(&serde_json::json!({
+                "namada_tx_hash": tx_hash,
+            }))
+            .unwrap();
+
             let tx_header = tx.header();
             // If [`process_proposal`] rejected a Tx, emit an event here and
             // move on to next tx
@@ -640,9 +741,7 @@ where
                     // signature, emit an event here and
                     // move on to next tx
                     ResultCode::InvalidSig => match tx.header().tx_type {
-                        TxType::Wrapper(_) | TxType::Protocol(_) => {
-                            new_tx_event(&tx, height.0)
-                        }
+                        TxType::Wrapper(_) => new_tx_event(&tx, height.0),
                         _ => {
                             tracing::error!(
                                 "Internal logic error: FinalizeBlock received \
@@ -655,7 +754,7 @@ where
                     },
                     _ => new_tx_event(&tx, height.0),
                 };
-                response.events.emit(
+                events.emit(
                     base_event
                         .with(Code(result_code))
                         .with(Info(format!(
@@ -664,6 +763,12 @@ where
                         )))
                         .with(GasUsed(0.into())),
                 );
+
+                tx_results.push(tendermint::abci::types::ExecTxResult {
+                    code: result_code.into(),
+                    info: result_info,
+                    ..Default::default()
+                });
 
                 continue;
             }
@@ -679,7 +784,7 @@ where
                         match wrapper.gas_limit.as_scaled_gas(gas_scale) {
                             Ok(value) => value,
                             Err(_) => {
-                                response.events.emit(
+                                events.emit(
                                     new_tx_event(&tx, height.0)
                                         .with(Code(ResultCode::InvalidTx))
                                         .with(Info(
@@ -689,6 +794,15 @@ where
                                         ))
                                         .with(GasUsed(0.into())),
                                 );
+
+                                tx_results.push(
+                                    tendermint::abci::types::ExecTxResult {
+                                        code: result_code.into(),
+                                        info: result_info,
+                                        ..Default::default()
+                                    },
+                                );
+
                                 continue;
                             }
                         };
@@ -723,63 +837,18 @@ where
                     );
                     continue;
                 }
-                TxType::Protocol(protocol_tx) => {
-                    match protocol_tx.tx {
-                        ProtocolTxType::BridgePoolVext
-                        | ProtocolTxType::BridgePool
-                        | ProtocolTxType::ValSetUpdateVext
-                        | ProtocolTxType::ValidatorSetUpdate => (),
-
-                        ProtocolTxType::EthEventsVext => {
-                            let ext =
-                        ethereum_tx_data_variants::EthEventsVext::try_from(&tx)
-                            .unwrap();
-                            if self
-                                .mode
-                                .get_validator_address()
-                                .map(|validator| {
-                                    validator == &ext.data.validator_addr
-                                })
-                                .unwrap_or(false)
-                            {
-                                for event in ext.data.ethereum_events.iter() {
-                                    self.mode.dequeue_eth_event(event);
-                                }
-                            }
-                        }
-                        ProtocolTxType::EthereumEvents => {
-                            let digest =
-                        ethereum_tx_data_variants::EthereumEvents::try_from(
-                            &tx,
-                        )
-                        .unwrap();
-                            if let Some(address) =
-                                self.mode.get_validator_address().cloned()
-                            {
-                                let this_signer = &(
-                                    address,
-                                    self.state.in_mem().get_last_block_height(),
-                                );
-                                for MultiSignedEthEvent { event, signers } in
-                                    &digest.events
-                                {
-                                    if signers.contains(this_signer) {
-                                        self.mode.dequeue_eth_event(event);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    (
-                        DispatchArgs::Protocol(protocol_tx),
-                        TxGasMeter::new(0, gas_scale),
-                    )
+                #[allow(deprecated)]
+                TxType::Protocol(_) => {
+                    tracing::error!(
+                        "Internal logic error: FinalizeBlock received a \
+                         TxType::Protocol transaction"
+                    );
+                    continue;
                 }
             };
             let tx_event = new_tx_event(&tx, height.0);
             let is_atomic_batch = tx.header.atomic;
             let commitments_len = tx.commitments().len() as u64;
-            let tx_hash = tx.header_hash();
             let tx_gas_meter = RefCell::new(tx_gas_meter);
 
             let dispatch_result = protocol::dispatch_tx(
@@ -792,10 +861,24 @@ where
             let consumed_gas = tx_gas_meter.get_consumed_gas();
 
             // save the gas cost
-            self.update_tx_gas(tx_hash, consumed_gas);
+            self.update_tx_gas(tx_hash, consumed_gas.clone());
+
+            #[allow(clippy::disallowed_methods)]
+            let gas_used =
+                i64::try_from(u64::from(consumed_gas)).unwrap_or_default();
+            // The number of the `tx_results` has to match the number of txs in
+            // request, otherwise Comet crashes consensus with "failed to apply
+            // block; error expected tx results length to match size of
+            // transactions in block."
+            tx_results.push(tendermint::abci::types::ExecTxResult {
+                code: result_code.into(),
+                gas_used,
+                info: result_info,
+                ..Default::default()
+            });
 
             if let Some(wrapper_cache) = self.evaluate_tx_result(
-                response,
+                events,
                 dispatch_result,
                 TxData {
                     is_atomic_batch,
@@ -824,7 +907,7 @@ where
         &mut self,
         successful_wrappers: Vec<WrapperCache>,
         ExecutionArgs {
-            response,
+            events,
             changed_keys,
             stats,
             height,
@@ -869,7 +952,7 @@ where
             self.update_tx_gas(tx_hash, consumed_gas);
 
             self.evaluate_tx_result(
-                response,
+                events,
                 dispatch_result,
                 TxData {
                     is_atomic_batch,
@@ -891,7 +974,7 @@ where
 }
 
 struct ExecutionArgs<'finalize> {
-    response: &'finalize mut shim::response::FinalizeBlock,
+    events: &'finalize mut Vec<Event>,
     changed_keys: &'finalize mut BTreeSet<Key>,
     stats: &'finalize mut InternalStats,
     height: BlockHeight,
@@ -957,16 +1040,12 @@ impl TempTxLogs {
 
 impl<'finalize> TempTxLogs {
     // Consumes the temporary logs and merges them to confirmed ones. Pushes ibc
-    // and eth events to the finalize block response
-    fn commit(
-        self,
-        logs: &mut TxLogs<'finalize>,
-        response: &mut shim::response::FinalizeBlock,
-    ) {
+    // events to the finalize block response
+    fn commit(self, logs: &mut TxLogs<'finalize>, events: &mut Vec<Event>) {
         logs.tx_event.merge(self.tx_event);
         logs.stats.merge(self.stats);
         logs.changed_keys.extend(self.changed_keys);
-        response.events.extend(self.response_events);
+        events.extend(self.response_events);
     }
 
     // Consumes the temporary logs and merges the statistics to confirmed ones.
@@ -1260,40 +1339,57 @@ where
     )
 }
 
+// This is just to be used in testing. It is not a meaningful default.
+#[cfg(any(test, feature = "testing"))]
+impl Default for Request {
+    fn default() -> Self {
+        Request {
+            hash: Hash([0; 32]),
+            #[allow(clippy::disallowed_methods)]
+            time: DateTimeUtc::now(),
+            next_validators_hash: Default::default(),
+            misbehavior: Default::default(),
+            txs: Default::default(),
+            proposer_address: tendermint::account::Id::try_from(
+                HEXUPPER
+                    .decode(
+                        wallet::defaults::validator_keypair()
+                            .to_public()
+                            .tm_raw_hash()
+                            .as_bytes(),
+                    )
+                    .unwrap(),
+            )
+            .unwrap(),
+            decided_last_commit: tendermint::abci::types::CommitInfo {
+                round: 0u8.into(),
+                votes: vec![],
+            },
+            height: Default::default(),
+        }
+    }
+}
+
 /// We test the failure cases of [`finalize_block`]. The happy flows
 /// are covered by the e2e tests.
 #[allow(clippy::arithmetic_side_effects, clippy::cast_possible_truncation)]
 #[cfg(test)]
 mod test_finalize_block {
     use std::collections::BTreeMap;
-    use std::num::NonZeroU64;
     use std::str::FromStr;
 
     use namada_apps_lib::wallet::defaults::albert_keypair;
     use namada_replay_protection as replay_protection;
     use namada_sdk::address;
+    use namada_sdk::borsh::BorshSerializeExt;
     use namada_sdk::collections::{HashMap, HashSet};
     use namada_sdk::dec::{Dec, POS_DECIMAL_PRECISION};
-    use namada_sdk::eth_bridge::MinimumConfirmations;
-    use namada_sdk::eth_bridge::storage::bridge_pool::{
-        self, get_key_from_hash, get_nonce_key, get_signed_root_key,
-    };
-    use namada_sdk::eth_bridge::storage::eth_bridge_queries::is_bridge_comptime_enabled;
-    use namada_sdk::eth_bridge::storage::vote_tallies::BridgePoolRoot;
-    use namada_sdk::eth_bridge::storage::{
-        min_confirmations_key, wrapped_erc20s,
-    };
-    use namada_sdk::ethereum_events::{EthAddress, Uint as ethUint};
-    use namada_sdk::events::Event;
     use namada_sdk::events::extend::Log;
-    use namada_sdk::gas::{GasMeterKind, VpGasMeter};
-    use namada_sdk::governance::storage::keys::get_proposal_execution_key;
     use namada_sdk::governance::storage::proposal::ProposalType;
     use namada_sdk::governance::{
         InitProposalData, ProposalVote, VoteProposalData,
     };
     use namada_sdk::hash::Hash;
-    use namada_sdk::keccak::KeccakHash;
     use namada_sdk::key::testing::common_sk_from_simple_seed;
     use namada_sdk::parameters::EpochDuration;
     use namada_sdk::proof_of_stake::storage::{
@@ -1326,20 +1422,15 @@ mod test_finalize_block {
     use namada_sdk::tx::event::types::APPLIED as APPLIED_TX;
     use namada_sdk::tx::{Authorization, Code, Data};
     use namada_sdk::uint::Uint;
-    use namada_sdk::validation::ParametersVp;
     use namada_test_utils::TestWasms;
     use namada_test_utils::tx_data::TxWriteData;
-    use namada_vm::wasm::run::VpEvalWasm;
-    use namada_vote_ext::ethereum_events;
     use proof_of_stake::{PosParams, bond_tokens};
     use test_log::test;
 
     use super::*;
-    use crate::oracle::control::Command;
+    use crate::shell::FinalizeBlockRequest;
+    use crate::shell::abci::ProcessedTx;
     use crate::shell::test_utils::*;
-    use crate::shims::abcipp_shim_types::shim::request::{
-        FinalizeBlock, ProcessedTx,
-    };
     use crate::tendermint::abci::types::Validator;
 
     const WRAPPER_GAS_LIMIT: u64 = 10_000_000;
@@ -1470,7 +1561,7 @@ mod test_finalize_block {
     /// correct event is returned.
     #[test]
     fn test_process_proposal_rejected_wrapper_tx() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
         let keypair = gen_keypair();
         let mut processed_txs = vec![];
 
@@ -1496,7 +1587,7 @@ mod test_finalize_block {
 
         // check that the correct events were created
         for event in shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs.clone(),
                 ..Default::default()
             })
@@ -1522,354 +1613,10 @@ mod test_finalize_block {
         }
     }
 
-    /// Test if a rejected protocol tx is applied and emits
-    /// the correct event
-    #[test]
-    fn test_rejected_protocol_tx() {
-        const LAST_HEIGHT: BlockHeight = BlockHeight(3);
-        let (mut shell, _, _, _) = setup_at_height(LAST_HEIGHT);
-        let protocol_key =
-            shell.mode.get_protocol_key().expect("Test failed").clone();
-
-        let tx = EthereumTxData::EthereumEvents(ethereum_events::VextDigest {
-            signatures: Default::default(),
-            events: vec![],
-        })
-        .sign(&protocol_key, shell.chain_id.clone())
-        .to_bytes();
-
-        let req = FinalizeBlock {
-            txs: vec![ProcessedTx {
-                tx: tx.into(),
-                result: TxResult {
-                    code: ResultCode::InvalidTx.into(),
-                    info: Default::default(),
-                },
-            }],
-            ..Default::default()
-        };
-        let mut resp = shell.finalize_block(req).expect("Test failed");
-        assert_eq!(resp.len(), 1);
-        let event = resp.remove(0);
-        assert_eq!(*event.kind(), APPLIED_TX);
-        let code = event.read_attribute::<CodeAttr>().expect("Test failed");
-        assert_eq!(code, ResultCode::InvalidTx);
-    }
-
-    /// Test that once a validator's vote for an Ethereum event lands
-    /// on-chain from a vote extension digest, it dequeues from the
-    /// list of events to vote on.
-    #[test]
-    fn test_eth_events_dequeued_digest() {
-        let (mut shell, _, oracle, _) = setup_at_height(3);
-        let protocol_key =
-            shell.mode.get_protocol_key().expect("Test failed").clone();
-        let address = shell
-            .mode
-            .get_validator_address()
-            .expect("Test failed")
-            .clone();
-
-        // ---- the ledger receives a new Ethereum event
-        let event = EthereumEvent::TransfersToNamada {
-            nonce: 0u64.into(),
-            transfers: vec![],
-        };
-        tokio_test::block_on(oracle.send(event.clone())).expect("Test failed");
-        let [queued_event]: [EthereumEvent; 1] =
-            shell.new_ethereum_events().try_into().expect("Test failed");
-        assert_eq!(queued_event, event);
-
-        // ---- The protocol tx that includes this event on-chain
-        let ext = ethereum_events::Vext {
-            block_height: shell.state.in_mem().get_last_block_height(),
-            ethereum_events: vec![event.clone()],
-            validator_addr: address.clone(),
-        }
-        .sign(&protocol_key);
-
-        let processed_tx = {
-            let signed = MultiSignedEthEvent {
-                event,
-                signers: BTreeSet::from([(
-                    address.clone(),
-                    shell.state.in_mem().get_last_block_height(),
-                )]),
-            };
-
-            let digest = ethereum_events::VextDigest {
-                signatures: vec![(
-                    (address, shell.state.in_mem().get_last_block_height()),
-                    ext.sig,
-                )]
-                .into_iter()
-                .collect(),
-                events: vec![signed],
-            };
-            ProcessedTx {
-                tx: EthereumTxData::EthereumEvents(digest)
-                    .sign(&protocol_key, shell.chain_id.clone())
-                    .to_bytes()
-                    .into(),
-                result: TxResult {
-                    code: ResultCode::Ok.into(),
-                    info: "".into(),
-                },
-            }
-        };
-
-        // ---- This protocol tx is accepted
-        let [result]: [Event; 1] = shell
-            .finalize_block(FinalizeBlock {
-                txs: vec![processed_tx],
-                ..Default::default()
-            })
-            .expect("Test failed")
-            .try_into()
-            .expect("Test failed");
-        assert_eq!(*result.kind(), APPLIED_TX);
-        let code = result.read_attribute::<CodeAttr>().expect("Test failed");
-        assert_eq!(code, ResultCode::Ok);
-
-        // --- The event is removed from the queue
-        assert!(shell.new_ethereum_events().is_empty());
-    }
-
-    /// Test that once a validator's vote for an Ethereum event lands
-    /// on-chain from a protocol tx, it dequeues from the
-    /// list of events to vote on.
-    #[test]
-    fn test_eth_events_dequeued_protocol_tx() {
-        let (mut shell, _, oracle, _) = setup_at_height(3);
-        let protocol_key =
-            shell.mode.get_protocol_key().expect("Test failed").clone();
-        let address = shell
-            .mode
-            .get_validator_address()
-            .expect("Test failed")
-            .clone();
-
-        // ---- the ledger receives a new Ethereum event
-        let event = EthereumEvent::TransfersToNamada {
-            nonce: 0u64.into(),
-            transfers: vec![],
-        };
-        tokio_test::block_on(oracle.send(event.clone())).expect("Test failed");
-        let [queued_event]: [EthereumEvent; 1] =
-            shell.new_ethereum_events().try_into().expect("Test failed");
-        assert_eq!(queued_event, event);
-
-        // ---- The protocol tx that includes this event on-chain
-        let ext = ethereum_events::Vext {
-            block_height: shell.state.in_mem().get_last_block_height(),
-            ethereum_events: vec![event],
-            validator_addr: address,
-        }
-        .sign(&protocol_key);
-        let processed_tx = ProcessedTx {
-            tx: EthereumTxData::EthEventsVext(ext.into())
-                .sign(&protocol_key, shell.chain_id.clone())
-                .to_bytes()
-                .into(),
-            result: TxResult {
-                code: ResultCode::Ok.into(),
-                info: "".into(),
-            },
-        };
-
-        // ---- This protocol tx is accepted
-        let [result]: [Event; 1] = shell
-            .finalize_block(FinalizeBlock {
-                txs: vec![processed_tx],
-                ..Default::default()
-            })
-            .expect("Test failed")
-            .try_into()
-            .expect("Test failed");
-        assert_eq!(*result.kind(), APPLIED_TX);
-        let code = result.read_attribute::<CodeAttr>().expect("Test failed");
-        assert_eq!(code, ResultCode::Ok);
-
-        // --- The event is removed from the queue
-        assert!(shell.new_ethereum_events().is_empty());
-    }
-
-    /// Actions to perform in [`test_bp`].
-    enum TestBpAction {
-        /// The tested unit correctly signed over the bridge pool root.
-        VerifySignedRoot,
-        /// The tested unit correctly incremented the bridge pool's nonce.
-        CheckNonceIncremented,
-    }
-
-    /// Helper function for testing the relevant protocol tx
-    /// for signing bridge pool roots and nonces
-    fn test_bp<F>(craft_tx: F)
-    where
-        F: FnOnce(&mut TestShell) -> (Tx, TestBpAction),
-    {
-        if !is_bridge_comptime_enabled() {
-            // NOTE: this test doesn't work if the ethereum bridge
-            // is disabled at compile time.
-            return;
-        }
-        let (mut shell, _, _, _) = setup_at_height(1u64);
-        namada_sdk::eth_bridge::test_utils::commit_bridge_pool_root_at_height(
-            &mut shell.state,
-            &KeccakHash([1; 32]),
-            1.into(),
-        );
-        let value = BlockHeight(2).serialize_to_vec();
-        shell
-            .state
-            .in_mem_mut()
-            .block
-            .tree
-            .update(&get_key_from_hash(&KeccakHash([1; 32])), value)
-            .expect("Test failed");
-        shell
-            .state
-            .db_write(&get_nonce_key(), Uint::from(1).serialize_to_vec())
-            .expect("Test failed");
-        let (tx, action) = craft_tx(&mut shell);
-        let processed_tx = ProcessedTx {
-            tx: tx.to_bytes().into(),
-            result: TxResult {
-                code: ResultCode::Ok.into(),
-                info: "".into(),
-            },
-        };
-        let req = FinalizeBlock {
-            txs: vec![processed_tx],
-            ..Default::default()
-        };
-        let root = shell
-            .state
-            .read::<(BridgePoolRoot, BlockHeight)>(&get_signed_root_key())
-            .expect("Reading signed Bridge pool root shouldn't fail.");
-        assert!(root.is_none());
-        _ = shell.finalize_block(req).expect("Test failed");
-        shell.state.commit_block().unwrap();
-        match action {
-            TestBpAction::VerifySignedRoot => {
-                let (root, _) = shell
-                    .state
-                    .ethbridge_queries()
-                    .get_signed_bridge_pool_root()
-                    .expect("Test failed");
-                assert_eq!(root.data.0, KeccakHash([1; 32]));
-                assert_eq!(root.data.1, ethUint::from(1));
-            }
-            TestBpAction::CheckNonceIncremented => {
-                let nonce =
-                    shell.state.ethbridge_queries().get_bridge_pool_nonce();
-                assert_eq!(nonce, ethUint::from(2));
-            }
-        }
-    }
-
-    #[test]
-    /// Test that adding a new erc20 transfer to the bridge pool
-    /// increments the pool's nonce.
-    fn test_bp_nonce_is_incremented() {
-        test_bp(|shell: &mut TestShell| {
-            let asset = EthAddress([0xff; 20]);
-            let receiver = EthAddress([0xaa; 20]);
-            let bertha = namada_apps_lib::wallet::defaults::bertha_address();
-            // add bertha's escrowed `asset` to the pool
-            {
-                let token = wrapped_erc20s::token(&asset);
-                let owner_key = token::storage_key::balance_key(
-                    &token,
-                    &bridge_pool::BRIDGE_POOL_ADDRESS,
-                );
-                let supply_key = token::storage_key::minted_balance_key(&token);
-                let amt: Amount = 999_999_u64.into();
-                shell.state.write(&owner_key, amt).expect("Test failed");
-                shell.state.write(&supply_key, amt).expect("Test failed");
-            }
-            // add bertha's gas fees the pool
-            {
-                let amt: Amount = 999_999_u64.into();
-                let native_token = shell.state.in_mem().native_token.clone();
-                update_balance(
-                    &mut shell.state,
-                    &native_token,
-                    &bridge_pool::BRIDGE_POOL_ADDRESS,
-                    |_| Ok(amt),
-                )
-                .expect("Test failed");
-            }
-            // write transfer to storage
-            let transfer = {
-                use namada_sdk::eth_bridge_pool::{
-                    GasFee, PendingTransfer, TransferToEthereum,
-                    TransferToEthereumKind,
-                };
-                let pending = PendingTransfer {
-                    transfer: TransferToEthereum {
-                        kind: TransferToEthereumKind::Erc20,
-                        amount: 10u64.into(),
-                        asset,
-                        recipient: receiver,
-                        sender: bertha.clone(),
-                    },
-                    gas_fee: GasFee {
-                        token: shell.state.in_mem().native_token.clone(),
-                        amount: 10u64.into(),
-                        payer: bertha.clone(),
-                    },
-                };
-                let transfer = (&pending).into();
-                shell
-                    .state
-                    .write(&bridge_pool::get_pending_key(&pending), pending)
-                    .expect("Test failed");
-                transfer
-            };
-            let ethereum_event = EthereumEvent::TransfersToEthereum {
-                nonce: 1u64.into(),
-                transfers: vec![transfer],
-                relayer: bertha,
-            };
-            let (protocol_key, _) =
-                namada_apps_lib::wallet::defaults::validator_keys();
-            let validator_addr =
-                namada_apps_lib::wallet::defaults::validator_address();
-            let ext = {
-                let ext = ethereum_events::Vext {
-                    validator_addr,
-                    block_height: shell.state.in_mem().get_last_block_height(),
-                    ethereum_events: vec![ethereum_event],
-                }
-                .sign(&protocol_key);
-                assert!(ext.verify(&protocol_key.ref_to()).is_ok());
-                ext
-            };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
-                .sign(&protocol_key, shell.chain_id.clone());
-            (tx, TestBpAction::CheckNonceIncremented)
-        });
-    }
-
-    #[test]
-    /// Test that the generated protocol tx passes Finalize Block
-    /// and effects the expected storage changes.
-    fn test_bp_roots_protocol_tx() {
-        test_bp(|shell: &mut TestShell| {
-            let vext = shell.extend_vote_with_bp_roots().expect("Test failed");
-            let tx = EthereumTxData::BridgePoolVext(vext.into()).sign(
-                shell.mode.get_protocol_key().expect("Test failed"),
-                shell.chain_id.clone(),
-            );
-            (tx, TestBpAction::VerifySignedRoot)
-        });
-    }
-
     /// Test the correct transition to a new masp epoch
     #[test]
     fn test_masp_epoch_progression() {
-        let (mut shell, _broadcaster, _, _eth_control) = setup();
+        let mut shell = setup();
 
         let masp_epoch_multiplier =
             namada_sdk::parameters::read_masp_epoch_multiplier_parameter(
@@ -1901,7 +1648,7 @@ mod test_finalize_block {
     /// the DB.
     #[test]
     fn test_finalize_doesnt_commit_db() {
-        let (mut shell, _broadcaster, _, _eth_control) = setup();
+        let mut shell = setup();
 
         // Update epoch duration to make sure we go through couple epochs
         let epoch_duration = EpochDuration {
@@ -2030,9 +1777,12 @@ mod test_finalize_block {
                 txs.push(processed_tx);
             }
 
-            let req = FinalizeBlock {
+            let req = FinalizeBlockRequest {
                 txs,
-                proposer_address: proposer_address.clone(),
+                proposer_address: tendermint::account::Id::try_from(
+                    proposer_address.clone(),
+                )
+                .unwrap(),
                 decided_last_commit: tendermint::abci::types::CommitInfo {
                     round: 0u8.into(),
                     votes: votes.clone(),
@@ -2044,9 +1794,9 @@ mod test_finalize_block {
 
             let _events = shell.finalize_block(req).unwrap();
 
-            // the merkle tree root should not change after finalize_block
+            // the merkle tree root should change after finalize_block
             let root_post = shell.shell.state.in_mem().block.tree.root();
-            assert_eq!(root_pre.0, root_post.0);
+            assert_ne!(root_pre.0, root_post.0);
             let new_state = store_block_state(&shell);
             // The new state must be unchanged
             itertools::assert_equal(
@@ -2074,10 +1824,9 @@ mod test_finalize_block {
         // properly. At the end of the epoch, check that the validator rewards
         // products are appropriately updated.
 
-        let (mut shell, _recv, _, _) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators: 4,
-            ..Default::default()
         });
 
         let mut validator_set: BTreeSet<WeightedValidator> =
@@ -2360,10 +2109,9 @@ mod test_finalize_block {
     /// A unit test for PoS inflationary rewards claiming and querying
     #[test]
     fn test_claim_rewards() {
-        let (mut shell, _recv, _, _) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators: 1,
-            ..Default::default()
         });
 
         let mut validator_set: BTreeSet<WeightedValidator> =
@@ -2635,10 +2383,9 @@ mod test_finalize_block {
     /// A unit test for PoS inflationary rewards claiming
     #[test]
     fn test_claim_validator_commissions() {
-        let (mut shell, _recv, _, _) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators: 1,
-            ..Default::default()
         });
 
         let mut validator_set: BTreeSet<WeightedValidator> =
@@ -2802,10 +2549,9 @@ mod test_finalize_block {
     /// A unit test for changing consensus keys and communicating to CometBFT
     #[test]
     fn test_change_validator_consensus_key() {
-        let (mut shell, _recv, _, _) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators: 3,
-            ..Default::default()
         });
 
         let mut validators: BTreeSet<WeightedValidator> =
@@ -3131,7 +2877,7 @@ mod test_finalize_block {
     /// Test that replay protection keys are not added to the merkle tree
     #[test]
     fn test_replay_keys_not_merklized() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
 
         let (wrapper_tx, processed_tx) = mk_wrapper_tx(
             &shell,
@@ -3145,7 +2891,7 @@ mod test_finalize_block {
         let root_pre = shell.shell.state.in_mem().block.tree.root();
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -3154,9 +2900,9 @@ mod test_finalize_block {
         let code = event.read_attribute::<CodeAttr>().expect("Test failed");
         assert_eq!(code, ResultCode::Ok);
 
-        // the merkle tree root should not change after finalize_block
+        // the merkle tree root should change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
-        assert_eq!(root_pre.0, root_post.0);
+        assert_ne!(root_pre.0, root_post.0);
 
         // Check transaction's hash in storage
         assert!(
@@ -3192,7 +2938,7 @@ mod test_finalize_block {
     /// Test that masp anchor keys are added to the merkle tree
     #[test]
     fn test_masp_anchors_merklized() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
 
         let convert_key =
             namada_sdk::token::storage_key::masp_convert_anchor_key();
@@ -3214,7 +2960,7 @@ mod test_finalize_block {
             .protocol_write(&commitment_key, "random_data".serialize_to_vec())
             .unwrap();
         shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![],
                 ..Default::default()
             })
@@ -3222,7 +2968,7 @@ mod test_finalize_block {
 
         // the merkle tree root should change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
-        assert_eq!(root_pre.0, root_post.0);
+        assert_ne!(root_pre.0, root_post.0);
         // Check that the hashes are present in the merkle tree
         shell.state.commit_block().unwrap();
         assert!(
@@ -3251,7 +2997,7 @@ mod test_finalize_block {
     /// doesn't get reapplied
     #[test]
     fn test_duplicated_tx_same_block() {
-        let (mut shell, _broadcaster, _, _) = setup();
+        let mut shell = setup();
         let keypair = namada_apps_lib::wallet::defaults::albert_keypair();
         let keypair_2 = namada_apps_lib::wallet::defaults::bertha_keypair();
 
@@ -3304,15 +3050,15 @@ mod test_finalize_block {
         let root_pre = shell.shell.state.in_mem().block.tree.root();
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
             .expect("Test failed");
 
-        // the merkle tree root should not change after finalize_block
+        // the merkle tree root should change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
-        assert_eq!(root_pre.0, root_post.0);
+        assert_ne!(root_pre.0, root_post.0);
 
         assert_eq!(*event[0].kind(), APPLIED_TX);
         let code = event[0].read_attribute::<CodeAttr>().expect("Test failed");
@@ -3358,7 +3104,8 @@ mod test_finalize_block {
     // able to execute and pass
     #[test]
     fn test_duplicated_tx_same_block_with_failure() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
+
         let keypair = namada_apps_lib::wallet::defaults::albert_keypair();
         let keypair_2 = namada_apps_lib::wallet::defaults::bertha_keypair();
 
@@ -3432,15 +3179,15 @@ mod test_finalize_block {
         let root_pre = shell.shell.state.in_mem().block.tree.root();
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
             .expect("Test failed");
 
-        // the merkle tree root should not change after finalize_block
+        // the merkle tree root should change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
-        assert_eq!(root_pre.0, root_post.0);
+        assert_ne!(root_pre.0, root_post.0);
 
         assert_eq!(*event[0].kind(), APPLIED_TX);
         let code = event[0].read_attribute::<CodeAttr>().expect("Test failed");
@@ -3467,7 +3214,7 @@ mod test_finalize_block {
     /// hash written to storage.
     #[test]
     fn test_tx_hash_handling() {
-        let (mut shell, _broadcaster, _, _) = setup();
+        let mut shell = setup();
         let keypair = namada_apps_lib::wallet::defaults::bertha_keypair();
         let mut out_of_gas_wrapper = {
             let mut wrapper_tx =
@@ -3561,15 +3308,15 @@ mod test_finalize_block {
         let root_pre = shell.shell.state.in_mem().block.tree.root();
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
             .expect("Test failed");
 
-        // the merkle tree root should not change after finalize_block
+        // the merkle tree root should change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
-        assert_eq!(root_pre.0, root_post.0);
+        assert_ne!(root_pre.0, root_post.0);
 
         assert_eq!(*event[0].kind(), APPLIED_TX);
         let code = event[0].read_attribute::<CodeAttr>().expect("Test failed");
@@ -3680,7 +3427,8 @@ mod test_finalize_block {
     /// even if the wrapper tx fails. The inner transaction hash must not be
     /// inserted
     fn test_commits_hash_if_wrapper_failure() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
+
         let keypair = gen_keypair();
 
         let mut wrapper =
@@ -3716,15 +3464,15 @@ mod test_finalize_block {
         let root_pre = shell.shell.state.in_mem().block.tree.root();
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
             .expect("Test failed");
 
-        // the merkle tree root should not change after finalize_block
+        // the merkle tree root should change after finalize_block
         let root_post = shell.shell.state.in_mem().block.tree.root();
-        assert_eq!(root_pre.0, root_post.0);
+        assert_ne!(root_pre.0, root_post.0);
 
         assert_eq!(*event[0].kind(), APPLIED_TX);
         let code = event[0].read_attribute::<CodeAttr>().expect("Test failed");
@@ -3748,7 +3496,8 @@ mod test_finalize_block {
     // modifications are dropped
     #[test]
     fn test_fee_payment_if_invalid_inner_tx() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
+
         let keypair = namada_apps_lib::wallet::defaults::albert_keypair();
 
         let mut wrapper =
@@ -3793,7 +3542,7 @@ mod test_finalize_block {
         };
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -3828,7 +3577,8 @@ mod test_finalize_block {
     // of the inner txs of the batch gets executed
     #[test]
     fn test_fee_payment_if_insufficient_balance() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
+
         let keypair = gen_keypair();
         let native_token = shell.state.in_mem().native_token.clone();
 
@@ -3865,7 +3615,7 @@ mod test_finalize_block {
         assert!(fee_amount > initial_balance);
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -3898,7 +3648,8 @@ mod test_finalize_block {
     // one is accepted
     #[test]
     fn test_fee_payment_whitelisted_token() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
+
         let btc = namada_sdk::address::testing::btc();
         let btc_denom = read_denom(&shell.state, &btc).unwrap().unwrap();
         let fee_amount: Amount = WRAPPER_GAS_LIMIT.into();
@@ -3953,7 +3704,7 @@ mod test_finalize_block {
         };
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -3978,7 +3729,7 @@ mod test_finalize_block {
     // signer and credited to the block proposer
     #[test]
     fn test_fee_payment_to_block_proposer() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
 
         let validator = shell.mode.get_validator_address().unwrap().to_owned();
         let pos_params = read_pos_params(&shell.state).unwrap();
@@ -4037,9 +3788,12 @@ mod test_finalize_block {
         };
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
-                proposer_address,
+                proposer_address: tendermint::account::Id::try_from(
+                    proposer_address,
+                )
+                .unwrap(),
                 ..Default::default()
             })
             .expect("Test failed")[0];
@@ -4075,10 +3829,9 @@ mod test_finalize_block {
     #[test]
     fn test_ledger_slashing() -> namada_sdk::state::Result<()> {
         let num_validators = 7_u64;
-        let (mut shell, _recv, _, _) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators,
-            ..Default::default()
         });
         let mut params = read_pos_params(&shell.state).unwrap();
         params.owned.unbonding_len = 4;
@@ -4470,10 +4223,9 @@ mod test_finalize_block {
     ) -> namada_sdk::state::Result<()> {
         // Setup the network with pipeline_len = 2, unbonding_len = 4
         // let num_validators = 8_u64;
-        let (mut shell, _recv, _, _) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators,
-            ..Default::default()
         });
         let mut params = read_pos_params(&shell.state).unwrap();
         params.owned.unbonding_len = 4;
@@ -5285,10 +5037,9 @@ mod test_finalize_block {
     #[test]
     fn test_jail_validator_for_inactivity() -> namada_sdk::state::Result<()> {
         let num_validators = 5_u64;
-        let (mut shell, _recv, _, _) = setup_with_cfg(SetupCfg {
+        let mut shell = setup_with_cfg(SetupCfg {
             last_height: 0,
             num_validators,
-            ..Default::default()
         });
         let params = read_pos_params(&shell.state).unwrap();
 
@@ -5660,118 +5411,17 @@ mod test_finalize_block {
         )
     }
 
-    /// Test that updating the ethereum bridge params via governance works.
-    #[tokio::test]
-    async fn test_eth_bridge_param_updates() {
-        if !is_bridge_comptime_enabled() {
-            // NOTE: this test doesn't work if the ethereum bridge
-            // is disabled at compile time.
-            return;
-        }
-        let (mut shell, _broadcaster, _, mut control_receiver) =
-            setup_at_height(3u64);
-        let proposal_execution_key = get_proposal_execution_key(0);
-        shell
-            .state
-            .write(&proposal_execution_key, 0u64)
-            .expect("Test failed.");
-        let mut tx = Tx::new(shell.chain_id.clone(), None);
-        tx.add_code_from_hash(Hash::default(), None).add_data(0u64);
-        let new_min_confirmations = MinimumConfirmations::from(unsafe {
-            NonZeroU64::new_unchecked(42)
-        });
-        shell
-            .state
-            .write(&min_confirmations_key(), new_min_confirmations)
-            .expect("Test failed");
-        let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
-            &TxGasMeter::new(u64::MAX, get_gas_scale(&shell.state).unwrap()),
-        ));
-        let keys_changed = BTreeSet::from([min_confirmations_key()]);
-        let verifiers = BTreeSet::default();
-        let batched_tx = tx.batch_ref_first_tx().unwrap();
-        let ctx = namada_vp::native_vp::Ctx::<_, _, VpEvalWasm<_, _, _>>::new(
-            shell.mode.get_validator_address().expect("Test failed"),
-            shell.state.read_only(),
-            batched_tx.tx,
-            batched_tx.cmt,
-            &TxIndex(0),
-            &gas_meter,
-            &keys_changed,
-            &verifiers,
-            shell.vp_wasm_cache.clone(),
-            GasMeterKind::MutGlobal,
-        );
-        assert!(
-            ParametersVp::validate_tx(
-                &ctx,
-                &batched_tx,
-                &keys_changed,
-                &verifiers
-            )
-            .is_ok()
-        );
-
-        // we advance forward to the next epoch
-        let mut req = FinalizeBlock::default();
-        req.header.time = {
-            #[allow(clippy::disallowed_methods)]
-            namada_sdk::time::DateTimeUtc::now()
-        };
-        let current_decision_height = shell.get_current_decision_height();
-        if let Some(b) = shell.state.in_mem_mut().last_block.as_mut() {
-            b.height = current_decision_height + 11;
-        }
-        shell.finalize_block(req).expect("Test failed");
-        shell.commit();
-
-        let consensus_set: Vec<WeightedValidator> =
-            read_consensus_validator_set_addresses_with_stake(
-                &shell.state,
-                Epoch::default(),
-            )
-            .unwrap()
-            .into_iter()
-            .collect();
-
-        let params = read_pos_params(&shell.state).unwrap();
-        let val1 = consensus_set[0].clone();
-        let pkh1 = get_pkh_from_address(
-            &shell.state,
-            &params,
-            val1.address.clone(),
-            Epoch::default(),
-        );
-
-        let _ = control_receiver.recv().await.expect("Test failed");
-        // Finalize block 2
-        let votes = vec![VoteInfo {
-            validator: Validator {
-                address: pkh1,
-                power: (u128::try_from(val1.bonded_stake).expect("Test failed")
-                    as u64)
-                    .try_into()
-                    .unwrap(),
-            },
-            sig_info: tendermint::abci::types::BlockSignatureInfo::LegacySigned,
-        }];
-        next_block_for_inflation(&mut shell, pkh1.to_vec(), votes, None);
-        let Command::UpdateConfig(cmd) =
-            control_receiver.recv().await.expect("Test failed");
-        assert_eq!(u64::from(cmd.min_confirmations), 42);
-    }
-
     // Test a successful tx batch containing three valid transactions
     #[test]
     fn test_successful_batch() {
-        let (mut shell, _broadcaster, _, _) = setup();
+        let mut shell = setup();
         let sk = wallet::defaults::bertha_keypair();
 
         let (batch, processed_tx) =
             mk_tx_batch(&shell, &sk, false, false, false);
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -5813,13 +5463,13 @@ mod test_finalize_block {
     // that the last transaction is never executed (batch short-circuit)
     #[test]
     fn test_failing_atomic_batch() {
-        let (mut shell, _broadcaster, _, _) = setup();
+        let mut shell = setup();
         let sk = wallet::defaults::bertha_keypair();
 
         let (batch, processed_tx) = mk_tx_batch(&shell, &sk, true, true, false);
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -5871,14 +5521,14 @@ mod test_finalize_block {
     // committed
     #[test]
     fn test_failing_non_atomic_batch() {
-        let (mut shell, _broadcaster, _, _) = setup();
+        let mut shell = setup();
         let sk = wallet::defaults::bertha_keypair();
 
         let (batch, processed_tx) =
             mk_tx_batch(&shell, &sk, false, true, false);
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -5949,13 +5599,14 @@ mod test_finalize_block {
     // successful txs. Verify that no changes are committed
     #[test]
     fn test_gas_error_atomic_batch() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
+
         let sk = wallet::defaults::bertha_keypair();
 
         let (batch, processed_tx) = mk_tx_batch(&shell, &sk, true, false, true);
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -6006,14 +5657,15 @@ mod test_finalize_block {
     // successful txs. Verify that changes from the first tx are committed
     #[test]
     fn test_gas_error_non_atomic_batch() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
+
         let sk = wallet::defaults::bertha_keypair();
 
         let (batch, processed_tx) =
             mk_tx_batch(&shell, &sk, false, false, true);
 
         let event = &shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: vec![processed_tx],
                 ..Default::default()
             })
@@ -6070,7 +5722,7 @@ mod test_finalize_block {
 
     #[test]
     fn test_multiple_events_from_batch_tx_all_valid() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
 
         let sk = wallet::defaults::bertha_keypair();
 
@@ -6115,7 +5767,7 @@ mod test_finalize_block {
         }];
 
         let mut events = shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
@@ -6152,7 +5804,7 @@ mod test_finalize_block {
     #[test]
     fn test_multiple_identical_events_from_batch_tx_all_valid() {
         const EVENT_MSG: &str = "bing";
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
 
         let sk = wallet::defaults::bertha_keypair();
 
@@ -6197,7 +5849,7 @@ mod test_finalize_block {
         }];
 
         let mut events = shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
@@ -6230,7 +5882,7 @@ mod test_finalize_block {
 
     #[test]
     fn test_multiple_events_from_batch_tx_one_valid_other_invalid() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
 
         let sk = wallet::defaults::bertha_keypair();
 
@@ -6274,7 +5926,7 @@ mod test_finalize_block {
         }];
 
         let mut events = shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })
@@ -6301,7 +5953,7 @@ mod test_finalize_block {
 
     #[test]
     fn test_multiple_events_from_atomic_batch_tx_one_valid_other_invalid() {
-        let (mut shell, _, _, _) = setup();
+        let mut shell = setup();
 
         let sk = wallet::defaults::bertha_keypair();
 
@@ -6345,7 +5997,7 @@ mod test_finalize_block {
         }];
 
         let mut events = shell
-            .finalize_block(FinalizeBlock {
+            .finalize_block(FinalizeBlockRequest {
                 txs: processed_txs,
                 ..Default::default()
             })

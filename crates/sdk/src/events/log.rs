@@ -144,9 +144,6 @@ impl<'log> WithMatcher<'log> {
 #[cfg(test)]
 mod event_log_tests {
     use namada_core::hash::Hash;
-    use namada_core::keccak::KeccakHash;
-    use namada_ethereum_bridge::event::BridgePoolTxHash;
-    use namada_ethereum_bridge::event::types::BRIDGE_POOL_RELAYED;
 
     use super::*;
     use crate::events::EventLevel;
@@ -163,31 +160,16 @@ mod event_log_tests {
         };
     }
 
-    /// An applied tx hash query.
-    macro_rules! bridge_pool_relayed {
-        ($hash:expr) => {
-            dumb_queries::QueryMatcher::bridge_pool_relayed(
-                &KeccakHash::try_from($hash).unwrap(),
-            )
-        };
-    }
-
     /// Return a mock `FinalizeBlock` event.
     fn mock_event(event_type: EventType, hash: impl AsRef<str>) -> Event {
         Event::new(event_type, EventLevel::Tx)
             .with(TxHash(Hash::try_from(hash.as_ref()).unwrap()))
-            .with(BridgePoolTxHash(
-                &KeccakHash::try_from(hash.as_ref()).unwrap(),
-            ))
             .into()
     }
 
     /// Return a vector of mock `FinalizeBlock` events.
     fn mock_tx_events(hash: &str) -> Vec<Event> {
-        vec![
-            mock_event(BRIDGE_POOL_RELAYED, hash),
-            mock_event(APPLIED_TX, hash),
-        ]
+        vec![mock_event(APPLIED_TX, hash)]
     }
 
     /// Test adding a couple of events to the event log, and
@@ -208,25 +190,13 @@ mod event_log_tests {
         // inspect log
         assert_eq!(log.iter().count(), NUM_HEIGHTS * events.len());
 
-        let events_in_log: Vec<_> = log
-            .with_matcher(bridge_pool_relayed!(HASH))
-            .iter()
-            .cloned()
-            .collect();
-
-        assert_eq!(events_in_log.len(), NUM_HEIGHTS);
-
-        for event in events_in_log {
-            assert_eq!(events[0], event);
-        }
-
         let events_in_log: Vec<_> =
             log.with_matcher(applied!(HASH)).iter().cloned().collect();
 
         assert_eq!(events_in_log.len(), NUM_HEIGHTS);
 
         for event in events_in_log {
-            assert_eq!(events[1], event);
+            assert_eq!(events[0], event);
         }
     }
 

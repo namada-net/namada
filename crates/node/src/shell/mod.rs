@@ -10,11 +10,13 @@ mod finalize_block;
 mod init_chain;
 pub use init_chain::InitChainValidation;
 use namada_apps_lib::config::NodeLocalConfig;
+use namada_sdk::state;
 use namada_sdk::state::StateRead;
 use namada_vm::wasm::run::check_tx_allowed;
 pub mod prepare_proposal;
 use namada_sdk::ibc;
-use namada_sdk::state::State;
+use namada_sdk::state::{DbError, ProcessProposalCachedResult, State};
+pub mod abci;
 pub mod process_proposal;
 pub(super) mod queries;
 mod snapshots;
@@ -22,7 +24,6 @@ mod stats;
 #[cfg(any(test, feature = "testing"))]
 #[allow(dead_code)]
 pub mod testing;
-mod vote_extensions;
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -31,16 +32,15 @@ use std::path::{Path, PathBuf};
 #[allow(unused_imports)]
 use std::rc::Rc;
 
-use namada_apps_lib::wallet::{self, ValidatorData, ValidatorKeys};
+use abci::TxResult;
+pub use finalize_block::{
+    Request as FinalizeBlockRequest, Response as FinalizeBlockResponse,
+};
+use namada_apps_lib::wallet::{self, ValidatorData};
 use namada_sdk::address::Address;
-use namada_sdk::borsh::{BorshDeserialize, BorshSerializeExt};
+use namada_sdk::borsh::BorshDeserialize;
 use namada_sdk::chain::{BlockHeight, ChainId};
 use namada_sdk::collections::HashMap;
-use namada_sdk::eth_bridge::protocol::validation::bridge_pool_roots::validate_bp_roots_vext;
-use namada_sdk::eth_bridge::protocol::validation::ethereum_events::validate_eth_events_vext;
-use namada_sdk::eth_bridge::protocol::validation::validator_set_update::validate_valset_upd_vext;
-use namada_sdk::eth_bridge::{EthBridgeQueries, EthereumOracleConfig};
-use namada_sdk::ethereum_events::EthereumEvent;
 use namada_sdk::events::log::EventLog;
 use namada_sdk::gas::{Gas, GasMetering, TxGasMeter};
 use namada_sdk::hash::Hash;
@@ -51,7 +51,6 @@ use namada_sdk::proof_of_stake::storage::read_pos_params;
 use namada_sdk::proof_of_stake::types::{
     ConsensusValidator, ValidatorSetUpdate,
 };
-use namada_sdk::state::tx_queue::ExpiredTx;
 use namada_sdk::state::{
     DB, DBIter, EPOCH_SWITCH_BLOCKS_DELAY, FullAccessState, Sha256Hasher,
     StorageHasher, StorageRead, TempWlState, WlState,
@@ -62,42 +61,20 @@ use namada_sdk::time::DateTimeUtc;
 pub use namada_sdk::tx::data::ResultCode;
 use namada_sdk::tx::data::{TxType, WrapperTx};
 use namada_sdk::tx::{Section, Tx};
-use namada_sdk::{
-    eth_bridge, governance, hints, migrations, parameters, proof_of_stake,
-    token,
-};
+use namada_sdk::{governance, migrations, parameters, proof_of_stake, token};
 use namada_vm::wasm::{TxCache, VpCache};
 use namada_vm::{WasmCacheAccess, WasmCacheRwAccess};
-use namada_vote_ext::EthereumTxData;
 use thiserror::Error;
-use tokio::sync::mpsc::{Receiver, UnboundedSender};
 
-use super::ethereum_oracle::{self as oracle, last_processed_block};
 use crate::config::{self, TendermintMode, ValidatorLocalConfig, genesis};
 use crate::protocol::ShellParams;
-use crate::shims::abcipp_shim_types::shim;
-use crate::shims::abcipp_shim_types::shim::TakeSnapshot;
-use crate::shims::abcipp_shim_types::shim::response::TxResult;
+use crate::storage::DbSnapshot;
 use crate::tendermint::abci::{request, response};
 use crate::tendermint::{self, validator};
-use crate::tendermint_proto::crypto::public_key;
 use crate::{protocol, storage, tendermint_node};
 
 /// A cap on a number of tx sections
 pub const MAX_TX_SECTIONS_LEN: usize = 10_000;
-
-fn key_to_tendermint(
-    pk: &common::PublicKey,
-) -> std::result::Result<public_key::Sum, ParsePublicKeyError> {
-    match pk {
-        common::PublicKey::Ed25519(_) => ed25519::PublicKey::try_from_pk(pk)
-            .map(|pk| public_key::Sum::Ed25519(pk.serialize_to_vec())),
-        common::PublicKey::Secp256k1(_) => {
-            secp256k1::PublicKey::try_from_pk(pk)
-                .map(|pk| public_key::Sum::Secp256k1(pk.serialize_to_vec()))
-        }
-    }
-}
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -111,8 +88,6 @@ pub enum Error {
     TxApply(protocol::Error),
     #[error("{0}")]
     Tendermint(tendermint_node::Error),
-    #[error("{0}")]
-    Ethereum(super::ethereum_oracle::Error),
     #[error("Server error: {0}")]
     TowerServer(String),
     #[error("{0}")]
@@ -136,6 +111,11 @@ pub enum Error {
     RejectedBlockProposal,
     #[error("Received an invalid block proposal")]
     InvalidBlockProposal,
+    #[error("Unexpected block height, expected: {expected}, got: {got}")]
+    UnexpectedBlockHeight {
+        expected: BlockHeight,
+        got: BlockHeight,
+    },
 }
 
 impl From<Error> for TxResult {
@@ -188,8 +168,6 @@ pub fn rollback(config: config::Ledger) -> ShellResult<()> {
 pub(super) enum ShellMode {
     Validator {
         data: ValidatorData,
-        broadcast_sender: UnboundedSender<Vec<u8>>,
-        eth_oracle: Option<EthereumOracleChannels>,
         validator_local_config: Option<ValidatorLocalConfig>,
         local_config: Option<NodeLocalConfig>,
     },
@@ -199,143 +177,13 @@ pub(super) enum ShellMode {
     Seed,
 }
 
-/// A channel for pulling events from the Ethereum oracle
-/// and queueing them up for inclusion in vote extensions
-#[derive(Debug)]
-pub(super) struct EthereumReceiver {
-    channel: Receiver<EthereumEvent>,
-    queue: BTreeSet<EthereumEvent>,
-}
-
-impl EthereumReceiver {
-    /// Create a new [`EthereumReceiver`] from a channel connected
-    /// to an Ethereum oracle
-    pub fn new(channel: Receiver<EthereumEvent>) -> Self {
-        Self {
-            channel,
-            queue: BTreeSet::new(),
-        }
-    }
-
-    /// Pull Ethereum events from the oracle and queue them to
-    /// be voted on.
-    ///
-    /// Since vote extensions require ordering of Ethereum
-    /// events, we do that here. We also de-duplicate events.
-    /// Events may be filtered out of the queue with a provided
-    /// predicate.
-    pub fn fill_queue<F>(&mut self, mut keep_event: F)
-    where
-        F: FnMut(&EthereumEvent) -> bool,
-    {
-        let mut new_events: usize = 0;
-        let mut filtered_events: usize = 0;
-        while let Ok(eth_event) = self.channel.try_recv() {
-            if keep_event(&eth_event) && self.queue.insert(eth_event) {
-                new_events =
-                    new_events.checked_add(1).expect("Cannot overflow");
-            } else {
-                filtered_events =
-                    filtered_events.checked_add(1).expect("Cannot overflow");
-            }
-        }
-        if new_events
-            .checked_add(filtered_events)
-            .expect("Cannot overflow")
-            > 0
-        {
-            tracing::info!(
-                new_events,
-                filtered_events,
-                "received Ethereum events"
-            );
-        }
-    }
-
-    /// Get a copy of the queue
-    pub fn get_events(&self) -> Vec<EthereumEvent> {
-        self.queue.iter().cloned().collect()
-    }
-
-    /// Remove the given [`EthereumEvent`] from the queue, if present.
-    ///
-    /// **INVARIANT:** This method preserves the sorting and de-duplication
-    /// of events in the queue.
-    pub fn remove_event(&mut self, event: &EthereumEvent) {
-        self.queue.remove(event);
-    }
-}
-
 impl ShellMode {
     /// Get the validator address if ledger is in validator mode
+    #[cfg(test)]
     pub fn get_validator_address(&self) -> Option<&Address> {
         match &self {
             ShellMode::Validator { data, .. } => Some(&data.address),
             _ => None,
-        }
-    }
-
-    /// Remove an Ethereum event from the internal queue
-    pub fn dequeue_eth_event(&mut self, event: &EthereumEvent) {
-        if let ShellMode::Validator {
-            eth_oracle:
-                Some(EthereumOracleChannels {
-                    ethereum_receiver, ..
-                }),
-            ..
-        } = self
-        {
-            ethereum_receiver.remove_event(event);
-        }
-    }
-
-    /// Get the protocol keypair for this validator.
-    pub fn get_protocol_key(&self) -> Option<&common::SecretKey> {
-        match self {
-            ShellMode::Validator {
-                data:
-                    ValidatorData {
-                        keys:
-                            ValidatorKeys {
-                                protocol_keypair, ..
-                            },
-                        ..
-                    },
-                ..
-            } => Some(protocol_keypair),
-            _ => None,
-        }
-    }
-
-    /// Get the Ethereum bridge keypair for this validator.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn get_eth_bridge_keypair(&self) -> Option<&common::SecretKey> {
-        match self {
-            ShellMode::Validator {
-                data:
-                    ValidatorData {
-                        keys:
-                            ValidatorKeys {
-                                eth_bridge_keypair, ..
-                            },
-                        ..
-                    },
-                ..
-            } => Some(eth_bridge_keypair),
-            _ => None,
-        }
-    }
-
-    /// If this node is a validator, broadcast a tx
-    /// to the mempool using the broadcaster subprocess
-    pub fn broadcast(&self, data: Vec<u8>) {
-        if let Self::Validator {
-            broadcast_sender, ..
-        } = self
-        {
-            broadcast_sender
-                .send(data)
-                .expect("The broadcaster should be running for a validator");
         }
     }
 }
@@ -391,9 +239,12 @@ where
     /// When set, indicates after how many blocks a new snapshot
     /// will be taken (counting from the first block)
     pub blocks_between_snapshots: Option<NonZeroU64>,
+    snapshot_task: Option<std::thread::JoinHandle<Result<(), DbError>>>,
+    snapshots_to_keep: u64,
     /// Data for a node downloading and apply snapshots as part of
     /// the fast sync protocol.
     pub syncing: Option<SnapshotSync>,
+    pub finalized_merkle_tree: Option<BlockHeight>,
 }
 
 /// Storage key filter to store the diffs into the storage. Return `false` for
@@ -407,28 +258,6 @@ pub fn is_key_diff_storable(key: &namada_sdk::storage::Key) -> bool {
         && !token::storage_key::is_masp_base_native_precision_key(key)
         || ibc::storage::is_ibc_counter_key(key)
         || proof_of_stake::storage_key::is_delegation_targets_key(key))
-}
-
-/// Channels for communicating with an Ethereum oracle.
-#[derive(Debug)]
-pub struct EthereumOracleChannels {
-    ethereum_receiver: EthereumReceiver,
-    control_sender: oracle::control::Sender,
-    last_processed_block_receiver: last_processed_block::Receiver,
-}
-
-impl EthereumOracleChannels {
-    pub fn new(
-        events_receiver: Receiver<EthereumEvent>,
-        control_sender: oracle::control::Sender,
-        last_processed_block_receiver: last_processed_block::Receiver,
-    ) -> Self {
-        Self {
-            ethereum_receiver: EthereumReceiver::new(events_receiver),
-            control_sender,
-            last_processed_block_receiver,
-        }
-    }
 }
 
 impl Shell<crate::storage::PersistentDB, Sha256Hasher> {
@@ -485,8 +314,6 @@ where
     pub fn new(
         config: config::Ledger,
         wasm_dir: PathBuf,
-        broadcast_sender: UnboundedSender<Vec<u8>>,
-        eth_oracle: Option<EthereumOracleChannels>,
         db_cache: Option<&D::Cache>,
         scheduled_migration: Option<ScheduledMigration>,
         vp_wasm_compilation_cache: u64,
@@ -588,8 +415,6 @@ where
                         .take_validator_data()
                         .map(|data| ShellMode::Validator {
                             data,
-                            broadcast_sender,
-                            eth_oracle,
                             validator_local_config,
                             local_config,
                         })
@@ -605,13 +430,11 @@ where
                     ShellMode::Validator {
                         data: ValidatorData {
                             address: wallet::defaults::validator_address(),
-                            keys: ValidatorKeys {
+                            keys: wallet::ValidatorKeys {
                                 protocol_keypair,
                                 eth_bridge_keypair,
                             },
                         },
-                        broadcast_sender,
-                        eth_oracle,
                         validator_local_config: None,
                         local_config: None,
                     }
@@ -659,7 +482,10 @@ where
             }
         }
 
-        let mut shell = Self {
+        let snapshots_to_keep =
+            config.shell.snapshots_to_keep.map(|n| n.get()).unwrap_or(1);
+
+        Self {
             chain_id,
             state,
             base_dir,
@@ -682,10 +508,11 @@ where
             event_log: EventLog::default(),
             scheduled_migration,
             blocks_between_snapshots: config.shell.blocks_between_snapshots,
+            snapshot_task: None,
+            snapshots_to_keep,
             syncing: None,
-        };
-        shell.update_eth_oracle(&Default::default());
-        shell
+            finalized_merkle_tree: None,
+        }
     }
 
     /// Return a reference to the [`EventLog`].
@@ -803,51 +630,36 @@ where
 
     /// Commit a block. Persist the application state and return the Merkle root
     /// hash.
-    pub fn commit(&mut self) -> shim::Response {
-        self.bump_last_processed_eth_block();
+    pub fn commit(&mut self) -> response::Commit {
+        let merkle_root_pre = self.state.in_mem().block.tree.root();
+
         let height_to_commit = self.state.in_mem().block.height;
 
-        let migration = match self.scheduled_migration.as_ref() {
-            Some(migration) if height_to_commit == migration.height => Some(
-                self.scheduled_migration
-                    .take()
-                    .unwrap()
-                    .load_and_validate()
-                    .expect("The scheduled migration is not valid."),
-            ),
-            _ => None,
-        };
+        if let Some(migration) = self.scheduled_migration.as_ref() {
+            if height_to_commit == migration.height {
+                // Remove migration applied in FinalizeBlock
+                self.scheduled_migration.take().unwrap();
+            }
+        }
 
         self.state
             .commit_block()
             .expect("Encountered a storage error while committing a block");
 
-        if let Some(migration) = migration {
-            migrations::commit(&mut self.state, migration);
-            self.state
-                .update_last_block_merkle_tree()
-                .expect("Must update merkle tree after migration");
-        }
-
         let merkle_root = self.state.in_mem().merkle_root();
+        assert_eq!(merkle_root_pre, merkle_root);
 
         tracing::info!(
             "Committed block hash: {merkle_root}, height: {height_to_commit}",
         );
 
-        self.broadcast_queued_txs();
-        let take_snapshot = self.check_snapshot_required();
-
-        shim::Response::Commit(
-            response::Commit {
-                // NB: by passing 0, we forbid CometBFT from deleting
-                // data pertaining to past blocks
-                retain_height: tendermint::block::Height::from(0_u32),
-                // NB: current application hash
-                data: merkle_root.0.to_vec().into(),
-            },
-            take_snapshot,
-        )
+        response::Commit {
+            // NB: by passing 0, we forbid CometBFT from deleting
+            // data pertaining to past blocks
+            retain_height: tendermint::block::Height::from(0_u32),
+            // NB: current application hash
+            data: merkle_root.0.to_vec().into(),
+        }
     }
 
     /// Check if we have reached a block height at which we should take a
@@ -869,203 +681,6 @@ where
         }
     }
 
-    /// Updates the Ethereum oracle's last processed block.
-    #[inline]
-    fn bump_last_processed_eth_block(&mut self) {
-        if let ShellMode::Validator {
-            eth_oracle: Some(eth_oracle),
-            ..
-        } = &self.mode
-        {
-            // update the oracle's last processed eth block
-            let last_processed_block = eth_oracle
-                .last_processed_block_receiver
-                .borrow()
-                .as_ref()
-                .cloned();
-            if let Some(eth_height) = last_processed_block {
-                tracing::info!(
-                    "Ethereum oracle's most recently processed Ethereum block \
-                     is {}",
-                    eth_height
-                );
-                self.state.in_mem_mut().ethereum_height = Some(eth_height);
-            }
-        }
-    }
-
-    /// Empties all the ledger's queues of transactions to be broadcasted
-    /// via CometBFT's P2P network.
-    #[inline]
-    fn broadcast_queued_txs(&mut self) {
-        if let ShellMode::Validator { .. } = &self.mode {
-            self.broadcast_protocol_txs();
-            self.broadcast_expired_txs();
-        }
-    }
-
-    /// Broadcast any pending protocol transactions.
-    fn broadcast_protocol_txs(&mut self) {
-        use crate::shell::vote_extensions::iter_protocol_txs;
-
-        let ext = self.craft_extension();
-
-        let protocol_key = self
-            .mode
-            .get_protocol_key()
-            .expect("Validators should have protocol keys");
-
-        let protocol_txs = iter_protocol_txs(ext).map(|protocol_tx| {
-            protocol_tx
-                .sign(protocol_key, self.chain_id.clone())
-                .to_bytes()
-        });
-
-        for tx in protocol_txs {
-            self.mode.broadcast(tx);
-        }
-    }
-
-    /// Broadcast any expired transactions.
-    fn broadcast_expired_txs(&mut self) {
-        let eth_events = {
-            let mut events: Vec<_> = self
-                .state
-                .in_mem_mut()
-                .expired_txs_queue
-                .drain()
-                .map(|expired_tx| match expired_tx {
-                    ExpiredTx::EthereumEvent(event) => event,
-                })
-                .collect();
-            events.sort();
-            events
-        };
-        if hints::likely(eth_events.is_empty()) {
-            // more often than not, there won't by any expired
-            // Ethereum events to retransmit
-            return;
-        }
-        if let Some(vote_extension) = self.sign_ethereum_events(eth_events) {
-            let protocol_key = self
-                .mode
-                .get_protocol_key()
-                .expect("Validators should have protocol keys");
-
-            let signed_tx = EthereumTxData::EthEventsVext(
-                namada_vote_ext::ethereum_events::SignedVext(vote_extension),
-            )
-            .sign(protocol_key, self.chain_id.clone())
-            .to_bytes();
-
-            self.mode.broadcast(signed_tx);
-        }
-    }
-
-    /// If a handle to an Ethereum oracle was provided to the [`Shell`], attempt
-    /// to send it an updated configuration, using a configuration
-    /// based on Ethereum bridge parameters in blockchain storage.
-    ///
-    /// This method must be safe to call even before ABCI `InitChain` has been
-    /// called (i.e. when storage is empty), as we may want to do this check
-    /// every time the shell starts up (including the first time ever at which
-    /// time storage will be empty).
-    ///
-    /// This method is also called during `FinalizeBlock` to update the oracle
-    /// if relevant storage changes have occurred. This includes deactivating
-    /// and reactivating the bridge.
-    fn update_eth_oracle(&mut self, changed_keys: &BTreeSet<Key>) {
-        if let ShellMode::Validator {
-            eth_oracle: Some(EthereumOracleChannels { control_sender, .. }),
-            ..
-        } = &mut self.mode
-        {
-            // We *always* expect a value describing the status of the Ethereum
-            // bridge to be present under [`eth_bridge::storage::active_key`],
-            // once a chain has been initialized. We need to explicitly check if
-            // this key is present here because we may be starting up the shell
-            // for the first time ever, in which case the chain hasn't been
-            // initialized yet.
-            let has_key = self
-                .state
-                .has_key(&eth_bridge::storage::active_key())
-                .expect(
-                    "We should always be able to check whether a key exists \
-                     in storage or not",
-                );
-            if !has_key {
-                tracing::debug!(
-                    "Not starting oracle yet as storage has not been \
-                     initialized"
-                );
-                return;
-            }
-            let Some(config) = EthereumOracleConfig::read(&self.state) else {
-                tracing::debug!(
-                    "Not starting oracle as the Ethereum bridge config \
-                     couldn't be found in storage"
-                );
-                return;
-            };
-            let active = if !self.state.ethbridge_queries().is_bridge_active() {
-                if !changed_keys.contains(&eth_bridge::storage::active_key()) {
-                    tracing::debug!(
-                        "Not starting oracle as the Ethereum bridge is \
-                         disabled"
-                    );
-                    return;
-                } else {
-                    tracing::debug!(
-                        "Disabling oracle as the bridge has been disabled"
-                    );
-                    false
-                }
-            } else {
-                true
-            };
-
-            let start_block = self
-                .state
-                .in_mem()
-                .ethereum_height
-                .clone()
-                .unwrap_or(config.eth_start_height);
-            tracing::info!(
-                ?start_block,
-                "Found Ethereum height from which the Ethereum oracle should \
-                 be updated"
-            );
-            let config = eth_bridge::oracle::config::Config {
-                min_confirmations: config.min_confirmations.into(),
-                bridge_contract: config.contracts.bridge.address,
-                start_block,
-                active,
-            };
-            tracing::info!(
-                ?config,
-                "Updating the Ethereum oracle using values from block storage"
-            );
-            if let Err(error) = control_sender
-                .try_send(oracle::control::Command::UpdateConfig(config))
-            {
-                match error {
-                    tokio::sync::mpsc::error::TrySendError::Full(_) => {
-                        panic!(
-                            "The Ethereum oracle communication channel is \
-                             full!"
-                        )
-                    }
-                    tokio::sync::mpsc::error::TrySendError::Closed(_) => {
-                        panic!(
-                            "The Ethereum oracle can no longer be \
-                             communicated with"
-                        )
-                    }
-                }
-            }
-        }
-    }
-
     /// Validate a transaction request. On success, the transaction will
     /// included in the mempool and propagated to peers, otherwise it will be
     /// rejected.
@@ -1074,9 +689,6 @@ where
         tx_bytes: &[u8],
         r#_type: MempoolTxType,
     ) -> response::CheckTx {
-        use namada_sdk::tx::data::protocol::ProtocolTxType;
-        use namada_vote_ext::ethereum_tx_data_variants;
-
         let mut response = response::CheckTx::default();
 
         const VALID_MSG: &str = "Mempool validation passed";
@@ -1154,115 +766,7 @@ where
             }
         };
 
-        // try to parse a vote extension protocol tx from
-        // the provided tx data
-        macro_rules! try_vote_extension {
-            ($kind:expr, $rsp:expr, $result:expr $(,)?) => {
-                match $result {
-                    Ok(ext) => ext,
-                    Err(err) => {
-                        $rsp.code = ResultCode::InvalidVoteExtension.into();
-                        $rsp.log = format!(
-                            "{INVALID_MSG}: Invalid {} vote extension: {err}",
-                            $kind,
-                        );
-                        return $rsp;
-                    }
-                }
-            };
-        }
-
         match tx_type.tx_type {
-            TxType::Protocol(protocol_tx) => match protocol_tx.tx {
-                ProtocolTxType::EthEventsVext => {
-                    let ext = try_vote_extension!(
-                        "Ethereum events",
-                        response,
-                        ethereum_tx_data_variants::EthEventsVext::try_from(&tx),
-                    );
-                    if let Err(err) =
-                        validate_eth_events_vext::<_, _, governance::Store<_>>(
-                            &self.state,
-                            &ext.0,
-                            self.state.in_mem().get_last_block_height(),
-                        )
-                    {
-                        response.code = ResultCode::InvalidVoteExtension.into();
-                        response.log = format!(
-                            "{INVALID_MSG}: Invalid Ethereum events vote \
-                             extension: {err}",
-                        );
-                    } else {
-                        response.log = String::from(VALID_MSG);
-                    }
-                }
-                ProtocolTxType::BridgePoolVext => {
-                    let ext = try_vote_extension!(
-                        "Bridge pool roots",
-                        response,
-                        ethereum_tx_data_variants::BridgePoolVext::try_from(
-                            &tx
-                        ),
-                    );
-                    if let Err(err) =
-                        validate_bp_roots_vext::<_, _, governance::Store<_>>(
-                            &self.state,
-                            &ext.0,
-                            self.state.in_mem().get_last_block_height(),
-                        )
-                    {
-                        response.code = ResultCode::InvalidVoteExtension.into();
-                        response.log = format!(
-                            "{INVALID_MSG}: Invalid Bridge pool roots vote \
-                             extension: {err}",
-                        );
-                    } else {
-                        response.log = String::from(VALID_MSG);
-                    }
-                }
-                ProtocolTxType::ValSetUpdateVext => {
-                    let ext = try_vote_extension!(
-                        "validator set update",
-                        response,
-                        ethereum_tx_data_variants::ValSetUpdateVext::try_from(
-                            &tx
-                        ),
-                    );
-                    if let Err(err) =
-                        validate_valset_upd_vext::<_, _, governance::Store<_>>(
-                            &self.state,
-                            &ext,
-                            // n.b. only accept validator set updates
-                            // issued at the last committed epoch
-                            // (signing off on the validators of the
-                            // next epoch). at the second height
-                            // within an epoch, the new epoch is
-                            // committed to storage, so `last_epoch`
-                            // reflects the current value of the
-                            // epoch.
-                            self.state.in_mem().last_epoch,
-                        )
-                    {
-                        response.code = ResultCode::InvalidVoteExtension.into();
-                        response.log = format!(
-                            "{INVALID_MSG}: Invalid validator set update vote \
-                             extension: {err}",
-                        );
-                    } else {
-                        response.log = String::from(VALID_MSG);
-                        // validator set update votes should be decided
-                        // as soon as possible
-                        response.priority = i64::MAX;
-                    }
-                }
-                _ => {
-                    response.code = ResultCode::InvalidTx.into();
-                    response.log = format!(
-                        "{INVALID_MSG}: The given protocol tx cannot be added \
-                         to the mempool"
-                    );
-                }
-            },
             TxType::Wrapper(wrapper) => {
                 // Get the gas scale first
                 let gas_scale = match get_gas_scale(&self.state) {
@@ -1392,6 +896,11 @@ where
                      the mempool"
                 );
             }
+            #[allow(deprecated)]
+            TxType::Protocol(_) => {
+                response.code = ResultCode::DeprecatedProtocolTx.into();
+                response.info = "Protocol txs are deprecated".into();
+            }
         }
 
         if response.code == ResultCode::Ok.into() {
@@ -1455,6 +964,157 @@ where
     /// within the current epoch.
     pub fn is_deciding_offset_within_epoch(&self, height_offset: u64) -> bool {
         self.state.is_deciding_offset_within_epoch(height_offset)
+    }
+
+    // Retrieve the cached result of process proposal for the given block or
+    // compute it if missing
+    fn get_process_proposal_result(
+        &mut self,
+        request: request::FinalizeBlock,
+    ) -> ProcessProposalCachedResult {
+        match namada_sdk::hash::Hash::try_from(request.hash) {
+            Ok(block_hash) => {
+                match self
+                    .state
+                    .in_mem_mut()
+                    .block_proposals_cache
+                    .get(&block_hash)
+                {
+                    // We already have the result of process proposal for
+                    // this block cached in memory
+                    Some(res) => res.to_owned(),
+                    None => {
+                        // Need to run process proposal to extract the data we
+                        // need for finalize block (tx results)
+                        let process_req =
+                            abci::finalize_block_to_process_proposal(request);
+
+                        let (process_resp, res) =
+                            self.process_proposal(process_req.into());
+                        let result = if let response::ProcessProposal::Accept =
+                            process_resp
+                        {
+                            ProcessProposalCachedResult::Accepted(
+                                res.into_iter().map(|res| res.into()).collect(),
+                            )
+                        } else {
+                            ProcessProposalCachedResult::Rejected
+                        };
+
+                        // Cache the result
+                        self.state
+                            .in_mem_mut()
+                            .block_proposals_cache
+                            .put(block_hash.to_owned(), result.clone());
+
+                        result
+                    }
+                }
+            }
+            Err(_) => {
+                // Need to run process proposal to extract the data we need for
+                // finalize block (tx results)
+                let process_req =
+                    abci::finalize_block_to_process_proposal(request);
+
+                // Do not cache the result in this case since we
+                // don't have the hash of the block
+                let (process_resp, res) =
+                    self.process_proposal(process_req.into());
+                if let response::ProcessProposal::Accept = process_resp {
+                    ProcessProposalCachedResult::Accepted(
+                        res.into_iter().map(|res| res.into()).collect(),
+                    )
+                } else {
+                    ProcessProposalCachedResult::Rejected
+                }
+            }
+        }
+    }
+
+    fn update_snapshot_task(&mut self, take_snapshot: TakeSnapshot) {
+        let snapshot_taken =
+            self.snapshot_task.as_ref().map(|t| t.is_finished());
+        match snapshot_taken {
+            Some(true) => {
+                let task = self.snapshot_task.take().unwrap();
+                match task.join() {
+                    Ok(Err(e)) => tracing::error!(
+                        "Failed to create snapshot with error: {:?}",
+                        e
+                    ),
+                    Err(e) => tracing::error!(
+                        "Failed to join thread creating snapshot: {:?}",
+                        e
+                    ),
+                    _ => {}
+                }
+            }
+            Some(false) => {
+                // if a snapshot task is still running,
+                // we don't start a new one. This is not
+                // expected to happen if snapshots are spaced
+                // far enough apart.
+                tracing::warn!(
+                    "Previous snapshot task was still running when a new \
+                     snapshot was scheduled"
+                );
+                return;
+            }
+            _ => {}
+        }
+
+        let TakeSnapshot::Yes(db_path, height) = take_snapshot else {
+            return;
+        };
+        // Ensure that the DB is flushed before making a checkpoint
+        state::DB::flush(self.state.db(), true).unwrap();
+        let base_dir = self.base_dir.clone();
+
+        let (snap_send, snap_recv) = tokio::sync::oneshot::channel();
+
+        let snapshots_to_keep = self.snapshots_to_keep;
+        let snapshot_task = std::thread::spawn(move || {
+            let db = crate::storage::open(db_path, true, None)
+                .expect("Could not open DB");
+            let snapshot = db.checkpoint(base_dir.clone(), height)?;
+            // signal to main thread that the snapshot has finished
+            snap_send.send(()).unwrap();
+            DbSnapshot::cleanup(height, &base_dir, snapshots_to_keep)
+                .map_err(|e| DbError::DBError(e.to_string()))?;
+            snapshot
+                .package()
+                .map_err(|e| DbError::DBError(e.to_string()))
+        });
+
+        // it's important that the thread is
+        // blocked until the snapshot is created so that no writes
+        // happen to the db while snapshotting. We want the db frozen
+        // at this specific point in time.
+        if snap_recv.blocking_recv().is_err() {
+            tracing::error!("Failed to start snapshot task.")
+        } else {
+            self.snapshot_task.replace(snapshot_task);
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+/// Indicate whether a state snapshot should be created
+/// at a certain point in time
+pub enum TakeSnapshot {
+    No,
+    Yes(PathBuf, BlockHeight),
+}
+
+impl<T: AsRef<std::path::Path>> From<Option<(T, BlockHeight)>>
+    for TakeSnapshot
+{
+    fn from(value: Option<(T, BlockHeight)>) -> Self {
+        match value {
+            None => TakeSnapshot::No,
+            Some(p) => TakeSnapshot::Yes(p.0.as_ref().to_path_buf(), p.1),
+        }
     }
 }
 
@@ -1570,26 +1230,19 @@ pub mod test_utils {
     use std::ops::{Deref, DerefMut};
 
     use data_encoding::HEXUPPER;
-    use namada_sdk::ethereum_events::Uint;
     use namada_sdk::events::Event;
-    use namada_sdk::hash::Hash;
-    use namada_sdk::keccak::KeccakHash;
     use namada_sdk::key::*;
     use namada_sdk::proof_of_stake::parameters::PosParams;
     use namada_sdk::proof_of_stake::storage::validator_consensus_key_handle;
+    use namada_sdk::state::LastBlock;
     use namada_sdk::state::mockdb::MockDB;
-    use namada_sdk::state::{LastBlock, StorageWrite};
-    use namada_sdk::storage::{BlockHeader, Epoch};
+    use namada_sdk::storage::Epoch;
     use namada_sdk::tendermint::abci::types::VoteInfo;
+    use namada_sdk::time::Duration;
     use tempfile::tempdir;
-    use tokio::sync::mpsc::{Sender, UnboundedReceiver};
 
     use super::*;
-    use crate::config::ethereum_bridge::ledger::ORACLE_CHANNEL_BUFFER_SIZE;
-    use crate::shims::abcipp_shim_types;
-    use crate::shims::abcipp_shim_types::shim::request::{
-        FinalizeBlock, ProcessedTx,
-    };
+    use crate::shell::abci::ProcessedTx;
     use crate::tendermint::abci::types::Misbehavior;
     use crate::tendermint_proto::abci::{
         RequestPrepareProposal, RequestProcessProposal,
@@ -1666,22 +1319,6 @@ pub mod test_utils {
         }
     }
 
-    /// Get the default bridge pool vext bytes to be signed.
-    pub fn get_bp_bytes_to_sign() -> KeccakHash {
-        use namada_sdk::keccak::{Hasher, Keccak};
-
-        let root = [0; 32];
-        let nonce = Uint::from(0).to_bytes();
-
-        let mut output = [0u8; 32];
-        let mut hasher = Keccak::v256();
-        hasher.update(&root);
-        hasher.update(&nonce);
-        hasher.finalize(&mut output);
-
-        KeccakHash(output)
-    }
-
     /// A wrapper around the shell that implements
     /// Drop so as to clean up the files that it
     /// generates. Also allows illegal state
@@ -1712,32 +1349,8 @@ pub mod test_utils {
     }
 
     impl TestShell {
-        /// Returns a new shell with
-        ///    - A broadcast receiver, which will receive any protocol txs sent
-        ///      by the shell.
-        ///    - A sender that can send Ethereum events into the ledger, mocking
-        ///      the Ethereum fullnode process
-        ///    - A receiver for control commands sent by the shell to the
-        ///      Ethereum oracle
-        pub fn new_at_height<H: Into<BlockHeight>>(
-            height: H,
-        ) -> (
-            Self,
-            UnboundedReceiver<Vec<u8>>,
-            Sender<EthereumEvent>,
-            Receiver<oracle::control::Command>,
-        ) {
-            let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-            let (eth_sender, eth_receiver) =
-                tokio::sync::mpsc::channel(ORACLE_CHANNEL_BUFFER_SIZE);
-            let (_, last_processed_block_receiver) =
-                last_processed_block::channel();
-            let (control_sender, control_receiver) = oracle::control::channel();
-            let eth_oracle = EthereumOracleChannels::new(
-                eth_receiver,
-                control_sender,
-                last_processed_block_receiver,
-            );
+        /// Returns a new shell
+        pub fn new_at_height<H: Into<BlockHeight>>(height: H) -> Self {
             let base_dir = tempdir().unwrap().as_ref().canonicalize().unwrap();
             let vp_wasm_compilation_cache = 50 * 1024 * 1024; // 50 kiB
             let tx_wasm_compilation_cache = 50 * 1024 * 1024; // 50 kiB
@@ -1748,27 +1361,20 @@ pub mod test_utils {
                     TendermintMode::Validator,
                 ),
                 top_level_directory().join("wasm"),
-                sender,
-                Some(eth_oracle),
                 None,
                 None,
                 vp_wasm_compilation_cache,
                 tx_wasm_compilation_cache,
             );
             shell.state.in_mem_mut().block.height = height.into();
-            (Self { shell }, receiver, eth_sender, control_receiver)
+            Self { shell }
         }
 
         /// Same as [`TestShell::new_at_height`], but returns a shell at block
         /// height 0.
         #[inline]
         #[allow(dead_code)]
-        pub fn new() -> (
-            Self,
-            UnboundedReceiver<Vec<u8>>,
-            Sender<EthereumEvent>,
-            Receiver<oracle::control::Command>,
-        ) {
+        pub fn new() -> Self {
             Self::new_at_height(BlockHeight(1))
         }
 
@@ -1834,19 +1440,16 @@ pub mod test_utils {
         /// the events created for each transaction
         pub fn finalize_block(
             &mut self,
-            req: FinalizeBlock,
+            req: finalize_block::Request,
         ) -> ShellResult<Vec<Event>> {
-            match self.shell.finalize_block(req) {
-                Ok(resp) => Ok(resp.events),
-                Err(err) => Err(err),
-            }
+            self.shell.finalize_block(req).map(|resp| resp.events)
         }
 
         /// Forward a PrepareProposal request
         pub fn prepare_proposal(
             &self,
             mut req: RequestPrepareProposal,
-        ) -> abcipp_shim_types::shim::response::PrepareProposal {
+        ) -> response::PrepareProposal {
             req.proposer_address = HEXUPPER
                 .decode(
                     wallet::defaults::validator_keypair()
@@ -1864,26 +1467,29 @@ pub mod test_utils {
             self.state.in_mem_mut().next_epoch_min_start_height =
                 self.state.in_mem().get_last_block_height() + num_blocks;
             self.state.in_mem_mut().next_epoch_min_start_time = {
-                #[allow(clippy::disallowed_methods)]
-                DateTimeUtc::now()
+                ({
+                    #[allow(clippy::disallowed_methods)]
+                    DateTimeUtc::now()
+                }) - Duration::seconds(1)
             };
         }
 
         /// Simultaneously call the `FinalizeBlock` and
         /// `Commit` handlers.
-        pub fn finalize_and_commit(&mut self, req: Option<FinalizeBlock>) {
-            let mut req = req.unwrap_or_default();
-            req.header.time = {
-                #[allow(clippy::disallowed_methods)]
-                DateTimeUtc::now()
-            };
-
+        pub fn finalize_and_commit(
+            &mut self,
+            req: Option<finalize_block::Request>,
+        ) {
+            let req = req.unwrap_or_default();
             self.finalize_block(req).expect("Test failed");
             self.commit();
         }
 
         /// Immediately change to the next epoch.
-        pub fn start_new_epoch(&mut self, req: Option<FinalizeBlock>) -> Epoch {
+        pub fn start_new_epoch(
+            &mut self,
+            req: Option<finalize_block::Request>,
+        ) -> Epoch {
             self.start_new_epoch_in(1);
 
             let next_epoch_min_start_height =
@@ -1911,8 +1517,6 @@ pub mod test_utils {
         /// The number of validators to configure
         // in `InitChain`.
         pub num_validators: u64,
-        /// Whether to enable the Ethereum oracle or not.
-        pub enable_ethereum_oracle: bool,
     }
 
     impl<H: Default> Default for SetupCfg<H> {
@@ -1920,7 +1524,6 @@ pub mod test_utils {
             Self {
                 last_height: H::default(),
                 num_validators: 1,
-                enable_ethereum_oracle: true,
             }
         }
     }
@@ -1932,22 +1535,9 @@ pub mod test_utils {
         SetupCfg {
             last_height,
             num_validators,
-            enable_ethereum_oracle,
         }: SetupCfg<H>,
-    ) -> (
-        TestShell,
-        UnboundedReceiver<Vec<u8>>,
-        Sender<EthereumEvent>,
-        Receiver<oracle::control::Command>,
-    ) {
-        let (mut test, receiver, eth_sender, control_receiver) =
-            TestShell::new_at_height(last_height);
-        if !enable_ethereum_oracle {
-            if let ShellMode::Validator { eth_oracle, .. } = &mut test.mode {
-                // drop the eth oracle event receiver
-                _ = eth_oracle.take();
-            }
-        }
+    ) -> TestShell {
+        let mut test = TestShell::new_at_height(last_height);
         let req = request::InitChain {
             time: Timestamp {
                 seconds: 0,
@@ -1983,20 +1573,13 @@ pub mod test_utils {
         };
         test.init_chain(req, num_validators);
         test.state.commit_block().expect("Test failed");
-        (test, receiver, eth_sender, control_receiver)
+        test
     }
 
     /// Same as [`setup_at_height`], but returns a shell at the given block
     /// height, with a single validator.
     #[inline]
-    pub fn setup_at_height<H: Into<BlockHeight>>(
-        last_height: H,
-    ) -> (
-        TestShell,
-        UnboundedReceiver<Vec<u8>>,
-        Sender<EthereumEvent>,
-        Receiver<oracle::control::Command>,
-    ) {
+    pub fn setup_at_height<H: Into<BlockHeight>>(last_height: H) -> TestShell {
         let last_height = last_height.into();
         setup_with_cfg(SetupCfg {
             last_height,
@@ -2007,54 +1590,8 @@ pub mod test_utils {
     /// Same as [`setup_with_cfg`], but returns a shell at block height 0,
     /// with a single validator.
     #[inline]
-    pub fn setup() -> (
-        TestShell,
-        UnboundedReceiver<Vec<u8>>,
-        Sender<EthereumEvent>,
-        Receiver<oracle::control::Command>,
-    ) {
+    pub fn setup() -> TestShell {
         setup_with_cfg(SetupCfg::<u64>::default())
-    }
-
-    /// This is just to be used in testing. It is not
-    /// a meaningful default.
-    impl Default for FinalizeBlock {
-        fn default() -> Self {
-            FinalizeBlock {
-                header: BlockHeader {
-                    hash: Hash([0; 32]),
-                    #[allow(clippy::disallowed_methods)]
-                    time: DateTimeUtc::now(),
-                    next_validators_hash: Hash([0; 32]),
-                },
-                block_hash: Hash([0; 32]),
-                byzantine_validators: vec![],
-                txs: vec![],
-                proposer_address: HEXUPPER
-                    .decode(
-                        wallet::defaults::validator_keypair()
-                            .to_public()
-                            .tm_raw_hash()
-                            .as_bytes(),
-                    )
-                    .unwrap(),
-                height: 0u8.into(),
-                decided_last_commit: tendermint::abci::types::CommitInfo {
-                    round: 0u8.into(),
-                    votes: vec![],
-                },
-            }
-        }
-    }
-
-    /// Set the Ethereum bridge to be inactive
-    pub fn deactivate_bridge(shell: &mut TestShell) {
-        use eth_bridge::storage::active_key;
-        use eth_bridge::storage::eth_bridge_queries::EthBridgeStatus;
-        shell
-            .state
-            .write(&active_key(), EthBridgeStatus::Disabled)
-            .expect("Test failed");
     }
 
     pub fn get_pkh_from_address<S>(
@@ -2081,14 +1618,14 @@ pub mod test_utils {
         votes: Vec<VoteInfo>,
         byzantine_validators: Option<Vec<Misbehavior>>,
     ) {
-        // Let the header time be always ahead of the next epoch min start time
-        let header = BlockHeader {
+        let mut req = finalize_block::Request {
+            // Let the header time be always ahead of the next epoch min start
+            // time
             time: shell.state.in_mem().next_epoch_min_start_time.next_second(),
-            ..Default::default()
-        };
-        let mut req = FinalizeBlock {
-            header,
-            proposer_address,
+            proposer_address: tendermint::account::Id::try_from(
+                proposer_address,
+            )
+            .unwrap(),
             decided_last_commit: tendermint::abci::types::CommitInfo {
                 round: 0u8.into(),
                 votes,
@@ -2096,7 +1633,7 @@ pub mod test_utils {
             ..Default::default()
         };
         if let Some(byz_vals) = byzantine_validators {
-            req.byzantine_validators = byz_vals;
+            req.misbehavior = byz_vals;
         }
         shell.finalize_block(req).unwrap();
         shell.commit();
@@ -2108,17 +1645,11 @@ mod shell_tests {
     use std::collections::BTreeMap;
     use std::fs::File;
 
-    use eth_bridge::storage::eth_bridge_queries::is_bridge_comptime_enabled;
     use namada_apps_lib::state::StorageWrite;
     use namada_sdk::address;
-    use namada_sdk::chain::Epoch;
     use namada_sdk::token::read_denom;
     use namada_sdk::tx::data::Fee;
-    use namada_sdk::tx::data::protocol::{ProtocolTx, ProtocolTxType};
-    use namada_sdk::tx::{Code, Data, Signed};
-    use namada_vote_ext::{
-        bridge_pool_roots, ethereum_events, ethereum_tx_data_variants,
-    };
+    use namada_sdk::tx::{Code, Data};
     use tempfile::tempdir;
     use {namada_replay_protection as replay_protection, wallet};
 
@@ -2129,321 +1660,10 @@ mod shell_tests {
 
     const GAS_LIMIT: u64 = 100_000;
 
-    /// Check that the shell broadcasts validator set updates,
-    /// even when the Ethereum oracle is not running (e.g.
-    /// because the bridge is disabled).
-    #[tokio::test]
-    async fn test_broadcast_valset_upd_inspite_oracle_off() {
-        if !is_bridge_comptime_enabled() {
-            // NOTE: this test doesn't work if the ethereum bridge
-            // is disabled at compile time.
-            return;
-        }
-
-        // this height should result in a validator set
-        // update being broadcasted
-        let (mut shell, mut broadcaster_rx, _, _) =
-            test_utils::setup_with_cfg(test_utils::SetupCfg {
-                last_height: 1,
-                enable_ethereum_oracle: false,
-                ..Default::default()
-            });
-
-        // broadcast validator set update
-        shell.broadcast_protocol_txs();
-
-        // check data inside tx - it should be a validator set update
-        // signed at epoch 0
-        let signed_valset_upd = loop {
-            // attempt to receive validator set update
-            let serialized_tx = tokio::time::timeout(
-                std::time::Duration::from_secs(1),
-                async { broadcaster_rx.recv().await.unwrap() },
-            )
-            .await
-            .unwrap();
-            let tx = Tx::try_from_bytes(&serialized_tx[..]).unwrap();
-
-            match ethereum_tx_data_variants::ValSetUpdateVext::try_from(&tx) {
-                Ok(signed_valset_upd) => break signed_valset_upd,
-                Err(_) => continue,
-            }
-        };
-
-        assert_eq!(signed_valset_upd.data.signing_epoch, Epoch(0));
-    }
-
-    /// Check that broadcasting expired Ethereum events works
-    /// as expected.
-    #[test]
-    fn test_commit_broadcasts_expired_eth_events() {
-        if !is_bridge_comptime_enabled() {
-            // NOTE: this test doesn't work if the ethereum bridge
-            // is disabled at compile time.
-            return;
-        }
-
-        let (mut shell, mut broadcaster_rx, _, _) =
-            test_utils::setup_at_height(5);
-
-        // push expired events to queue
-        let ethereum_event_0 = EthereumEvent::TransfersToNamada {
-            nonce: 0u64.into(),
-            transfers: vec![],
-        };
-        let ethereum_event_1 = EthereumEvent::TransfersToNamada {
-            nonce: 1u64.into(),
-            transfers: vec![],
-        };
-        shell
-            .state
-            .in_mem_mut()
-            .expired_txs_queue
-            .push(ExpiredTx::EthereumEvent(ethereum_event_0.clone()));
-        shell
-            .state
-            .in_mem_mut()
-            .expired_txs_queue
-            .push(ExpiredTx::EthereumEvent(ethereum_event_1.clone()));
-
-        // broadcast them
-        shell.broadcast_expired_txs();
-
-        // attempt to receive vote extension tx aggregating
-        // all expired events
-        let serialized_tx = broadcaster_rx.blocking_recv().unwrap();
-        let tx = Tx::try_from_bytes(&serialized_tx[..]).unwrap();
-
-        // check data inside tx
-        let vote_extension =
-            ethereum_tx_data_variants::EthEventsVext::try_from(&tx).unwrap();
-        assert_eq!(
-            vote_extension.data.ethereum_events,
-            vec![ethereum_event_0, ethereum_event_1]
-        );
-    }
-
-    /// Test that Ethereum events with outdated nonces are
-    /// not validated by `CheckTx`.
-    #[test]
-    fn test_outdated_nonce_mempool_validate() {
-        use namada_sdk::storage::InnerEthEventsQueue;
-
-        const LAST_HEIGHT: BlockHeight = BlockHeight(3);
-
-        if !is_bridge_comptime_enabled() {
-            // NOTE: this test doesn't work if the ethereum bridge
-            // is disabled at compile time.
-            return;
-        }
-
-        let (mut shell, _recv, _, _) = test_utils::setup_at_height(LAST_HEIGHT);
-        shell
-            .state
-            .in_mem_mut()
-            .eth_events_queue
-            // sent transfers to namada nonce to 5
-            .transfers_to_namada = InnerEthEventsQueue::new_at(5.into());
-
-        let (protocol_key, _) = wallet::defaults::validator_keys();
-
-        // only bad events
-        {
-            let ethereum_event = EthereumEvent::TransfersToNamada {
-                nonce: 3u64.into(),
-                transfers: vec![],
-            };
-            let ext = {
-                let ext = ethereum_events::Vext {
-                    validator_addr: wallet::defaults::validator_address(),
-                    block_height: LAST_HEIGHT,
-                    ethereum_events: vec![ethereum_event],
-                }
-                .sign(&protocol_key);
-                assert!(ext.verify(&protocol_key.ref_to()).is_ok());
-                ext
-            };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
-                .sign(&protocol_key, shell.chain_id.clone())
-                .to_bytes();
-            let rsp = shell.mempool_validate(&tx, Default::default());
-            assert!(
-                rsp.code != ResultCode::Ok.into(),
-                "Validation should have failed"
-            );
-        }
-
-        // at least one good event
-        {
-            let e1 = EthereumEvent::TransfersToNamada {
-                nonce: 3u64.into(),
-                transfers: vec![],
-            };
-            let e2 = EthereumEvent::TransfersToNamada {
-                nonce: 5u64.into(),
-                transfers: vec![],
-            };
-            let ext = {
-                let ext = ethereum_events::Vext {
-                    validator_addr: wallet::defaults::validator_address(),
-                    block_height: LAST_HEIGHT,
-                    ethereum_events: vec![e1, e2],
-                }
-                .sign(&protocol_key);
-                assert!(ext.verify(&protocol_key.ref_to()).is_ok());
-                ext
-            };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
-                .sign(&protocol_key, shell.chain_id.clone())
-                .to_bytes();
-            let rsp = shell.mempool_validate(&tx, Default::default());
-            assert!(
-                rsp.code == ResultCode::Ok.into(),
-                "Validation should have passed"
-            );
-        }
-    }
-
-    /// Test that we do not include protocol txs in the mempool,
-    /// voting on ethereum events or signing bridge pool roots
-    /// and nonces if the bridge is inactive.
-    #[test]
-    fn test_mempool_filter_protocol_txs_bridge_inactive() {
-        let (mut shell, _, _, _) = test_utils::setup_at_height(3);
-        test_utils::deactivate_bridge(&mut shell);
-        let address = shell
-            .mode
-            .get_validator_address()
-            .expect("Test failed")
-            .clone();
-        let protocol_key = shell.mode.get_protocol_key().expect("Test failed");
-        let ethereum_event = EthereumEvent::TransfersToNamada {
-            nonce: 0u64.into(),
-            transfers: vec![],
-        };
-        let eth_vext = EthereumTxData::EthEventsVext(
-            ethereum_events::Vext {
-                validator_addr: address.clone(),
-                block_height: shell.state.in_mem().get_last_block_height(),
-                ethereum_events: vec![ethereum_event],
-            }
-            .sign(protocol_key)
-            .into(),
-        )
-        .sign(protocol_key, shell.chain_id.clone())
-        .to_bytes();
-
-        let to_sign = test_utils::get_bp_bytes_to_sign();
-        let hot_key = shell.mode.get_eth_bridge_keypair().expect("Test failed");
-        let sig = Signed::<_, SignableEthMessage>::new(hot_key, to_sign).sig;
-        let bp_vext = EthereumTxData::BridgePoolVext(
-            bridge_pool_roots::Vext {
-                block_height: shell.state.in_mem().get_last_block_height(),
-                validator_addr: address,
-                sig,
-            }
-            .sign(protocol_key),
-        )
-        .sign(protocol_key, shell.chain_id.clone())
-        .to_bytes();
-        let txs_to_validate = [
-            (eth_vext, "Incorrectly validated eth events vext"),
-            (bp_vext, "Incorrectly validated bp roots vext"),
-        ];
-        for (tx_bytes, err_msg) in txs_to_validate {
-            let rsp = shell.mempool_validate(&tx_bytes, Default::default());
-            assert!(
-                rsp.code == ResultCode::InvalidVoteExtension.into(),
-                "{err_msg}"
-            );
-        }
-    }
-
-    /// Test if Ethereum events validation behaves as expected,
-    /// considering honest validators.
-    #[test]
-    fn test_mempool_eth_events_vext_normal_op() {
-        const LAST_HEIGHT: BlockHeight = BlockHeight(3);
-
-        if !is_bridge_comptime_enabled() {
-            // NOTE: this test doesn't work if the ethereum bridge
-            // is disabled at compile time.
-            return;
-        }
-
-        let (shell, _recv, _, _) = test_utils::setup_at_height(LAST_HEIGHT);
-
-        let (protocol_key, _) = wallet::defaults::validator_keys();
-        let validator_addr = wallet::defaults::validator_address();
-
-        let ethereum_event = EthereumEvent::TransfersToNamada {
-            nonce: 0u64.into(),
-            transfers: vec![],
-        };
-        let ext = {
-            let ext = ethereum_events::Vext {
-                validator_addr,
-                block_height: LAST_HEIGHT,
-                ethereum_events: vec![ethereum_event],
-            }
-            .sign(&protocol_key);
-            assert!(ext.verify(&protocol_key.ref_to()).is_ok());
-            ext
-        };
-        let tx = EthereumTxData::EthEventsVext(ext.into())
-            .sign(&protocol_key, shell.chain_id.clone())
-            .to_bytes();
-        let rsp = shell.mempool_validate(&tx, Default::default());
-        assert_eq!(rsp.code, 0.into());
-    }
-
-    /// Test if Ethereum events validation fails, if the underlying
-    /// protocol transaction type is different from the vote extension
-    /// contained in the transaction's data field.
-    #[test]
-    fn test_mempool_eth_events_vext_data_mismatch() {
-        const LAST_HEIGHT: BlockHeight = BlockHeight(3);
-
-        let (shell, _recv, _, _) = test_utils::setup_at_height(LAST_HEIGHT);
-
-        let (protocol_key, _) = wallet::defaults::validator_keys();
-        let validator_addr = wallet::defaults::validator_address();
-
-        let ethereum_event = EthereumEvent::TransfersToNamada {
-            nonce: 0u64.into(),
-            transfers: vec![],
-        };
-        let ext = {
-            let ext = ethereum_events::Vext {
-                validator_addr,
-                block_height: LAST_HEIGHT,
-                ethereum_events: vec![ethereum_event],
-            }
-            .sign(&protocol_key);
-            assert!(ext.verify(&protocol_key.ref_to()).is_ok());
-            ext
-        };
-        let tx = {
-            let mut tx =
-                Tx::from_type(TxType::Protocol(Box::new(ProtocolTx {
-                    pk: protocol_key.ref_to(),
-                    tx: ProtocolTxType::BridgePoolVext,
-                })));
-            // invalid tx type, it doesn't match the
-            // tx type declared in the header
-            tx.set_data(Data::new(ext.serialize_to_vec()));
-            tx.sign_wrapper(protocol_key);
-            tx
-        }
-        .to_bytes();
-        let rsp = shell.mempool_validate(&tx, Default::default());
-        assert_eq!(rsp.code, ResultCode::InvalidVoteExtension.into());
-    }
-
     /// Mempool validation must reject unsigned wrappers
     #[test]
     fn test_missing_signature() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let keypair = super::test_utils::gen_keypair();
 
@@ -2480,7 +1700,7 @@ mod shell_tests {
     /// Mempool validation must reject wrappers with an invalid signature
     #[test]
     fn test_invalid_signature() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let keypair = super::test_utils::gen_keypair();
 
@@ -2525,7 +1745,7 @@ mod shell_tests {
     /// Mempool validation must reject non-wrapper txs
     #[test]
     fn test_wrong_tx_type() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let mut tx = Tx::new(shell.chain_id.clone(), None);
         tx.add_code("wasm_code".as_bytes().to_owned(), None);
@@ -2546,7 +1766,7 @@ mod shell_tests {
     /// transactions
     #[test]
     fn test_replay_attack() {
-        let (mut shell, _recv, _, _) = test_utils::setup();
+        let mut shell = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -2656,7 +1876,7 @@ mod shell_tests {
     /// Check that a transaction with a wrong chain id gets discarded
     #[test]
     fn test_wrong_chain_id() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let keypair = super::test_utils::gen_keypair();
 
@@ -2684,7 +1904,7 @@ mod shell_tests {
     /// Check that an expired transaction gets rejected
     #[test]
     fn test_expired_tx() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let keypair = super::test_utils::gen_keypair();
 
@@ -2704,7 +1924,7 @@ mod shell_tests {
     /// Check that a tx requiring more gas than the block limit gets rejected
     #[test]
     fn test_exceeding_max_block_gas_tx() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let block_gas_limit =
             parameters::get_max_block_gas(&shell.state).unwrap();
@@ -2734,7 +1954,7 @@ mod shell_tests {
     // Check that a tx requiring more gas than its limit gets rejected
     #[test]
     fn test_exceeding_gas_limit_tx() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let shell = test_utils::setup();
         let keypair = super::test_utils::gen_keypair();
 
         let mut wrapper =
@@ -2762,7 +1982,7 @@ mod shell_tests {
     // rejected
     #[test]
     fn test_fee_non_whitelisted_token() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let shell = test_utils::setup();
         let apfel_denom = read_denom(&shell.state, &address::testing::apfel())
             .expect("unable to read denomination from storage")
             .expect("unable to find denomination of apfels");
@@ -2795,7 +2015,7 @@ mod shell_tests {
     // is accepted
     #[test]
     fn test_fee_whitelisted_non_native_token() {
-        let (mut shell, _recv, _, _) = test_utils::setup();
+        let mut shell = test_utils::setup();
         let apfel_denom = read_denom(&shell.state, &address::testing::apfel())
             .expect("unable to read denomination from storage")
             .expect("unable to find denomination of apfels");
@@ -2854,7 +2074,7 @@ mod shell_tests {
     // is rejected
     #[test]
     fn test_fee_wrong_minimum_amount() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -2880,7 +2100,7 @@ mod shell_tests {
     // Check that a wrapper transactions whose fees cannot be paid is rejected
     #[test]
     fn test_insufficient_balance_for_fee() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -2908,7 +2128,7 @@ mod shell_tests {
     // Check that a fee overflow in the wrapper transaction is rejected
     #[test]
     fn test_wrapper_fee_overflow() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let mut wrapper =
             Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
@@ -2936,7 +2156,7 @@ mod shell_tests {
     /// Test max tx bytes parameter in CheckTx
     #[test]
     fn test_max_tx_bytes_check_tx() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let max_tx_bytes: u32 = {
             let key = parameters::storage::get_max_tx_bytes_key();
@@ -2987,7 +2207,7 @@ mod shell_tests {
     /// Test max tx sections limit in CheckTx
     #[test]
     fn test_max_tx_sections_check_tx() {
-        let (shell, _recv, _, _) = test_utils::setup();
+        let shell = test_utils::setup();
 
         let new_tx = |num_of_sections: usize| {
             let keypair = super::test_utils::gen_keypair();
@@ -3036,8 +2256,6 @@ mod shell_tests {
     /// from a snapshot if it is not syncing
     #[test]
     fn test_restore_database_from_snapshot() {
-        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
-
         let base_dir = tempdir().unwrap().as_ref().canonicalize().unwrap();
         let vp_wasm_compilation_cache = 50 * 1024 * 1024; // 50 kiB
         let tx_wasm_compilation_cache = 50 * 1024 * 1024; // 50 kiB
@@ -3049,8 +2267,6 @@ mod shell_tests {
         let mut shell = Shell::<PersistentDB, Sha256Hasher>::new(
             config.clone(),
             top_level_directory().join("wasm"),
-            sender,
-            None,
             None,
             None,
             vp_wasm_compilation_cache,
@@ -3071,7 +2287,7 @@ mod shell_tests {
             .expect("Test failed");
         shell.state.commit_block().expect("Test failed");
         let new_root = shell.state.in_mem().merkle_root();
-        assert_ne!(new_root, original_root);
+        assert_eq!(new_root, original_root);
 
         shell.restore_database_from_state_sync();
         assert_eq!(shell.state.in_mem().merkle_root(), new_root,);

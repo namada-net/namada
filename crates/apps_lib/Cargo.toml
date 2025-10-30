@@ -20,7 +20,6 @@ mainnet = ["namada_sdk/mainnet"]
 testing = ["lazy_static", "namada_sdk/testing"]
 benches = ["lazy_static", "namada_sdk/benches"]
 migrations = ["namada_migrations", "namada_sdk/migrations", "linkme"]
-namada-eth-bridge = ["namada_sdk/namada-eth-bridge"]
 
 [dependencies]
 namada_core.workspace = true

@@ -59,6 +59,8 @@ pub enum TxError {
     Deserialization(String),
     #[error("Tx contains repeated sections")]
     RepeatedSections,
+    #[error("Protocol txs are deprecated")]
+    DeprecatedProtocolTx,
 }
 
 /// A Namada transaction is represented as a header followed by a series of
@@ -232,6 +234,12 @@ impl Tx {
         raw_header.tx_type = TxType::Raw;
 
         Section::Header(raw_header).get_hash()
+    }
+
+    /// CometBFT matching tx hash (applicable for wrapper txs only)
+    pub fn comet_tx_hash(&self) -> namada_core::hash::Hash {
+        let bytes = self.to_bytes();
+        namada_core::hash::Hash::sha256(bytes)
     }
 
     /// Get hashes of all the sections in this transaction
@@ -679,7 +687,7 @@ impl Tx {
     ///
     /// If it is a raw Tx, signed or not, we return `None`.
     ///
-    /// If it is a WrapperTx or ProtocolTx, we extract the signed data of
+    /// If it is a WrapperTx, we extract the signed data of
     /// the Tx and verify it is of the appropriate form. This means
     /// 1. The wrapper tx is indeed signed
     /// 2. The signature is valid
@@ -702,18 +710,10 @@ impl Tx {
                         ))
                     })
             }
-            // verify signature and extract signed data
-            TxType::Protocol(protocol) => self
-                .verify_signature(&protocol.pk, &self.unique_sechashes())
-                .map(Option::Some)
-                .map_err(|err| {
-                    TxError::SigError(format!(
-                        "ProtocolTx signature verification failed: {}",
-                        err
-                    ))
-                }),
             // return as is
             TxType::Raw => Ok(None),
+            #[allow(deprecated)]
+            TxType::Protocol(_) => Err(TxError::DeprecatedProtocolTx),
         }
     }
 
@@ -1165,7 +1165,6 @@ mod test {
 
     use super::*;
     use crate::data;
-    use crate::data::protocol::{ProtocolTx, ProtocolTxType};
 
     /// Test that the BorshSchema for Tx gets generated without any name
     /// conflicts
@@ -1184,7 +1183,8 @@ mod test {
         let serialized_txs: Vec<String> =
             serde_json::from_reader(file).expect("file should be proper JSON");
 
-        for serialized_tx in serialized_txs {
+        for (ix, serialized_tx) in serialized_txs.iter().enumerate() {
+            dbg!(ix);
             let raw_bytes = HEXLOWER.decode(serialized_tx.as_bytes()).unwrap();
             let tx = Tx::try_from_bytes(raw_bytes.as_ref()).unwrap();
 
@@ -1249,48 +1249,6 @@ mod test {
             let mut tx = tx.clone();
             // Sign the tx with a wrong key
             tx.sign_wrapper(sk2);
-
-            // Should be rejected
-            tx.validate_tx().expect_err("invalid signature - wrong key");
-        }
-    }
-
-    #[test]
-    fn test_protocol_tx_signing() {
-        let sk1 = key::testing::keypair_1();
-        let sk2 = key::testing::keypair_2();
-        let pk1 = sk1.to_public();
-        let tx = Tx::from_type(TxType::Protocol(Box::new(ProtocolTx {
-            pk: pk1,
-            tx: ProtocolTxType::BridgePool,
-        })));
-
-        // Unsigned tx should fail validation
-        tx.validate_tx().expect_err("Unsigned");
-
-        {
-            let mut tx = tx.clone();
-            // Sign the tx
-            tx.add_section(Section::Authorization(Authorization::new(
-                tx.sechashes(),
-                BTreeMap::from_iter([(0, sk1)]),
-                None,
-            )));
-
-            // Signed tx should pass validation
-            tx.validate_tx()
-                .expect("valid tx")
-                .expect("with authorization");
-        }
-
-        {
-            let mut tx = tx.clone();
-            // Sign the tx with a wrong key
-            tx.add_section(Section::Authorization(Authorization::new(
-                tx.sechashes(),
-                BTreeMap::from_iter([(0, sk2)]),
-                None,
-            )));
 
             // Should be rejected
             tx.validate_tx().expect_err("invalid signature - wrong key");

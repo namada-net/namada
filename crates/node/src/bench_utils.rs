@@ -105,7 +105,7 @@ use namada_sdk::tx::{
     Authorization, BatchedTx, BatchedTxRef, Code, Data, IndexedTx, Section, Tx,
 };
 pub use namada_sdk::tx::{
-    TX_BECOME_VALIDATOR_WASM, TX_BOND_WASM, TX_BRIDGE_POOL_WASM,
+    TX_BECOME_VALIDATOR_WASM, TX_BOND_WASM,
     TX_CHANGE_COMMISSION_WASM as TX_CHANGE_VALIDATOR_COMMISSION_WASM,
     TX_CHANGE_CONSENSUS_KEY_WASM,
     TX_CHANGE_METADATA_WASM as TX_CHANGE_VALIDATOR_METADATA_WASM,
@@ -567,15 +567,12 @@ impl Default for BenchShell {
                 .init();
         });
 
-        let (sender, _) = tokio::sync::mpsc::unbounded_channel();
         let tempdir = tempfile::tempdir().unwrap();
         let path = tempdir.path().canonicalize().unwrap();
 
         let shell = Shell::new(
             config::Ledger::new(path, Default::default(), TendermintMode::Full),
             WASM_DIR.into(),
-            sender,
-            None,
             None,
             None,
             50 * 1024 * 1024, // 50 kiB
@@ -1056,7 +1053,7 @@ impl Client for BenchShell {
 
         // We can expect all the masp tranfers to have happened only in the last
         // block
-        let end_block_events = if height.value()
+        let finalize_block_events = if height.value()
             == shell.inner.state.in_mem().get_last_block_height().0
         {
             let mut res = vec![];
@@ -1117,17 +1114,17 @@ impl Client for BenchShell {
                     res.push(namada_sdk::tendermint::abci::Event::from(event));
                 }
             }
-            Some(res)
+            res
         } else {
-            None
+            Default::default()
         };
 
         Ok(tendermint_rpc::endpoint::block_results::Response {
             height,
             txs_results: None,
-            finalize_block_events: vec![],
+            finalize_block_events,
             begin_block_events: None,
-            end_block_events,
+            end_block_events: None,
             validator_updates: vec![],
             consensus_param_updates: None,
             app_hash: namada_sdk::tendermint::hash::AppHash::default(),

@@ -9,13 +9,11 @@ members = [
   "crates/controller",
   "crates/core",
   "crates/encoding_spec",
-  "crates/ethereum_bridge",
   "crates/events",
   "crates/gas",
   "crates/governance",
   "crates/ibc",
   "crates/io",
-  "crates/light_sdk",
   "crates/macros",
   "crates/migrations",
   "crates/merkle_tree",
@@ -37,7 +35,6 @@ members = [
   "crates/tx_prelude",
   "crates/vm",
   "crates/vm_env",
-  "crates/vote_ext",
   "crates/vp",
   "crates/vp_env",
   "crates/vp_prelude",
@@ -71,13 +68,11 @@ namada_apps_lib = { version = "0.251.0", path = "crates/apps_lib" }
 namada_controller = { version = "0.251.0", path = "crates/controller" }
 namada_core = { version = "0.251.0", path = "crates/core" }
 namada_encoding_spec = { version = "0.251.0", path = "crates/encoding_spec" }
-namada_ethereum_bridge = { version = "0.251.0", path = "crates/ethereum_bridge" }
 namada_events = { version = "0.251.0", path = "crates/events" }
 namada_gas = { version = "0.251.0", path = "crates/gas" }
 namada_governance = { version = "0.251.0", path = "crates/governance" }
 namada_ibc = { version = "0.251.0", path = "crates/ibc" }
 namada_io = { version = "0.251.0", path = "crates/io" }
-namada_light_sdk = { version = "0.251.0", path = "crates/light_sdk" }
 namada_macros = { version = "0.251.0", path = "crates/macros" }
 namada_migrations = { version = "0.251.0", path = "crates/migrations" }
 namada_merkle_tree = { version = "0.251.0", path = "crates/merkle_tree" }
@@ -99,7 +94,6 @@ namada_tx_env = { version = "0.251.0", path = "crates/tx_env" }
 namada_tx_prelude = { version = "0.251.0", path = "crates/tx_prelude" }
 namada_vm = { version = "0.251.0", path = "crates/vm", default-features = false }
 namada_vm_env = { version = "0.251.0", path = "crates/vm_env" }
-namada_vote_ext = { version = "0.251.0", path = "crates/vote_ext" }
 namada_vp = { version = "0.251.0", path = "crates/vp" }
 namada_vp_env = { version = "0.251.0", path = "crates/vp_env" }
 namada_vp_prelude = { version = "0.251.0", path = "crates/vp_prelude" }

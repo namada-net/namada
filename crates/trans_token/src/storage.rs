@@ -175,13 +175,6 @@ where
     S: StorageRead,
 {
     let (key, is_default_zero) = match token {
-        Address::Internal(InternalAddress::Nut(erc20)) => {
-            let token = Address::Internal(InternalAddress::Erc20(*erc20));
-            // NB: always use the equivalent ERC20's smallest
-            // denomination to specify amounts, if we cannot
-            // find a denom in storage
-            (denom_key(&token), true)
-        }
         Address::Internal(InternalAddress::IbcToken(_)) => {
             return Ok(Some(0u8.into()));
         }

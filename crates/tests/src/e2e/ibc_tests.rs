@@ -20,7 +20,6 @@ use eyre::{WrapErr, eyre};
 use ibc_middleware_packet_forward::ForwardMetadata;
 use itertools::Either;
 use namada_apps_lib::client::rpc::query_storage_value_bytes;
-use namada_apps_lib::config::ethereum_bridge;
 use namada_apps_lib::config::genesis::templates;
 use namada_apps_lib::tendermint_rpc::{Client, HttpClient, Url};
 use namada_core::masp::PaymentAddress;
@@ -62,8 +61,8 @@ use crate::e2e::ledger_tests::{
 use crate::e2e::setup::{
     self, Bin, CosmosChainType, ENV_VAR_COSMWASM_CONTRACT_DIR, NamadaCmd, Test,
     TestDir, Who, apply_use_device, osmosis_fixtures_dir, run_cosmos_cmd,
-    run_cosmos_cmd_homeless, run_hermes_cmd, set_ethereum_bridge_mode,
-    setup_cosmos, setup_hermes, sleep, working_dir,
+    run_cosmos_cmd_homeless, run_hermes_cmd, setup_cosmos, setup_hermes, sleep,
+    working_dir,
 };
 use crate::ibc::primitives::Signer;
 use crate::strings::TX_APPLIED_SUCCESS;
@@ -2511,14 +2510,6 @@ fn run_namada_cosmos(
     ) -> templates::All<templates::Unvalidated>,
 ) -> Result<(NamadaCmd, NamadaCmd, Test, Test)> {
     let test = setup::network(&mut update_genesis, None)?;
-
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
 
     let ledger = start_namada_ledger_node_wait_wasm(&test, Some(0), Some(40))?;
 

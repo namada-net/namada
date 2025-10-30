@@ -1,12 +1,12 @@
 //! Data-Types that are used in transactions.
 
+#![allow(deprecated)] // Triggered by deprecated `TxType::Protocol
+
 pub mod eval_vp;
 /// txs to manage pgf
 pub mod pgf;
 /// txs to manage pos
 pub mod pos;
-/// transaction protocols made by validators
-pub mod protocol;
 /// wrapper txs
 pub mod wrapper;
 
@@ -39,7 +39,6 @@ use sha2::{Digest, Sha256};
 pub use wrapper::*;
 
 use crate::TxCommitments;
-use crate::data::protocol::ProtocolTx;
 
 /// The different result codes that the ledger may send back to a client
 /// indicating the status of their submitted tx.
@@ -89,6 +88,8 @@ pub enum ResultCode {
     TxNotAllowlisted = 12,
     // =========================================================================
     // WARN: These codes shouldn't be changed between version!
+    /// Protocol txs are deprecated
+    DeprecatedProtocolTx = 13,
 }
 
 impl ResultCode {
@@ -102,7 +103,8 @@ impl ResultCode {
             Ok | WasmRuntimeError => true,
             InvalidTx | InvalidSig | AllocationError | ReplayTx
             | InvalidChainId | ExpiredTx | TxGasLimit | FeeError
-            | InvalidVoteExtension | TooLarge | TxNotAllowlisted => false,
+            | InvalidVoteExtension | TooLarge | TxNotAllowlisted
+            | DeprecatedProtocolTx => false,
         }
     }
 
@@ -580,7 +582,8 @@ pub enum TxType {
     /// A Tx that contains a payload in the form of a raw tx
     Wrapper(Box<WrapperTx>),
     /// Txs issued by validators as part of internal protocols
-    Protocol(Box<ProtocolTx>),
+    #[deprecated]
+    Protocol(Vec<u8>),
 }
 
 impl TxType {

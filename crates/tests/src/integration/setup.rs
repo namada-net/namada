@@ -20,8 +20,8 @@ use namada_core::chain::ChainIdPrefix;
 use namada_core::collections::HashMap;
 use namada_node::shell::Shell;
 use namada_node::shell::testing::node::{
-    InnerMockNode, MockNode, MockServicesCfg, MockServicesController,
-    MockServicesPackage, SalvageableTestDir, mock_services,
+    InnerMockNode, MockNode, MockServicesController, MockServicesPackage,
+    SalvageableTestDir, mock_services,
 };
 use namada_node::shell::testing::utils::TestDir;
 use namada_sdk::dec::Dec;
@@ -40,15 +40,27 @@ pub fn setup() -> Result<(MockNode, MockServicesController)> {
 
 /// Setup folders with genesis, configs, wasm, etc.
 pub fn initialize_genesis(
-    mut update_genesis: impl FnMut(
+    update_genesis: impl FnMut(
         templates::All<templates::Unvalidated>,
     ) -> templates::All<templates::Unvalidated>,
 ) -> Result<(MockNode, MockServicesController)> {
+    initialize_genesis_aux(update_genesis, None)
+}
+
+/// Setup folders with genesis, configs, wasm, etc. Allows to override
+/// `keep_temp` irrespective of the `ENV_VAR_KEEP_TEMP` env var.
+pub fn initialize_genesis_aux(
+    mut update_genesis: impl FnMut(
+        templates::All<templates::Unvalidated>,
+    ) -> templates::All<templates::Unvalidated>,
+    keep_temp: Option<bool>,
+) -> Result<(MockNode, MockServicesController)> {
     let working_dir = std::fs::canonicalize("../..").unwrap();
-    let keep_temp = match std::env::var(ENV_VAR_KEEP_TEMP) {
-        Ok(val) => !val.eq_ignore_ascii_case("false"),
-        _ => false,
-    };
+    let keep_temp =
+        keep_temp.unwrap_or_else(|| match std::env::var(ENV_VAR_KEEP_TEMP) {
+            Ok(val) => !val.eq_ignore_ascii_case("false"),
+            _ => false,
+        });
     let test_dir = TestDir::new();
     let template_dir = derive_template_dir(&working_dir);
 
@@ -120,25 +132,8 @@ pub fn initialize_genesis(
     // Remove release archive
     fs::remove_file(release_archive_path).unwrap();
 
-    let eth_bridge_params = genesis.get_eth_bridge_params();
-    let auto_drive_services = {
-        // NB: for now, the only condition that
-        // dictates whether mock services should
-        // be enabled is if the Ethereum bridge
-        // is enabled at genesis
-        eth_bridge_params.is_some()
-    };
-    let enable_eth_oracle = {
-        // NB: we only enable the oracle if the
-        // Ethereum bridge is enabled at genesis
-        eth_bridge_params.is_some()
-    };
-    let services_cfg = MockServicesCfg {
-        auto_drive_services,
-        enable_eth_oracle,
-    };
     finalize_wallet(&template_dir, &global_args, genesis);
-    create_node(test_dir, global_args, keep_temp, services_cfg)
+    create_node(test_dir, global_args, keep_temp)
 }
 
 /// Add the address from the finalized genesis to the wallet.
@@ -183,7 +178,6 @@ fn create_node(
     test_dir: TestDir,
     global_args: args::Global,
     keep_temp: bool,
-    services_cfg: MockServicesCfg,
 ) -> Result<(MockNode, MockServicesController)> {
     // look up the chain id from the global file.
     let chain_id = global_args.chain_id.unwrap_or_default();
@@ -197,11 +191,9 @@ fn create_node(
 
     // instantiate and initialize the ledger node.
     let MockServicesPackage {
-        auto_drive_services,
         services,
-        shell_handlers,
         controller,
-    } = mock_services(services_cfg);
+    } = mock_services();
     let node = MockNode(Arc::new(InnerMockNode {
         shell: Mutex::new(Shell::new(
             config::Ledger::new(
@@ -212,8 +204,6 @@ fn create_node(
             global_args
                 .wasm_dir
                 .expect("Wasm path not provided to integration test setup."),
-            shell_handlers.tx_broadcaster,
-            shell_handlers.eth_oracle_channels,
             None,
             None,
             50 * 1024 * 1024, // 50 kiB
@@ -227,7 +217,6 @@ fn create_node(
         tx_result_codes: Mutex::new(vec![]),
         tx_results: Mutex::new(vec![]),
         blocks: Mutex::new(HashMap::new()),
-        auto_drive_services,
     }));
     let init_req =
         namada_apps_lib::tendermint::abci::request::InitChain {

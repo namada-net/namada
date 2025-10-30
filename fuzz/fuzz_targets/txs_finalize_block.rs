@@ -4,16 +4,14 @@
 
 use data_encoding::HEXUPPER;
 use libfuzzer_sys::fuzz_target;
-use namada_apps_lib::wallet;
+use namada_apps_lib::{tendermint, wallet};
 use namada_core::address::Address;
 use namada_core::key::PublicKeyTmRawHash;
 use namada_core::time::DateTimeUtc;
 use namada_node::shell;
+use namada_node::shell::FinalizeBlockRequest;
+use namada_node::shell::abci::{ProcessedTx, TxBytes};
 use namada_node::shell::test_utils::TestShell;
-use namada_node::shims::abcipp_shim_types::shim::TxBytes;
-use namada_node::shims::abcipp_shim_types::shim::request::{
-    FinalizeBlock, ProcessedTx,
-};
 use namada_tx::Tx;
 use namada_tx::data::TxType;
 
@@ -37,7 +35,7 @@ fuzz_target!(|txs: Vec<Tx>| {
         match SHELL.as_mut() {
             Some(shell) => shell,
             None => {
-                let (shell, _recv, _, _) = shell::test_utils::setup();
+                let shell = shell::test_utils::setup();
                 SHELL = Some(shell);
                 SHELL.as_mut().unwrap()
             }
@@ -59,9 +57,12 @@ fuzz_target!(|txs: Vec<Tx>| {
     let proposer_address_bytes = HEXUPPER
         .decode(proposer_pk.tm_raw_hash().as_bytes())
         .unwrap();
-    let req = FinalizeBlock {
+    let req = FinalizeBlockRequest {
         txs,
-        proposer_address: proposer_address_bytes,
+        proposer_address: tendermint::account::Id::try_from(
+            proposer_address_bytes,
+        )
+        .unwrap(),
         ..Default::default()
     };
     let _events = shell.finalize_block(req).unwrap();

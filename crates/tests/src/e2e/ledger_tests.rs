@@ -25,14 +25,16 @@ use namada_apps_lib::client::utils::PRE_GENESIS_DIR;
 use namada_apps_lib::config::genesis::chain;
 use namada_apps_lib::config::genesis::templates::TokenBalances;
 use namada_apps_lib::config::utils::convert_tm_addr_to_socket_addr;
-use namada_apps_lib::config::{self, ethereum_bridge};
+use namada_apps_lib::config::{self};
 use namada_apps_lib::tendermint_config::net::Address as TendermintAddress;
 use namada_apps_lib::wallet::defaults::is_use_device;
 use namada_apps_lib::wallet::{self, Alias};
 use namada_core::chain::ChainId;
 use namada_core::token::NATIVE_MAX_DECIMAL_PLACES;
+use namada_node::tendermint_config::TxIndexConfig;
 use namada_sdk::address::Address;
 use namada_sdk::chain::{ChainIdPrefix, Epoch};
+use namada_sdk::tendermint_rpc::Client;
 use namada_sdk::time::DateTimeUtc;
 use namada_sdk::token;
 use namada_test_utils::TestWasms;
@@ -45,7 +47,7 @@ use super::helpers::{
     epochs_per_year_from_min_duration, get_height, get_pregenesis_wallet,
     wait_for_block_height, wait_for_wasm_pre_compile,
 };
-use super::setup::{NamadaCmd, set_ethereum_bridge_mode, working_dir};
+use super::setup::{NamadaCmd, working_dir};
 use crate::e2e::helpers::{
     epoch_sleep, find_address, find_bonded_stake, get_actor_rpc, get_epoch,
     is_debug_mode, parse_reached_epoch,
@@ -99,14 +101,6 @@ pub fn start_namada_ledger_node_wait_wasm(
 fn run_ledger() -> Result<()> {
     let test = setup::single_node_net()?;
 
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
-
     let cmd_combinations = vec![
         (Bin::Node, vec!["ledger"]),
         (Bin::Node, vec!["ledger", "run"]),
@@ -155,21 +149,6 @@ fn test_node_connectivity_and_consensus() -> Result<()> {
 
     allow_duplicate_ips(&test, &test.net.chain_id, Who::Validator(0));
     allow_duplicate_ips(&test, &test.net.chain_id, Who::Validator(1));
-
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(1),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
 
     // 1. Run 2 genesis validator ledger nodes and 1 non-validator node
     let bg_validator_0 =
@@ -249,14 +228,6 @@ fn test_node_connectivity_and_consensus() -> Result<()> {
 fn test_namada_shuts_down_if_tendermint_dies() -> Result<()> {
     let test = setup::single_node_net()?;
 
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
-
     // 1. Run the ledger node
     let mut ledger =
         start_namada_ledger_node_wait_wasm(&test, Some(0), Some(40))?;
@@ -292,14 +263,6 @@ fn test_namada_shuts_down_if_tendermint_dies() -> Result<()> {
 #[test]
 fn run_ledger_load_state_and_reset() -> Result<()> {
     let test = setup::single_node_net()?;
-
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
 
     // 1. Run the ledger node
     let mut ledger = start_namada_ledger_node(&test, Some(0), Some(40))?;
@@ -385,14 +348,6 @@ fn run_ledger_load_state_and_reset() -> Result<()> {
 #[test]
 fn test_db_migration() -> Result<()> {
     let test = setup::single_node_net()?;
-
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
 
     // 1. Run the ledger node, halting at height 6
     let mut ledger = run_as!(
@@ -574,13 +529,6 @@ fn pos_bonds() -> Result<()> {
     )?;
     allow_duplicate_ips(&test, &test.net.chain_id, Who::Validator(0));
     allow_duplicate_ips(&test, &test.net.chain_id, Who::Validator(1));
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
 
     // If used, keep Speculos alive for duration of the test
     let _speculos = if hw_wallet_automation::uses_automation() {
@@ -1048,14 +996,6 @@ fn ledger_many_txs_in_a_block() -> Result<()> {
         Some("10s"),
     )?);
 
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
-
     // 1. Run the ledger node
     let bg_ledger =
         start_namada_ledger_node_wait_wasm(&test, Some(0), Some(40))?
@@ -1188,20 +1128,6 @@ fn double_signing_gets_slashed() -> Result<()> {
     allow_duplicate_ips(&test, &test.net.chain_id, Who::Validator(0));
     allow_duplicate_ips(&test, &test.net.chain_id, Who::Validator(1));
 
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(1),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
     println!("pipeline_len: {}", pipeline_len);
 
     // 1. Copy the first genesis validator base-dir
@@ -1606,20 +1532,6 @@ fn deactivate_and_reactivate_validator() -> Result<()> {
     )?;
     allow_duplicate_ips(&test, &test.net.chain_id, Who::Validator(0));
     allow_duplicate_ips(&test, &test.net.chain_id, Who::Validator(1));
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(1),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
 
     // 1. Run the ledger node
     let _bg_validator_0 =
@@ -1779,14 +1691,6 @@ fn test_invalid_validator_txs() -> Result<()> {
         None,
     )?;
 
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
-
     // 1. Run the ledger node
     let _bg_validator_0 =
         start_namada_ledger_node_wait_wasm(&test, Some(0), Some(40))?
@@ -1945,16 +1849,6 @@ fn change_consensus_key() -> Result<()> {
         None,
     )?;
 
-    for i in 0..2 {
-        set_ethereum_bridge_mode(
-            &test,
-            &test.net.chain_id,
-            Who::Validator(i),
-            ethereum_bridge::ledger::Mode::Off,
-            None,
-        );
-    }
-
     // =========================================================================
     // 1. Run 2 genesis validator ledger nodes
 
@@ -2053,13 +1947,6 @@ fn proposal_change_shielded_reward() -> Result<()> {
         },
         None,
     )?;
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
 
     // 1. Run the ledger node
     let mut ledger =
@@ -2378,13 +2265,6 @@ fn rollback() -> Result<()> {
         // slow block production rate
         Some("5s"),
     )?;
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
 
     // 1. Run the ledger node once
     let mut ledger =
@@ -2506,13 +2386,6 @@ fn masp_txs_and_queries() -> Result<()> {
 
     // Run all cmds on the first validator
     let who = Who::Validator(0);
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        who,
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
 
     // 1. Run the ledger node
     let _bg_ledger =
@@ -2759,14 +2632,6 @@ fn test_genesis_chain_id_change() -> Result<()> {
     test_genesis_result
         .exp_string("Genesis files were dry-run successfully")?;
 
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
-
     // Unset the chain ID - the transaction signatures have been validated at
     // init-network so we don't need it anymore
     unsafe {
@@ -2790,14 +2655,6 @@ fn test_genesis_chain_id_change() -> Result<()> {
 #[test]
 fn test_genesis_manipulation() -> Result<()> {
     let test = setup::single_node_net().unwrap();
-
-    set_ethereum_bridge_mode(
-        &test,
-        &test.net.chain_id,
-        Who::Validator(0),
-        ethereum_bridge::ledger::Mode::Off,
-        None,
-    );
 
     let chain_dir = test.get_chain_dir(Who::Validator(0));
     let genesis = chain::Finalized::read_toml_files(&chain_dir).unwrap();
@@ -2849,6 +2706,90 @@ fn test_genesis_manipulation() -> Result<()> {
             start_namada_ledger_node_wait_wasm(&test, Some(0), Some(40));
         assert!(result.is_err())
     }
+
+    Ok(())
+}
+
+#[test]
+fn comet_tx_indexer() -> Result<()> {
+    use namada_apps_lib::config::Config;
+    use namada_sdk::{tendermint, tendermint_rpc};
+
+    let test = Arc::new(setup::network(
+        |genesis, base_dir: &_| {
+            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+        },
+        None,
+    )?);
+
+    // Enable comet tx indexer
+    let update_config = |mut config: Config| {
+        config.ledger.cometbft.tx_index = TxIndexConfig {
+            indexer: namada_node::tendermint_config::TxIndexer::Kv,
+        };
+        config
+    };
+
+    let validator_base_dir = test.get_base_dir(Who::Validator(0));
+    let validator_config = update_config(Config::load(
+        &validator_base_dir,
+        &test.net.chain_id,
+        None,
+    ));
+    validator_config
+        .write(&validator_base_dir, &test.net.chain_id, true)
+        .unwrap();
+
+    // 1. Run the ledger node
+    let bg_ledger =
+        start_namada_ledger_node_wait_wasm(&test, Some(0), Some(40))?
+            .background();
+
+    let validator_rpc = get_actor_rpc(&test, Who::Validator(0));
+
+    // A token transfer tx args
+    let tx_args = apply_use_device(vec![
+        "transparent-transfer",
+        "--source",
+        BERTHA,
+        "--target",
+        ALBERT,
+        "--token",
+        NAM,
+        "--amount",
+        "1.01",
+        "--signing-keys",
+        BERTHA_KEY,
+        "--node",
+        &validator_rpc,
+    ]);
+    let mut client = run!(*test, Bin::Client, tx_args, Some(80))?;
+    let expected = "CometBFT tx hash: ";
+    let (_unread, matched) = client.exp_regex(&format!("{expected}.*\n"))?;
+    let comet_tx_hash = matched.trim().split_once(expected).unwrap().1;
+    client.assert_success();
+
+    // Wait to commit a block
+    let mut ledger = bg_ledger.foreground();
+    ledger.exp_regex(r"Committed block hash.*, height: [0-9]+")?;
+
+    // Check the tx result in Comet's indexer
+    let client = tendermint_rpc::HttpClient::builder(
+        tendermint_rpc::HttpClientUrl::from_str(&validator_rpc).unwrap(),
+    )
+    .compat_mode(tendermint_rpc::client::CompatMode::V0_38)
+    .timeout(std::time::Duration::from_secs(30))
+    .build()
+    .unwrap();
+    let result = test
+        .async_runtime()
+        .block_on(
+            client
+                .tx(tendermint::Hash::from_str(comet_tx_hash).unwrap(), false),
+        )
+        .unwrap();
+    assert!(result.tx_result.code.is_ok());
+    assert!(result.tx_result.gas_used > 0);
 
     Ok(())
 }

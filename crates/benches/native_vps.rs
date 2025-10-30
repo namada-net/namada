@@ -15,10 +15,6 @@ use masp_proofs::group::GroupEncoding;
 use masp_proofs::sapling::BatchValidator;
 use namada_apps_lib::address::{self, Address, InternalAddress};
 use namada_apps_lib::collections::HashMap;
-use namada_apps_lib::eth_bridge::read_native_erc20_address;
-use namada_apps_lib::eth_bridge::storage::eth_bridge_queries::is_bridge_comptime_enabled;
-use namada_apps_lib::eth_bridge::storage::whitelist;
-use namada_apps_lib::eth_bridge_pool::{GasFee, PendingTransfer};
 use namada_apps_lib::gas::{GasMeterKind, TxGasMeter, VpGasMeter};
 use namada_apps_lib::governance::pgf::storage::steward::StewardDetail;
 use namada_apps_lib::governance::storage::proposal::ProposalType;
@@ -48,8 +44,8 @@ use namada_apps_lib::token::masp::{
 use namada_apps_lib::token::{Amount, Transfer};
 use namada_apps_lib::tx::{BatchedTx, Code, Section, Tx};
 use namada_apps_lib::validation::{
-    EthBridgeNutVp, EthBridgePoolVp, EthBridgeVp, GovernanceVp, IbcVp,
-    IbcVpContext, MaspVp, MultitokenVp, ParametersVp, PgfVp, PosVp,
+    GovernanceVp, IbcVp, IbcVpContext, MaspVp, MultitokenVp, ParametersVp,
+    PgfVp, PosVp,
 };
 use namada_apps_lib::wallet::defaults;
 use namada_apps_lib::{
@@ -58,10 +54,9 @@ use namada_apps_lib::{
 };
 use namada_node::bench_utils::{
     ALBERT_PAYMENT_ADDRESS, ALBERT_SPENDING_KEY, BERTHA_PAYMENT_ADDRESS,
-    BenchShell, BenchShieldedCtx, TX_BRIDGE_POOL_WASM, TX_IBC_WASM,
-    TX_INIT_PROPOSAL_WASM, TX_RESIGN_STEWARD, TX_TRANSFER_WASM,
-    TX_UPDATE_STEWARD_COMMISSION, TX_VOTE_PROPOSAL_WASM,
-    generate_foreign_key_tx,
+    BenchShell, BenchShieldedCtx, TX_IBC_WASM, TX_INIT_PROPOSAL_WASM,
+    TX_RESIGN_STEWARD, TX_TRANSFER_WASM, TX_UPDATE_STEWARD_COMMISSION,
+    TX_VOTE_PROPOSAL_WASM, generate_foreign_key_tx,
 };
 use namada_vm::wasm::VpCache;
 use namada_vm::wasm::run::VpEvalWasm;
@@ -1302,254 +1297,6 @@ fn pgf(c: &mut Criterion) {
     group.finish();
 }
 
-fn eth_bridge_nut(c: &mut Criterion) {
-    if !is_bridge_comptime_enabled() {
-        return;
-    }
-
-    let bench_shell = BenchShell::default();
-    let mut shell = bench_shell.write();
-    let native_erc20_addres = read_native_erc20_address(&shell.state).unwrap();
-
-    let signed_tx = {
-        let data = PendingTransfer {
-            transfer: namada_apps_lib::eth_bridge_pool::TransferToEthereum {
-                kind:
-                    namada_apps_lib::eth_bridge_pool::TransferToEthereumKind::Erc20,
-                asset: native_erc20_addres,
-                recipient: namada_apps_lib::ethereum_events::EthAddress([1u8; 20]),
-                sender: defaults::albert_address(),
-                amount: Amount::from(1),
-            },
-            gas_fee: GasFee {
-                amount: Amount::from(100),
-                payer: defaults::albert_address(),
-                token: shell.state.in_mem().native_token.clone(),
-            },
-        };
-        shell.generate_tx(
-            TX_BRIDGE_POOL_WASM,
-            data,
-            None,
-            None,
-            vec![&defaults::albert_keypair()],
-        )
-    };
-
-    // Run the tx to validate
-    let verifiers_from_tx = shell.execute_tx(&signed_tx.to_ref());
-
-    let (verifiers, keys_changed) = shell
-        .state
-        .write_log()
-        .verifiers_and_changed_keys(&verifiers_from_tx);
-
-    let vp_address =
-        Address::Internal(InternalAddress::Nut(native_erc20_addres));
-    let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
-        &TxGasMeter::new(u64::MAX, 1),
-    ));
-    let ctx = Ctx::new(
-        &vp_address,
-        &shell.state,
-        &signed_tx.tx,
-        &signed_tx.cmt,
-        &TxIndex(0),
-        &gas_meter,
-        &keys_changed,
-        &verifiers,
-        shell.vp_wasm_cache.clone(),
-        GasMeterKind::MutGlobal,
-    );
-
-    c.bench_function("vp_eth_bridge_nut", |b| {
-        b.iter(|| {
-            assert!(
-                EthBridgeNutVp::validate_tx(
-                    &ctx,
-                    &signed_tx.to_ref(),
-                    ctx.keys_changed,
-                    ctx.verifiers,
-                )
-                .is_ok()
-            )
-        })
-    });
-}
-
-fn eth_bridge(c: &mut Criterion) {
-    if !is_bridge_comptime_enabled() {
-        return;
-    }
-
-    let bench_shell = BenchShell::default();
-    let mut shell = bench_shell.write();
-    let native_erc20_addres = read_native_erc20_address(&shell.state).unwrap();
-
-    let signed_tx = {
-        let data = PendingTransfer {
-            transfer: namada_apps_lib::eth_bridge_pool::TransferToEthereum {
-                kind:
-                    namada_apps_lib::eth_bridge_pool::TransferToEthereumKind::Erc20,
-                asset: native_erc20_addres,
-                recipient: namada_apps_lib::ethereum_events::EthAddress([1u8; 20]),
-                sender: defaults::albert_address(),
-                amount: Amount::from(1),
-            },
-            gas_fee: GasFee {
-                amount: Amount::from(100),
-                payer: defaults::albert_address(),
-                token: shell.state.in_mem().native_token.clone(),
-            },
-        };
-        shell.generate_tx(
-            TX_BRIDGE_POOL_WASM,
-            data,
-            None,
-            None,
-            vec![&defaults::albert_keypair()],
-        )
-    };
-
-    // Run the tx to validate
-    let verifiers_from_tx = shell.execute_tx(&signed_tx.to_ref());
-
-    let (verifiers, keys_changed) = shell
-        .state
-        .write_log()
-        .verifiers_and_changed_keys(&verifiers_from_tx);
-
-    let vp_address = Address::Internal(InternalAddress::EthBridge);
-    let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
-        &TxGasMeter::new(u64::MAX, 1),
-    ));
-    let ctx = Ctx::new(
-        &vp_address,
-        &shell.state,
-        &signed_tx.tx,
-        &signed_tx.cmt,
-        &TxIndex(0),
-        &gas_meter,
-        &keys_changed,
-        &verifiers,
-        shell.vp_wasm_cache.clone(),
-        GasMeterKind::MutGlobal,
-    );
-
-    c.bench_function("vp_eth_bridge", |b| {
-        b.iter(|| {
-            assert!(
-                EthBridgeVp::validate_tx(
-                    &ctx,
-                    &signed_tx.to_ref(),
-                    ctx.keys_changed,
-                    ctx.verifiers,
-                )
-                .is_ok()
-            )
-        })
-    });
-}
-
-fn eth_bridge_pool(c: &mut Criterion) {
-    if !is_bridge_comptime_enabled() {
-        return;
-    }
-
-    // NOTE: this vp is one of the most expensive but its cost comes from the
-    // numerous accesses to storage that we already account for, so no need to
-    // benchmark specific sections of it like for the ibc native vp
-    let bench_shell = BenchShell::default();
-    let mut shell = bench_shell.write();
-    let native_erc20_addres = read_native_erc20_address(&shell.state).unwrap();
-
-    // Whitelist NAM token
-    let cap_key = whitelist::Key {
-        asset: native_erc20_addres,
-        suffix: whitelist::KeyType::Cap,
-    }
-    .into();
-    shell.state.write(&cap_key, Amount::from(1_000)).unwrap();
-
-    let whitelisted_key = whitelist::Key {
-        asset: native_erc20_addres,
-        suffix: whitelist::KeyType::Whitelisted,
-    }
-    .into();
-    shell.state.write(&whitelisted_key, true).unwrap();
-
-    let denom_key = whitelist::Key {
-        asset: native_erc20_addres,
-        suffix: whitelist::KeyType::Denomination,
-    }
-    .into();
-    shell.state.write(&denom_key, 0).unwrap();
-
-    let signed_tx = {
-        let data = PendingTransfer {
-            transfer: namada_apps_lib::eth_bridge_pool::TransferToEthereum {
-                kind:
-                    namada_apps_lib::eth_bridge_pool::TransferToEthereumKind::Erc20,
-                asset: native_erc20_addres,
-                recipient: namada_apps_lib::ethereum_events::EthAddress([1u8; 20]),
-                sender: defaults::albert_address(),
-                amount: Amount::from(1),
-            },
-            gas_fee: GasFee {
-                amount: Amount::from(100),
-                payer: defaults::albert_address(),
-                token: shell.state.in_mem().native_token.clone(),
-            },
-        };
-        shell.generate_tx(
-            TX_BRIDGE_POOL_WASM,
-            data,
-            None,
-            None,
-            vec![&defaults::albert_keypair()],
-        )
-    };
-
-    // Run the tx to validate
-    let verifiers_from_tx = shell.execute_tx(&signed_tx.to_ref());
-
-    let (verifiers, keys_changed) = shell
-        .state
-        .write_log()
-        .verifiers_and_changed_keys(&verifiers_from_tx);
-
-    let vp_address = Address::Internal(InternalAddress::EthBridgePool);
-    let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
-        &TxGasMeter::new(u64::MAX, 1),
-    ));
-    let ctx = Ctx::new(
-        &vp_address,
-        &shell.state,
-        &signed_tx.tx,
-        &signed_tx.cmt,
-        &TxIndex(0),
-        &gas_meter,
-        &keys_changed,
-        &verifiers,
-        shell.vp_wasm_cache.clone(),
-        GasMeterKind::MutGlobal,
-    );
-
-    c.bench_function("vp_eth_bridge_pool", |b| {
-        b.iter(|| {
-            assert!(
-                EthBridgePoolVp::validate_tx(
-                    &ctx,
-                    &signed_tx.to_ref(),
-                    ctx.keys_changed,
-                    ctx.verifiers,
-                )
-                .is_ok()
-            )
-        })
-    });
-}
-
 fn parameters(c: &mut Criterion) {
     let mut group = c.benchmark_group("vp_parameters");
 
@@ -1849,9 +1596,6 @@ criterion_group!(
     masp_batch_output_proofs_validate,
     vp_multitoken,
     pgf,
-    eth_bridge_nut,
-    eth_bridge,
-    eth_bridge_pool,
     parameters,
     pos,
     ibc_vp_validate_action,

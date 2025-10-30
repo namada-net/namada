@@ -11,7 +11,7 @@ use namada_core::borsh::{BorshDeserialize, BorshSerialize};
 use namada_core::chain::{BlockHeader, BlockHeight, Epoch};
 use namada_core::hash::Hash;
 use namada_core::storage::{DbColFam, KEY_SEGMENT_SEPARATOR, Key, KeySeg};
-use namada_core::{decode, encode, ethereum_events};
+use namada_core::{decode, encode};
 use namada_gas::Gas;
 use namada_merkle_tree::{
     MerkleTreeStoresRead, MerkleTreeStoresWrite, StoreType,
@@ -34,8 +34,6 @@ const NEXT_EPOCH_MIN_START_TIME_KEY: &str = "next_epoch_min_start_time";
 const UPDATE_EPOCH_BLOCKS_DELAY_KEY: &str = "update_epoch_blocks_delay";
 const COMMIT_ONLY_DATA_KEY: &str = "commit_only_data_commitment";
 const CONVERSION_STATE_KEY: &str = "conversion_state";
-const ETHEREUM_HEIGHT_KEY: &str = "ethereum_height";
-const ETH_EVENTS_QUEUE_KEY: &str = "eth_events_queue";
 const RESULTS_KEY_PREFIX: &str = "results";
 
 const MERKLE_TREE_ROOT_KEY_SEGMENT: &str = "root";
@@ -153,16 +151,6 @@ impl DB for MockDB {
             None => return Ok(None),
         };
 
-        let ethereum_height = match self.read_value(ETHEREUM_HEIGHT_KEY)? {
-            Some(h) => h,
-            None => return Ok(None),
-        };
-
-        let eth_events_queue = match self.read_value(ETH_EVENTS_QUEUE_KEY)? {
-            Some(q) => q,
-            None => return Ok(None),
-        };
-
         // Block results
         let results_key = format!("{RESULTS_KEY_PREFIX}/{}", height.raw());
         let results = match self.read_value(results_key)? {
@@ -207,8 +195,6 @@ impl DB for MockDB {
             next_epoch_min_start_time,
             update_epoch_blocks_delay,
             address_gen,
-            ethereum_height,
-            eth_events_queue,
             commit_only_data,
         }))
     }
@@ -232,8 +218,6 @@ impl DB for MockDB {
             address_gen,
             results,
             conversion_state,
-            ethereum_height,
-            eth_events_queue,
             commit_only_data,
         }: BlockStateWrite<'_> = state;
 
@@ -249,8 +233,6 @@ impl DB for MockDB {
             UPDATE_EPOCH_BLOCKS_DELAY_KEY,
             &update_epoch_blocks_delay,
         );
-        self.write_value(ETHEREUM_HEIGHT_KEY, &ethereum_height);
-        self.write_value(ETH_EVENTS_QUEUE_KEY, &eth_events_queue);
         self.write_value(CONVERSION_STATE_KEY, &conversion_state);
         self.write_value(COMMIT_ONLY_DATA_KEY, &commit_only_data);
 
@@ -598,14 +580,6 @@ impl DB for MockDB {
         let store_key = format!("{key_prefix}/{MERKLE_TREE_STORE_KEY_SEGMENT}");
         self.0.borrow_mut().remove(&store_key);
         Ok(())
-    }
-
-    fn read_bridge_pool_signed_nonce(
-        &self,
-        _height: BlockHeight,
-        _last_height: BlockHeight,
-    ) -> Result<Option<ethereum_events::Uint>> {
-        Ok(None)
     }
 
     fn write_replay_protection_entry(

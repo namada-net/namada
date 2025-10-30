@@ -10,9 +10,7 @@ use std::str::FromStr;
 
 use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
 use data_encoding::HEXLOWER;
-use ethabi::Token;
 use k256::ecdsa::RecoveryId;
-use k256::elliptic_curve::sec1::ToEncodedPoint;
 use namada_macros::BorshDeserializer;
 #[cfg(feature = "migrations")]
 use namada_migrations::*;
@@ -27,8 +25,6 @@ use super::{
     SchemeType, SigScheme as SigSchemeTrait, SignableBytes, VerifySigError,
 };
 use crate::borsh::BorshSerializeExt;
-use crate::eth_abi::Encode;
-use crate::ethereum_events::EthAddress;
 use crate::key::StorageHasher;
 
 /// The provided constant is for a traditional
@@ -154,21 +150,6 @@ impl FromStr for PublicKey {
 impl From<k256::PublicKey> for PublicKey {
     fn from(pk: k256::PublicKey) -> Self {
         Self(pk)
-    }
-}
-
-impl From<&PublicKey> for EthAddress {
-    fn from(pk: &PublicKey) -> Self {
-        use tiny_keccak::Hasher;
-
-        let mut hasher = tiny_keccak::Keccak::v256();
-        let pk_bytes = &pk.0.to_encoded_point(false).to_bytes()[1..];
-        hasher.update(pk_bytes);
-        let mut output = [0_u8; 32];
-        hasher.finalize(&mut output);
-        let mut addr = [0; 20];
-        addr.copy_from_slice(&output[12..]);
-        EthAddress(addr)
     }
 }
 
@@ -470,16 +451,6 @@ impl Signature {
     }
 }
 
-impl Encode<1> for Signature {
-    fn tokenize(&self) -> [Token; 1] {
-        let (r, s, v) = self.clone().into_eth_rsv();
-        let r = Token::FixedBytes(r.to_vec());
-        let s = Token::FixedBytes(s.to_vec());
-        let v = Token::Uint(v.into());
-        [Token::Tuple(vec![r, s, v])]
-    }
-}
-
 #[allow(clippy::derived_hash_with_manual_eq)]
 impl Hash for Signature {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -664,26 +635,6 @@ mod test {
     /// test vector from https://bitcoin.stackexchange.com/a/89848
     const SECRET_KEY_HEX: &str =
         "c2c72dfbff11dfb4e9d5b0a20c620c58b15bb7552753601f043db91331b0db15";
-
-    /// Test that we can recover an Ethereum address from
-    /// a public secp key.
-    #[test]
-    fn test_eth_address_from_secp() {
-        let expected_pk_hex = "a225bf565ff4ea039bccba3e26456e910cd74e4616d67ee0a166e26da6e5e55a08d0fa1659b4b547ba7139ca531f62907b9c2e72b80712f1c81ece43c33f4b8b";
-        let expected_eth_addr_hex = "6ea27154616a29708dce7650b475dd6b82eba6a3";
-
-        let sk_bytes = HEXLOWER.decode(SECRET_KEY_HEX.as_bytes()).unwrap();
-        let sk = SecretKey::try_from_slice(&sk_bytes[..]).unwrap();
-        let pk: PublicKey = sk.ref_to();
-        // We're removing the first byte with tag
-        let pk_hex =
-            HEXLOWER.encode(&pk.0.to_encoded_point(false).to_bytes()[1..]);
-        assert_eq!(expected_pk_hex, pk_hex);
-
-        let eth_addr: EthAddress = (&pk).into();
-        let eth_addr_hex = HEXLOWER.encode(&eth_addr.0[..]);
-        assert_eq!(expected_eth_addr_hex, eth_addr_hex);
-    }
 
     /// Test serializing and then de-serializing a signature
     /// with Serde is idempotent.

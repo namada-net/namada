@@ -31,7 +31,6 @@ path = "make-db-migration.rs"
 [features]
 default = ["migrations"]
 migrations = []
-namada-eth-bridge = ["namada_sdk/namada-eth-bridge"]
 
 [dev-dependencies]
 masp_primitives = { workspace = true, features = ["transparent-inputs"] }

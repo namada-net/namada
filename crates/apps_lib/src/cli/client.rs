@@ -440,27 +440,6 @@ impl CliApi {
                         let namada = ctx.to_sdk(client, io);
                         tx::gen_ibc_shielding_transfer(&namada, args).await?;
                     }
-                    #[cfg(feature = "namada-eth-bridge")]
-                    Sub::AddToEthBridgePool(args) => {
-                        let args = args.0;
-                        let chain_ctx = ctx.borrow_mut_chain_or_exit();
-                        let ledger_address =
-                            chain_ctx.get(&args.tx.ledger_address);
-                        let client = client.unwrap_or_else(|| {
-                            C::from_tendermint_address(&ledger_address)
-                        });
-                        client.wait_until_node_is_synced(&io).await?;
-                        let args = args.to_sdk(&mut ctx)?;
-                        let namada = ctx.to_sdk(client, io);
-                        tx::submit_bridge_pool_tx(&namada, args).await?;
-                    }
-                    #[cfg(not(feature = "namada-eth-bridge"))]
-                    Sub::AddToEthBridgePool(_) => {
-                        display_line!(
-                            &io,
-                            "The Namada Ethereum bridge is disabled"
-                        );
-                    }
                     Sub::TxUnjailValidator(TxUnjailValidator(args)) => {
                         let chain_ctx = ctx.borrow_mut_chain_or_exit();
                         let ledger_address =

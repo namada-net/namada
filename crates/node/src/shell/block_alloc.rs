@@ -13,24 +13,14 @@
 //!
 //! # How space is allocated
 //!
-//! In the current implementation, we allocate space for transactions
-//! in the following order of preference:
-//!
-//! - First, we allot space for protocol txs. We allow them to take up at most
-//!   1/2 of the total block space unless there is extra room due to a lack of
-//!   user txs.
-//! - Next, we allot space for user submitted txs until the block is filled.
-//! - If we cannot fill the block with normal txs, we try to fill it with
-//!   protocol txs that were not allocated in the initial phase.
-//!
+//! In the current implementation, we allot space for user submitted txs until
+//! the block is filled.
 //!
 //! # How gas is allocated
 //!
 //! Gas is only relevant to non-protocol txs. Every such tx defines its
 //! gas limit. We take this entire gas limit as the amount of gas requested by
 //! the tx.
-
-pub mod states;
 
 // TODO(namada#3250): what if a tx has a size greater than the threshold
 // for its bin? how do we handle this? if we keep it in the mempool
@@ -44,7 +34,6 @@ use std::marker::PhantomData;
 use namada_sdk::parameters;
 use namada_sdk::state::{self, WlState};
 
-use crate::shell::block_alloc::states::WithNormalTxs;
 #[allow(unused_imports)]
 use crate::tendermint_proto::abci::RequestPrepareProposal;
 
@@ -106,27 +95,16 @@ impl Resource for BlockGas {
 
 /// Allotted resources for a batch of transactions in some proposed block.
 ///
-/// We keep track of the current space utilized by:
-///
-///   - normal transactions.
-///   - Protocol transactions.
+/// We keep track of the current space utilized by transactions.
 ///
 /// Gas usage of normal txs is also tracked.
 #[derive(Debug, Default)]
-pub struct BlockAllocator<State> {
-    /// The current state of the [`BlockAllocator`] state machine.
-    _state: PhantomData<*const State>,
-    /// The total space Tendermint has allotted to the
-    /// application for the current block height.
-    block: TxBin<BlockSpace>,
-    /// The current space utilized by protocol transactions.
-    protocol_txs: TxBin<BlockSpace>,
+pub struct BlockAllocator {
     /// The current space and gas utilized by normal user transactions.
     normal_txs: NormalTxsBins,
 }
 
-impl<D, H> From<&WlState<D, H>>
-    for BlockAllocator<states::BuildingProtocolTxBatch<WithNormalTxs>>
+impl<D, H> From<&WlState<D, H>> for BlockAllocator
 where
     D: 'static + state::DB + for<'iter> state::DBIter<'iter>,
     H: 'static + state::StorageHasher,
@@ -142,29 +120,7 @@ where
     }
 }
 
-impl BlockAllocator<states::BuildingProtocolTxBatch<WithNormalTxs>> {
-    /// Construct a new [`BlockAllocator`], with an upper bound
-    /// on the max size of all txs in a block defined by CometBFT and an upper
-    /// bound on the max gas in a block.
-    #[inline]
-    pub fn init(
-        cometbft_max_block_space_in_bytes: u64,
-        max_block_gas: u64,
-    ) -> Self {
-        let max = cometbft_max_block_space_in_bytes;
-        Self {
-            _state: PhantomData,
-            block: TxBin::init(max),
-            protocol_txs: {
-                let allotted_space_in_bytes = threshold::ONE_HALF.over(max);
-                TxBin::init(allotted_space_in_bytes)
-            },
-            normal_txs: NormalTxsBins::new(max_block_gas),
-        }
-    }
-}
-
-impl BlockAllocator<states::BuildingNormalTxBatch> {
+impl BlockAllocator {
     /// Construct a new [`BlockAllocator`], with an upper bound
     /// on the max size of all txs in a block defined by Tendermint and an upper
     /// bound on the max gas in a block.
@@ -173,37 +129,21 @@ impl BlockAllocator<states::BuildingNormalTxBatch> {
         tendermint_max_block_space_in_bytes: u64,
         max_block_gas: u64,
     ) -> Self {
-        let max = tendermint_max_block_space_in_bytes;
         Self {
-            _state: PhantomData,
-            block: TxBin::init(max),
-            protocol_txs: TxBin::default(),
             normal_txs: NormalTxsBins {
                 space: TxBin::init(tendermint_max_block_space_in_bytes),
                 gas: TxBin::init(max_block_gas),
             },
         }
     }
-}
 
-impl<State> BlockAllocator<State> {
-    /// Return the amount of space left to initialize in all
-    /// [`TxBin`] instances.
-    ///
-    /// This is calculated based on the difference between the Tendermint
-    /// block space for a given round and the sum of the allotted space
-    /// to each [`TxBin`] instance in a [`BlockAllocator`].
     #[inline]
-    fn unoccupied_space_in_bytes(&self) -> u64 {
-        let total_bin_space = self
-            .protocol_txs
-            .occupied
-            .checked_add(self.normal_txs.space.occupied)
-            .expect("Shouldn't overflow");
-        self.block
-            .allotted
-            .checked_sub(total_bin_space)
-            .expect("Shouldn't underflow")
+    pub fn try_alloc(
+        &mut self,
+        resource_required: BlockResources<'_>,
+    ) -> Result<(), AllocFailure> {
+        self.normal_txs.space.try_dump(resource_required.tx)?;
+        self.normal_txs.gas.try_dump(resource_required.gas)
     }
 }
 
@@ -353,111 +293,15 @@ mod tests {
     use assert_matches::assert_matches;
     use proptest::prelude::*;
 
-    use super::states::{
-        BuildingNormalTxBatch, BuildingProtocolTxBatch, NextState, TryAlloc,
-    };
     use super::*;
-    use crate::shims::abcipp_shim_types::shim::TxBytes;
-
-    /// Convenience alias for a block space allocator at a state with protocol
-    /// txs.
-    type BsaInitialProtocolTxs =
-        BlockAllocator<BuildingProtocolTxBatch<WithNormalTxs>>;
-
-    /// Convenience alias for a block allocator at a state with protocol
-    /// txs.
-    type BsaNormalTxs = BlockAllocator<BuildingNormalTxBatch>;
+    use crate::shell::abci::TxBytes;
 
     /// Proptest generated txs.
     #[derive(Debug)]
     struct PropTx {
         tendermint_max_block_space_in_bytes: u64,
         max_block_gas: u64,
-        protocol_txs: Vec<TxBytes>,
         normal_txs: Vec<TxBytes>,
-    }
-
-    /// Check that at most 1/2 of the block space is
-    /// reserved for each kind of tx type, in the
-    /// allocator's common path. Further check that
-    /// if not enough normal txs are present, the rest
-    /// is filled with protocol txs
-    #[test]
-    fn test_filling_up_with_protocol() {
-        const BLOCK_SIZE: u64 = 60;
-        const BLOCK_GAS: u64 = 1_000;
-
-        // reserve block space for protocol txs
-        let mut alloc = BsaInitialProtocolTxs::init(BLOCK_SIZE, BLOCK_GAS);
-
-        // allocate ~1/2 of the block space to wrapper txs
-        assert!(alloc.try_alloc(&[0; 29]).is_ok());
-
-        // reserve block space for normal txs
-        let mut alloc = alloc.next_state();
-
-        // the space we allotted to protocol txs was shrunk to
-        // the total space we actually used up
-        assert_eq!(alloc.protocol_txs.allotted, 29);
-
-        // check that the allotted space for normal txs is correct
-        assert_eq!(alloc.normal_txs.space.allotted, BLOCK_SIZE - 29);
-
-        // add about ~1/3 worth of normal txs
-        assert!(alloc.try_alloc(BlockResources::new(&[0; 17], 0)).is_ok());
-
-        // fill the rest of the block with protocol txs
-        let mut alloc = alloc.next_state();
-
-        // check that space was shrunk
-        assert_eq!(alloc.protocol_txs.allotted, BLOCK_SIZE - (29 + 17));
-
-        // add protocol txs to the block space allocator
-        assert!(alloc.try_alloc(&[0; 14]).is_ok());
-
-        // the block should be full at this point
-        assert_matches!(
-            alloc.try_alloc(&[0; 1]),
-            Err(AllocFailure::Rejected { .. })
-        );
-    }
-
-    /// Test that if less than half of the block can be initially filled
-    /// with protocol txs, the rest if filled with normal txs.
-    #[test]
-    fn test_less_than_half_protocol() {
-        const BLOCK_SIZE: u64 = 60;
-        const BLOCK_GAS: u64 = 1_000;
-
-        // reserve block space for protocol txs
-        let mut alloc = BsaInitialProtocolTxs::init(BLOCK_SIZE, BLOCK_GAS);
-
-        // allocate ~1/3 of the block space to protocol txs
-        assert!(alloc.try_alloc(&[0; 18]).is_ok());
-
-        // reserve block space for normal txs
-        let mut alloc = alloc.next_state();
-
-        // the space we allotted to protocol txs was shrunk to
-        // the total space we actually used up
-        assert_eq!(alloc.protocol_txs.allotted, 18);
-
-        // check that the allotted space for normal txs is correct
-        assert_eq!(alloc.normal_txs.space.allotted, BLOCK_SIZE - 18);
-
-        // add about ~2/3 worth of normal txs
-        assert!(alloc.try_alloc(BlockResources::new(&[0; 42], 0)).is_ok());
-        // the block should be full at this point
-        assert_matches!(
-            alloc.try_alloc(BlockResources::new(&[0; 1], 0)),
-            Err(AllocFailure::Rejected { .. })
-        );
-
-        let mut alloc = alloc.next_state();
-        assert_matches!(
-            alloc.try_alloc(&[0; 1]),
-            Err(AllocFailure::OverflowsBin { .. })
-        );
     }
 
     proptest! {
@@ -466,13 +310,6 @@ mod tests {
         #[test]
         fn test_reject_tx_on_bin_cap_reached(max in prop::num::u64::ANY) {
             proptest_reject_tx_on_bin_cap_reached(max)
-        }
-
-        /// Check if the initial bin capacity of the [`BlockAllocator`]
-        /// is correct.
-        #[test]
-        fn test_initial_bin_capacity(max in prop::num::u64::ANY) {
-            proptest_initial_bin_capacity(max)
         }
 
         /// Test that dumping txs whose total combined size
@@ -488,7 +325,7 @@ mod tests {
         tendermint_max_block_space_in_bytes: u64,
     ) {
         let mut bins =
-            BsaNormalTxs::init(tendermint_max_block_space_in_bytes, 1_000);
+            BlockAllocator::init(tendermint_max_block_space_in_bytes, 1_000);
 
         // fill the entire bin of protocol txs
         bins.normal_txs.space.occupied = bins.normal_txs.space.allotted;
@@ -511,26 +348,11 @@ mod tests {
         )
     }
 
-    /// Implementation of [`test_initial_bin_capacity`].
-    fn proptest_initial_bin_capacity(tendermint_max_block_space_in_bytes: u64) {
-        let bins = BsaInitialProtocolTxs::init(
-            tendermint_max_block_space_in_bytes,
-            1_000,
-        );
-        let expected = tendermint_max_block_space_in_bytes;
-        assert_eq!(
-            bins.protocol_txs.allotted,
-            threshold::ONE_HALF.over(tendermint_max_block_space_in_bytes)
-        );
-        assert_eq!(expected, bins.unoccupied_space_in_bytes());
-    }
-
     /// Implementation of [`test_tx_dump_doesnt_fill_up_bin`].
     fn proptest_tx_dump_doesnt_fill_up_bin(args: PropTx) {
         let PropTx {
             tendermint_max_block_space_in_bytes,
             max_block_gas,
-            protocol_txs,
             normal_txs,
         } = args;
 
@@ -540,27 +362,10 @@ mod tests {
         // iterate over the produced txs to make sure we can keep
         // dumping new txs without filling up the bins
 
-        let mut bins = BsaInitialProtocolTxs::init(
+        let mut bins = BlockAllocator::init(
             tendermint_max_block_space_in_bytes,
             max_block_gas,
         );
-        let mut protocol_tx_iter = protocol_txs.iter();
-        let mut allocated_txs = vec![];
-        let mut new_size = 0;
-        for tx in protocol_tx_iter.by_ref() {
-            let bin = bins.protocol_txs;
-            if new_size + tx.len() as u64 >= bin.allotted {
-                break;
-            } else {
-                new_size += tx.len() as u64;
-                allocated_txs.push(tx);
-            }
-        }
-        for tx in allocated_txs {
-            assert!(bins.try_alloc(tx).is_ok());
-        }
-
-        let mut bins = bins.next_state();
         let mut new_size = bins.normal_txs.space.allotted;
         let mut decrypted_txs = vec![];
         for tx in normal_txs {
@@ -575,23 +380,6 @@ mod tests {
         for tx in decrypted_txs {
             assert!(bins.try_alloc(BlockResources::new(&tx, 0)).is_ok());
         }
-
-        let mut bins = bins.next_state();
-        let mut allocated_txs = vec![];
-        let mut new_size = bins.protocol_txs.allotted;
-        for tx in protocol_tx_iter.by_ref() {
-            let bin = bins.protocol_txs;
-            if new_size + tx.len() as u64 >= bin.allotted {
-                break;
-            } else {
-                new_size += tx.len() as u64;
-                allocated_txs.push(tx);
-            }
-        }
-
-        for tx in allocated_txs {
-            assert!(bins.try_alloc(tx).is_ok());
-        }
     }
 
     prop_compose! {
@@ -599,37 +387,32 @@ mod tests {
         fn arb_transactions()
             // create base strategies
             (
-                (tendermint_max_block_space_in_bytes, max_block_gas, protocol_tx_max_bin_size,
+                (tendermint_max_block_space_in_bytes, max_block_gas,
                  decrypted_tx_max_bin_size) in arb_max_bin_sizes(),
             )
             // compose strategies
             (
                 tendermint_max_block_space_in_bytes in Just(tendermint_max_block_space_in_bytes),
-            max_block_gas in Just(max_block_gas),
-                protocol_txs in arb_tx_list(protocol_tx_max_bin_size),
+                max_block_gas in Just(max_block_gas),
                 normal_txs in arb_tx_list(decrypted_tx_max_bin_size),
             )
             -> PropTx {
                 PropTx {
                     tendermint_max_block_space_in_bytes,
-                max_block_gas,
-                    protocol_txs: protocol_txs.into_iter().map(prost::bytes::Bytes::from).collect(),
+                    max_block_gas,
                     normal_txs: normal_txs.into_iter().map(prost::bytes::Bytes::from).collect(),
                 }
             }
     }
 
     /// Return random bin sizes for a [`BlockAllocator`].
-    fn arb_max_bin_sizes() -> impl Strategy<Value = (u64, u64, usize, usize)> {
+    fn arb_max_bin_sizes() -> impl Strategy<Value = (u64, u64, usize)> {
         const MAX_BLOCK_SIZE_BYTES: u64 = 1000;
         (1..=MAX_BLOCK_SIZE_BYTES).prop_map(
             |tendermint_max_block_space_in_bytes| {
                 (
                     tendermint_max_block_space_in_bytes,
                     tendermint_max_block_space_in_bytes,
-                    threshold::ONE_HALF
-                        .over(tendermint_max_block_space_in_bytes)
-                        as usize,
                     threshold::ONE_HALF
                         .over(tendermint_max_block_space_in_bytes)
                         as usize,

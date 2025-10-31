@@ -27,6 +27,7 @@ use std::iter::Peekable;
 
 pub use in_memory::{
     BlockStorage, InMemory, LastBlock, ProcessProposalCachedResult,
+    virtual_storage as in_mem_virtual_storage,
 };
 use namada_core::address::Address;
 use namada_core::arith::checked;

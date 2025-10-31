@@ -335,3 +335,173 @@ where
             .unwrap_or_default()
     }
 }
+
+pub mod virtual_storage {
+    //! Access to in-memory state through [`TEMP_STORAGE`].
+
+    use namada_core::address::TEMP_STORAGE;
+    use namada_core::arith::checked;
+    use namada_core::hints;
+    use namada_core::storage::{DbKeySeg, KeySeg};
+    use namada_gas::{Gas, MEMORY_ACCESS_GAS_PER_BYTE};
+    use namada_storage::conversion_state::AssetType;
+
+    use super::InMemory;
+    use crate::{Error, Result, ResultExt};
+
+    const IN_MEMORY_SEGMENT: &str = "in-memory";
+    const CONVERSION_STATE_SEGMENT: &str = "conversion-state";
+    const HAS_CONVERSION_SEGMENT: &str = "has-conversion";
+
+    /// Check if the given storage key corresponds to an
+    /// in-memory virtual storage key.
+    pub fn is_in_mem_key(key: &namada_storage::Key) -> bool {
+        matches!(
+            &key.segments[..],
+            [
+                DbKeySeg::AddressSeg(TEMP_STORAGE),
+                DbKeySeg::StringSeg(seg),
+                ..
+            ]
+            if seg == IN_MEMORY_SEGMENT
+        )
+    }
+
+    /// Read a value from the in-memory virtual storage.
+    pub fn read_from_in_mem<H>(
+        key: &namada_storage::Key,
+        in_mem: &InMemory<H>,
+    ) -> Result<(Vec<u8>, Gas)>
+    where
+        H: namada_storage::StorageHasher,
+    {
+        let invalid_key = || {
+            Error::new_alloc(format!(
+                "Invalid in-memory virtual storage key {key}"
+            ))
+        };
+
+        if hints::unlikely(!is_in_mem_key(key)) {
+            return Err(invalid_key());
+        }
+
+        // NOTE: it's only safe to skip the first two segments because
+        // we went through the `is_in_mem_key` predicate
+        match &key.segments[2..] {
+            // handle a request to the `has_conversion_key` key space
+            [
+                DbKeySeg::StringSeg(conversion_seg),
+                DbKeySeg::StringSeg(has_conv_seg),
+                DbKeySeg::StringSeg(asset_type_hash),
+            ] if conversion_seg == CONVERSION_STATE_SEGMENT
+                && has_conv_seg == HAS_CONVERSION_SEGMENT =>
+            {
+                let asset_type: AssetType = asset_type_hash.parse().wrap_err(
+                    "Invalid AssetType hash in has_conversion virtual storage \
+                     request",
+                )?;
+
+                let value = vec![
+                    in_mem
+                        .conversion_state
+                        .assets
+                        .contains_key(&asset_type)
+                        .into(),
+                ];
+
+                let gas = checked!(key.len() + value.len())? as u64;
+
+                Ok((value, checked!(gas * MEMORY_ACCESS_GAS_PER_BYTE)?.into()))
+            }
+            // invalid request
+            _ => Err(invalid_key()),
+        }
+    }
+
+    /// Key used to query the conversion state of a given [`AssetType`].
+    pub fn has_conversion_key(asset_type: &AssetType) -> namada_storage::Key {
+        namada_storage::Key::from(TEMP_STORAGE.to_db_key())
+            .with_segment(IN_MEMORY_SEGMENT.to_string())
+            .with_segment(CONVERSION_STATE_SEGMENT.to_string())
+            .with_segment(HAS_CONVERSION_SEGMENT.to_string())
+            .with_segment(asset_type.to_string())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::collections::BTreeMap;
+
+        use namada_core::address;
+        use namada_core::borsh::BorshSerializeExt;
+        use namada_core::chain::ChainId;
+        use namada_core::hash::Sha256Hasher;
+        use namada_core::masp_primitives::merkle_tree::FrozenCommitmentTree;
+        use namada_core::masp_primitives::transaction::components::amount::I128Sum;
+        use namada_core::token::{MaspDigitPos, NATIVE_MAX_DECIMAL_PLACES};
+        use namada_storage::conversion_state::{
+            ConversionLeaf, ConversionState,
+        };
+
+        use super::*;
+
+        #[test]
+        fn test_is_in_mem_key() {
+            let asset = AssetType::new(b"bing bong").unwrap();
+            assert!(is_in_mem_key(&has_conversion_key(&asset)));
+            assert!(is_in_mem_key(&namada_storage::Key {
+                segments: vec![
+                    DbKeySeg::AddressSeg(TEMP_STORAGE),
+                    DbKeySeg::StringSeg(IN_MEMORY_SEGMENT.to_string()),
+                    DbKeySeg::StringSeg("whatever".to_string()),
+                ],
+            }));
+            assert!(!is_in_mem_key(&namada_storage::Key {
+                segments: vec![
+                    DbKeySeg::AddressSeg(namada_core::address::IBC),
+                    DbKeySeg::StringSeg(IN_MEMORY_SEGMENT.to_string()),
+                    DbKeySeg::StringSeg("whatever".to_string()),
+                ],
+            }));
+        }
+
+        #[test]
+        fn test_in_mem_virtual_storage_requests() {
+            let asset1 = AssetType::new(b"1").unwrap();
+            let asset2 = AssetType::new(b"2").unwrap();
+
+            let mut in_mem = InMemory::<Sha256Hasher>::new(
+                ChainId("namada".into()),
+                address::testing::nam(),
+                None,
+            );
+            in_mem.conversion_state = {
+                let tree = FrozenCommitmentTree::new(&[]);
+                let leaf = ConversionLeaf {
+                    token: address::testing::nam(),
+                    denom: NATIVE_MAX_DECIMAL_PLACES.into(),
+                    digit_pos: MaspDigitPos::Zero,
+                    epoch: Default::default(),
+                    conversion: I128Sum::zero().into(),
+                    leaf_pos: 0,
+                };
+                let assets = BTreeMap::from([(asset1, leaf)]);
+                ConversionState {
+                    #[allow(deprecated)]
+                    current_precision: None,
+                    tree,
+                    assets,
+                }
+            };
+
+            let (value, _gas) =
+                read_from_in_mem(&has_conversion_key(&asset1), &in_mem)
+                    .unwrap();
+            assert_eq!(value, true.serialize_to_vec());
+
+            let (value, _gas) =
+                read_from_in_mem(&has_conversion_key(&asset2), &in_mem)
+                    .unwrap();
+            assert_eq!(value, false.serialize_to_vec());
+        }
+    }
+}

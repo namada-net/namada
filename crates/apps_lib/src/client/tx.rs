@@ -35,7 +35,6 @@ use namada_sdk::{ExtendedViewingKey, Namada, error, signing, tx};
 use rand::rngs::OsRng;
 use tokio::sync::RwLock;
 
-use super::masp::sync_shielded_context;
 use super::rpc;
 use crate::cli::{args, safe_exit};
 use crate::client::tx::signing::{SigningTxData, default_sign};
@@ -1225,18 +1224,6 @@ pub async fn submit_shielded_transfer(
     )
     .await?;
 
-    // Sync the shielded context before building the transaction
-    sync_shielded_context(
-        namada,
-        args.tx.ledger_address.clone(),
-        args.shielded_sync.clone().ok_or_else(|| {
-            error::Error::Other(
-                "Missing arguments for shielded sync".to_string(),
-            )
-        })?,
-    )
-    .await?;
-
     let (mut tx, signing_data) =
         args.clone().build(namada, &mut bparams).await?;
     let disposable_fee_payer = match signing_data {
@@ -1392,18 +1379,6 @@ pub async fn submit_unshielding_transfer(
     )
     .await?;
 
-    // Sync the shielded context before building the transaction
-    sync_shielded_context(
-        namada,
-        args.tx.ledger_address.clone(),
-        args.shielded_sync.clone().ok_or_else(|| {
-            error::Error::Other(
-                "Missing arguments for shielded sync".to_string(),
-            )
-        })?,
-    )
-    .await?;
-
     let (mut tx, signing_data) =
         args.clone().build(namada, &mut bparams).await?;
     let disposable_fee_payer = match signing_data {
@@ -1486,21 +1461,6 @@ where
         |e| (Box::new(StoredBuildParams::default()) as _, Some(e)),
         |bparams| (bparams, None),
     );
-
-    // If the ibc sources are MASP, sync the shielded context before building
-    // the transaction
-    if args.source.spending_key().is_some() || args.gas_spending_key.is_some() {
-        sync_shielded_context(
-            namada,
-            args.tx.ledger_address.clone(),
-            args.shielded_sync.clone().ok_or_else(|| {
-                error::Error::Other(
-                    "Missing arguments for shielded sync".to_string(),
-                )
-            })?,
-        )
-        .await?;
-    }
 
     // If transaction building fails for any reason, then abort the process
     // blaming MASP build parameter generation if that had also failed.

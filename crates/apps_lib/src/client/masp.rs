@@ -3,7 +3,6 @@ use std::time::Duration;
 use color_eyre::owo_colors::OwoColorize;
 #[cfg(feature = "testing")]
 use namada_core::masp::AssetData;
-use namada_sdk::Namada;
 use namada_sdk::args::ShieldedSync;
 use namada_sdk::control_flow::install_shutdown_signal;
 use namada_sdk::error::Error;
@@ -14,10 +13,6 @@ use namada_sdk::masp::{
     IndexerMaspClient, LedgerMaspClient, LinearBackoffSleepMaspClient,
     MaspLocalTaskEnv, ShieldedContext, ShieldedSyncConfig, ShieldedUtils,
 };
-use namada_wallet::DatedViewingKey;
-use tendermint_rpc::HttpClient;
-
-use crate::cli::api::{CliClient, CliIo};
 
 const MASP_INDEXER_CLIENT_USER_AGENT: &str = {
     const TOKENS: &[&str] =
@@ -31,11 +26,11 @@ pub async fn syncing<
     C: Client + Send + Sync + 'static,
     IO: Io + Send + Sync,
 >(
-    shielded: &mut ShieldedContext<U>,
+    mut shielded: ShieldedContext<U>,
     client: C,
     args: ShieldedSync,
     io: &IO,
-) -> Result<(), Error> {
+) -> Result<ShieldedContext<U>, Error> {
     let (fetched_bar, scanned_bar, applied_bar) = {
         #[cfg(any(test, feature = "testing"))]
         {
@@ -102,7 +97,7 @@ pub async fn syncing<
 
             let env = MaspLocalTaskEnv::new(500)
                 .map_err(|e| Error::Other(e.to_string()))?;
-            let res = shielded
+            let ctx = shielded
                 .sync(
                     env,
                     config,
@@ -111,11 +106,12 @@ pub async fn syncing<
                     &vks,
                 )
                 .await
+                .map(|_| shielded)
                 .map_err(|e| Error::Other(e.to_string()));
 
             display!(io, "\nSyncing finished\n");
 
-            res
+            ctx
         }};
     }
 
@@ -167,7 +163,7 @@ pub async fn syncing<
             .map_err(|e| Error::Other(e.to_string()))?;
     }
 
-    if let Some(endpoint) = args.with_indexer {
+    let shielded = if let Some(endpoint) = args.with_indexer {
         display_line!(
             io,
             "{}\n",
@@ -207,31 +203,7 @@ pub async fn syncing<
             LedgerMaspClient::new(client, args.max_concurrent_fetches,),
             Duration::from_millis(5)
         ))?
-    }
+    };
 
-    Ok(())
-}
-
-pub async fn sync_shielded_context(
-    ctx: &impl Namada,
-    ledger_address: tendermint_rpc::Url,
-    mut sync_args: namada_sdk::args::ShieldedSync,
-) -> Result<(), Error> {
-    let sync_client = HttpClient::from_tendermint_address(&ledger_address);
-
-    // Extend the keys we are interested into
-    let wallet = ctx.wallet().await;
-    sync_args
-        .viewing_keys
-        .extend(wallet.get_viewing_keys().into_iter().map(|(k, v)| {
-            DatedViewingKey::new(v, wallet.find_birthday(k).copied())
-        }));
-
-    crate::client::masp::syncing(
-        &mut *ctx.shielded_mut().await,
-        sync_client,
-        sync_args,
-        &CliIo,
-    )
-    .await
+    Ok(shielded)
 }

@@ -36,6 +36,7 @@ use namada_core::chain::{
 pub use namada_core::collections::HashSet;
 use namada_core::hash::{HASH_LENGTH, Hash};
 use namada_core::internal::HostEnvResult;
+use namada_core::masp_primitives::asset_type::AssetType;
 use namada_core::storage::TxIndex;
 pub use namada_core::validity_predicate::{VpError, VpErrorExtResult};
 pub use namada_core::*;
@@ -47,7 +48,7 @@ pub use namada_macros::validity_predicate;
 pub use namada_storage::{
     Error, OptionExt, ResultExt, StorageRead, iter_prefix, iter_prefix_bytes,
 };
-pub use namada_tx::{BatchedTx, Section, Tx};
+pub use namada_tx::{BatchedTx, IndexedTx, Section, Tx};
 use namada_vm_env::vp::*;
 use namada_vm_env::{read_from_buffer, read_key_val_bytes_from_buffer};
 pub use namada_vp_env::{VpEnv, collection_validation};
@@ -341,8 +342,14 @@ impl<'view> VpEnv<'view> for Ctx {
         get_pred_epochs()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex, Error> {
-        get_tx_index()
+    fn get_tx_index(&self) -> Result<IndexedTx, Error> {
+        get_tx_index().map(|(block_height, block_index, batch_index)| {
+            IndexedTx {
+                block_height,
+                block_index,
+                batch_index,
+            }
+        })
     }
 
     fn get_native_token(&self) -> Result<Address, Error> {
@@ -447,6 +454,20 @@ impl StorageRead for CtxPreStorageRead<'_> {
         Ok(HostEnvResult::is_success(found))
     }
 
+    fn has_conversion(
+        &self,
+        asset_type: &AssetType,
+    ) -> namada_storage::Result<bool> {
+        let asset_type = asset_type.serialize_to_vec();
+        let found = unsafe {
+            namada_vp_has_conversion(
+                asset_type.as_ptr() as _,
+                asset_type.len() as _,
+            )
+        };
+        Ok(HostEnvResult::is_success(found))
+    }
+
     fn iter_prefix<'iter>(
         &'iter self,
         prefix: &storage::Key,
@@ -490,7 +511,9 @@ impl StorageRead for CtxPreStorageRead<'_> {
         get_pred_epochs()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex, Error> {
+    fn get_tx_index(
+        &self,
+    ) -> Result<(BlockHeight, TxIndex, Option<u32>), Error> {
         get_tx_index()
     }
 
@@ -516,6 +539,20 @@ impl StorageRead for CtxPostStorageRead<'_> {
         let key = key.to_string();
         let found = unsafe {
             namada_vp_has_key_post(key.as_ptr() as _, key.len() as _)
+        };
+        Ok(HostEnvResult::is_success(found))
+    }
+
+    fn has_conversion(
+        &self,
+        asset_type: &AssetType,
+    ) -> namada_storage::Result<bool> {
+        let asset_type = asset_type.serialize_to_vec();
+        let found = unsafe {
+            namada_vp_has_conversion(
+                asset_type.as_ptr() as _,
+                asset_type.len() as _,
+            )
         };
         Ok(HostEnvResult::is_success(found))
     }
@@ -563,7 +600,9 @@ impl StorageRead for CtxPostStorageRead<'_> {
         get_pred_epochs()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex, Error> {
+    fn get_tx_index(
+        &self,
+    ) -> Result<(BlockHeight, TxIndex, Option<u32>), Error> {
         get_tx_index()
     }
 
@@ -624,8 +663,20 @@ fn get_block_epoch() -> Result<Epoch, Error> {
     Ok(Epoch(unsafe { namada_vp_get_block_epoch() }))
 }
 
-fn get_tx_index() -> Result<TxIndex, Error> {
-    Ok(TxIndex(unsafe { namada_vp_get_tx_index() }))
+fn get_tx_index() -> Result<(BlockHeight, TxIndex, Option<u32>), Error> {
+    // NOTE: the conversion to i64 is infallible
+    let read_result = unsafe { namada_vp_get_tx_index() } as i64;
+    let bytes = read_from_buffer(read_result, namada_vp_result_buffer).ok_or(
+        Error::SimpleMessage(
+            "Missing result from `namada_vp_get_tx_index` call",
+        ),
+    )?;
+    let IndexedTx {
+        block_height,
+        block_index,
+        batch_index,
+    } = namada_core::decode(bytes).expect("Cannot decode tx index");
+    Ok((block_height, block_index, batch_index))
 }
 
 fn get_pred_epochs() -> Result<Epochs, Error> {

@@ -41,6 +41,7 @@ pub use namada_core::chain::{
     BlockHash, BlockHeader, BlockHeight, Epoch, Epochs,
 };
 pub use namada_core::hash::{Hash, StorageHasher};
+use namada_core::masp_primitives::asset_type::AssetType;
 pub use namada_core::storage::*;
 
 /// Common storage read interface
@@ -68,6 +69,9 @@ pub trait StorageRead {
 
     /// Storage `has_key` in. It will try to read from the storage.
     fn has_key(&self, key: &Key) -> Result<bool>;
+
+    /// Check if an asset type has an entry in the conversions table
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool>;
 
     /// Storage prefix iterator ordered by the storage keys. It will try to get
     /// an iterator from the storage.
@@ -110,7 +114,7 @@ pub trait StorageRead {
     fn get_pred_epochs(&self) -> Result<Epochs>;
 
     /// Get the transaction index.
-    fn get_tx_index(&self) -> Result<TxIndex>;
+    fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)>;
 
     /// Get the native token address
     fn get_native_token(&self) -> Result<Address>;
@@ -436,6 +440,10 @@ pub mod testing {
             Ok(self.read_bytes(key)?.is_some())
         }
 
+        fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+            Ok(self.conversion_state.assets.contains_key(asset_type))
+        }
+
         fn iter_prefix<'iter>(
             &'iter self,
             prefix: &Key,
@@ -476,8 +484,8 @@ pub mod testing {
             Ok(self.pred_epochs.clone())
         }
 
-        fn get_tx_index(&self) -> Result<TxIndex> {
-            Ok(TxIndex::default())
+        fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)> {
+            Ok(Default::default())
         }
 
         fn get_native_token(&self) -> Result<Address> {

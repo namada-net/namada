@@ -59,7 +59,6 @@ use namada_sdk::wallet::AddressVpType;
 use namada_sdk::{Namada, error, state as storage, token};
 
 use crate::cli::{self, args};
-use crate::client::masp::sync_shielded_context;
 use crate::tendermint::merkle::proof::ProofOps;
 
 /// Query the status of a given transaction.
@@ -428,22 +427,6 @@ pub async fn query_rewards_estimate(
         edisplay_line!(context.io(), "Failed to load shielded context: {}", e);
         cli::safe_exit(1);
     }
-    // Sync the shielded context before estimating the rewards
-    if let Err(e) = args
-        .shielded_sync
-        .ok_or("Missing arguments for shielded-sync")
-        .map(async |sync_args| {
-            sync_shielded_context(context, args.query.ledger_address, sync_args)
-                .await
-        })
-    {
-        edisplay_line!(
-            context.io(),
-            "Failed to sync the shielded context: {}",
-            e
-        );
-        cli::safe_exit(1);
-    }
     let raw_balance = match shielded
         .compute_shielded_balance(&args.owner.as_viewing_key())
         .await
@@ -494,7 +477,7 @@ async fn query_shielded_balance(
 ) {
     let args::QueryBalance {
         // Need the ledger address for sync purposes
-        query,
+        query: _,
         // Token owner (needs to be a viewing key)
         owner,
         // The token to query
@@ -546,23 +529,6 @@ async fn query_shielded_balance(
     let no_balance = || {
         display_line!(context.io(), "{token_alias}: 0");
     };
-
-    // Sync the shielded context before computing the balance
-    if let Err(e) = args
-        .shielded_sync
-        .ok_or("Missing arguments for shielded-sync")
-        .map(async |sync_args| {
-            sync_shielded_context(context, query.ledger_address, sync_args)
-                .await
-        })
-    {
-        edisplay_line!(
-            context.io(),
-            "Failed to sync the shielded context: {}",
-            e
-        );
-        cli::safe_exit(1);
-    }
 
     let balance = if no_conversions || token != context.native_token() {
         let Some(bal) = shielded

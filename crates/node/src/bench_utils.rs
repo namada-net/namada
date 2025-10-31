@@ -1243,9 +1243,9 @@ impl BenchShieldedCtx {
             spending_key,
             self.wallet.find_birthday(ALBERT_SPENDING_KEY).copied(),
         );
-        async_runtime
+        self.shielded = async_runtime
             .block_on(namada_apps_lib::client::masp::syncing(
-                &mut self.shielded,
+                self.shielded,
                 self.shell.clone(),
                 ShieldedSync {
                     last_query_height: None,

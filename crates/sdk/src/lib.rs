@@ -117,6 +117,14 @@ pub trait Namada: NamadaIo {
         &self,
     ) -> RwLockWriteGuard<'_, ShieldedContext<Self::ShieldedUtils>>;
 
+    /// Update the shielded context with the one provided
+    async fn update_shielded_context<U>(
+        self,
+        context: ShieldedContext<U>,
+    ) -> impl Namada
+    where
+        U: ShieldedUtils + MaybeSend + MaybeSync;
+
     /// Return the native token
     fn native_token(&self) -> Address;
 
@@ -811,6 +819,23 @@ where
         &self,
     ) -> RwLockWriteGuard<'_, ShieldedContext<Self::ShieldedUtils>> {
         self.shielded.write().await
+    }
+
+    async fn update_shielded_context<T>(
+        self,
+        context: ShieldedContext<T>,
+    ) -> impl Namada
+    where
+        T: ShieldedUtils + MaybeSend + MaybeSync,
+    {
+        NamadaImpl::<C, U, T, I> {
+            client: self.client,
+            wallet: self.wallet,
+            shielded: RwLock::new(context),
+            io: self.io,
+            native_token: self.native_token,
+            prototype: self.prototype,
+        }
     }
 
     fn native_token(&self) -> Address {

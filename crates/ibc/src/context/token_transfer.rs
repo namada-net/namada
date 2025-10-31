@@ -130,18 +130,9 @@ where
     /// Add the amount to the per-epoch withdraw of the token
     fn add_deposit(
         &self,
-        to_account: &IbcAccountId,
         token: &Address,
         amount: Amount,
-    ) -> Result<(), HostError>
-    where
-        Params:
-            namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
-        Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>,
-        ShieldedToken: namada_systems::shielded_token::Write<
-                <C as IbcStorageContext>::Storage,
-            >,
-    {
+    ) -> Result<(), HostError> {
         let deposit = self.inner.borrow().deposit(token)?;
         let added_deposit =
             deposit
@@ -152,20 +143,15 @@ where
         self.inner
             .borrow_mut()
             .store_deposit(token, added_deposit)?;
-        if let IbcAccountId::Shielded(owner_pa) = to_account {
-            self.store_masp_note_commitments(owner_pa, token, &amount)?;
-        }
         Ok(())
     }
 
     /// Add the amount to the per-epoch withdraw of the token
     fn add_withdraw(
         &self,
-        from_account: &IbcAccountId,
         token: &Address,
         amount: Amount,
     ) -> Result<(), HostError> {
-        self.validate_masp_withdraw(from_account)?;
         let withdraw = self.inner.borrow().withdraw(token)?;
         let added_withdraw =
             withdraw
@@ -209,6 +195,27 @@ where
                      IBC unshielding MASP transaction"
                 ),
             });
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn maybe_store_masp_note_commitments(
+        &self,
+        to_account: &IbcAccountId,
+        token: &Address,
+        amount: &Amount,
+    ) -> Result<(), HostError>
+    where
+        Params:
+            namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+        Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>,
+        ShieldedToken: namada_systems::shielded_token::Write<
+                <C as IbcStorageContext>::Storage,
+            >,
+    {
+        if let IbcAccountId::Shielded(owner_pa) = to_account {
+            self.store_masp_note_commitments(owner_pa, token, amount)?;
         }
         Ok(())
     }
@@ -506,7 +513,8 @@ where
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
-        self.add_withdraw(from_account, &ibc_token, amount)?;
+        self.validate_masp_withdraw(from_account)?;
+        self.add_withdraw(&ibc_token, amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
         if ibc_token.is_internal()
@@ -541,7 +549,10 @@ where
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
-        self.add_deposit(to_account, &ibc_token, amount)?;
+        self.add_deposit(&ibc_token, amount)?;
+        self.maybe_store_masp_note_commitments(
+            to_account, &ibc_token, &amount,
+        )?;
 
         self.inner
             .borrow_mut()
@@ -563,7 +574,8 @@ where
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
         self.update_mint_amount(&ibc_token, amount, true)?;
-        self.add_deposit(account, &ibc_token, amount)?;
+        self.add_deposit(&ibc_token, amount)?;
+        self.maybe_store_masp_note_commitments(account, &ibc_token, &amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
         if ibc_token.is_internal()
@@ -592,8 +604,9 @@ where
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
+        self.validate_masp_withdraw(account)?;
         self.update_mint_amount(&ibc_token, amount, false)?;
-        self.add_withdraw(account, &ibc_token, amount)?;
+        self.add_withdraw(&ibc_token, amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
         if ibc_token.is_internal()

@@ -989,51 +989,42 @@ impl FromStr for MaspValue {
 }
 
 /// Compact representation of a [`Note`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, BorshSerialize, BorshDeserialize)]
 #[allow(missing_docs)]
 pub struct CompactNote {
     pub asset_type: AssetType,
     pub value: u64,
     pub diversifier: Diversifier,
+    #[borsh(
+        serialize_with = "compact_note_pk_d_borsh::serialize",
+        deserialize_with = "compact_note_pk_d_borsh::deserialize"
+    )]
     pub pk_d: masp_primitives::jubjub::SubgroupPoint,
     pub rseed: masp_primitives::sapling::Rseed,
 }
 
-impl BorshSerialize for CompactNote {
-    fn serialize<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        use group::GroupEncoding;
+mod compact_note_pk_d_borsh {
+    #![allow(missing_docs)]
 
-        BorshSerialize::serialize(&self.asset_type, writer)?;
-        BorshSerialize::serialize(&self.value, writer)?;
-        BorshSerialize::serialize(&self.diversifier, writer)?;
-        BorshSerialize::serialize(&self.pk_d.to_bytes(), writer)?;
-        BorshSerialize::serialize(&self.rseed, writer)
+    use group::GroupEncoding;
+
+    use super::*;
+
+    pub fn serialize<W: Write>(
+        pk_d: &masp_primitives::jubjub::SubgroupPoint,
+        writer: &mut W,
+    ) -> std::io::Result<()> {
+        BorshSerialize::serialize(&pk_d.to_bytes(), writer)
     }
-}
 
-impl BorshDeserialize for CompactNote {
-    fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-        use group::GroupEncoding;
-
-        let asset_type =
-            <AssetType as BorshDeserialize>::deserialize_reader(reader)?;
-        let value = <u64 as BorshDeserialize>::deserialize_reader(reader)?;
-        let diversifier =
-            <Diversifier as BorshDeserialize>::deserialize_reader(reader)?;
-        let pk_d = masp_primitives::jubjub::SubgroupPoint::from_bytes(
+    pub fn deserialize<R: Read>(
+        reader: &mut R,
+    ) -> std::io::Result<masp_primitives::jubjub::SubgroupPoint> {
+        masp_primitives::jubjub::SubgroupPoint::from_bytes(
             &<[u8; 32] as BorshDeserialize>::deserialize_reader(reader)?,
         )
         .into_option()
-        .ok_or_else(|| std::io::Error::other("Invalid pk_d in CompactNote"))?;
-        let rseed = <masp_primitives::sapling::Rseed as BorshDeserialize>::deserialize_reader(reader)?;
-
-        Ok(Self {
-            asset_type,
-            value,
-            diversifier,
-            pk_d,
-            rseed,
-        })
+        .ok_or_else(|| std::io::Error::other("Invalid pk_d in CompactNote"))
     }
 }
 

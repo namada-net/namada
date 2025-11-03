@@ -78,12 +78,19 @@ const NFT_ID: &str = "test_nft";
 
 #[test]
 fn ibc_to_and_from_payment_addrs() -> Result<()> {
+    const PIPELINE_LEN: u64 = 2;
+    const MASP_EPOCH_MULTIPLIER: u64 = 1;
+
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
             genesis.parameters.parameters.epochs_per_year =
-                epochs_per_year_from_min_duration(1800);
+                epochs_per_year_from_min_duration(60);
+            genesis.parameters.gov_params.min_proposal_grace_epochs = 3;
             genesis.parameters.ibc_params.default_mint_limit =
                 Amount::max_signed();
+            genesis.parameters.pos_params.pipeline_len = PIPELINE_LEN;
+            genesis.parameters.parameters.masp_epoch_multiplier =
+                MASP_EPOCH_MULTIPLIER;
             genesis
                 .parameters
                 .ibc_params
@@ -95,6 +102,13 @@ fn ibc_to_and_from_payment_addrs() -> Result<()> {
     let _bg_ledger = ledger.background();
     let _bg_gaia = gaia.background();
 
+    // Delegate tokens on Namada
+    delegate_token(&test)?;
+    let rpc = get_actor_rpc(&test, Who::Validator(0));
+    let mut epoch = get_epoch(&test, &rpc).unwrap();
+    let delegated_epoch = epoch + PIPELINE_LEN;
+
+    // Create channel between Namada and Gaia
     let hermes_dir = setup_hermes(&test, &test_gaia)?;
     let port_id_namada = FT_PORT_ID.parse().unwrap();
     let port_id_gaia = FT_PORT_ID.parse().unwrap();
@@ -108,7 +122,7 @@ fn ibc_to_and_from_payment_addrs() -> Result<()> {
 
     // Start relaying
     let hermes = run_hermes(&hermes_dir)?;
-    let _bg_hermes = hermes.background();
+    let bg_hermes = hermes.background();
 
     // Shielding transfer 200 samoleans from Gaia to Namada
     let albert_payment_addr = find_payment_address(&test, AA_PAYMENT_ADDRESS)?;
@@ -186,9 +200,159 @@ fn ibc_to_and_from_payment_addrs() -> Result<()> {
         &channel_id_namada,
         &test,
     )?;
-    // The balance should not be changed
+    // The balance should not have changed
     check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 100)?;
     check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 900)?;
+
+    // Attempt to mint tokens twice, by including both a payment
+    // address and a shielding transfer. This should fail.
+    let shielding_data = {
+        let shielding_data_path = gen_ibc_shielding_data(
+            &test,
+            AA_PAYMENT_ADDRESS,
+            COSMOS_COIN,
+            100,
+            &port_id_namada,
+            &channel_id_namada,
+            None,
+        )?;
+        String::from_utf8(std::fs::read(shielding_data_path)?)?
+    };
+    transfer_from_cosmos(
+        &test_gaia,
+        COSMOS_USER,
+        albert_payment_addr.to_string(),
+        COSMOS_COIN,
+        100,
+        &port_id_gaia,
+        &channel_id_gaia,
+        // NB: stuff the shielding data onto a `Right`
+        // variant, to avoid using the MASP transparent
+        // address as a receiver, and use the payment
+        // address instead
+        Some(Either::Right(shielding_data)),
+        // NB: add a timeout, to get refunded on Gaia
+        Some(Duration::from_secs(10)),
+    )?;
+
+    // Check that the VP rejects the received packet
+    let mut hermes = bg_hermes.foreground();
+    hermes.exp_string("Attempted to mint IBC tokens twice through the MASP")?;
+    let bg_hermes = hermes.background();
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_gaia,
+        &channel_id_gaia,
+        &test_gaia,
+    )?;
+    check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 100)?;
+    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 900)?;
+
+    // Now let's activate rewards for samoleans on Namada
+    {
+        // Wait for tokens to be delegated, in case
+        // they haven't yet
+        epoch = get_epoch(&test, &rpc).unwrap();
+        while epoch < delegated_epoch {
+            epoch = epoch_sleep(&test, &rpc, 120)?;
+        }
+
+        // Launch inflation proposal on Namada
+        let start_epoch = propose_inflation(&test)?;
+
+        // Vote
+        epoch = get_epoch(&test, &rpc).unwrap();
+        while epoch < start_epoch {
+            epoch = epoch_sleep(&test, &rpc, 120)?;
+        }
+        submit_votes(&test)?;
+
+        // Wait for grace epoch
+        let grace_epoch = start_epoch + 6u64 /* grace epoch offset */;
+        epoch = get_epoch(&test, &rpc).unwrap();
+        while epoch < grace_epoch {
+            epoch = epoch_sleep(&test, &rpc, 120)?;
+        }
+
+        // Wait the next masp epoch to update the conversion state
+        let new_masp_epoch = grace_epoch + MASP_EPOCH_MULTIPLIER;
+        epoch = get_epoch(&test, &rpc).unwrap();
+        while epoch < new_masp_epoch {
+            epoch = epoch_sleep(&test, &rpc, 120)?;
+        }
+    }
+
+    // Attempt to mint tokens twice, again, but this time,
+    // with rewards activated
+    let shielding_data = {
+        let shielding_data_path = gen_ibc_shielding_data(
+            &test,
+            AA_PAYMENT_ADDRESS,
+            COSMOS_COIN,
+            100,
+            &port_id_namada,
+            &channel_id_namada,
+            None,
+        )?;
+        String::from_utf8(std::fs::read(shielding_data_path)?)?
+    };
+    transfer_from_cosmos(
+        &test_gaia,
+        COSMOS_USER,
+        albert_payment_addr.to_string(),
+        COSMOS_COIN,
+        100,
+        &port_id_gaia,
+        &channel_id_gaia,
+        Some(Either::Right(shielding_data)),
+        Some(Duration::from_secs(10)),
+    )?;
+
+    // Check that the VP rejects the received packet
+    let mut hermes = bg_hermes.foreground();
+    hermes.exp_string("Attempted to mint IBC tokens twice through the MASP")?;
+    let _bg_hermes = hermes.background();
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_gaia,
+        &channel_id_gaia,
+        &test_gaia,
+    )?;
+    check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 100)?;
+    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 900)?;
+
+    // Shielding transfer 100 samoleans from Gaia to Namada (with rewards
+    // active)
+    let albert_payment_addr = find_payment_address(&test, AA_PAYMENT_ADDRESS)?;
+    transfer_from_cosmos(
+        &test_gaia,
+        COSMOS_USER,
+        albert_payment_addr.to_string(),
+        COSMOS_COIN,
+        100,
+        &port_id_gaia,
+        &channel_id_gaia,
+        None,
+        None,
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_gaia,
+        &channel_id_gaia,
+        &test_gaia,
+    )?;
+    let ibc_denom_on_namada =
+        format!("{port_id_namada}/{channel_id_namada}/{COSMOS_COIN}");
+    check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 200)?;
+    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 800)?;
+
+    // Check the balance of the minted NAM rewards
+    epoch = get_epoch(&test, &rpc).unwrap();
+    let new_masp_epoch = epoch + MASP_EPOCH_MULTIPLIER;
+    while epoch < new_masp_epoch {
+        epoch = epoch_sleep(&test, &rpc, 120)?;
+    }
+    check_inflated_balance(&test, AA_VIEWING_KEY)?;
 
     Ok(())
 }

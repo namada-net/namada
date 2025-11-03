@@ -343,9 +343,6 @@ pub struct TxShieldedTransfer<C: NamadaTypes = SdkTypes> {
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
     /// Optional data for the implicit shielded-sync
-    // FIXME: not sure about this, the sdk won't call shielded-sync implicitly
-    // so this arg is useless FIXME: maybe better to read a configuration
-    // file?
     pub shielded_sync: Option<ShieldedSync<C>>,
 }
 
@@ -2482,7 +2479,6 @@ impl TxReactivateValidator {
 pub struct ShieldedSync<C: NamadaTypes = SdkTypes> {
     /// Height to sync up to. Defaults to most recent
     pub last_query_height: Option<BlockHeight>,
-    // FIXME: this seems to never be used
     /// Spending keys used to determine note ownership
     pub spending_keys: Vec<C::DatedSpendingKey>,
     /// Viewing keys used to determine note ownership

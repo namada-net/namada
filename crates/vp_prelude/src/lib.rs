@@ -36,7 +36,6 @@ use namada_core::chain::{
 pub use namada_core::collections::HashSet;
 use namada_core::hash::{HASH_LENGTH, Hash};
 use namada_core::internal::HostEnvResult;
-use namada_core::masp_primitives::asset_type::AssetType;
 use namada_core::storage::TxIndex;
 pub use namada_core::validity_predicate::{VpError, VpErrorExtResult};
 pub use namada_core::*;
@@ -454,20 +453,6 @@ impl StorageRead for CtxPreStorageRead<'_> {
         Ok(HostEnvResult::is_success(found))
     }
 
-    fn has_conversion(
-        &self,
-        asset_type: &AssetType,
-    ) -> namada_storage::Result<bool> {
-        let asset_type = asset_type.serialize_to_vec();
-        let found = unsafe {
-            namada_vp_has_conversion(
-                asset_type.as_ptr() as _,
-                asset_type.len() as _,
-            )
-        };
-        Ok(HostEnvResult::is_success(found))
-    }
-
     fn iter_prefix<'iter>(
         &'iter self,
         prefix: &storage::Key,
@@ -539,20 +524,6 @@ impl StorageRead for CtxPostStorageRead<'_> {
         let key = key.to_string();
         let found = unsafe {
             namada_vp_has_key_post(key.as_ptr() as _, key.len() as _)
-        };
-        Ok(HostEnvResult::is_success(found))
-    }
-
-    fn has_conversion(
-        &self,
-        asset_type: &AssetType,
-    ) -> namada_storage::Result<bool> {
-        let asset_type = asset_type.serialize_to_vec();
-        let found = unsafe {
-            namada_vp_has_conversion(
-                asset_type.as_ptr() as _,
-                asset_type.len() as _,
-            )
         };
         Ok(HostEnvResult::is_success(found))
     }

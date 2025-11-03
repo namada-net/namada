@@ -251,7 +251,6 @@ where
             "namada_tx_write" => Function::new_typed_with_env(wasm_store, &env, wrap_tx::_4(host_env::tx_write)),
             "namada_tx_write_temp" => Function::new_typed_with_env(wasm_store, &env, wrap_tx::_4(host_env::tx_write_temp)),
             "namada_tx_yield_value" => Function::new_typed_with_env(wasm_store, &env, wrap_tx::_2(host_env::tx_yield_value)),
-            "namada_tx_has_conversion" => Function::new_typed_with_env(wasm_store, &env, wrap_tx::_2(host_env::tx_has_conversion)),
         },
     }
 }
@@ -297,7 +296,6 @@ where
             "namada_vp_result_buffer" => Function::new_typed_with_env(wasm_store, &env, wrap_vp::_1(host_env::vp_result_buffer)),
             "namada_vp_verify_tx_section_signature" => Function::new_typed_with_env(wasm_store, &env, wrap_vp::_7(host_env::vp_verify_tx_section_signature)),
             "namada_vp_yield_value" => Function::new_typed_with_env(wasm_store, &env, wrap_vp::_2(host_env::vp_yield_value)),
-            "namada_vp_has_conversion" => Function::new_typed_with_env(wasm_store, &env, wrap_vp::_2(host_env::vp_has_conversion)),
         },
     }
 }

@@ -15,6 +15,7 @@ use ibc::primitives::IntoTimestamp;
 use namada_core::address::Address;
 use namada_core::borsh::{BorshSerialize, BorshSerializeExt};
 use namada_core::ibc::PGFIbcTarget;
+use namada_core::masp_primitives::asset_type::AssetType;
 use namada_core::tendermint::Time as TmTime;
 use namada_core::token::Amount;
 use namada_events::{EmitEvents, Event};
@@ -97,6 +98,15 @@ where
 
     fn log_string(&self, message: String) {
         tracing::trace!(message);
+    }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        Ok(self
+            .state
+            .in_mem()
+            .conversion_state
+            .assets
+            .contains_key(asset_type))
     }
 }
 

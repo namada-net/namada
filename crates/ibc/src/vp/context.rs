@@ -128,10 +128,6 @@ where
         Ok(self.store.contains_key(key) || self.ctx.has_key(key)?)
     }
 
-    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
-        self.ctx.has_conversion(asset_type)
-    }
-
     fn iter_prefix<'iter>(
         &'iter self,
         prefix: &Key,
@@ -272,6 +268,18 @@ where
     fn log_string(&self, message: String) {
         tracing::debug!("{message} in the pseudo execution for IBC VP");
     }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        Ok(self
+            .storage
+            .ctx
+            .ctx
+            .state
+            .in_mem()
+            .conversion_state
+            .assets
+            .contains_key(asset_type))
+    }
 }
 
 impl<'view, 'a, S, CA, EVAL, Token> IbcCommonContext
@@ -324,10 +332,6 @@ where
 
     fn has_key(&self, key: &Key) -> Result<bool> {
         self.ctx.has_key(key)
-    }
-
-    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
-        self.ctx.has_conversion(asset_type)
     }
 
     fn iter_prefix<'iter>(
@@ -451,6 +455,17 @@ where
     /// Logging
     fn log_string(&self, message: String) {
         tracing::debug!("{message} for validation in IBC VP");
+    }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        Ok(self
+            .ctx
+            .ctx
+            .state
+            .in_mem()
+            .conversion_state
+            .assets
+            .contains_key(asset_type))
     }
 }
 

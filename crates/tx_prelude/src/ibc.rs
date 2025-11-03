@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use namada_core::address::Address;
+use namada_core::masp_primitives::asset_type::AssetType;
 use namada_core::token::Amount;
 use namada_events::Event;
 use namada_ibc::context::middlewares::create_transfer_middlewares;
@@ -19,6 +20,7 @@ pub use namada_ibc::{
     IbcActions, IbcCommonContext, IbcStorageContext, NftTransferModule,
     ProofSpec, TransferModule,
 };
+use namada_state::in_mem_virtual_storage;
 use namada_tx_env::TxEnv;
 
 use crate::{Ctx, Result, parameters, token};
@@ -63,6 +65,12 @@ impl IbcStorageContext for Ctx {
 
     fn log_string(&self, message: String) {
         super::log_string(message);
+    }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        Ok(self
+            .read_temp(&in_mem_virtual_storage::has_conversion_key(asset_type))?
+            .unwrap_or_default())
     }
 
     fn emit_event(&mut self, event: Event) -> Result<()> {

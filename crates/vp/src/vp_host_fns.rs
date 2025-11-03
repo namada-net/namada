@@ -10,6 +10,7 @@ use namada_core::hash::{HASH_LENGTH, Hash};
 use namada_core::storage::{Key, TX_INDEX_LENGTH};
 use namada_events::{Event, EventTypeBuilder};
 use namada_gas::{self as gas, Gas, GasMetering, MEMORY_ACCESS_GAS_PER_BYTE};
+use namada_state::in_mem_virtual_storage;
 use namada_tx::{BatchedTxRef, IndexedTx, Section};
 use thiserror::Error;
 
@@ -130,10 +131,17 @@ pub fn read_temp<S>(
 where
     S: StateRead + Debug,
 {
-    let (log_val, gas) =
-        state.write_log().read_temp(key).into_storage_result()?;
+    let (val, gas) = if in_mem_virtual_storage::is_in_mem_key(key) {
+        let (val, gas) =
+            in_mem_virtual_storage::read_from_in_mem(key, state.in_mem())?;
+        (Some(val), gas)
+    } else {
+        let (val, gas) =
+            state.write_log().read_temp(key).into_storage_result()?;
+        (val.cloned(), gas)
+    };
     add_gas(gas_meter, gas)?;
-    Ok(log_val.cloned())
+    Ok(val)
 }
 
 /// Storage `has_key` in prior state (before tx execution). It will try to read

@@ -294,7 +294,6 @@ where
             // in the conversion state at the current masp epoch
             self.inner
                 .borrow()
-                .storage()
                 .has_conversion(&asset_type)?
                 .then_some(masp_epoch)
         };

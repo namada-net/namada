@@ -558,10 +558,6 @@ mod native_tx_host_env {
         buf_ptr: u64,
         buf_len: u64,
     ));
-    native_host_fn!(tx_has_conversion(
-        buf_ptr: u64,
-        buf_len: u64,
-    ) -> i64);
 }
 
 #[cfg(test)]

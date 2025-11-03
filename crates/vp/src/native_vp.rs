@@ -10,7 +10,6 @@ use std::marker::PhantomData;
 use namada_core::borsh;
 use namada_core::borsh::BorshDeserialize;
 use namada_core::chain::{ChainId, Epochs};
-use namada_core::masp_primitives::asset_type::AssetType;
 use namada_gas::{Gas, GasMeterKind, GasMetering, VpGasMeter};
 use namada_state::{ConversionState, ReadConversionState};
 use namada_tx::{BatchedTxRef, IndexedTx, Tx, TxCommitments};
@@ -187,16 +186,6 @@ where
             .into_storage_result()
     }
 
-    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
-        Ok(self
-            .ctx
-            .state
-            .in_mem()
-            .conversion_state
-            .assets
-            .contains_key(asset_type))
-    }
-
     fn iter_prefix<'iter>(
         &'iter self,
         prefix: &Key,
@@ -279,16 +268,6 @@ where
     fn has_key(&self, key: &Key) -> Result<bool> {
         vp_host_fns::has_key_post(self.ctx.gas_meter, self.ctx.state, key)
             .into_storage_result()
-    }
-
-    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
-        Ok(self
-            .ctx
-            .state
-            .in_mem()
-            .conversion_state
-            .assets
-            .contains_key(asset_type))
     }
 
     fn iter_prefix<'iter>(

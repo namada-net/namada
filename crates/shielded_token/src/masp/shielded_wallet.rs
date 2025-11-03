@@ -356,7 +356,7 @@ impl<U: ShieldedUtils + MaybeSend + MaybeSync> ShieldedWallet<U> {
 
     /// Save this shielded context into its associated context directory.
     pub async fn save(&self) -> std::io::Result<()> {
-        self.utils.save(VersionedWalletRef::V2(self)).await
+        self.utils.save(VersionedWalletRef::V3(self)).await
     }
 
     /// Update the merkle tree of witnesses the first time we

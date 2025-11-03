@@ -32,7 +32,9 @@ use namada_state::{
 };
 use namada_systems::{governance, ibc, parameters, trans_token};
 use namada_tx::BatchedTxRef;
-use namada_tx::event::{MaspTxRef, masp_types as masp_event_types};
+use namada_tx::event::{
+    MaspTxRef, ProtocolIbcShielding, masp_types as masp_event_types,
+};
 use namada_vp_env::{Error, Result, VpEnv};
 
 use crate::storage_key::{
@@ -543,6 +545,17 @@ where
         let masp_source = if let Some(tx) =
             Ibc::try_extract_masp_tx_from_envelope::<Transfer>(&tx_data)
         {
+            if ctx
+                .get_events(&masp_event_types::TRANSFER)?
+                .into_iter()
+                .any(|masp_event| {
+                    masp_event.has_attribute::<ProtocolIbcShielding>()
+                })
+            {
+                return Err(Error::new_const(
+                    "Attempted to mint IBC tokens twice through the MASP",
+                ));
+            }
             MaspSource::UserTx(Box::new(tx))
         } else {
             match namada_tx::action::get_masp_section_ref(&actions)

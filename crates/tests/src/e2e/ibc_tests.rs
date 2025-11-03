@@ -3469,13 +3469,14 @@ fn transfer_from_cosmos(
         args.push(&memo);
     }
 
-    let timeout_nanosec = timeout_sec
-        .as_ref()
-        .map(|d| d.as_nanos().to_string())
-        .unwrap_or_default();
-    if timeout_sec.is_some() {
+    let timeout_nanosec;
+    if let Some(d) = timeout_sec {
+        timeout_nanosec = d.as_nanos().to_string();
+
         args.push("--packet-timeout-timestamp");
         args.push(&timeout_nanosec);
+        args.push("--packet-timeout-height");
+        args.push("0-0");
     }
 
     let mut gaia = run_cosmos_cmd(test, args, Some(40))?;

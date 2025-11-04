@@ -1634,7 +1634,13 @@ pub trait ShieldedApi<U: ShieldedUtils + MaybeSend + MaybeSync>:
                     delta_time.num_seconds()
                         / i64::try_from(max_block_time.0).unwrap(),
                 )
-                .map_err(|e| TransferErr::General(e.to_string()))?;
+                .map_err(|e| {
+                    TransferErr::General(format!(
+                        "Failed to compute the amount of blocks for the tx \
+                         expiration, likely due to the provided expiration \
+                         time being in the past: {e}"
+                    ))
+                })?;
                 match checked!(last_block_height + delta_blocks) {
                     Ok(height) if height <= u32::MAX - 20 => height,
                     _ => {

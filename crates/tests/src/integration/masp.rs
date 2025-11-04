@@ -3964,6 +3964,12 @@ fn masp_tx_expiration_first_invalid_block_height() -> Result<()> {
     let tempdir = tempfile::tempdir().unwrap();
 
     _ = node.next_epoch();
+    // Expiration a few seconds in the future since we'll need to run
+    // shielded-sync before building the tx and we must ensure we don't
+    // overshoot the expiration time in the process
+    #[allow(clippy::disallowed_methods)]
+    let expiration =
+        DateTimeUtc::now().next_second().next_second().next_second();
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -3990,8 +3996,7 @@ fn masp_tx_expiration_first_invalid_block_height() -> Result<()> {
                 // to overwrite the header with one having no
                 // expiration
                 "--expiration",
-                #[allow(clippy::disallowed_methods)]
-                &DateTimeUtc::now().to_string(),
+                &expiration.to_string(),
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-tx",
@@ -4143,6 +4148,12 @@ fn masp_tx_expiration_first_invalid_block_height_with_fee_payment() -> Result<()
     let tempdir = tempfile::tempdir().unwrap();
 
     _ = node.next_epoch();
+    // Expiration a few seconds in the future since we'll need to run
+    // shielded-sync before building the tx and we must ensure we don't
+    // overshoot the expiration time in the process
+    #[allow(clippy::disallowed_methods)]
+    let expiration =
+        DateTimeUtc::now().next_second().next_second().next_second();
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -4171,8 +4182,7 @@ fn masp_tx_expiration_first_invalid_block_height_with_fee_payment() -> Result<()
                 // to overwrite the header with one having no
                 // expiration
                 "--expiration",
-                #[allow(clippy::disallowed_methods)]
-                &DateTimeUtc::now().to_string(),
+                &expiration.to_string(),
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-tx",
@@ -4302,6 +4312,12 @@ fn masp_tx_expiration_last_valid_block_height() -> Result<()> {
     let tempdir = tempfile::tempdir().unwrap();
 
     _ = node.next_epoch();
+    // Expiration a few seconds in the future since we'll need to run
+    // shielded-sync before building the tx and we must ensure we don't
+    // overshoot the expiration time in the process
+    #[allow(clippy::disallowed_methods)]
+    let expiration =
+        DateTimeUtc::now().next_second().next_second().next_second();
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -4316,6 +4332,7 @@ fn masp_tx_expiration_last_valid_block_height() -> Result<()> {
                 NAM,
                 "--amount",
                 "50",
+                // FIXME: can avoid gas payer since dumping?
                 "--gas-payer",
                 cooper_alias,
                 // We want to create an expired masp tx. Doing so will also set
@@ -4328,8 +4345,7 @@ fn masp_tx_expiration_last_valid_block_height() -> Result<()> {
                 // to overwrite the header with one having no
                 // expiration
                 "--expiration",
-                #[allow(clippy::disallowed_methods)]
-                &DateTimeUtc::now().to_string(),
+                &expiration.to_string(),
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-tx",

@@ -3936,7 +3936,7 @@ fn masp_tx_expiration_first_invalid_block_height() -> Result<()> {
     _ = node.next_epoch();
 
     // Initialize accounts we can access the secret keys of
-    let (cooper_alias, cooper_key) =
+    let (_, cooper_key) =
         make_temp_account(&node, validator_one_rpc, "Cooper", NAM, 500_000)?;
 
     // 1. Shield tokens
@@ -3984,8 +3984,6 @@ fn masp_tx_expiration_first_invalid_block_height() -> Result<()> {
                 NAM,
                 "--amount",
                 "50",
-                "--gas-payer",
-                cooper_alias,
                 // We want to create an expired masp tx. Doing so will also set
                 // the expiration field of the header which can
                 // be a problem because this would lead to the
@@ -4120,7 +4118,7 @@ fn masp_tx_expiration_first_invalid_block_height_with_fee_payment() -> Result<()
 
     // Initialize account we can access the secret keys of. The account must
     // have no balance to be used as a disposable gas payer
-    let (cooper_alias, cooper_key) =
+    let (_, cooper_key) =
         make_temp_account(&node, validator_one_rpc, "Cooper", NAM, 0)?;
 
     // 1. Shield tokens
@@ -4168,10 +4166,6 @@ fn masp_tx_expiration_first_invalid_block_height_with_fee_payment() -> Result<()
                 NAM,
                 "--amount",
                 "50",
-                // This gas payer has no funds so we are going to use it as a
-                // disposable gas payer via the MASP
-                "--gas-payer",
-                cooper_alias,
                 // We want to create an expired masp tx. Doing so will also set
                 // the expiration field of the header which can
                 // be a problem because this would lead to the
@@ -4284,7 +4278,7 @@ fn masp_tx_expiration_last_valid_block_height() -> Result<()> {
     _ = node.next_epoch();
 
     // Initialize accounts we can access the secret keys of
-    let (cooper_alias, cooper_key) =
+    let (_, cooper_key) =
         make_temp_account(&node, validator_one_rpc, "Cooper", NAM, 500_000)?;
 
     // 1. Shield tokens
@@ -4332,9 +4326,6 @@ fn masp_tx_expiration_last_valid_block_height() -> Result<()> {
                 NAM,
                 "--amount",
                 "50",
-                // FIXME: can avoid gas payer since dumping?
-                "--gas-payer",
-                cooper_alias,
                 // We want to create an expired masp tx. Doing so will also set
                 // the expiration field of the header which can
                 // be a problem because this would lead to the

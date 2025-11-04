@@ -4786,6 +4786,13 @@ fn get_ibc_refund_target(
 ) -> Result<TransferTarget> {
     match (source, override_refund_target) {
         (
+            TransferSource::Address(taddr),
+            Some(TransferTarget::PaymentAddress(pa)),
+        ) => Err(Error::Other(format!(
+            "Can't specify payment address {pa} as an IBC refund target when \
+             the transfer source {taddr} is a transparent address"
+        ))),
+        (
             _,
             Some(
                 target @ (TransferTarget::Address(_)
@@ -4793,7 +4800,8 @@ fn get_ibc_refund_target(
             ),
         ) => {
             // Take the transfer target verbatim if the refund address is not
-            // IBC
+            // IBC, or if we're not attempting to withdraw from the MASP without
+            // adding a spending key as a transfer source
             Ok(target.clone())
         }
         (_, Some(TransferTarget::Ibc(_))) => Err(Error::Other(

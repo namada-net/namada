@@ -4673,7 +4673,7 @@ fn osmosis_xcs() -> Result<()> {
             {
                 "operation": "set",
                 "chain_name": "namada",
-                "prefix": "tnam"
+                "prefix": "znam"
             },
             {
                 "operation": "set",
@@ -4904,66 +4904,72 @@ fn osmosis_xcs() -> Result<()> {
         "transfer/{channel_from_osmosis_to_gaia}/{COSMOS_COIN}"
     ));
 
-    // Transparently swap samoleans with nam
-    let mut cmd = run!(
-        &test_namada,
-        Bin::Client,
-        [
-            "osmosis-swap",
-            "--osmosis-lcd",
-            "http://localhost:1317",
-            "--source",
+    // NOTE: This cfg is only used to disable compiling this code.
+    // A separate contract needs to be deployed for transparent
+    // swaps, so we won't test it here.
+    #[cfg(target_family = "wasm")]
+    {
+        // Transparently swap samoleans with nam
+        let mut cmd = run!(
+            &test_namada,
+            Bin::Client,
+            [
+                "osmosis-swap",
+                "--osmosis-lcd",
+                "http://localhost:1317",
+                "--source",
+                BERTHA,
+                "--token",
+                NAM,
+                "--amount",
+                "0.000064",
+                "--channel-id",
+                channel_from_namada_to_osmosis.as_ref(),
+                "--output-denom",
+                &output_denom_on_namada,
+                "--local-recovery-addr",
+                &osmosis_jones,
+                "--swap-contract",
+                &crosschain_swaps_addr,
+                "--minimum-amount",
+                "1",
+                "--target",
+                BERTHA,
+                "--pool-hop",
+                &format!("1:{output_denom_on_osmosis}"),
+                "--node",
+                &rpc_namada,
+            ],
+            Some(80),
+        )?;
+
+        // confirm trade
+        cmd.send_line("y")?;
+        cmd.assert_success();
+
+        wait_for_packet_relay(
+            &hermes_namada_osmosis,
+            &PortId::transfer(),
+            &channel_from_osmosis_to_namada,
+            &test_osmosis,
+        )?;
+        wait_for_packet_relay(
+            &hermes_gaia_namada,
+            &PortId::transfer(),
+            &channel_from_gaia_to_namada,
+            &test_namada,
+        )?;
+
+        // Check that the swap worked
+        // 39 is derived from the uniswap formula:
+        // floor( 100 - (100*100/(100 + 64)) )
+        check_balance(
+            &test_namada,
             BERTHA,
-            "--token",
-            NAM,
-            "--amount",
-            "0.000064",
-            "--channel-id",
-            channel_from_namada_to_osmosis.as_ref(),
-            "--output-denom",
-            &output_denom_on_namada,
-            "--local-recovery-addr",
-            &osmosis_jones,
-            "--swap-contract",
-            &crosschain_swaps_addr,
-            "--minimum-amount",
-            "1",
-            "--target",
-            BERTHA,
-            "--pool-hop",
-            &format!("1:{output_denom_on_osmosis}"),
-            "--node",
-            &rpc_namada,
-        ],
-        Some(80),
-    )?;
-
-    // confirm trade
-    cmd.send_line("y")?;
-    cmd.assert_success();
-
-    wait_for_packet_relay(
-        &hermes_namada_osmosis,
-        &PortId::transfer(),
-        &channel_from_osmosis_to_namada,
-        &test_osmosis,
-    )?;
-    wait_for_packet_relay(
-        &hermes_gaia_namada,
-        &PortId::transfer(),
-        &channel_from_gaia_to_namada,
-        &test_namada,
-    )?;
-
-    // Check that the swap worked
-    // 39 is derived from the uniswap formula:
-    // floor( 100 - (100*100/(100 + 64)) )
-    check_balance(
-        &test_namada,
-        BERTHA,
-        format!("transfer/{channel_from_namada_to_gaia}/{COSMOS_COIN}"),
-        39,
-    )?;
+            format!("transfer/{channel_from_namada_to_gaia}/{COSMOS_COIN}"),
+            39,
+        )?;
+    }
 
     // Perform a shielded swap of samoleans and nam
     let mut cmd = run!(
@@ -4974,7 +4980,7 @@ fn osmosis_xcs() -> Result<()> {
             "--osmosis-lcd",
             "http://localhost:1317",
             "--source",
-            AA_VIEWING_KEY,
+            A_SPENDING_KEY,
             "--token",
             NAM,
             "--amount",
@@ -4991,8 +4997,6 @@ fn osmosis_xcs() -> Result<()> {
             "10",
             "--target-pa",
             AA_PAYMENT_ADDRESS,
-            "--overflow-addr",
-            ALBERT,
             "--pool-hop",
             &format!("1:{output_denom_on_osmosis}"),
             "--gas-payer",
@@ -5022,17 +5026,13 @@ fn osmosis_xcs() -> Result<()> {
         &test_namada,
     )?;
 
-    // Check that the minimum amount got shielded
+    // Check the shielded balance.
     check_shielded_balance(
         &test_namada,
         AA_VIEWING_KEY,
         &output_denom_on_namada,
-        10,
+        35,
     )?;
-    // 5 is derived from the uniswap formula:
-    // floor( 61 - ( 164 * 61 / (164 + 56) ) ) minus
-    // the minimum amount (10) which was shielded
-    check_balance(&test_namada, ALBERT, &output_denom_on_namada, 5)?;
 
     Ok(())
 }

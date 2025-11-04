@@ -628,10 +628,18 @@ impl TxOsmosisSwap<SdkTypes> {
         let namada_input_denom =
             query_ibc_denom(ctx, transfer.token.to_string(), None).await;
 
+        let (receiver, swap_into_znam) = recipient.either(
+            |transparent_recipient| {
+                (transparent_recipient.encode_compat(), false)
+            },
+            |shielded_recipient| (shielded_recipient.encode_compat(), true),
+        );
+
         let (osmosis_input_denom, _) = osmosis_denom_from_namada_denom(
             &osmosis_lcd_rpc,
             &registry_xcs_addr,
             &namada_input_denom,
+            swap_into_znam,
         )
         .await?;
 
@@ -640,6 +648,7 @@ impl TxOsmosisSwap<SdkTypes> {
                 &osmosis_lcd_rpc,
                 &registry_xcs_addr,
                 &namada_output_denom,
+                swap_into_znam,
             )
             .await?;
 
@@ -660,10 +669,6 @@ impl TxOsmosisSwap<SdkTypes> {
             return Err(Error::Other("Swap has been cancelled".to_owned()));
         }
 
-        let receiver = recipient.either(
-            |transparent_recipient| transparent_recipient.encode_compat(),
-            |shielded_recipient| shielded_recipient.encode_compat(),
-        );
         let cosmwasm_memo = Memo {
             wasm: Wasm {
                 contract: transfer.receiver.clone(),

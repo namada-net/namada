@@ -228,16 +228,13 @@ where
         keys_changed: &BTreeSet<Key>,
         masp_source: &MaspSource,
     ) -> Result<()> {
-        let MaspSource::UserTx(transaction) = masp_source else {
-            return Ok(());
-        };
-
         // Support set to check that a nullifier was not revealed more
         // than once in the same tx
         let mut revealed_nullifiers = HashSet::new();
 
-        for description in transaction
-            .sapling_bundle()
+        for description in masp_source
+            .as_user_tx()
+            .and_then(|transaction| transaction.sapling_bundle())
             .map_or(&vec![], |bundle| &bundle.shielded_spends)
         {
             let nullifier_key = masp_nullifier_key(&description.nullifier);

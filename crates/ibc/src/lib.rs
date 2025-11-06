@@ -91,6 +91,7 @@ use masp_primitives::transaction::Transaction as MaspTransaction;
 pub use msg::*;
 use namada_core::address::{self, Address};
 use namada_core::arith::{CheckedAdd, CheckedSub, checked};
+use namada_core::either::{Either, Left, Right};
 use namada_core::ibc::apps::nft_transfer::types::packet::PacketData as NftPacketData;
 use namada_core::ibc::core::channel::types::commitment::{
     AcknowledgementCommitment, PacketCommitment, compute_packet_commitment,
@@ -272,13 +273,36 @@ where
 {
     fn try_extract_masp_tx_from_envelope<Transfer: BorshDeserialize>(
         tx_data: &[u8],
-    ) -> Option<masp_primitives::transaction::Transaction> {
-        let msg = decode_message::<Transfer>(tx_data).ok()?;
-
-        if let IbcMessage::Envelope(envelope) = msg {
-            extract_masp_tx_from_envelope(&envelope)
+    ) -> StorageResult<
+        Option<Either<(), masp_primitives::transaction::Transaction>>,
+    > {
+        if let Ok(IbcMessage::Envelope(envelope)) =
+            decode_message::<Transfer>(tx_data)
+        {
+            if let MsgEnvelope::Packet(PacketMsg::Recv(msg)) = &*envelope {
+                // The RECV packet either contained an IBC shielding tx,
+                // or a single payment address, which will be used by
+                // the protocol to mint a MASP note
+                Ok(Some(
+                    extract_masp_tx_from_packet(&msg.packet)
+                        .map_or(Left(()), Right),
+                ))
+            } else if matches!(
+                &*envelope,
+                MsgEnvelope::Packet(PacketMsg::Ack(_) | PacketMsg::Timeout(_))
+            ) {
+                // In case we get an ACK or TIMEOUT, assume we are dealing
+                // with a shielded refund
+                Ok(Some(Left(())))
+            } else {
+                Err(StorageError::new_const(
+                    "Only Recv, Ack or Timeout packet envelopes can alter the \
+                     state of the MASP from an IBC counterparty chain",
+                ))
+            }
         } else {
-            None
+            // If there is no IBC envelope packet, give up
+            Ok(None)
         }
     }
 

@@ -20,6 +20,7 @@ use namada_core::address::{self, Address};
 use namada_core::arith::{CheckedAdd, CheckedSub, checked};
 use namada_core::booleans::BoolResultUnitExt;
 use namada_core::collections::HashSet;
+use namada_core::either::{Left, Right};
 use namada_core::masp::{
     CompactNote, MaspEpoch, TAddrData, addr_taddr, encode_asset_type,
 };
@@ -57,16 +58,16 @@ enum MaspSource {
     /// Updates to the state of the MASP resulting from a user
     /// built shielded transaction.
     UserTx(Box<Transaction>),
-    /// Updates to the state of the MASP resulting from changes
-    /// done by the protocol (e.g. IBC memoless shieldings).
-    Protocol(Vec<CompactNote>),
+    /// Updates to the state of the MASP resulting from
+    /// protocol memoless IBC shieldings.
+    ProtocolIbcShielding(Vec<CompactNote>),
 }
 
 impl MaspSource {
     fn sapling_value_balance(&self) -> I128Sum {
         match self {
             Self::UserTx(shielded_tx) => shielded_tx.sapling_value_balance(),
-            Self::Protocol(notes) =>
+            Self::ProtocolIbcShielding(notes) =>
             {
                 #[allow(clippy::arithmetic_side_effects)]
                 notes.iter().fold(I128Sum::zero(), |accum, note| {
@@ -89,7 +90,7 @@ impl MaspSource {
                     bundle.shielded_outputs.iter().map(|so| so.cmu)
                 }),
             ),
-            Self::Protocol(notes) => {
+            Self::ProtocolIbcShielding(notes) => {
                 itertools::Either::Right(notes.iter().filter_map(|cnote| {
                     cnote.into_note().map(|note| note.cmu())
                 }))
@@ -114,7 +115,7 @@ impl MaspSource {
                     |transp_bundle| transp_bundle.vin.iter().map(Cow::Borrowed),
                 ),
             ),
-            Self::Protocol(notes) => {
+            Self::ProtocolIbcShielding(notes) => {
                 itertools::Either::Right(notes.iter().filter_map(|cnote| {
                     cnote.into_note().map(|note| {
                         Cow::Owned(TxIn {
@@ -137,7 +138,9 @@ impl MaspSource {
                     .into_iter()
                     .flat_map(|transp_bundle| transp_bundle.vout.iter()),
             ),
-            Self::Protocol(_) => itertools::Either::Right(std::iter::empty()),
+            Self::ProtocolIbcShielding(_) => {
+                itertools::Either::Right(std::iter::empty())
+            }
         }
     }
 }
@@ -537,28 +540,68 @@ where
             .data(batched_tx.cmt)
             .ok_or_err_msg("No transaction data")?;
         let actions = ctx.read_actions()?;
-        // Try to get the Transaction object from the tx first (IBC), from
-        // the actions or from unencrypted protocol generated notes
-        let masp_source = if let Some(tx) =
-            Ibc::try_extract_masp_tx_from_envelope::<Transfer>(&tx_data)
+        // Try to get the masp data either from an IBC tx, from
+        // the actions or from protocol memoless IBC shielding
+        // generated notes.
+        let masp_source = match Ibc::try_extract_masp_tx_from_envelope::<
+            Transfer,
+        >(&tx_data)?
         {
-            if ctx
-                .get_events(&masp_event_types::TRANSFER)?
-                .into_iter()
-                .any(|masp_event| {
-                    masp_event.has_attribute::<ProtocolIbcShielding>()
-                })
-            {
-                return Err(Error::new_const(
-                    "Attempted to mint IBC tokens twice through the MASP",
-                ));
+            // MASP tx included in memo field of IBC tx.
+            Some(Right(tx)) => {
+                if is_protocol_ibc_shielding(ctx)? {
+                    return Err(Error::new_const(
+                        "Attempted to mint IBC tokens twice through the MASP",
+                    ));
+                }
+                MaspSource::UserTx(Box::new(tx))
             }
-            MaspSource::UserTx(Box::new(tx))
-        } else {
-            match namada_tx::action::get_masp_section_ref(&actions)
-                .map_err(Error::new_const)?
-            {
-                Some(masp_section_ref) => MaspSource::UserTx(Box::new(
+            // There is an IBC envelope, but no MASP tx included in its memo.
+            // Since the MASP VP was triggered, that only leaves the
+            // case where the protocol minted notes via an IBC memoless
+            // shielding.
+            Some(Left(())) => {
+                let notes = ctx
+                    .get_events(&masp_event_types::TRANSFER)?
+                    .into_iter()
+                    .find_map(|masp_event| {
+                        match masp_event.read_attribute::<MaspTxRef>() {
+                            Ok(MaspTxRef::Unencrypted(notes))
+                                if masp_event
+                                    .has_attribute::<ProtocolIbcShielding>(
+                                    ) =>
+                            {
+                                Some(notes)
+                            }
+                            _ => None,
+                        }
+                    })
+                    .ok_or_else(|| {
+                        Error::new_const(
+                            "Missing IBC protocol shielding note event in \
+                             transaction",
+                        )
+                    })?;
+                MaspSource::ProtocolIbcShielding(notes)
+            }
+            // The only remaining option is a MASP section ref
+            // we are able to read from the actions.
+            None => {
+                if is_protocol_ibc_shielding(ctx)? {
+                    return Err(Error::new_const(
+                        "The transaction emitted a protocol IBC shielding \
+                         event, even though no IBC transaction occurred",
+                    ));
+                }
+                let masp_section_ref =
+                    namada_tx::action::get_masp_section_ref(&actions)
+                        .map_err(Error::new_const)?
+                        .ok_or_else(|| {
+                            Error::new_const(
+                                "Missing MASP section reference in action",
+                            )
+                        })?;
+                MaspSource::UserTx(Box::new(
                     batched_tx
                         .tx
                         .get_masp_section(&masp_section_ref)
@@ -568,28 +611,7 @@ where
                                 "Missing MASP section in transaction",
                             )
                         })?,
-                )),
-                None => {
-                    let notes = ctx
-                        .get_events(&masp_event_types::TRANSFER)?
-                        .into_iter()
-                        .find_map(|masp_event| {
-                            if let MaspTxRef::Unencrypted(notes) =
-                                masp_event.read_attribute::<MaspTxRef>().ok()?
-                            {
-                                Some(notes)
-                            } else {
-                                None
-                            }
-                        })
-                        .ok_or_else(|| {
-                            Error::new_const(
-                                "Missing MASP unencrypted note event in \
-                                 transaction",
-                            )
-                        })?;
-                    MaspSource::Protocol(notes)
-                }
+                ))
             }
         };
 
@@ -779,6 +801,17 @@ where
 
         Ok(())
     }
+}
+
+// Predicate that checks if there is a protocol IBC shielding
+fn is_protocol_ibc_shielding<'ctx, CTX>(ctx: &'ctx CTX) -> Result<bool>
+where
+    CTX: VpEnv<'ctx>,
+{
+    Ok(ctx
+        .get_events(&masp_event_types::TRANSFER)?
+        .into_iter()
+        .any(|masp_event| masp_event.has_attribute::<ProtocolIbcShielding>()))
 }
 
 // Make a map to help recognize asset types lacking an epoch

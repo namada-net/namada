@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v101.1.3
+
+Namada apps v101.1.3 release contains security update of CometBFT to 0.37.16.
+
 ## v101.1.2
 
 Namada apps v101.1.2 release.
@@ -2387,9 +2391,9 @@ Namada 0.24.0 is a minor release that introduces an SDK crate, PoS redelegation,
 
 ### MISCELLANEOUS
 
-- Switched from using `libsecp256k1` to `k256` crate.
-  ([\#1958](https://github.com/anoma/namada/pull/1958))
 - Tag `ed25519` keys with `ZeroizeOnDrop`
+  ([\#1958](https://github.com/anoma/namada/pull/1958))
+- Switched from using `libsecp256k1` to `k256` crate.
   ([\#1958](https://github.com/anoma/namada/pull/1958))
 
 ### SDK

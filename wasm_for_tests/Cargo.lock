@@ -2267,6 +2267,7 @@ dependencies = [
  "chrono",
  "data-encoding",
  "ed25519-consensus",
+ "either",
  "ethabi",
  "ethbridge-structs",
  "eyre",

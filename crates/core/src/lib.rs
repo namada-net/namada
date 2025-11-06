@@ -25,6 +25,7 @@ pub mod bytes;
 pub mod control_flow;
 pub mod hints;
 
+pub use either;
 pub use masp_primitives;
 /// Re-export of tendermint v0.37
 pub mod tendermint {

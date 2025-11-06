@@ -64,18 +64,26 @@ enum MaspSource {
 }
 
 impl MaspSource {
-    fn sapling_value_balance(&self) -> I128Sum {
+    fn sapling_value_balance(&self) -> Result<I128Sum> {
         match self {
-            Self::UserTx(shielded_tx) => shielded_tx.sapling_value_balance(),
-            Self::ProtocolIbcShielding(notes) =>
-            {
-                #[allow(clippy::arithmetic_side_effects)]
-                notes.iter().fold(I128Sum::zero(), |accum, note| {
+            Self::UserTx(shielded_tx) => {
+                Ok(shielded_tx.sapling_value_balance())
+            }
+            Self::ProtocolIbcShielding(notes) => {
+                use masp_primitives::num_traits::CheckedSub;
+
+                notes.iter().try_fold(I128Sum::zero(), |accum, note| {
                     accum
-                        + I128Sum::from_pair(
+                        .checked_sub(&I128Sum::from_pair(
                             note.asset_type,
-                            -i128::from(note.value),
-                        )
+                            note.value.into(),
+                        ))
+                        .ok_or_else(|| {
+                            Error::new_const(
+                                "Underflow in ProtocolIbcShielding sapling \
+                                 balance computation",
+                            )
+                        })
                 })
             }
         }
@@ -646,7 +654,7 @@ where
                 .unwrap_or(&zero),
             &changed_balances.undated_pre,
             &changed_balances.undated_post,
-            &masp_source.sapling_value_balance(),
+            &masp_source.sapling_value_balance()?,
             masp_epoch,
             &changed_balances.undated_tokens,
             conversion_state,
@@ -994,7 +1002,7 @@ fn validate_transparent_bundle(
     authorizers: &mut BTreeSet<TransparentAddress>,
 ) -> Result<()> {
     // The Sapling value balance adds to the transparent tx pool
-    let mut transparent_tx_pool = masp_source.sapling_value_balance();
+    let mut transparent_tx_pool = masp_source.sapling_value_balance()?;
 
     for vin in masp_source.transparent_inputs() {
         validate_transparent_input(

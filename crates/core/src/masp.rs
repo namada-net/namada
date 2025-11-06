@@ -1118,6 +1118,7 @@ impl CompactNote {
     ) -> std::io::Result<MaspTransaction> {
         use group::GroupEncoding;
         use masp_primitives::consensus::{BranchId, MainNetwork};
+        use masp_primitives::num_traits::CheckedSub;
         use masp_primitives::sapling::note_encryption::sapling_note_encryption;
         use masp_primitives::transaction::components::{
             I128Sum, OutputDescription, sapling, transparent,
@@ -1164,10 +1165,15 @@ impl CompactNote {
                         zkproof: [0u8; GROTH_PROOF_BYTES],
                     });
 
-                    #[allow(clippy::arithmetic_side_effects)]
-                    {
-                        bal += I128Sum::from_pair(note.asset_type, -i128::from(note.value));
-                    }
+                    bal = bal.checked_sub(&I128Sum::from_pair(
+                        note.asset_type,
+                        note.value.into(),
+                    ))
+                    .ok_or_else(|| {
+                        std::io::Error::other(
+                            "underflow in CompactNote sapling balance computation",
+                        )
+                    })?;
 
                     Ok::<_, std::io::Error>((t, s, bal))
                 },

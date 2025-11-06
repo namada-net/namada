@@ -684,7 +684,7 @@ impl TxOsmosisSwap<SdkTypes> {
 
         let (receiver, final_memo) = match recipient {
             Either::Left(transparent_recipient) => {
-                (transparent_recipient.encode_compat(), None)
+                (transparent_recipient.encode(), None)
             }
             Either::Right(fut) => {
                 let (payment_addr, overflow_receiver) = fut.await;
@@ -733,7 +733,7 @@ impl TxOsmosisSwap<SdkTypes> {
                     .unwrap(),
                 );
 
-                (MASP.encode_compat(), Some(memo))
+                (MASP.encode(), Some(memo))
             }
         };
 

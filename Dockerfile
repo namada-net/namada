@@ -27,7 +27,7 @@ RUN make build-release
 FROM golang:1.21.0 as tendermint-builder
 WORKDIR /app
 
-RUN git clone -b v0.37.15 --single-branch https://github.com/cometbft/cometbft.git && cd cometbft && make build
+RUN git clone -b v0.37.16 --single-branch https://github.com/cometbft/cometbft.git && cd cometbft && make build
 
 FROM debian:bookworm-slim AS runtime
 ENV NAMADA_LOG_COLOR=false

@@ -6,11 +6,6 @@ use masp_primitives::zip32;
 use namada_core::key::SchemeType;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
-use tiny_hderive::Error as HDeriveError;
-use tiny_hderive::bip44::{
-    DerivationPath as HDeriveDerivationPath,
-    IntoDerivationPath as IntoHDeriveDerivationPath,
-};
 
 const BIP44_PURPOSE: u32 = 44;
 const ZIP32_PURPOSE: u32 = 32;
@@ -274,9 +269,13 @@ impl<'de> Deserialize<'de> for DerivationPath {
     }
 }
 
-impl IntoHDeriveDerivationPath for DerivationPath {
-    fn into(self) -> Result<HDeriveDerivationPath, HDeriveError> {
-        HDeriveDerivationPath::from_str(&self.0.to_string())
+impl TryFrom<DerivationPath> for bip32::DerivationPath {
+    type Error = <bip32::DerivationPath as FromStr>::Err;
+
+    fn try_from(
+        DerivationPath(inner): DerivationPath,
+    ) -> Result<Self, Self::Error> {
+        bip32::DerivationPath::from_str(&inner.to_string())
     }
 }
 

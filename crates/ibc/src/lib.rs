@@ -505,6 +505,12 @@ impl fmt::Display for IbcAccountId {
     }
 }
 
+impl From<IbcAccountId> for ibc::primitives::Signer {
+    fn from(account: IbcAccountId) -> Self {
+        account.to_string().into()
+    }
+}
+
 fn check_ibc_transfer<S>(
     storage: &S,
     ibc_transfer: &IbcTransferInfo,

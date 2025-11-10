@@ -1,7 +1,7 @@
 //! Middleware entry points on Namada.
 
 pub mod pfm_mod;
-pub mod shielded_recv;
+pub mod voluntary_fees;
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -16,14 +16,14 @@ use ibc_middleware_packet_forward::PacketForwardMiddleware;
 use namada_core::address::Address;
 
 use self::pfm_mod::PfmTransferModule;
-use self::shielded_recv::ShieldedRecvModule;
+use self::voluntary_fees::VoluntaryFeesModule;
 use crate::context::transfer_mod::TransferModule;
 use crate::{IbcCommonContext, IbcStorageContext};
 
 /// The stack of middlewares of the transfer module.
 pub type TransferMiddlewares<C, Params, Token, ShieldedToken> =
     OverflowReceiveMiddleware<
-        ShieldedRecvModule<C, Params, Token, ShieldedToken>,
+        VoluntaryFeesModule<C, Params, Token, ShieldedToken>,
     >;
 
 /// Create a new instance of [`TransferMiddlewares`]
@@ -40,7 +40,7 @@ where
     ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
         + Debug,
 {
-    OverflowReceiveMiddleware::wrap(ShieldedRecvModule {
+    OverflowReceiveMiddleware::wrap(VoluntaryFeesModule {
         next: PacketForwardMiddleware::wrap(PfmTransferModule {
             transfer_module: TransferModule::new(ctx, verifiers),
         }),

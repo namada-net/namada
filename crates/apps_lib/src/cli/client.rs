@@ -13,7 +13,7 @@ use crate::cli::cmds::*;
 use crate::client::{rpc, tx, utils};
 
 impl CliApi {
-    pub async fn handle_client_command<C, IO: Io + Send + Sync>(
+    pub async fn handle_client_command<C, IO: Io + Clone + Send + Sync>(
         client: Option<C>,
         cmd: cli::NamadaClient,
         io: IO,
@@ -231,9 +231,23 @@ impl CliApi {
                         });
                         client.wait_until_node_is_synced(&io).await?;
 
+                        // Pre-extract data for the optional shielded-sync
+                        let extra_sync_vks = chain_ctx
+                            .wallet
+                            .get_viewing_keys()
+                            .into_iter()
+                            .map(|(k, v)| {
+                                DatedViewingKey::new(
+                                    v,
+                                    chain_ctx.wallet.find_birthday(k).copied(),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        let shielded = std::mem::take(&mut chain_ctx.shielded);
+
                         let args = args.to_sdk(&mut ctx)?;
-                        let namada = ctx.to_sdk(client, io);
-                        let args = args
+                        let namada = ctx.to_sdk(client.clone(), io.clone());
+                        let mut args = args
                             .into_ibc_transfer(
                                 &namada,
                                 |_route, min_amount, quote_amount| {
@@ -276,7 +290,34 @@ impl CliApi {
                             )
                             .await?;
 
-                        tx::submit_ibc_transfer(&namada, args).await?;
+                        if args.source.spending_key().is_some() {
+                            // Sync the shielded context
+                            let mut sync_args = std::mem::take(
+                                &mut args.shielded_sync,
+                            )
+                            .expect("Missing required shielded-sync arguments");
+                            sync_args.viewing_keys.extend(extra_sync_vks);
+                            let synced_shielded_ctx =
+                                crate::client::masp::syncing(
+                                    ShieldedContext::new(shielded),
+                                    client.clone(),
+                                    sync_args,
+                                    &io,
+                                )
+                                .await?;
+
+                            let namada = namada
+                                .update_shielded_context(synced_shielded_ctx)
+                                .await;
+                            tx::submit_ibc_transfer(&namada, args).await?
+                        } else {
+                            let namada = namada
+                                .update_shielded_context(ShieldedContext::new(
+                                    shielded,
+                                ))
+                                .await;
+                            tx::submit_ibc_transfer(&namada, args).await?
+                        }
                     }
                     Sub::TxUpdateAccount(TxUpdateAccount(args)) => {
                         let chain_ctx = ctx.borrow_mut_chain_or_exit();

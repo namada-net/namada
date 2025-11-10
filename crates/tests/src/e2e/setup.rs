@@ -1142,6 +1142,7 @@ where
                     || fst_arg.as_ref() == "ibc-transfer"
                     || fst_arg.as_ref() == "balance"
                     || fst_arg.as_ref() == "estimate-shielding-rewards"
+                    || fst_arg.as_ref() == "osmosis-swap"
             })
             .unwrap_or_default();
 

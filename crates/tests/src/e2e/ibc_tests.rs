@@ -1820,6 +1820,7 @@ fn shielded_recv_memo_value(
     let tx = StringEncoded::new(
         IbcShieldingData::from_str(&transfer).expect("Test failed"),
     );
+    #[allow(deprecated)]
     let data = NamadaMemoData::OsmosisSwap {
         shielding_data: tx,
         shielded_amount,

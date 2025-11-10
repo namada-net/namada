@@ -96,33 +96,46 @@ pub struct NamadaMemo<Data = NamadaMemoData> {
     pub namada: Data,
 }
 
-/// Data included in a Namada memo.
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[allow(clippy::large_enum_variant)] // TODO Box OsmosisSwap shielding_data
-pub enum NamadaMemoData {
-    /// Generic message sent over IBC.
-    Memo(String),
-    /// Voluntary fees message.
-    VoluntaryFees {
-        /// The fee amount to be paid.
-        fee_amount: namada_core::token::Amount,
-        /// The transparent fee receiver.
-        fee_receiver: namada_core::address::Address,
-    },
-    /// Osmosis swap message.
-    OsmosisSwap {
-        /// Shielding transfer data. Hex encodes the borsh serialized MASP
-        /// transfer.
-        shielding_data: StringEncoded<IbcShieldingData>,
-        /// The amount that is shielded onto the MASP. Corresponds to the
-        /// minimum output amount from the swap.
-        shielded_amount: namada_core::token::Amount,
-        /// The receiver of the difference between the transferred tokens and
-        /// the minimum output amount.
-        overflow_receiver: namada_core::address::Address,
-    },
+mod namada_memo_data {
+    // NOTE: this hack is used to allow deriving Serialize and Deserialize
+    // on a deprecated enum field
+    #![allow(deprecated)]
+
+    use super::*;
+
+    /// Data included in a Namada memo.
+    #[derive(Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    #[allow(clippy::large_enum_variant)]
+    pub enum NamadaMemoData {
+        /// Generic message sent over IBC.
+        Memo(String),
+        /// Voluntary fees message.
+        VoluntaryFees {
+            /// The new received amount (original received amount minus a fee).
+            new_received_amount: namada_core::token::Amount,
+            /// The transparent fee receiver.
+            fee_receiver: namada_core::address::Address,
+        },
+        /// Osmosis swap message.
+        #[deprecated = "Osmosis swap shielding memo data has been deprecated \
+                        in favor of swapping directly to a payment address \
+                        receiver"]
+        OsmosisSwap {
+            /// Shielding transfer data. Hex encodes the borsh serialized MASP
+            /// transfer.
+            shielding_data: StringEncoded<IbcShieldingData>,
+            /// The amount that is shielded onto the MASP. Corresponds to the
+            /// minimum output amount from the swap.
+            shielded_amount: namada_core::token::Amount,
+            /// The receiver of the difference between the transferred tokens
+            /// and the minimum output amount.
+            overflow_receiver: namada_core::address::Address,
+        },
+    }
 }
+#[doc(inline)]
+pub use namada_memo_data::NamadaMemoData;
 
 /// The different variants of an Ibc message
 #[derive(Debug, Clone)]
@@ -292,6 +305,7 @@ pub fn decode_ibc_shielding_data(
         |NamadaMemo { namada: memo_data }| match memo_data {
             NamadaMemoData::Memo(memo) => memo.parse().ok(),
             NamadaMemoData::VoluntaryFees { .. } => None,
+            #[allow(deprecated)]
             NamadaMemoData::OsmosisSwap { shielding_data, .. } => {
                 Some(shielding_data.raw)
             }

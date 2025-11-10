@@ -29,7 +29,6 @@ use namada_sdk::chain::Epoch;
 use namada_sdk::governance::cli::onchain::PgfFunding;
 use namada_sdk::governance::pgf::ADDRESS as PGF_ADDRESS;
 use namada_sdk::governance::storage::proposal::{PGFIbcTarget, PGFTarget};
-use namada_sdk::ibc::IbcShieldingData;
 use namada_sdk::ibc::apps::nft_transfer::types::{
     PORT_ID_STR as NFT_PORT_ID, VERSION as NFT_CHANNEL_VERSION,
 };
@@ -1807,24 +1806,15 @@ fn packet_forward_memo_value(
     }
 }
 
-fn shielded_recv_memo_value(
-    masp_transfer_path: &Path,
-    shielded_amount: Amount,
-    overflow_receiver: namada_core::address::Address,
+fn voluntary_fees_memo_value(
+    new_received_amount: Amount,
+    fee_receiver: namada_core::address::Address,
 ) -> serde_json::Map<String, serde_json::Value> {
-    use namada_core::string_encoding::StringEncoded;
     use namada_sdk::ibc::{NamadaMemo, NamadaMemoData};
 
-    let transfer =
-        std::fs::read_to_string(masp_transfer_path).expect("Test failed");
-    let tx = StringEncoded::new(
-        IbcShieldingData::from_str(&transfer).expect("Test failed"),
-    );
-    #[allow(deprecated)]
-    let data = NamadaMemoData::OsmosisSwap {
-        shielding_data: tx,
-        shielded_amount,
-        overflow_receiver,
+    let data = NamadaMemoData::VoluntaryFees {
+        new_received_amount,
+        fee_receiver,
     };
 
     let value = serde_json::to_value(&NamadaMemo { namada: data })
@@ -2571,11 +2561,8 @@ fn ibc_pfm_unhappy_flows() -> Result<()> {
     Ok(())
 }
 
-/// Test that we are able to use the shielded-receive
-/// middleware to shield funds specified in the memo
-/// message.
 #[test]
-fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
+fn ibc_voluntary_fees_middleware_happy_flow() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
             genesis.parameters.parameters.epochs_per_year =
@@ -2622,45 +2609,33 @@ fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
     )?;
     check_shielded_balance(&test, AA_VIEWING_KEY, NAM, 20)?;
 
-    // 2. Unshield from A_SPENDING_KEY to B_SPENDING_KEY,
-    // using the packet forward and shielded receive
+    // 2. Unshield from A_SPENDING_KEY, using the packet forward and voluntary
+    //    fees
     // middlewares
     for iter in 1..=2u64 {
-        let nam_addr = find_address(&test, NAM)?;
-        let overflow_addr = "tnam1qrqzqa0l0rzzrlr20n487l6n865t8ndv6uhseulq";
-        let ibc_denom_on_gaia =
-            format!("transfer/{channel_id_gaia}/{nam_addr}");
-        let memo_path = gen_ibc_shielding_data(
-            &test,
-            AB_PAYMENT_ADDRESS,
-            &ibc_denom_on_gaia,
-            8,
-            &port_id_namada,
-            &channel_id_namada,
-            None,
-        )?;
-        let masp_receiver = match iter {
+        let recv_addr = "tnam1qpn2vkhm7f0ufh5nylnmr4yflc8x45gnlvdq3tcq";
+        let fees_addr = "tnam1qrqzqa0l0rzzrlr20n487l6n865t8ndv6uhseulq";
+        let receiver = match iter {
             // Test addresses encoded using `bech32m`...
-            1 => MASP.encode(),
+            1 => recv_addr,
             // ...as well as addresses encoded using `bech32`
             2 => {
-                let bech32 = "tnam1pcqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqh8f9c4";
+                let bech32 = "tnam1qpn2vkhm7f0ufh5nylnmr4yflc8x45gnlvcup8az";
                 let addr: namada_core::address::Address =
                     bech32.parse().unwrap();
-                assert_eq!(addr, MASP);
-                bech32.to_owned()
+                assert_eq!(addr, recv_addr.parse().unwrap());
+                bech32
             }
             _ => unreachable!("there are only 2 iters"),
         };
         let memo = packet_forward_memo(
-            masp_receiver.into(),
+            receiver.to_owned().into(),
             &PortId::transfer(),
             &channel_id_namada,
             None,
-            Some(shielded_recv_memo_value(
-                &memo_path,
+            Some(voluntary_fees_memo_value(
                 Amount::native_whole(8),
-                overflow_addr.parse().unwrap(),
+                fees_addr.parse().unwrap(),
             )),
         );
         transfer(
@@ -2689,17 +2664,15 @@ fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
 
         // Check the token on Namada
         check_shielded_balance(&test, AA_VIEWING_KEY, NAM, 20 - iter * 10)?;
-        check_shielded_balance(&test, AB_VIEWING_KEY, NAM, 8 * iter)?;
-        check_balance(&test, overflow_addr, NAM, 2 * iter)?;
+        check_balance(&test, recv_addr, NAM, 8 * iter)?;
+        check_balance(&test, fees_addr, NAM, 2 * iter)?;
     }
 
     Ok(())
 }
 
-/// Test that if the received amount underflows the minimum
-/// amount, we error out and refund assets.
 #[test]
-fn ibc_shielded_recv_middleware_unhappy_flow() -> Result<()> {
+fn ibc_voluntary_fees_middleware_unhappy_flow() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
             genesis.parameters.parameters.epochs_per_year =
@@ -2733,29 +2706,18 @@ fn ibc_shielded_recv_middleware_unhappy_flow() -> Result<()> {
     let hermes = run_hermes(&hermes_dir)?;
     let _bg_hermes = hermes.background();
 
-    let nam_addr = find_address(&test, NAM)?;
-    let overflow_addr = "tnam1qrqzqa0l0rzzrlr20n487l6n865t8ndv6uhseulq";
-    let ibc_denom_on_gaia = format!("transfer/{channel_id_gaia}/{nam_addr}");
+    let recv_addr = "tnam1qpn2vkhm7f0ufh5nylnmr4yflc8x45gnlvdq3tcq";
+    let fees_addr = "tnam1qrqzqa0l0rzzrlr20n487l6n865t8ndv6uhseulq";
     check_balance(&test, ALBERT, NAM, 2_000_000)?;
 
-    let memo_path = gen_ibc_shielding_data(
-        &test,
-        AB_PAYMENT_ADDRESS,
-        &ibc_denom_on_gaia,
-        8,
-        &port_id_namada,
-        &channel_id_namada,
-        None,
-    )?;
     let memo = packet_forward_memo(
-        MASP.to_string().into(),
+        recv_addr.to_string().into(),
         &PortId::transfer(),
         &channel_id_namada,
         None,
-        Some(shielded_recv_memo_value(
-            &memo_path,
+        Some(voluntary_fees_memo_value(
             Amount::native_whole(8),
-            overflow_addr.parse().unwrap(),
+            fees_addr.parse().unwrap(),
         )),
     );
     transfer(
@@ -2779,8 +2741,8 @@ fn ibc_shielded_recv_middleware_unhappy_flow() -> Result<()> {
 
     // Check the token on Namada
     check_balance(&test, ALBERT, NAM, 2_000_000)?;
-    check_shielded_balance(&test, AB_VIEWING_KEY, NAM, 0)?;
-    check_balance(&test, overflow_addr, NAM, 0)?;
+    check_balance(&test, recv_addr, NAM, 0)?;
+    check_balance(&test, fees_addr, NAM, 0)?;
 
     Ok(())
 }

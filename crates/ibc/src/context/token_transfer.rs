@@ -27,6 +27,7 @@ where
     pub(crate) inner: Rc<RefCell<C>>,
     pub(crate) verifiers: Rc<RefCell<BTreeSet<Address>>>,
     is_shielded: bool,
+    is_refund: bool,
 }
 
 impl<C> TokenTransferContext<C>
@@ -42,6 +43,7 @@ where
             inner,
             verifiers,
             is_shielded: false,
+            is_refund: false,
         }
     }
 
@@ -53,6 +55,11 @@ where
     /// Set to enable a shielded transfer
     pub fn enable_shielded_transfer(&mut self) {
         self.is_shielded = true;
+    }
+
+    /// Set the transfer as refund
+    pub fn enable_refund_transfer(&mut self) {
+        self.is_refund = true;
     }
 
     fn validate_sent_coin(&self, coin: &PrefixedCoin) -> Result<(), HostError> {
@@ -312,7 +319,9 @@ where
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
-        self.add_deposit(&ibc_token, amount)?;
+        if !self.is_refund {
+            self.add_deposit(&ibc_token, amount)?;
+        }
 
         self.inner
             .borrow_mut()
@@ -329,7 +338,9 @@ where
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
         self.update_mint_amount(&ibc_token, amount, true)?;
-        self.add_deposit(&ibc_token, amount)?;
+        if !self.is_refund {
+            self.add_deposit(&ibc_token, amount)?;
+        }
 
         // A transfer of NUT tokens must be verified by their VP
         if ibc_token.is_internal()

@@ -1912,7 +1912,6 @@ pub mod cmds {
         }
 
         fn def() -> App {
-            // FIXME: remove the cli shielded-sync command
             App::new(Self::CMD)
                 .about(wrap!(
                     "Estimate the amount of MASP rewards for the \

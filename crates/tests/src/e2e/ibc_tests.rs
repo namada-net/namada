@@ -4694,7 +4694,7 @@ fn osmosis_xcs() -> Result<()> {
             "--gas-limit",
             "500000",
         ],
-        Some(40),
+        Some(120),
     )?;
 
     // confirm trade

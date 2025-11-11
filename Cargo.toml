@@ -117,6 +117,7 @@ base58 = "0.2"
 base64 = "0.22"
 bech32 = "0.11"
 bimap = {version = "0.6", features = ["serde"]}
+bip32 = "0.5"
 bit-set = "0.8"
 bitflags = { version = "2.5", features = ["serde"] }
 blake2b-rs = "0.2"
@@ -246,7 +247,6 @@ tendermint-rpc = {version = "0.40.3", default-features = false}
 test-log = {version = "0.2", default-features = false, features = ["trace"]}
 textwrap-macros = "0.3"
 tiny-bip39 = {version = "2.0"}
-tiny-hderive = {package = "nam-tiny-hderive", version = "0.3.1-nam.1"}
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 thiserror = "2.0"
 tokio = {version = "1.8", default-features = false}

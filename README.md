@@ -1,6 +1,7 @@
 # Namada
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE)
+[![Apps License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](./LICENSE-GPL) (Namada Apps)
+[![Libraries License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE-MIT) (Libraries)
 ![CI Status](https://github.com/namada-net/namada/actions/workflows/ci.yml/badge.svg?branch=main)
 
 ## Overview

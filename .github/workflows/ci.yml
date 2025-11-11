@@ -725,3 +725,27 @@ jobs:
       - name: Stop sccache
         if: always() && steps.sccache.conclusion == 'success'
         run: sccache --stop-server || true
+
+  check-sdk-licenses:
+    runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
+    container:
+      image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.ROLE }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+      - name: Install cargo-about
+        run: cargo binstall cargo-about@0.8.0 --no-confirm
+      - name: Check SDK licenses
+        run: |
+          cd crates/sdk
+          cargo about generate --fail --format json

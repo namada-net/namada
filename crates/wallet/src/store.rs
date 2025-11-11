@@ -808,12 +808,12 @@ pub fn derive_hd_secret_key(
             ed25519::SigScheme::from_bytes(sk).try_to_sk().unwrap()
         }
         SchemeType::Secp256k1 => {
-            let xpriv = tiny_hderive::bip32::ExtendedPrivKey::derive(
+            let xpriv = bip32::XPrv::derive_from_path(
                 seed,
-                derivation_path,
+                &derivation_path.try_into().expect("bip32 derivation path"),
             )
             .expect("Secret key derivation should not fail.");
-            secp256k1::SigScheme::from_bytes(xpriv.secret())
+            secp256k1::SigScheme::from_bytes(xpriv.to_bytes())
                 .try_to_sk()
                 .unwrap()
         }
@@ -1116,22 +1116,82 @@ mod test_wallet {
         {
             // Test vector 1
             const SEED: &str = "000102030405060708090a0b0c0d0e0f";
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m", "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'", "xprv9uHRZZhk6KAJC1avXpDAp4MDc3sQKNxDiPvvkX8Br5ngLNv1TxvUxt4cV1rGL5hj6KCesnDYUhd7oWgT11eZG7XnxHrnYeSvkzY7d2bhkJ7");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'/1", "xprv9wTYmMFdV23N2TdNG573QoEsfRrWKQgWeibmLntzniatZvR9BmLnvSxqu53Kw1UmYPxLgboyZQaXwTCg8MSY3H2EU4pWcQDnRnrVA1xe8fs");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'/1/2'", "xprv9z4pot5VBttmtdRTWfWQmoH1taj2axGVzFqSb8C9xaxKymcFzXBDptWmT7FwuEzG3ryjH4ktypQSAewRiNMjANTtpgP4mLTj34bhnZX7UiM");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'/1/2'/2", "xprvA2JDeKCSNNZky6uBCviVfJSKyQ1mDYahRjijr5idH2WwLsEd4Hsb2Tyh8RfQMuPh7f7RtyzTtdrbdqqsunu5Mm3wDvUAKRHSC34sJ7in334");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'/1/2'/2/1000000000", "xprvA41z7zogVVwxVSgdKUHDy1SKmdb533PjDz7J6N6mV6uS3ze1ai8FHa8kmHScGpWmj4WggLyQjgPie1rFSruoUihUZREPSL39UNdE3BBDu76");
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m",
+                "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'",
+                "xprv9uHRZZhk6KAJC1avXpDAp4MDc3sQKNxDiPvvkX8Br5ngLNv1TxvUxt4cV1rGL5hj6KCesnDYUhd7oWgT11eZG7XnxHrnYeSvkzY7d2bhkJ7",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'/1",
+                "xprv9wTYmMFdV23N2TdNG573QoEsfRrWKQgWeibmLntzniatZvR9BmLnvSxqu53Kw1UmYPxLgboyZQaXwTCg8MSY3H2EU4pWcQDnRnrVA1xe8fs",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'/1/2'",
+                "xprv9z4pot5VBttmtdRTWfWQmoH1taj2axGVzFqSb8C9xaxKymcFzXBDptWmT7FwuEzG3ryjH4ktypQSAewRiNMjANTtpgP4mLTj34bhnZX7UiM",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'/1/2'/2",
+                "xprvA2JDeKCSNNZky6uBCviVfJSKyQ1mDYahRjijr5idH2WwLsEd4Hsb2Tyh8RfQMuPh7f7RtyzTtdrbdqqsunu5Mm3wDvUAKRHSC34sJ7in334",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'/1/2'/2/1000000000",
+                "xprvA41z7zogVVwxVSgdKUHDy1SKmdb533PjDz7J6N6mV6uS3ze1ai8FHa8kmHScGpWmj4WggLyQjgPie1rFSruoUihUZREPSL39UNdE3BBDu76",
+            );
         }
         {
             // Test vector 2
             const SEED: &str = "fffcf9f6f3f0edeae7e4e1dedbd8d5d2cfccc9c6c3c0bdbab7b4b1aeaba8a5a29f9c999693908d8a8784817e7b7875726f6c696663605d5a5754514e4b484542";
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m", "xprv9s21ZrQH143K31xYSDQpPDxsXRTUcvj2iNHm5NUtrGiGG5e2DtALGdso3pGz6ssrdK4PFmM8NSpSBHNqPqm55Qn3LqFtT2emdEXVYsCzC2U");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0", "xprv9vHkqa6EV4sPZHYqZznhT2NPtPCjKuDKGY38FBWLvgaDx45zo9WQRUT3dKYnjwih2yJD9mkrocEZXo1ex8G81dwSM1fwqWpWkeS3v86pgKt");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0/2147483647'", "xprv9wSp6B7kry3Vj9m1zSnLvN3xH8RdsPP1Mh7fAaR7aRLcQMKTR2vidYEeEg2mUCTAwCd6vnxVrcjfy2kRgVsFawNzmjuHc2YmYRmagcEPdU9");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0/2147483647'/1", "xprv9zFnWC6h2cLgpmSA46vutJzBcfJ8yaJGg8cX1e5StJh45BBciYTRXSd25UEPVuesF9yog62tGAQtHjXajPPdbRCHuWS6T8XA2ECKADdw4Ef");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0/2147483647'/1/2147483646'", "xprvA1RpRA33e1JQ7ifknakTFpgNXPmW2YvmhqLQYMmrj4xJXXWYpDPS3xz7iAxn8L39njGVyuoseXzU6rcxFLJ8HFsTjSyQbLYnMpCqE2VbFWc");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0/2147483647'/1/2147483646'/2", "xprvA2nrNbFZABcdryreWet9Ea4LvTJcGsqrMzxHx98MMrotbir7yrKCEXw7nadnHM8Dq38EGfSh6dqA9QWTyefMLEcBYJUuekgW4BYPJcr9E7j");
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m",
+                "xprv9s21ZrQH143K31xYSDQpPDxsXRTUcvj2iNHm5NUtrGiGG5e2DtALGdso3pGz6ssrdK4PFmM8NSpSBHNqPqm55Qn3LqFtT2emdEXVYsCzC2U",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0",
+                "xprv9vHkqa6EV4sPZHYqZznhT2NPtPCjKuDKGY38FBWLvgaDx45zo9WQRUT3dKYnjwih2yJD9mkrocEZXo1ex8G81dwSM1fwqWpWkeS3v86pgKt",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0/2147483647'",
+                "xprv9wSp6B7kry3Vj9m1zSnLvN3xH8RdsPP1Mh7fAaR7aRLcQMKTR2vidYEeEg2mUCTAwCd6vnxVrcjfy2kRgVsFawNzmjuHc2YmYRmagcEPdU9",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0/2147483647'/1",
+                "xprv9zFnWC6h2cLgpmSA46vutJzBcfJ8yaJGg8cX1e5StJh45BBciYTRXSd25UEPVuesF9yog62tGAQtHjXajPPdbRCHuWS6T8XA2ECKADdw4Ef",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0/2147483647'/1/2147483646'",
+                "xprvA1RpRA33e1JQ7ifknakTFpgNXPmW2YvmhqLQYMmrj4xJXXWYpDPS3xz7iAxn8L39njGVyuoseXzU6rcxFLJ8HFsTjSyQbLYnMpCqE2VbFWc",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0/2147483647'/1/2147483646'/2",
+                "xprvA2nrNbFZABcdryreWet9Ea4LvTJcGsqrMzxHx98MMrotbir7yrKCEXw7nadnHM8Dq38EGfSh6dqA9QWTyefMLEcBYJUuekgW4BYPJcr9E7j",
+            );
         }
     }
 
@@ -1142,22 +1202,82 @@ mod test_wallet {
         {
             // Test vector 1 for ed15519
             const SEED: &str = "000102030405060708090a0b0c0d0e0f";
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m", "2b4be7f19ee27bbf30c667b642d5f4aa69fd169872f8fc3059c08ebae2eb19e7");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'", "68e0fe46dfb67e368c75379acec591dad19df3cde26e63b93a8e704f1dade7a3");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'/1'", "b1d0bad404bf35da785a64ca1ac54b2617211d2777696fbffaf208f746ae84f2");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'/1'/2'", "92a5b23c0b8a99e37d07df3fb9966917f5d06e02ddbd909c7e184371463e9fc9");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'/1'/2'/2'", "30d1dc7e5fc04c31219ab25a27ae00b50f6fd66622f6e9c913253d6511d1e662");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'/1'/2'/2'/1000000000'", "8f94d394a8e8fd6b1bc2f3f49f5c47e385281d5c17e65324b0f62483e37e8793");
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m",
+                "2b4be7f19ee27bbf30c667b642d5f4aa69fd169872f8fc3059c08ebae2eb19e7",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'",
+                "68e0fe46dfb67e368c75379acec591dad19df3cde26e63b93a8e704f1dade7a3",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'/1'",
+                "b1d0bad404bf35da785a64ca1ac54b2617211d2777696fbffaf208f746ae84f2",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'/1'/2'",
+                "92a5b23c0b8a99e37d07df3fb9966917f5d06e02ddbd909c7e184371463e9fc9",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'/1'/2'/2'",
+                "30d1dc7e5fc04c31219ab25a27ae00b50f6fd66622f6e9c913253d6511d1e662",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'/1'/2'/2'/1000000000'",
+                "8f94d394a8e8fd6b1bc2f3f49f5c47e385281d5c17e65324b0f62483e37e8793",
+            );
         }
         {
             // Test vector 2 for ed15519
             const SEED: &str = "fffcf9f6f3f0edeae7e4e1dedbd8d5d2cfccc9c6c3c0bdbab7b4b1aeaba8a5a29f9c999693908d8a8784817e7b7875726f6c696663605d5a5754514e4b484542";
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m", "171cb88b1b3c1db25add599712e36245d75bc65a1a5c9e18d76f9f2b1eab4012");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'", "1559eb2bbec5790b0c65d8693e4d0875b1747f4970ae8b650486ed7470845635");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'/2147483647'", "ea4f5bfe8694d8bb74b7b59404632fd5968b774ed545e810de9c32a4fb4192f4");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'/2147483647'/1'", "3757c7577170179c7868353ada796c839135b3d30554bbb74a4b1e4a5a58505c");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'/2147483647'/1'/2147483646'", "5837736c89570de861ebc173b1086da4f505d4adb387c6a1b1342d5e4ac9ec72");
-            do_test_gen_sk_from_seed_and_derivation_path(SCHEME, SEED, "m/0'/2147483647'/1'/2147483646'/2'", "551d333177df541ad876a60ea71f00447931c0a9da16f227c11ea080d7391b8d");
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m",
+                "171cb88b1b3c1db25add599712e36245d75bc65a1a5c9e18d76f9f2b1eab4012",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'",
+                "1559eb2bbec5790b0c65d8693e4d0875b1747f4970ae8b650486ed7470845635",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'/2147483647'",
+                "ea4f5bfe8694d8bb74b7b59404632fd5968b774ed545e810de9c32a4fb4192f4",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'/2147483647'/1'",
+                "3757c7577170179c7868353ada796c839135b3d30554bbb74a4b1e4a5a58505c",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'/2147483647'/1'/2147483646'",
+                "5837736c89570de861ebc173b1086da4f505d4adb387c6a1b1342d5e4ac9ec72",
+            );
+            do_test_gen_sk_from_seed_and_derivation_path(
+                SCHEME,
+                SEED,
+                "m/0'/2147483647'/1'/2147483646'/2'",
+                "551d333177df541ad876a60ea71f00447931c0a9da16f227c11ea080d7391b8d",
+            );
         }
     }
 }

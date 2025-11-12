@@ -3,8 +3,8 @@ use std::io::Read;
 use color_eyre::eyre::Result;
 use namada_sdk::io::{Io, NamadaIo, display_line};
 use namada_sdk::masp::ShieldedContext;
-use namada_sdk::wallet::DatedViewingKey;
 use namada_sdk::{Namada, NamadaImpl};
+use namada_wallet::DatedViewingKey;
 
 use crate::cli;
 use crate::cli::api::{CliApi, CliClient};
@@ -13,13 +13,13 @@ use crate::cli::cmds::*;
 use crate::client::{rpc, tx, utils};
 
 impl CliApi {
-    pub async fn handle_client_command<C, IO: Io + Send + Sync>(
+    pub async fn handle_client_command<C, IO: Io + Clone + Send + Sync>(
         client: Option<C>,
         cmd: cli::NamadaClient,
         io: IO,
     ) -> Result<()>
     where
-        C: CliClient,
+        C: CliClient + Clone,
     {
         match cmd {
             cli::NamadaClient::WithContext(cmd_box) => {
@@ -65,15 +65,49 @@ impl CliApi {
                         tx::submit_transparent_transfer(&namada, args).await?;
                     }
                     Sub::TxShieldedTransfer(TxShieldedTransfer(args)) => {
+                        let extra_sync_vks = {
+                            let chain_ctx = ctx.borrow_chain_or_exit();
+                            chain_ctx
+                                .wallet
+                                .get_viewing_keys()
+                                .into_iter()
+                                .map(|(k, v)| {
+                                    DatedViewingKey::new(
+                                        v,
+                                        chain_ctx
+                                            .wallet
+                                            .find_birthday(k)
+                                            .copied(),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                        };
                         let chain_ctx = ctx.borrow_mut_chain_or_exit();
+                        let shielded = std::mem::take(&mut chain_ctx.shielded);
                         let ledger_address =
                             chain_ctx.get(&args.tx.ledger_address);
                         let client = client.unwrap_or_else(|| {
                             C::from_tendermint_address(&ledger_address)
                         });
                         client.wait_until_node_is_synced(&io).await?;
-                        let args = args.to_sdk(&mut ctx)?;
+
+                        let mut args = args.to_sdk(&mut ctx)?;
+                        let mut sync_args = std::mem::take(
+                            &mut args.shielded_sync,
+                        )
+                        .expect("Missing required shielded-sync arguments");
+                        sync_args.viewing_keys.extend(extra_sync_vks);
+                        let shielded = crate::client::masp::syncing(
+                            ShieldedContext::new(shielded),
+                            client.clone(),
+                            sync_args,
+                            &io,
+                        )
+                        .await?;
+
                         let namada = ctx.to_sdk(client, io);
+                        let namada =
+                            namada.update_shielded_context(shielded).await;
                         tx::submit_shielded_transfer(&namada, args).await?;
                     }
                     Sub::TxShieldingTransfer(TxShieldingTransfer(args)) => {
@@ -89,29 +123,103 @@ impl CliApi {
                         tx::submit_shielding_transfer(&namada, args).await?;
                     }
                     Sub::TxUnshieldingTransfer(TxUnshieldingTransfer(args)) => {
+                        let extra_sync_vks = {
+                            let chain_ctx = ctx.borrow_chain_or_exit();
+                            chain_ctx
+                                .wallet
+                                .get_viewing_keys()
+                                .into_iter()
+                                .map(|(k, v)| {
+                                    DatedViewingKey::new(
+                                        v,
+                                        chain_ctx
+                                            .wallet
+                                            .find_birthday(k)
+                                            .copied(),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                        };
                         let chain_ctx = ctx.borrow_mut_chain_or_exit();
+                        let shielded = std::mem::take(&mut chain_ctx.shielded);
                         let ledger_address =
                             chain_ctx.get(&args.tx.ledger_address);
                         let client = client.unwrap_or_else(|| {
                             C::from_tendermint_address(&ledger_address)
                         });
                         client.wait_until_node_is_synced(&io).await?;
-                        let args = args.to_sdk(&mut ctx)?;
+
+                        let mut args = args.to_sdk(&mut ctx)?;
+                        let mut sync_args = std::mem::take(
+                            &mut args.shielded_sync,
+                        )
+                        .expect("Missing required shielded-sync arguments");
+                        sync_args.viewing_keys.extend(extra_sync_vks);
+                        let shielded = crate::client::masp::syncing(
+                            ShieldedContext::new(shielded),
+                            client.clone(),
+                            sync_args,
+                            &io,
+                        )
+                        .await?;
+
                         let namada = ctx.to_sdk(client, io);
+                        let namada =
+                            namada.update_shielded_context(shielded).await;
                         tx::submit_unshielding_transfer(&namada, args).await?;
                     }
                     Sub::TxIbcTransfer(args) => {
                         let TxIbcTransfer(args) = *args;
                         let chain_ctx = ctx.borrow_mut_chain_or_exit();
+                        let shielded = std::mem::take(&mut chain_ctx.shielded);
                         let ledger_address =
                             chain_ctx.get(&args.tx.ledger_address);
                         let client = client.unwrap_or_else(|| {
                             C::from_tendermint_address(&ledger_address)
                         });
                         client.wait_until_node_is_synced(&io).await?;
-                        let args = args.to_sdk(&mut ctx)?;
-                        let namada = ctx.to_sdk(client, io);
-                        tx::submit_ibc_transfer(&namada, args).await?;
+
+                        let mut args = args.to_sdk(&mut ctx)?;
+                        if args.source.spending_key().is_some() {
+                            // Sync the shielded context
+                            let chain_ctx = ctx.borrow_chain_or_exit();
+                            let extra_sync_vks = chain_ctx
+                                .wallet
+                                .get_viewing_keys()
+                                .into_iter()
+                                .map(|(k, v)| {
+                                    DatedViewingKey::new(
+                                        v,
+                                        chain_ctx
+                                            .wallet
+                                            .find_birthday(k)
+                                            .copied(),
+                                    )
+                                })
+                                .collect::<Vec<_>>();
+                            let mut sync_args = std::mem::take(
+                                &mut args.shielded_sync,
+                            )
+                            .expect("Missing required shielded-sync arguments");
+                            sync_args.viewing_keys.extend(extra_sync_vks);
+                            let synced_shielded_ctx =
+                                crate::client::masp::syncing(
+                                    ShieldedContext::new(shielded),
+                                    client.clone(),
+                                    sync_args,
+                                    &io,
+                                )
+                                .await?;
+
+                            let namada = ctx
+                                .to_sdk(client, io)
+                                .update_shielded_context(synced_shielded_ctx)
+                                .await;
+                            tx::submit_ibc_transfer(&namada, args).await?
+                        } else {
+                            let namada = ctx.to_sdk(client, io);
+                            tx::submit_ibc_transfer(&namada, args).await?
+                        }
                     }
                     Sub::TxOsmosisSwap(args) => {
                         let TxOsmosisSwap(args) = *args;
@@ -123,9 +231,23 @@ impl CliApi {
                         });
                         client.wait_until_node_is_synced(&io).await?;
 
+                        // Pre-extract data for the optional shielded-sync
+                        let extra_sync_vks = chain_ctx
+                            .wallet
+                            .get_viewing_keys()
+                            .into_iter()
+                            .map(|(k, v)| {
+                                DatedViewingKey::new(
+                                    v,
+                                    chain_ctx.wallet.find_birthday(k).copied(),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        let shielded = std::mem::take(&mut chain_ctx.shielded);
+
                         let args = args.to_sdk(&mut ctx)?;
-                        let namada = ctx.to_sdk(client, io);
-                        let args = args
+                        let namada = ctx.to_sdk(client.clone(), io.clone());
+                        let mut args = args
                             .into_ibc_transfer(
                                 &namada,
                                 |_route, min_amount, quote_amount| {
@@ -168,7 +290,34 @@ impl CliApi {
                             )
                             .await?;
 
-                        tx::submit_ibc_transfer(&namada, args).await?;
+                        if args.source.spending_key().is_some() {
+                            // Sync the shielded context
+                            let mut sync_args = std::mem::take(
+                                &mut args.shielded_sync,
+                            )
+                            .expect("Missing required shielded-sync arguments");
+                            sync_args.viewing_keys.extend(extra_sync_vks);
+                            let synced_shielded_ctx =
+                                crate::client::masp::syncing(
+                                    ShieldedContext::new(shielded),
+                                    client.clone(),
+                                    sync_args,
+                                    &io,
+                                )
+                                .await?;
+
+                            let namada = namada
+                                .update_shielded_context(synced_shielded_ctx)
+                                .await;
+                            tx::submit_ibc_transfer(&namada, args).await?
+                        } else {
+                            let namada = namada
+                                .update_shielded_context(ShieldedContext::new(
+                                    shielded,
+                                ))
+                                .await;
+                            tx::submit_ibc_transfer(&namada, args).await?
+                        }
                     }
                     Sub::TxUpdateAccount(TxUpdateAccount(args)) => {
                         let chain_ctx = ctx.borrow_mut_chain_or_exit();
@@ -396,9 +545,7 @@ impl CliApi {
                     Sub::ShieldedSync(ShieldedSync(args)) => {
                         let mut args = args.to_sdk(&mut ctx)?;
                         let chain_ctx = ctx.take_chain_or_exit();
-                        let client = client.unwrap_or_else(|| {
-                            C::from_tendermint_address(&args.ledger_address)
-                        });
+                        let client = client.unwrap();
                         if args.with_indexer.is_none() {
                             client.wait_until_node_is_synced(&io).await?;
                         }
@@ -607,28 +754,102 @@ impl CliApi {
                     }
                     Sub::QueryBalance(QueryBalance(args)) => {
                         let chain_ctx = ctx.borrow_mut_chain_or_exit();
+                        let shielded = std::mem::take(&mut chain_ctx.shielded);
                         let ledger_address =
                             chain_ctx.get(&args.query.ledger_address);
                         let client = client.unwrap_or_else(|| {
                             C::from_tendermint_address(&ledger_address)
                         });
                         client.wait_until_node_is_synced(&io).await?;
-                        let args = args.to_sdk(&mut ctx)?;
-                        let namada = ctx.to_sdk(client, io);
-                        rpc::query_balance(&namada, args).await;
+
+                        let mut args = args.to_sdk(&mut ctx)?;
+                        if args.owner.full_viewing_key().is_some() {
+                            // Sync the shielded context
+                            let chain_ctx = ctx.borrow_chain_or_exit();
+                            let extra_sync_vks = chain_ctx
+                                .wallet
+                                .get_viewing_keys()
+                                .into_iter()
+                                .map(|(k, v)| {
+                                    DatedViewingKey::new(
+                                        v,
+                                        chain_ctx
+                                            .wallet
+                                            .find_birthday(k)
+                                            .copied(),
+                                    )
+                                })
+                                .collect::<Vec<_>>();
+                            let mut sync_args = std::mem::take(
+                                &mut args.shielded_sync,
+                            )
+                            .expect("Missing required shielded-sync arguments");
+                            sync_args.viewing_keys.extend(extra_sync_vks);
+                            let synced_shielded_ctx =
+                                crate::client::masp::syncing(
+                                    ShieldedContext::new(shielded),
+                                    client.clone(),
+                                    sync_args,
+                                    &io,
+                                )
+                                .await?;
+
+                            let namada = ctx
+                                .to_sdk(client, io)
+                                .update_shielded_context(synced_shielded_ctx)
+                                .await;
+                            rpc::query_balance(&namada, args).await;
+                        } else {
+                            let namada = ctx.to_sdk(client, io);
+                            rpc::query_balance(&namada, args).await;
+                        }
                     }
                     Sub::QueryShieldingRewardsEstimate(
                         QueryShieldingRewardsEstimate(args),
                     ) => {
+                        let extra_sync_vks = {
+                            let chain_ctx = ctx.borrow_chain_or_exit();
+                            chain_ctx
+                                .wallet
+                                .get_viewing_keys()
+                                .into_iter()
+                                .map(|(k, v)| {
+                                    DatedViewingKey::new(
+                                        v,
+                                        chain_ctx
+                                            .wallet
+                                            .find_birthday(k)
+                                            .copied(),
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                        };
                         let chain_ctx = ctx.borrow_mut_chain_or_exit();
+                        let shielded = std::mem::take(&mut chain_ctx.shielded);
                         let ledger_address =
                             chain_ctx.get(&args.query.ledger_address);
                         let client = client.unwrap_or_else(|| {
                             C::from_tendermint_address(&ledger_address)
                         });
                         client.wait_until_node_is_synced(&io).await?;
-                        let args = args.to_sdk(&mut ctx)?;
+
+                        let mut args = args.to_sdk(&mut ctx)?;
+                        let mut sync_args = std::mem::take(
+                            &mut args.shielded_sync,
+                        )
+                        .expect("Missing required shielded-sync arguments");
+                        sync_args.viewing_keys.extend(extra_sync_vks);
+                        let shielded = crate::client::masp::syncing(
+                            ShieldedContext::new(shielded),
+                            client.clone(),
+                            sync_args,
+                            &io,
+                        )
+                        .await?;
+
                         let namada = ctx.to_sdk(client, io);
+                        let namada =
+                            namada.update_shielded_context(shielded).await;
                         rpc::query_rewards_estimate(&namada, args).await;
                     }
                     Sub::QueryBonds(QueryBonds(args)) => {

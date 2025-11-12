@@ -2522,22 +2522,6 @@ fn masp_txs_and_queries() -> Result<()> {
     let rpc_address = get_actor_rpc(&test, who);
     wait_for_block_height(&test, &rpc_address, 1, 30)?;
 
-    // add necessary viewing keys to shielded context
-    let mut sync = run_as!(
-        test,
-        who,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            &rpc_address,
-        ],
-        Some(15),
-    )?;
-    sync.assert_success();
     let txs_args = vec![
         // 2. Shield 20 BTC from Albert to PA(A)
         (
@@ -2601,15 +2585,6 @@ fn masp_txs_and_queries() -> Result<()> {
     ];
 
     for (tx_args, tx_result) in &txs_args {
-        // sync shielded context
-        let mut sync = run_as!(
-            test,
-            who,
-            Bin::Client,
-            vec!["shielded-sync", "--node", &rpc_address],
-            Some(15),
-        )?;
-        sync.assert_success();
         for &dry_run in &[true, false] {
             if dry_run && is_use_device() {
                 continue;

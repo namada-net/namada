@@ -80,9 +80,8 @@ use namada_sdk::key::common::SecretKey;
 use namada_sdk::masp::shielded_wallet::ShieldedApi;
 use namada_sdk::masp::utils::RetryStrategy;
 use namada_sdk::masp::{
-    self, ContextSyncStatus, DispatcherCache, MaspTransferData,
-    ShieldedContext, ShieldedUtils, ShieldedWallet, VersionedWallet,
-    VersionedWalletRef,
+    self, DispatcherCache, MaspTransferData, ShieldedContext, ShieldedUtils,
+    ShieldedWallet, VersionedWallet, VersionedWalletRef,
 };
 use namada_sdk::queries::{
     EncodedResponseQuery, RPC, RequestCtx, RequestQuery, Router,
@@ -143,8 +142,6 @@ const BERTHA_SPENDING_KEY: &str = "bertha_spending";
 
 const FILE_NAME: &str = "shielded.dat";
 const TMP_FILE_NAME: &str = "shielded.tmp";
-const SPECULATIVE_FILE_NAME: &str = "speculative_shielded.dat";
-const SPECULATIVE_TMP_FILE_NAME: &str = "speculative_shielded.tmp";
 const CACHE_FILE_NAME: &str = "shielded_sync.cache";
 const CACHE_FILE_TMP_PREFIX: &str = "shielded_sync.cache.tmp";
 
@@ -801,19 +798,10 @@ impl ShieldedUtils for BenchShieldedUtils {
     async fn load<U: ShieldedUtils>(
         &self,
         ctx: &mut ShieldedWallet<U>,
-        force_confirmed: bool,
     ) -> std::io::Result<()> {
         // Try to load shielded context from file
-        let file_name = if force_confirmed {
-            FILE_NAME
-        } else {
-            match ctx.sync_status {
-                ContextSyncStatus::Confirmed => FILE_NAME,
-                ContextSyncStatus::Speculative => SPECULATIVE_FILE_NAME,
-            }
-        };
         let mut ctx_file = match File::open(
-            self.context_dir.0.path().to_path_buf().join(file_name),
+            self.context_dir.0.path().to_path_buf().join(FILE_NAME),
         ) {
             Ok(file) => file,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -840,16 +828,9 @@ impl ShieldedUtils for BenchShieldedUtils {
     async fn save<'a, U: ShieldedUtils>(
         &'a self,
         ctx: VersionedWalletRef<'a, U>,
-        sync_status: ContextSyncStatus,
     ) -> std::io::Result<()> {
-        let (tmp_file_name, file_name) = match sync_status {
-            ContextSyncStatus::Confirmed => (TMP_FILE_NAME, FILE_NAME),
-            ContextSyncStatus::Speculative => {
-                (SPECULATIVE_TMP_FILE_NAME, SPECULATIVE_FILE_NAME)
-            }
-        };
         let tmp_path =
-            self.context_dir.0.path().to_path_buf().join(tmp_file_name);
+            self.context_dir.0.path().to_path_buf().join(TMP_FILE_NAME);
         {
             // First serialize the shielded context into a temporary file.
             // Inability to create this file implies a simultaneuous write is in
@@ -870,20 +851,9 @@ impl ShieldedUtils for BenchShieldedUtils {
         // corrupt data.
         std::fs::rename(
             tmp_path,
-            self.context_dir.0.path().to_path_buf().join(file_name),
+            self.context_dir.0.path().to_path_buf().join(FILE_NAME),
         )?;
 
-        // Remove the speculative file if present since it's state is
-        // overwritten by the confirmed one we just saved
-        if let ContextSyncStatus::Confirmed = sync_status {
-            let _ = std::fs::remove_file(
-                self.context_dir
-                    .0
-                    .path()
-                    .to_path_buf()
-                    .join(SPECULATIVE_FILE_NAME),
-            );
-        }
         Ok(())
     }
 
@@ -1278,8 +1248,6 @@ impl BenchShieldedCtx {
                 self.shielded,
                 self.shell.clone(),
                 ShieldedSync {
-                    ledger_address: FromStr::from_str("http://127.0.0.1:1337")
-                        .unwrap(),
                     last_query_height: None,
                     spending_keys: vec![spending_key],
                     viewing_keys: vec![],

@@ -14,7 +14,6 @@ use masp_primitives::transaction::components::sapling::fees::InputView;
 use masp_primitives::zip32::{
     ExtendedFullViewingKey, ExtendedKey, PseudoExtendedKey,
 };
-use namada_core::masp::MaspTransaction;
 use namada_sdk::address::{Address, ImplicitAddress, MASP};
 use namada_sdk::args::TxBecomeValidator;
 use namada_sdk::borsh::{BorshDeserialize, BorshSerializeExt};
@@ -1210,15 +1209,6 @@ pub async fn submit_shielded_transfer(
     namada: &impl Namada,
     mut args: args::TxShieldedTransfer,
 ) -> Result<(), error::Error> {
-    display_line!(
-        namada.io(),
-        "{}: {}\n",
-        "WARNING".bold().underline().yellow(),
-        "Some information might be leaked if your shielded wallet is not up \
-         to date, make sure to run `namadac shielded-sync` before running \
-         this command.",
-    );
-
     let sources = args
         .sources
         .iter_mut()
@@ -1233,6 +1223,7 @@ pub async fn submit_shielded_transfer(
         &args.tx,
     )
     .await?;
+
     let (mut tx, signing_data) =
         args.clone().build(namada, &mut bparams).await?;
     let disposable_fee_payer = match signing_data {
@@ -1262,15 +1253,6 @@ pub async fn submit_shielded_transfer(
     )
     .await?;
 
-    let masp_section = tx
-        .sections
-        .iter()
-        .find_map(|section| section.masp_tx())
-        .ok_or_else(|| {
-            error::Error::Other(
-                "Missing MASP section in shielded transaction".to_string(),
-            )
-        })?;
     if let Some(dump_tx) = args.tx.dump_tx {
         if let Some(true) = disposable_fee_payer {
             display_line!(
@@ -1280,7 +1262,6 @@ pub async fn submit_shielded_transfer(
             )
         }
         tx::dump_tx(namada.io(), dump_tx, args.tx.output_folder, tx)?;
-        pre_cache_masp_data(namada, &masp_section).await;
     } else {
         sign(namada, &mut tx, &args.tx, signing_data).await?;
         // Store the generated disposable signing key to wallet in case of need
@@ -1291,8 +1272,7 @@ pub async fn submit_shielded_transfer(
                 )
             })?;
         }
-        let res = namada.submit(tx, &args.tx).await?;
-        pre_cache_masp_data_on_tx_result(namada, &res, &masp_section).await;
+        namada.submit(tx, &args.tx).await?;
     }
     Ok(())
 }
@@ -1384,15 +1364,6 @@ pub async fn submit_unshielding_transfer(
     namada: &impl Namada,
     mut args: args::TxUnshieldingTransfer,
 ) -> Result<(), error::Error> {
-    display_line!(
-        namada.io(),
-        "{}: {}\n",
-        "WARNING".bold().underline().yellow(),
-        "Some information might be leaked if your shielded wallet is not up \
-         to date, make sure to run `namadac shielded-sync` before running \
-         this command.",
-    );
-
     let sources = args
         .sources
         .iter_mut()
@@ -1407,6 +1378,7 @@ pub async fn submit_unshielding_transfer(
         &args.tx,
     )
     .await?;
+
     let (mut tx, signing_data) =
         args.clone().build(namada, &mut bparams).await?;
     let disposable_fee_payer = match signing_data {
@@ -1436,15 +1408,6 @@ pub async fn submit_unshielding_transfer(
     )
     .await?;
 
-    let masp_section = tx
-        .sections
-        .iter()
-        .find_map(|section| section.masp_tx())
-        .ok_or_else(|| {
-            error::Error::Other(
-                "Missing MASP section in shielded transaction".to_string(),
-            )
-        })?;
     if let Some(dump_tx) = args.tx.dump_tx {
         if let Some(true) = disposable_fee_payer {
             display_line!(
@@ -1454,7 +1417,6 @@ pub async fn submit_unshielding_transfer(
             )
         }
         tx::dump_tx(namada.io(), dump_tx, args.tx.output_folder, tx)?;
-        pre_cache_masp_data(namada, &masp_section).await;
     } else {
         sign(namada, &mut tx, &args.tx, signing_data).await?;
         // Store the generated disposable signing key to wallet in case of need
@@ -1465,8 +1427,7 @@ pub async fn submit_unshielding_transfer(
                 )
             })?;
         }
-        let res = namada.submit(tx, &args.tx).await?;
-        pre_cache_masp_data_on_tx_result(namada, &res, &masp_section).await;
+        namada.submit(tx, &args.tx).await?;
     }
     Ok(())
 }
@@ -1500,6 +1461,7 @@ where
         |e| (Box::new(StoredBuildParams::default()) as _, Some(e)),
         |bparams| (bparams, None),
     );
+
     // If transaction building fails for any reason, then abort the process
     // blaming MASP build parameter generation if that had also failed.
     let (mut tx, signing_data, _) = args
@@ -1536,8 +1498,6 @@ where
     )
     .await?;
 
-    let opt_masp_section =
-        tx.sections.iter().find_map(|section| section.masp_tx());
     if let Some(dump_tx) = args.tx.dump_tx {
         tx::dump_tx(namada.io(), dump_tx, args.tx.output_folder, tx)?;
         if let Some(true) = disposable_fee_payer {
@@ -1546,9 +1506,6 @@ where
                 "Transaction dry run. The disposable address will not be \
                  saved to wallet."
             )
-        }
-        if let Some(masp_section) = opt_masp_section {
-            pre_cache_masp_data(namada, &masp_section).await;
         }
     } else {
         // Store the generated disposable signing key to wallet in case of need
@@ -1559,17 +1516,13 @@ where
                 )
             })?;
         }
-        let res = batch_opt_reveal_pk_and_submit(
+        batch_opt_reveal_pk_and_submit(
             namada,
             &args.tx,
             &[&args.source.effective_address()],
             (tx, signing_data),
         )
         .await?;
-
-        if let Some(masp_section) = opt_masp_section {
-            pre_cache_masp_data_on_tx_result(namada, &res, &masp_section).await;
-        }
     }
     // NOTE that the tx could fail when its submission epoch doesn't match
     // construction epoch
@@ -2073,43 +2026,4 @@ pub async fn gen_ibc_shielding_transfer(
         eprintln!("No shielded transfer for this IBC transfer.")
     }
     Ok(())
-}
-
-// Pre-cache the data for the provided MASP transaction. Log an error on
-// failure.
-async fn pre_cache_masp_data(namada: &impl Namada, masp_tx: &MaspTransaction) {
-    if let Err(e) = namada
-        .shielded_mut()
-        .await
-        .pre_cache_transaction(masp_tx)
-        .await
-    {
-        // Just display the error but do not propagate it
-        edisplay_line!(namada.io(), "Failed to pre-cache masp data: {}.", e);
-    }
-}
-
-// Check the result of a transaction and pre-cache the masp data accordingly
-async fn pre_cache_masp_data_on_tx_result(
-    namada: &impl Namada,
-    tx_result: &ProcessTxResponse,
-    masp_tx: &MaspTransaction,
-) {
-    match tx_result {
-        ProcessTxResponse::Applied(resp) => {
-            if let Some(InnerTxResult::Success(_)) =
-                // If we have the masp data in an ibc transfer it
-                // means we are unshielding, so there's no reveal pk
-                // tx in the batch which contains only the ibc tx
-                resp.batch_result().first().map(|(_, res)| res)
-            {
-                pre_cache_masp_data(namada, masp_tx).await;
-            }
-        }
-        ProcessTxResponse::Broadcast(_) => {
-            pre_cache_masp_data(namada, masp_tx).await;
-        }
-        // Do not pre-cache when dry-running
-        ProcessTxResponse::DryRun(_) => {}
-    }
 }

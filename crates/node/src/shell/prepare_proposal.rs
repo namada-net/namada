@@ -8,6 +8,7 @@ use namada_sdk::key::tm_raw_hash_to_string;
 use namada_sdk::parameters::get_gas_scale;
 use namada_sdk::proof_of_stake::storage::find_validator_by_raw_hash;
 use namada_sdk::state::{DB, DBIter, StorageHasher, TempWlState, TxIndex};
+use namada_sdk::storage::BlockHeight;
 use namada_sdk::token::{Amount, DenominatedAmount};
 use namada_sdk::tx::Tx;
 use namada_sdk::tx::data::WrapperTx;
@@ -132,7 +133,8 @@ where
             .filter_map(|(tx_index, tx_bytes)| {
                 let result = validate_wrapper_bytes(
                     tx_bytes,
-                    &TxIndex::must_from_usize(tx_index),
+                    TxIndex::must_from_usize(tx_index),
+                    self.get_current_decision_height(),
                     block_time,
                     block_proposer,
                     proposer_local_config,
@@ -276,7 +278,8 @@ where
 #[allow(clippy::too_many_arguments)]
 fn validate_wrapper_bytes<D, H, CA>(
     tx_bytes: &[u8],
-    tx_index: &TxIndex,
+    tx_index: TxIndex,
+    height: BlockHeight,
     block_time: Option<DateTimeUtc>,
     block_proposer: &Address,
     proposer_local_config: Option<&ValidatorLocalConfig>,
@@ -317,6 +320,7 @@ where
         &wrapper,
         &tx,
         tx_index,
+        height,
         block_proposer,
         proposer_local_config,
         &mut ShellParams::new(
@@ -334,7 +338,8 @@ where
 fn prepare_proposal_fee_check<D, H, CA>(
     wrapper: &WrapperTx,
     tx: &Tx,
-    tx_index: &TxIndex,
+    tx_index: TxIndex,
+    height: BlockHeight,
     proposer: &Address,
     proposer_local_config: Option<&ValidatorLocalConfig>,
     shell_params: &mut ShellParams<'_, TempWlState<'static, D, H>, D, H, CA>,
@@ -352,8 +357,15 @@ where
 
     super::fee_data_check(wrapper, minimum_gas_price, shell_params)?;
 
-    protocol::transfer_fee(shell_params, proposer, tx, wrapper, tx_index)
-        .map_or_else(|e| Err(Error::TxApply(e)), |_| Ok(()))
+    protocol::transfer_fee(
+        shell_params,
+        proposer,
+        tx,
+        wrapper,
+        tx_index,
+        height,
+    )
+    .map_or_else(|e| Err(Error::TxApply(e)), |_| Ok(()))
 }
 
 fn compute_min_gas_price<D, H>(
@@ -433,9 +445,7 @@ mod test_prepare_proposal {
     };
     use namada_sdk::proof_of_stake::types::WeightedValidator;
     use namada_sdk::state::collections::lazy_map::{NestedSubKey, SubKey};
-    use namada_sdk::storage::{
-        BlockHeight, InnerEthEventsQueue, StorageRead, StorageWrite,
-    };
+    use namada_sdk::storage::{InnerEthEventsQueue, StorageRead, StorageWrite};
     use namada_sdk::token::read_denom;
     use namada_sdk::tx::data::{Fee, TxType};
     use namada_sdk::tx::{Code, Data, Signed};

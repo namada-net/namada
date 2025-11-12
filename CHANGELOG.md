@@ -148,6 +148,22 @@ Namada apps v201.0.0 Consensus breaking release.
 - Updated Namada libraries to libs-v0.251.0
   ([\#4742](https://github.com/anoma/namada/pull/4742))
 
+## v101.1.4
+
+Namada apps v101.1.4 release.
+
+### IMPROVEMENTS
+
+- Uses the new published version of our sparse merkle tree that speeds up
+  validation times. This should speed up the time it takes to start a node.
+  ([\#4791](https://github.com/anoma/namada/pull/4791))
+- Partially backported PR#4785 to improve performance of shielded sync.
+  ([\#4966](https://github.com/anoma/namada/pull/4966))
+
+## v101.1.3
+
+Namada apps v101.1.3 release contains security update of CometBFT to 0.37.16.
+
 ## v101.1.2
 
 Namada apps v101.1.2 release.

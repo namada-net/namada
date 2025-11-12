@@ -9,7 +9,8 @@ use std::time::Duration as StdDuration;
 use either::Either;
 use masp_primitives::transaction::components::sapling::builder::BuildParams;
 use masp_primitives::zip32::PseudoExtendedKey;
-use namada_core::address::Address;
+use namada_core::address::{Address, MASP};
+use namada_core::arith::checked;
 use namada_core::chain::{BlockHeight, ChainId, Epoch};
 use namada_core::collections::HashMap;
 use namada_core::dec::Dec;
@@ -669,6 +670,44 @@ impl TxOsmosisSwap<SdkTypes> {
             return Err(Error::Other("Swap has been cancelled".to_owned()));
         }
 
+        let frontend_sus_fee = 'frontend_sus_fee: {
+            let Some((target, fee_percentage)) = &transfer.frontend_sus_fee
+            else {
+                break 'frontend_sus_fee None;
+            };
+            if !swap_into_znam {
+                break 'frontend_sus_fee None;
+            }
+
+            let fee_receiver = match target {
+                crate::TransferTarget::Address(MASP)
+                | crate::TransferTarget::PaymentAddress(_)
+                | crate::TransferTarget::Ibc(_) => {
+                    return Err(Error::Other(
+                        "Only transparent sus fee receivers are supported in \
+                         Osmosis shielded swaps"
+                            .to_owned(),
+                    ));
+                }
+                crate::TransferTarget::Address(addr) => addr.clone(),
+            };
+            let remaining_amount_percentage =
+                checked!(Dec::one() - *fee_percentage)?;
+            let new_received_amount = tx::compute_raw_masp_frontend_sus_fee(
+                &trade_min_output_amount,
+                &remaining_amount_percentage,
+            )?;
+
+            Some(assert_json_obj(
+                serde_json::to_value(&NamadaMemo {
+                    namada: NamadaMemoData::VoluntaryFees {
+                        new_received_amount,
+                        fee_receiver,
+                    },
+                })
+                .unwrap(),
+            ))
+        };
         let cosmwasm_memo = Memo {
             wasm: Wasm {
                 contract: transfer.receiver.clone(),
@@ -683,7 +722,7 @@ impl TxOsmosisSwap<SdkTypes> {
                             local_recovery_addr,
                         },
                         route,
-                        final_memo: None,
+                        final_memo: frontend_sus_fee,
                     },
                 },
             },

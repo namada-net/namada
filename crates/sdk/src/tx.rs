@@ -3631,9 +3631,29 @@ async fn compute_masp_frontend_sus_fee(
     token: &Address,
     force: bool,
 ) -> Result<namada_token::DenominatedAmount> {
-    let sus_fee_amt = namada_token::Amount::from_uint(
-        input_amount
-            .amount()
+    let sus_fee_amt =
+        compute_raw_masp_frontend_sus_fee(&input_amount.amount(), percentage)?;
+
+    // Validate the amount given
+    validate_amount(
+        context,
+        args::InputAmount::Unvalidated(DenominatedAmount::new(
+            sus_fee_amt,
+            input_amount.denom(),
+        )),
+        token,
+        force,
+    )
+    .await
+}
+
+/// Extract the raw amount for the masp frontend sustainability fee
+pub fn compute_raw_masp_frontend_sus_fee(
+    amount: &namada_token::Amount,
+    percentage: &namada_core::dec::Dec,
+) -> Result<namada_token::Amount> {
+    namada_token::Amount::from_uint(
+        amount
             .raw_amount()
             .checked_mul_div(
                 percentage.abs(),
@@ -3647,19 +3667,7 @@ async fn compute_masp_frontend_sus_fee(
             .0,
         0,
     )
-    .map_err(|e| Error::Other(e.to_string()))?;
-
-    // Validate the amount given
-    validate_amount(
-        context,
-        args::InputAmount::Unvalidated(DenominatedAmount::new(
-            sus_fee_amt,
-            input_amount.denom(),
-        )),
-        token,
-        force,
-    )
-    .await
+    .map_err(|e| Error::Other(e.to_string()))
 }
 
 /// Build a shielding transfer

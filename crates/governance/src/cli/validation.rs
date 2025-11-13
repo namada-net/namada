@@ -6,7 +6,7 @@ use namada_core::chain::Epoch;
 use namada_core::token;
 use thiserror::Error;
 
-use super::onchain::{PgfFunding, StewardsUpdate};
+use super::onchain::{PgfAction, PgfContinuous, PgfFunding, StewardsUpdate};
 
 /// This enum represents proposal data
 #[derive(Debug, Error)]
@@ -66,6 +66,12 @@ pub enum ProposalValidation {
     InvalidPgfFundingExtraData,
     #[error("Arithmetic {0}.")]
     Arith(#[from] arith::Error),
+    #[error("Continuous PGF target to add may not have proposal ID set")]
+    AddCPGFWithProposalId,
+    #[error("Continuous PGF target to remove must have proposal ID set")]
+    RmCPGFWithoutProposalId,
+    #[error("Continuous PGF target to remove may not have end epoch set")]
+    RmCPGFWithEndEpoch,
 }
 
 pub fn is_valid_author_balance(
@@ -224,9 +230,25 @@ pub fn is_valid_pgf_stewards_data(
 pub fn is_valid_pgf_funding_data(
     data: &PgfFunding,
 ) -> Result<(), ProposalValidation> {
-    if !data.continuous.is_empty() || !data.retro.is_empty() {
-        Ok(())
-    } else {
-        Err(ProposalValidation::InvalidPgfFundingExtraData)
+    if data.continuous.is_empty() && data.retro.is_empty() {
+        return Err(ProposalValidation::InvalidPgfFundingExtraData);
     }
+    for PgfContinuous { target, action } in data.continuous.iter() {
+        match action {
+            PgfAction::Add => {
+                if target.proposal_id.is_some() {
+                    return Err(ProposalValidation::AddCPGFWithProposalId);
+                }
+            }
+            PgfAction::Remove => {
+                if target.proposal_id.is_none() {
+                    return Err(ProposalValidation::RmCPGFWithoutProposalId);
+                }
+                if target.end_epoch.is_some() {
+                    return Err(ProposalValidation::RmCPGFWithEndEpoch);
+                }
+            }
+        }
+    }
+    Ok(())
 }

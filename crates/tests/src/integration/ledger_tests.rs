@@ -1173,6 +1173,7 @@ fn inflation() -> Result<()> {
 /// 1. Submit a first funding proposal where
 ///   - Add ALB - 10k unam until epoch 52
 ///   - Add CHR - 35k unam indefinitely
+///   - Add EST - 1k unam indefinitely
 /// 2. Query the proposal
 /// 3. Vote for the accepted proposals and query balances
 /// 4. Check the result passed
@@ -1182,19 +1183,21 @@ fn inflation() -> Result<()> {
 ///   - Add CHR - 75k unam until epoch 71
 ///   - Add EST - 66.6k unam indefinitely
 ///   - Add ALB - 166 unam until epoch 55
-/// 7. Vote and confirm it passes then wait until activation epoch
+/// 7. Vote and confirm it passes
 /// 8. Query balances
-/// 9. Query PGF fundings
-/// 10. Advance to epoch 52 and check that the ALB prop 0 cPGF has expired
-/// 10. Submit a new funding proposal where
+/// 9. Wait until activation epoch
+/// 10. Query PGF fundings
+/// 11. Advance to epoch 52 and check that the ALB prop 0 cPGF has expired
+/// 12. Submit a new funding proposal where
+///   - Remove EST - prop 0
 ///   - Remove EST - prop 1
-/// 11. Vote on proposal and pass it
-/// 12. Advance to epoch 71 and confirm that no cPGF exists anymore
+/// 13. Vote on proposal and pass it
+/// 14. Advance to epoch 71 and confirm that no cPGF exists anymore
 #[test]
 fn continuous_pgf_proposals() -> Result<()> {
     // This address doesn't matter for tests. But an argument is required.
     let validator_one_rpc = "http://127.0.0.1:26567";
-    // 1. start the ledger node
+    // Start the ledger node
     let (mut node, _services) = setup::setup()?;
 
     let tx_args = apply_use_device(vec![
@@ -1240,6 +1243,17 @@ fn continuous_pgf_proposals() -> Result<()> {
                     target: PGFTarget::Internal(PGFInternalTarget {
                         amount: token::Amount::from_u64(35_000),
                         target: christel.clone(),
+                    }),
+                    end_epoch: None,
+                    proposal_id: None,
+                },
+                action: PgfAction::Add,
+            },
+            PgfContinuous {
+                target: ContPGFTarget {
+                    target: PGFTarget::Internal(PGFInternalTarget {
+                        amount: token::Amount::from_u64(1_000),
+                        target: ester.clone(),
                     }),
                     end_epoch: None,
                     proposal_id: None,
@@ -1358,6 +1372,7 @@ fn continuous_pgf_proposals() -> Result<()> {
         node.next_epoch();
     }
 
+    // 4. Check the result passed
     let query_proposal = vec![
         "query-proposal-result",
         "--proposal-id",
@@ -1409,6 +1424,10 @@ fn continuous_pgf_proposals() -> Result<()> {
     assert!(captured.contains(&format!("- {}", &christel)));
     assert!(
         captured.contains("- Prop 0: 0.035000 native tokens, end epoch = None")
+    );
+    assert!(captured.contains(&format!("- {}", &ester)));
+    assert!(
+        captured.contains("- Prop 0: 0.001000 native tokens, end epoch = None")
     );
     assert!(captured.contains(&format!("- {}", &albert)));
     assert!(
@@ -1485,6 +1504,7 @@ fn continuous_pgf_proposals() -> Result<()> {
     assert_matches!(captured.result, Ok(_));
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
+    // 7. Vote and confirm it passes
     node.next_epoch();
     let submit_proposal_vote = apply_use_device(vec![
         "vote-proposal",
@@ -1520,6 +1540,7 @@ fn continuous_pgf_proposals() -> Result<()> {
     assert_matches!(captured.result, Ok(_));
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
+    // 8. Query balances
     let query_balance_args = vec![
         "balance",
         "--owner",
@@ -1548,18 +1569,21 @@ fn continuous_pgf_proposals() -> Result<()> {
     assert_matches!(captured.result, Ok(_));
     assert!(captured.contains("nam: 2000000.07"));
 
-    // Wait until activation epoch
+    // 9. Wait until activation epoch
     while node.current_epoch().0 < 49 {
         node.next_epoch();
     }
 
-    // 11. Query pgf fundings
+    // 10. Query pgf fundings
     let query_pgf = vec!["query-pgf", "--node", &validator_one_rpc];
     let captured = CapturedOutput::of(|| run(&node, Bin::Client, query_pgf));
     assert_matches!(captured.result, Ok(_));
 
     assert!(captured.contains("Continuous PGF distributions"));
     assert!(captured.contains(&format!("- {}", &ester)));
+    assert!(
+        captured.contains("- Prop 0: 0.001000 native tokens, end epoch = None")
+    );
     assert!(
         captured.contains("- Prop 1: 0.066600 native tokens, end epoch = None")
     );
@@ -1615,8 +1639,9 @@ fn continuous_pgf_proposals() -> Result<()> {
     let captured =
         CapturedOutput::of(|| run(&node, Bin::Client, query_balance_args));
     assert_matches!(captured.result, Ok(_));
-    assert!(captured.contains("nam: 1000000.066605"));
+    assert!(captured.contains("nam: 1000000.086605"));
 
+    // 11. Advance to epoch 52 and check that the ALB prop 0 cPGF has expired
     while node.current_epoch().0 < 52 {
         node.next_epoch();
     }
@@ -1624,10 +1649,11 @@ fn continuous_pgf_proposals() -> Result<()> {
     let captured = CapturedOutput::of(|| run(&node, Bin::Client, query_pgf));
     assert_matches!(captured.result, Ok(_));
 
-    // TODO: How can I check the absence of a string??
-
     assert!(captured.contains("Continuous PGF distributions"));
     assert!(captured.contains(&format!("- {}", &ester)));
+    assert!(
+        captured.contains("- Prop 0: 0.001000 native tokens, end epoch = None")
+    );
     assert!(
         captured.contains("- Prop 1: 0.066600 native tokens, end epoch = None")
     );
@@ -1636,6 +1662,9 @@ fn continuous_pgf_proposals() -> Result<()> {
         captured.contains("- Prop 1: 0.075000 native tokens, end epoch = 71")
     );
     assert!(captured.contains(&format!("- {}", &albert)));
+    assert!(
+        !captured.contains("- Prop 0: 0.010000 native tokens, end epoch = 52")
+    );
     assert!(
         captured.contains("- Prop 1: 0.000166 native tokens, end epoch = 55")
     );
@@ -1680,20 +1709,34 @@ fn continuous_pgf_proposals() -> Result<()> {
     let captured =
         CapturedOutput::of(|| run(&node, Bin::Client, query_balance_args));
     assert_matches!(captured.result, Ok(_));
-    assert!(captured.contains("nam: 1000000.266405"));
+    assert!(captured.contains("nam: 1000000.289405"));
 
+    // 12. Submit a new funding proposal
     let pgf_funding = PgfFunding {
-        continuous: vec![PgfContinuous {
-            target: ContPGFTarget {
-                target: PGFTarget::Internal(PGFInternalTarget {
-                    amount: token::Amount::zero(), // doesn't matter
-                    target: ester.clone(),
-                }),
-                end_epoch: None,
-                proposal_id: Some(1),
+        continuous: vec![
+            PgfContinuous {
+                target: ContPGFTarget {
+                    target: PGFTarget::Internal(PGFInternalTarget {
+                        amount: token::Amount::zero(), // doesn't matter
+                        target: ester.clone(),
+                    }),
+                    end_epoch: None,
+                    proposal_id: Some(0),
+                },
+                action: PgfAction::Remove,
             },
-            action: PgfAction::Remove,
-        }],
+            PgfContinuous {
+                target: ContPGFTarget {
+                    target: PGFTarget::Internal(PGFInternalTarget {
+                        amount: token::Amount::zero(), // doesn't matter
+                        target: ester.clone(),
+                    }),
+                    end_epoch: None,
+                    proposal_id: Some(1),
+                },
+                action: PgfAction::Remove,
+            },
+        ],
         retro: vec![],
     };
 
@@ -1717,6 +1760,7 @@ fn continuous_pgf_proposals() -> Result<()> {
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
     node.next_epoch();
+    // 13. Vote on proposal and pass it
     let submit_proposal_vote = apply_use_device(vec![
         "vote-proposal",
         "--proposal-id",
@@ -1751,7 +1795,7 @@ fn continuous_pgf_proposals() -> Result<()> {
     assert_matches!(captured.result, Ok(_));
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // 10. Wait
+    // 14. Advance to epoch 71 and confirm that no cPGF exists anymore
     while node.current_epoch().0 < 71 {
         node.next_epoch();
     }
@@ -1803,7 +1847,7 @@ fn continuous_pgf_proposals() -> Result<()> {
     let captured =
         CapturedOutput::of(|| run(&node, Bin::Client, query_balance_args));
     assert_matches!(captured.result, Ok(_));
-    assert!(captured.contains("nam: 1000001.465205"));
+    assert!(captured.contains("nam: 1000001.506205"));
 
     Ok(())
 }

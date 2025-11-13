@@ -494,11 +494,14 @@ where
                     .iter()
                     .filter_map(|funding| match funding {
                         PGFAction::Continuous(AddRemove::Remove(target)) => {
-                            Some(target.target.target().to_lowercase())
+                            Some((
+                                target.target.target().to_lowercase(),
+                                target.proposal_id,
+                            ))
                         }
                         _ => None,
                     })
-                    .collect::<BTreeSet<String>>();
+                    .collect::<BTreeSet<_>>();
 
                 let total_retro_targets = fundings
                     .iter()

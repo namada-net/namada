@@ -476,6 +476,37 @@ where
                 }
             }
             ProposalType::PGFPayment(fundings) => {
+                // Check optional fields of CPGF targets
+                for action in fundings.iter() {
+                    match action {
+                        PGFAction::Continuous(add_remove) => match add_remove {
+                            AddRemove::Add(target) => {
+                                if target.proposal_id.is_some() {
+                                    return Err(Error::new_const(
+                                        "Continuous PGF target to add may not \
+                                         have proposal ID set",
+                                    ));
+                                }
+                            }
+                            AddRemove::Remove(target) => {
+                                if target.proposal_id.is_none() {
+                                    return Err(Error::new_const(
+                                        "Continuous PGF target to remove must \
+                                         have proposal ID set",
+                                    ));
+                                }
+                                if target.end_epoch.is_some() {
+                                    return Err(Error::new_const(
+                                        "Continuous PGF target to remove may \
+                                         not have end epoch set",
+                                    ));
+                                }
+                            }
+                        },
+                        PGFAction::Retro(_) => {}
+                    }
+                }
+
                 // collect all the funding target that we have to add and are
                 // unique
                 let are_continuous_add_targets_unique = fundings

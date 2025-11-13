@@ -482,7 +482,7 @@ where
                     .iter()
                     .filter_map(|funding| match funding {
                         PGFAction::Continuous(AddRemove::Add(target)) => {
-                            Some(target.target().to_lowercase())
+                            Some(target.target.target().to_lowercase())
                         }
                         _ => None,
                     })
@@ -494,7 +494,7 @@ where
                     .iter()
                     .filter_map(|funding| match funding {
                         PGFAction::Continuous(AddRemove::Remove(target)) => {
-                            Some(target.target().to_lowercase())
+                            Some(target.target.target().to_lowercase())
                         }
                         _ => None,
                     })

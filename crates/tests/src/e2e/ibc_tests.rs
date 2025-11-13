@@ -2959,7 +2959,7 @@ fn propose_funding(
                     channel_id: src_channel_id.clone(),
                 }),
                 end_epoch: None,
-                proposal_id: 0,
+                proposal_id: Some(0),
             },
             action: PgfAction::Add,
         }],

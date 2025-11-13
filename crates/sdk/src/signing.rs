@@ -1198,7 +1198,7 @@ fn proposal_type_to_ledger_vector(
                     PGFAction::Continuous(AddRemove::Remove(
                         ContPGFTarget {
                             target: PGFTarget::Internal(target),
-                            end_epoch,
+                            end_epoch: _,
                             proposal_id,
                         },
                     )) => {
@@ -1206,27 +1206,22 @@ fn proposal_type_to_ledger_vector(
                             "PGF Action : Remove Continuous Payment"
                                 .to_string(),
                         );
-                        output.push(format!("Proposal ID: {}", proposal_id));
+                        output.push(format!(
+                            "Proposal ID: {}",
+                            proposal_id.unwrap()
+                        ));
                         output.push(format!("Target: {}", target.target));
                         output.push(format!(
                             "Amount: NAM {}",
                             to_ledger_decimal_whitelisted_token(
                                 &target.amount.to_string_native()
                             )
-                        ));
-                        output.push(format!(
-                            "End Epoch: {}",
-                            if let Some(end_epoch) = end_epoch {
-                                end_epoch.0.to_string()
-                            } else {
-                                "None".to_string()
-                            }
                         ));
                     }
                     PGFAction::Continuous(AddRemove::Remove(
                         ContPGFTarget {
                             target: PGFTarget::Ibc(target),
-                            end_epoch,
+                            end_epoch: _,
                             proposal_id,
                         },
                     )) => {
@@ -1234,21 +1229,16 @@ fn proposal_type_to_ledger_vector(
                             "PGF Action : Remove Continuous Payment"
                                 .to_string(),
                         );
-                        output.push(format!("Proposal ID: {}", proposal_id));
+                        output.push(format!(
+                            "Proposal ID: {}",
+                            proposal_id.unwrap()
+                        ));
                         output.push(format!("Target: {}", target.target));
                         output.push(format!(
                             "Amount: NAM {}",
                             to_ledger_decimal_whitelisted_token(
                                 &target.amount.to_string_native()
                             )
-                        ));
-                        output.push(format!(
-                            "End Epoch: {}",
-                            if let Some(end_epoch) = end_epoch {
-                                end_epoch.0.to_string()
-                            } else {
-                                "None".to_string()
-                            }
                         ));
                         output.push(format!("Port ID: {}", target.port_id));
                         output
@@ -3260,8 +3250,8 @@ mod test_signing {
                         amount: Amount::zero(),
                     }),
                     end_epoch: Some(Epoch::from(1)),
-                    proposal_id: 0,
-                }), // TODO: ask Murisi if this is ok
+                    proposal_id: None,
+                }),
             )])),
             &tx,
             &mut output,
@@ -3272,7 +3262,6 @@ mod test_signing {
             vec![
                 "Proposal type : PGF Payment".to_string(),
                 "PGF Action : Add Continuous Payment".to_string(),
-                "Proposal ID: 0".to_string(),
                 format!("Target: {addr}"),
                 "Amount: NAM 0".to_string(),
                 "End Epoch: 1".to_string(),
@@ -3286,9 +3275,9 @@ mod test_signing {
                         target: addr.clone(),
                         amount: Amount::zero(),
                     }),
-                    end_epoch: Some(Epoch::from(1)),
-                    proposal_id: 0,
-                }), // TODO: ask Murisi if this is ok
+                    end_epoch: None,
+                    proposal_id: Some(0),
+                }),
             )])),
             &tx,
             &mut output,
@@ -3302,7 +3291,6 @@ mod test_signing {
                 "Proposal ID: 0".to_string(),
                 format!("Target: {addr}"),
                 "Amount: NAM 0".to_string(),
-                "End Epoch: 1".to_string(),
             ],
         );
         output.clear();
@@ -3339,8 +3327,8 @@ mod test_signing {
                         channel_id: ChannelId::new(16),
                     }),
                     end_epoch: None,
-                    proposal_id: 0,
-                }), // TODO: ask Murisi if this is ok
+                    proposal_id: None,
+                }),
             )])),
             &tx,
             &mut output,
@@ -3370,8 +3358,8 @@ mod test_signing {
                         channel_id: ChannelId::new(16),
                     }),
                     end_epoch: None,
-                    proposal_id: 0,
-                }), // TODO: ask Murisi if this is ok
+                    proposal_id: Some(0),
+                }),
             )])),
             &tx,
             &mut output,
@@ -3385,7 +3373,6 @@ mod test_signing {
                 "Proposal ID: 0".to_string(),
                 "Target: bloop".to_string(),
                 "Amount: NAM 0".to_string(),
-                "End Epoch: None".to_string(),
                 "Port ID: transfer".to_string(),
                 "Channel ID: channel-16".to_string(),
             ],

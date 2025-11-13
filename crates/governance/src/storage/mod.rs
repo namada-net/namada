@@ -73,7 +73,7 @@ where
                                 proposal::AddRemove::Add(ContPGFTarget {
                                     target: c_tgt.target,
                                     end_epoch: c_tgt.end_epoch,
-                                    proposal_id,
+                                    proposal_id: None,
                                 })
                             }
                             proposal::AddRemove::Remove(c) => {

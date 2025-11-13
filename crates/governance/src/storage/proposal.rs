@@ -170,36 +170,6 @@ impl TryFrom<PgfFundingProposal> for InitProposalData {
     }
 }
 
-/// Storage struture for pgf fundings
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    BorshSerialize,
-    BorshDeserialize,
-    BorshDeserializer,
-    Serialize,
-    Deserialize,
-)]
-pub struct StoragePgfFunding {
-    /// The data about the pgf funding
-    pub detail: ContPGFTarget,
-    /// The id of the proposal that added this funding
-    pub id: u64,
-}
-
-impl StoragePgfFunding {
-    /// Init a new pgf funding struct
-    pub fn new(detail: ContPGFTarget, id: u64) -> Self {
-        Self { detail, id }
-    }
-}
-
-/// Sorted map of continuous pgf distributions
-pub type ContPgfFundings = BTreeMap<String, BTreeMap<u64, ContPGFTarget>>;
-
 /// The type of a Proposal
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[derive(
@@ -263,18 +233,18 @@ where
     }
 }
 
-/// The actions that yo momma can execute
+/// Continuous PGF target.
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[derive(
     Debug,
     Clone,
-    PartialEq,
     BorshSchema,
     BorshSerialize,
     BorshDeserialize,
     BorshDeserializer,
     Serialize,
     Deserialize,
+    PartialEq,
     Eq,
     Ord,
     PartialOrd,
@@ -284,9 +254,14 @@ pub struct ContPGFTarget {
     /// PGF target
     pub target: PGFTarget,
     /// The epoch at which the funding ends, if any
+    ///
+    /// This may be set only when adding the target.
     pub end_epoch: Option<Epoch>,
-    /// The proposal ID that added this PGF payment
-    pub proposal_id: u64,
+    /// The proposal ID that added this PGF payment.
+    ///
+    /// This must be set when removing PGF target and cannot be set when adding
+    /// it.
+    pub proposal_id: Option<u64>,
 }
 
 impl Display for ContPGFTarget {
@@ -322,7 +297,33 @@ impl Display for ContPGFTarget {
     }
 }
 
-impl ContPGFTarget {
+/// Stored Continuous PGF target
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    BorshSchema,
+    BorshSerialize,
+    BorshDeserialize,
+    BorshDeserializer,
+    Serialize,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialOrd,
+    Hash,
+)]
+pub struct StoredContPGFTarget {
+    /// PGF target
+    pub target: PGFTarget,
+    /// The epoch at which the funding ends, if any
+    pub end_epoch: Option<Epoch>,
+    /// The proposal ID that added this PGF payment
+    pub proposal_id: u64,
+}
+
+impl StoredContPGFTarget {
     /// Returns the funding target as String
     pub fn target(&self) -> String {
         self.target.target()
@@ -753,7 +754,8 @@ pub mod testing {
         ) -> ContPGFTarget {
             ContPGFTarget {
                 target,
-                end_epoch,proposal_id
+                end_epoch,
+                proposal_id: Some(proposal_id),
             }
         }
     }
@@ -765,7 +767,21 @@ pub mod testing {
     /// Generate an arbitrary PGF action
     pub fn arb_pgf_action() -> impl Strategy<Value = PGFAction> {
         prop_oneof![
-            arb_add_remove(arb_cpgf_target()).prop_map(PGFAction::Continuous),
+            arb_add_remove(arb_cpgf_target()).prop_map(|add_rm| {
+                let add_rm = match add_rm {
+                    AddRemove::Add(target) => AddRemove::Add(ContPGFTarget {
+                        proposal_id: None,
+                        ..target
+                    }),
+                    AddRemove::Remove(target) => {
+                        AddRemove::Remove(ContPGFTarget {
+                            end_epoch: None,
+                            ..target
+                        })
+                    }
+                };
+                PGFAction::Continuous(add_rm)
+            }),
             arb_pgf_target().prop_map(PGFAction::Retro),
         ]
     }

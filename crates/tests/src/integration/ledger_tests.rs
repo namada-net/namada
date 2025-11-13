@@ -1231,7 +1231,7 @@ fn continuous_pgf_proposals() -> Result<()> {
                         target: albert.clone(),
                     }),
                     end_epoch: Some(Epoch(52)),
-                    proposal_id: 999999, // doesn't matter
+                    proposal_id: None,
                 },
                 action: PgfAction::Add,
             },
@@ -1242,7 +1242,7 @@ fn continuous_pgf_proposals() -> Result<()> {
                         target: christel.clone(),
                     }),
                     end_epoch: None,
-                    proposal_id: 9999999, // doesn't matter
+                    proposal_id: None,
                 },
                 action: PgfAction::Add,
             },
@@ -1424,8 +1424,8 @@ fn continuous_pgf_proposals() -> Result<()> {
                         amount: token::Amount::zero(), // doesn't matter
                         target: christel.clone(),
                     }),
-                    end_epoch: Some(Epoch(999999)), // doesn't matter
-                    proposal_id: 0,
+                    end_epoch: None,
+                    proposal_id: Some(0),
                 },
                 action: PgfAction::Remove,
             },
@@ -1436,7 +1436,7 @@ fn continuous_pgf_proposals() -> Result<()> {
                         target: christel.clone(),
                     }),
                     end_epoch: Some(Epoch(71)),
-                    proposal_id: 9999999, // doesn't matter
+                    proposal_id: None,
                 },
                 action: PgfAction::Add,
             },
@@ -1447,7 +1447,7 @@ fn continuous_pgf_proposals() -> Result<()> {
                         target: ester.clone(),
                     }),
                     end_epoch: None,
-                    proposal_id: 9999999, // doesn't matter
+                    proposal_id: None,
                 },
                 action: PgfAction::Add,
             },
@@ -1458,7 +1458,7 @@ fn continuous_pgf_proposals() -> Result<()> {
                         target: albert.clone(),
                     }),
                     end_epoch: Some(Epoch(55)),
-                    proposal_id: 9999999, // doesn't matter
+                    proposal_id: None,
                 },
                 action: PgfAction::Add,
             },
@@ -1689,8 +1689,8 @@ fn continuous_pgf_proposals() -> Result<()> {
                     amount: token::Amount::zero(), // doesn't matter
                     target: ester.clone(),
                 }),
-                end_epoch: Some(Epoch(0)), // doesn't matter
-                proposal_id: 1,
+                end_epoch: None,
+                proposal_id: Some(1),
             },
             action: PgfAction::Remove,
         }],
@@ -2065,7 +2065,7 @@ fn pgf_governance_proposal() -> Result<()> {
                         target: bertha.clone(),
                     }),
                     end_epoch: Some(cont_end_epoch),
-                    proposal_id: 0,
+                    proposal_id: None,
                 },
                 action: PgfAction::Add,
             },
@@ -2076,7 +2076,7 @@ fn pgf_governance_proposal() -> Result<()> {
                         target: christel.clone(),
                     }),
                     end_epoch: None,
-                    proposal_id: 0,
+                    proposal_id: None,
                 },
                 action: PgfAction::Add,
             },

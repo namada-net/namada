@@ -36,7 +36,9 @@ use namada_gas::event::GasUsed as GasUsedAttr;
 use namada_governance::parameters::GovernanceParameters;
 use namada_governance::pgf::parameters::PgfParameters;
 use namada_governance::pgf::storage::steward::StewardDetail;
-use namada_governance::storage::proposal::{ContPgfFundings, StorageProposal};
+use namada_governance::storage::proposal::{
+    StorageProposal, StoredContPGFTarget,
+};
 use namada_governance::utils::{
     ProposalResult, ProposalVotes, Vote, compute_proposal_result,
 };
@@ -326,8 +328,10 @@ pub async fn query_pgf_stewards<C: namada_io::Client + Sync>(
 /// Get the set of pgf fundings
 pub async fn query_pgf_fundings<C: namada_io::Client + Sync>(
     client: &C,
-) -> Result<ContPgfFundings, error::Error> {
-    convert_response::<C, ContPgfFundings>(RPC.vp().pgf().funding(client).await)
+) -> Result<Vec<StoredContPGFTarget>, error::Error> {
+    convert_response::<C, Vec<StoredContPGFTarget>>(
+        RPC.vp().pgf().funding(client).await,
+    )
 }
 
 /// Query the consensus key by validator address

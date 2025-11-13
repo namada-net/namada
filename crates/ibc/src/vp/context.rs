@@ -7,6 +7,7 @@ use namada_core::address::Address;
 use namada_core::arith::checked;
 use namada_core::chain::{BlockHeader, BlockHeight, ChainId, Epoch, Epochs};
 use namada_core::collections::{HashMap, HashSet};
+use namada_core::masp_primitives::asset_type::AssetType;
 use namada_core::storage::{Key, TxIndex};
 use namada_events::Event;
 use namada_gas::MEMORY_ACCESS_GAS_PER_BYTE;
@@ -17,7 +18,6 @@ use namada_systems::trans_token::{self as token, Amount};
 use namada_vp::VpEnv;
 use namada_vp::native_vp::{CtxPreStorageRead, VpEvaluator};
 
-use crate::event::IbcEvent;
 use crate::storage::{self, is_ibc_key};
 use crate::{IbcCommonContext, IbcStorageContext};
 
@@ -163,7 +163,7 @@ where
         self.ctx.get_block_epoch()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex> {
+    fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)> {
         self.ctx.get_tx_index()
     }
 
@@ -225,8 +225,8 @@ where
         &mut self.storage
     }
 
-    fn emit_ibc_event(&mut self, event: IbcEvent) -> Result<()> {
-        self.storage.event.insert(event.into());
+    fn emit_event(&mut self, event: Event) -> Result<()> {
+        self.storage.event.insert(event);
         Ok(())
     }
 
@@ -267,6 +267,18 @@ where
 
     fn log_string(&self, message: String) {
         tracing::debug!("{message} in the pseudo execution for IBC VP");
+    }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        Ok(self
+            .storage
+            .ctx
+            .ctx
+            .state
+            .in_mem()
+            .conversion_state
+            .assets
+            .contains_key(asset_type))
     }
 }
 
@@ -355,7 +367,7 @@ where
         self.ctx.get_block_epoch()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex> {
+    fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)> {
         self.ctx.get_tx_index()
     }
 
@@ -404,7 +416,7 @@ where
         self
     }
 
-    fn emit_ibc_event(&mut self, _event: IbcEvent) -> Result<()> {
+    fn emit_event(&mut self, _event: Event) -> Result<()> {
         unimplemented!("Validation doesn't emit an event")
     }
 
@@ -443,6 +455,17 @@ where
     /// Logging
     fn log_string(&self, message: String) {
         tracing::debug!("{message} for validation in IBC VP");
+    }
+
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        Ok(self
+            .ctx
+            .ctx
+            .state
+            .in_mem()
+            .conversion_state
+            .assets
+            .contains_key(asset_type))
     }
 }
 

@@ -61,7 +61,6 @@ bridgetree.workspace = true
 eyre.workspace = true
 flume = { workspace = true, optional = true }
 futures.workspace = true
-group.workspace = true
 itertools.workspace = true
 lazy_static.workspace = true
 linkme = { workspace = true, optional = true }

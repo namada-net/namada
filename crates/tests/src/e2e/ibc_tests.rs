@@ -26,7 +26,9 @@ use namada_apps_lib::tendermint_rpc::{Client, HttpClient, Url};
 use namada_core::masp::PaymentAddress;
 use namada_sdk::address::MASP;
 use namada_sdk::chain::Epoch;
-use namada_sdk::governance::cli::onchain::PgfFunding;
+use namada_sdk::governance::cli::onchain::{
+    PgfAction, PgfContinuous, PgfFunding,
+};
 use namada_sdk::governance::pgf::ADDRESS as PGF_ADDRESS;
 use namada_sdk::governance::storage::proposal::{PGFIbcTarget, PGFTarget};
 use namada_sdk::ibc::IbcShieldingData;
@@ -46,6 +48,7 @@ use namada_sdk::ibc::storage::*;
 use namada_sdk::ibc::trace::ibc_token;
 use namada_sdk::token::Amount;
 use namada_test_utils::TestWasms;
+use namada_tx_prelude::gov_storage::proposal::ContPGFTarget;
 use prost::Message;
 use serde_json::json;
 use setup::constants::*;
@@ -2947,12 +2950,19 @@ fn propose_funding(
     src_channel_id: &ChannelId,
 ) -> Result<Epoch> {
     let pgf_funding = PgfFunding {
-        continuous: vec![PGFTarget::Ibc(PGFIbcTarget {
-            amount: Amount::native_whole(10),
-            target: continuous_receiver.as_ref().to_string(),
-            port_id: src_port_id.clone(),
-            channel_id: src_channel_id.clone(),
-        })],
+        continuous: vec![PgfContinuous {
+            target: ContPGFTarget {
+                target: PGFTarget::Ibc(PGFIbcTarget {
+                    amount: Amount::native_whole(10),
+                    target: continuous_receiver.as_ref().to_string(),
+                    port_id: src_port_id.clone(),
+                    channel_id: src_channel_id.clone(),
+                }),
+                end_epoch: None,
+                proposal_id: None,
+            },
+            action: PgfAction::Add,
+        }],
         retro: vec![PGFTarget::Ibc(PGFIbcTarget {
             amount: Amount::native_whole(5),
             target: retro_receiver.as_ref().to_string(),

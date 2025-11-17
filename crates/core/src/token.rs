@@ -287,6 +287,13 @@ impl Amount {
         DenominatedAmount::from_str(string).map(|den| den.amount)
     }
 
+    /// Multiply by a decimal, with the result rounded down.
+    pub fn checked_mul_dec(&self, dec: Dec) -> Option<Amount> {
+        self.raw
+            .checked_mul_div(dec.abs(), Uint::exp10(POS_DECIMAL_PRECISION as _))
+            .map(|(result, _)| result.into())
+    }
+
     /// Multiply by a decimal [`Dec`] with the result rounded up. Returns an
     /// error if the dec is negative. Checks for overflow.
     pub fn mul_ceil(&self, dec: Dec) -> Result<Self, arith::Error> {

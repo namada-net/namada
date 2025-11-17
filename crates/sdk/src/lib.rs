@@ -87,7 +87,7 @@ pub const DEFAULT_GAS_LIMIT: u64 = 50_000;
 #[cfg_attr(not(feature = "async-send"), async_trait::async_trait(?Send))]
 #[rustversion::attr(
     nightly,
-    allow(elided_named_lifetimes, reason = "Not actually named")
+    allow(mismatched_lifetime_syntaxes, reason = "Not actually named")
 )]
 pub trait Namada: NamadaIo {
     /// Captures the interactive parts of the wallet's functioning
@@ -772,7 +772,7 @@ where
 #[cfg_attr(not(feature = "async-send"), async_trait::async_trait(?Send))]
 #[rustversion::attr(
     nightly,
-    allow(elided_named_lifetimes, reason = "Not actually named")
+    allow(mismatched_lifetime_syntaxes, reason = "Not actually named")
 )]
 impl<C, U, V, I> Namada for NamadaImpl<C, U, V, I>
 where

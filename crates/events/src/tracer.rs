@@ -121,7 +121,7 @@ impl FromStr for EventTrace<'_> {
             }
         }
 
-        (init_state == bits::DONE).ok_or_else(|| {
+        (init_state == bits::DONE).ext_ok_or_else(|| {
             "Some fields were not initialized in the event trace".to_owned()
         })?;
 

@@ -168,14 +168,14 @@ where
                 &transfer,
                 escrow_checks.token_check,
             )?
-            .ok_or_else(|| {
+            .ext_ok_or_else(|| {
                 Error::new_const(
                     "The wrapped NAM tokens were not escrowed properly",
                 )
             })
         } else {
             Self::check_escrowed_toks(ctx, escrow_checks.token_check)?
-                .ok_or_else(|| {
+                .ext_ok_or_else(|| {
                     Error::new_alloc(format!(
                         "The {} tokens were not escrowed properly",
                         transfer.transfer.asset

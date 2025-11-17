@@ -117,10 +117,10 @@ where
             // The MASP transfer keys can only be changed by a valid Transaction
             Self::is_valid_masp_transfer(ctx, tx_data, keys_changed, verifiers)
         } else {
-            return Err(Error::new_const(
+            Err(Error::new_const(
                 "A governance proposal is required to modify MASP \
                  non-transfer keys",
-            ));
+            ))
         }
     }
 
@@ -157,7 +157,7 @@ where
             // value for this key anyway)
             ctx.read_bytes_post(&nullifier_key)?
                 .is_some_and(|value| value.is_empty())
-                .ok_or_else(|| {
+                .ext_ok_or_else(|| {
                     Error::new_const(
                         "The nullifier should have been committed with no \
                          associated data",
@@ -943,7 +943,7 @@ fn verify_sapling_balancing_value(
              balance",
         );
         tracing::debug!("{error}");
-        return Err(error);
+        Err(error)
     } else {
         Ok(())
     }

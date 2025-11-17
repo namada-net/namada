@@ -1076,15 +1076,15 @@ fn transparent_address_or_alias_find(
                 alias
             );
         }
-    } else if address.is_some() {
-        if let Some(alias) = wallet.find_alias(address.as_ref().unwrap()) {
+    } else if let Some(address) = address.as_ref() {
+        if let Some(alias) = wallet.find_alias(address) {
             display_line!(io, "Found alias {}", alias);
         } else {
             display_line!(
                 io,
                 "No address with alias {} found. Use the command `list \
                  --addr` to see all the known transparent addresses.",
-                address.unwrap()
+                address
             );
         }
     }
@@ -1116,17 +1116,15 @@ fn payment_address_or_alias_find(
                 alias
             );
         }
-    } else if payment_address.is_some() {
-        if let Some(alias) =
-            wallet.find_alias_by_payment_addr(payment_address.as_ref().unwrap())
-        {
+    } else if let Some(address) = payment_address.as_ref() {
+        if let Some(alias) = wallet.find_alias_by_payment_addr(address) {
             display_line!(io, "Found alias {}", alias);
         } else {
             display_line!(
                 io,
                 "No address with alias {} found. Use the command `list \
                  --shielded --addr` to see all the known payment addresses.",
-                payment_address.unwrap()
+                address
             );
         }
     }

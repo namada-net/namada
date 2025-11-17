@@ -22,7 +22,7 @@ fn apply_tx(ctx: &mut Ctx, tx_data: BatchedTx) -> TxResult {
         key::common::PublicKey::Secp256k1(become_validator.eth_hot_key.clone()),
         become_validator.protocol_key.clone(),
     ];
-    verify_signatures_of_pks(&tx_data.tx, all_pks).true_or_else(|| {
+    verify_signatures_of_pks(&tx_data.tx, all_pks).ext_true_or_else(|| {
         const ERR_MSG: &str = "Keys ownership signature verification failed";
         debug_log!("{ERR_MSG}");
         Error::new_const(ERR_MSG)

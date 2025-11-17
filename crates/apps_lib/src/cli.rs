@@ -725,7 +725,7 @@ pub mod cmds {
         fn parse(matches: &ArgMatches) -> Option<Self> {
             matches
                 .subcommand_matches(Self::CMD)
-                .map(|matches| (Self(args::KeyAddressList::parse(matches))))
+                .map(|matches| Self(args::KeyAddressList::parse(matches)))
         }
 
         fn def() -> App {
@@ -778,7 +778,7 @@ pub mod cmds {
         fn parse(matches: &ArgMatches) -> Option<Self> {
             matches
                 .subcommand_matches(Self::CMD)
-                .map(|matches| (Self(args::KeyExport::parse(matches))))
+                .map(|matches| Self(args::KeyExport::parse(matches)))
         }
 
         fn def() -> App {
@@ -801,7 +801,7 @@ pub mod cmds {
         fn parse(matches: &ArgMatches) -> Option<Self> {
             matches
                 .subcommand_matches(Self::CMD)
-                .map(|matches| (Self(args::KeyConvert::parse(matches))))
+                .map(|matches| Self(args::KeyConvert::parse(matches)))
         }
 
         fn def() -> App {
@@ -824,7 +824,7 @@ pub mod cmds {
         fn parse(matches: &ArgMatches) -> Option<Self> {
             matches
                 .subcommand_matches(Self::CMD)
-                .map(|matches| (Self(args::KeyImport::parse(matches))))
+                .map(|matches| Self(args::KeyImport::parse(matches)))
         }
 
         fn def() -> App {
@@ -847,7 +847,7 @@ pub mod cmds {
         fn parse(matches: &ArgMatches) -> Option<Self> {
             matches
                 .subcommand_matches(Self::CMD)
-                .map(|matches| (Self(args::KeyAddressAdd::parse(matches))))
+                .map(|matches| Self(args::KeyAddressAdd::parse(matches)))
         }
 
         fn def() -> App {

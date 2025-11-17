@@ -256,7 +256,7 @@ mod tests {
             ext
         });
 
-        let ext = vec![ext_1, ext_2, ext_3];
+        let ext = [ext_1, ext_2, ext_3];
 
         // we have the `Signed<Vext>` instances we need,
         // let us now compress them into a single `VextDigest`

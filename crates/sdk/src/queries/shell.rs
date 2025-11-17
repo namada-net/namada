@@ -223,7 +223,7 @@ where
         .conversion_state
         .assets
         .iter()
-        .filter(|&(_, asset)| (asset.epoch == masp_epoch))
+        .filter(|&(_, asset)| asset.epoch == masp_epoch)
         .map(|(&asset_type, asset)| {
             (
                 asset_type,

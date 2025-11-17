@@ -1154,7 +1154,7 @@ impl BatchedTx {
 #[cfg(test)]
 mod test {
     use std::collections::BTreeMap;
-    use std::fs;
+    use std::{fs, slice};
 
     use assert_matches::assert_matches;
     use data_encoding::HEXLOWER;
@@ -1418,8 +1418,11 @@ mod test {
         // Sign the tx with one key only - sk1
         {
             let mut tx = tx.clone();
-            let signatures =
-                tx.compute_section_signature(&[sk1.clone()], &pks_map, None);
+            let signatures = tx.compute_section_signature(
+                slice::from_ref(&sk1),
+                &pks_map,
+                None,
+            );
             assert_eq!(signatures.len(), 1);
             tx.add_signatures(signatures);
 
@@ -1491,7 +1494,7 @@ mod test {
             let pks_map_wrong =
                 AccountPublicKeysMap::from_iter(vec![pk1.clone()]);
             let signatures = tx.compute_section_signature(
-                &[sk1.clone()],
+                slice::from_ref(&sk1),
                 &pks_map_wrong,
                 None,
             );
@@ -1523,7 +1526,7 @@ mod test {
             let pks_map_wrong =
                 AccountPublicKeysMap::from_iter(vec![pk1.clone()]);
             let signatures = tx.compute_section_signature(
-                &[sk1.clone()],
+                slice::from_ref(&sk1),
                 &pks_map_wrong,
                 None,
             );
@@ -1561,7 +1564,7 @@ mod test {
             let pks_map_wrong =
                 AccountPublicKeysMap::from_iter(vec![pk1.clone()]);
             let signatures = tx.compute_section_signature(
-                &[sk1.clone()],
+                slice::from_ref(&sk1),
                 &pks_map_wrong,
                 None,
             );

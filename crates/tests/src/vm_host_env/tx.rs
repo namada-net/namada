@@ -853,8 +853,8 @@ mod tests {
     fn arb_u64() -> impl Strategy<Value = u64> {
         prop_oneof![
             5 => Just(u64::MIN),
-            5 => Just(u64::MIN + 1),
-            5 => u64::MIN + 2..=u32::MAX as u64,
+            5 => Just(1),
+            5 => 2..=u32::MAX as u64,
             1 => Just(u64::MAX),
             1 => Just(u64::MAX - 1),
             1 => u32::MAX as u64 + 1..u64::MAX - 1,

@@ -15,7 +15,7 @@ fn apply_tx(ctx: &mut Ctx, tx_data: BatchedTx) -> TxResult {
 
     // Check that the tx has been signed with the new consensus key
     verify_signatures_of_pks(&tx_data.tx, vec![consensus_key.clone()])
-        .true_or_else(|| {
+        .ext_true_or_else(|| {
             const ERR_MSG: &str =
                 "Consensus key ownership signature verification failed";
             debug_log!("{ERR_MSG}");

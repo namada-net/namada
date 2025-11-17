@@ -33,7 +33,7 @@ env:
   CACHE_BUCKET: github-runners-remote-cache-shared
   SCCACHE_BUCKET: github-runners-remote-cache-shared
   AWS_REGION: us-west-2
-  NIGHTLY: nightly-2025-03-27
+  NIGHTLY: nightly-2025-11-17
   NAMADA_MASP_PARAMS_DIR: /masp/.masp-params
   LEDGER_APP_VERSION: "3.0.7"
   ROLE: arn:aws:iam::375643557360:role/github-runners-ci-shared

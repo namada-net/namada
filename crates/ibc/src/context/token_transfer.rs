@@ -13,7 +13,7 @@ use ibc::apps::transfer::types::{Memo, PrefixedCoin, PrefixedDenom};
 use ibc::core::host::types::error::HostError;
 use ibc::core::host::types::identifiers::{ChannelId, PortId};
 use ibc::core::primitives::Signer;
-use namada_core::address::{Address, InternalAddress, MASP};
+use namada_core::address::{Address, InternalAddress, MASP, PGF};
 use namada_core::arith::{CheckedAdd, checked};
 use namada_core::masp::{AssetData, CompactNote, PaymentAddress};
 use namada_core::token::{Amount, MaspDigitPos};
@@ -58,7 +58,7 @@ where
     }
 
     /// Insert a verifier address whose VP will verify the tx.
-    pub(crate) fn insert_verifier(&mut self, addr: &Address) {
+    pub(crate) fn insert_verifier(&self, addr: &Address) {
         self.verifiers.borrow_mut().insert(addr.clone());
     }
 
@@ -194,29 +194,16 @@ where
         )
     }
 
-    fn validate_masp_withdraw(
-        &self,
-        from_account: &IbcAccountId,
-    ) -> Result<(), HostError> {
-        if from_account.is_shielded() && !self.has_masp_tx {
-            return Err(HostError::Other {
-                description: format!(
-                    "Set refund address {from_account} without including an \
-                     IBC unshielding MASP transaction"
-                ),
-            });
-        }
-        Ok(())
-    }
-
     #[inline]
-    fn maybe_store_masp_note_commitments(
+    fn maybe_handle_masp_memoless_shielding<F>(
         &self,
         to_account: &IbcAccountId,
         token: &Address,
         amount: &Amount,
-    ) -> Result<(), HostError>
+        transfer: F,
+    ) -> Result<Amount, HostError>
     where
+        F: FnOnce(Amount) -> Result<(), HostError>,
         Params:
             namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
         Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>,
@@ -224,10 +211,121 @@ where
                 <C as IbcStorageContext>::Storage,
             >,
     {
+        let mut amount = *amount;
+
         if let IbcAccountId::Shielded(owner_pa) = to_account {
-            self.store_masp_note_commitments(owner_pa, token, amount)?;
+            if let Some(fee) = self.get_masp_shielding_fee(token, &amount)? {
+                amount = amount.checked_sub(fee).ok_or_else(|| {
+                    HostError::Other {
+                        description: "Shielding fee greater than deposited \
+                                      amount"
+                            .to_string(),
+                    }
+                })?;
+
+                transfer(fee)?;
+            }
+
+            self.store_masp_note_commitments(owner_pa, token, &amount)?;
         }
-        Ok(())
+
+        Ok(amount)
+    }
+
+    #[inline]
+    fn maybe_handle_masp_unshielding<F>(
+        &self,
+        from_account: &IbcAccountId,
+        token: &Address,
+        amount: &Amount,
+        transfer: F,
+    ) -> Result<Amount, HostError>
+    where
+        F: FnOnce(Amount) -> Result<(), HostError>,
+        Params:
+            namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    {
+        let mut amount = *amount;
+
+        if !self.has_masp_tx {
+            return if from_account.is_transparent() {
+                Ok(amount)
+            } else {
+                Err(HostError::Other {
+                    description: format!(
+                        "Set refund address {from_account} without including \
+                         an IBC unshielding MASP transaction"
+                    ),
+                })
+            };
+        }
+
+        if let Some(fee) = self.get_masp_unshielding_fee(token, &amount)? {
+            amount =
+                amount.checked_sub(fee).ok_or_else(|| HostError::Other {
+                    description: "Unshielding fee greater than withdrawn \
+                                  amount"
+                        .to_string(),
+                })?;
+
+            transfer(fee)?;
+        }
+
+        Ok(amount)
+    }
+
+    fn get_masp_shielding_fee(
+        &self,
+        token: &Address,
+        amount: &Amount,
+    ) -> Result<Option<Amount>, HostError>
+    where
+        Params:
+            namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    {
+        if self.is_refund {
+            return Ok(None);
+        }
+
+        let Some(fee_percentage) = Params::ibc_shielding_fee_percentage(
+            self.inner.borrow().storage(),
+            token,
+        )?
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(amount.checked_mul_dec(fee_percentage).ok_or_else(
+            || HostError::Other {
+                description:
+                    "Overflow in MASP shielding fee computation".to_string(),
+            },
+        )?))
+    }
+
+    fn get_masp_unshielding_fee(
+        &self,
+        token: &Address,
+        amount: &Amount,
+    ) -> Result<Option<Amount>, HostError>
+    where
+        Params:
+            namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    {
+        let Some(fee_percentage) = Params::ibc_unshielding_fee_percentage(
+            self.inner.borrow().storage(),
+            token,
+        )?
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(amount.checked_mul_dec(fee_percentage).ok_or_else(
+            || HostError::Other {
+                description:
+                    "Overflow in MASP unshielding fee computation".to_string(),
+            },
+        )?))
     }
 
     fn store_masp_note_commitments(
@@ -522,7 +620,24 @@ where
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
-        self.validate_masp_withdraw(from_account)?;
+        let from_trans_account = if self.has_masp_tx {
+            Cow::Owned(MASP)
+        } else {
+            from_account.to_address()
+        };
+        let amount = self.maybe_handle_masp_unshielding(
+            from_account,
+            &ibc_token,
+            &amount,
+            |fee| {
+                self.insert_verifier(&PGF);
+                self.inner
+                    .borrow_mut()
+                    .transfer_token(&from_trans_account, &PGF, &ibc_token, fee)
+                    .map_err(HostError::from)
+            },
+        )?;
+
         self.increment_per_epoch_withdraw_limits(&ibc_token, amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
@@ -532,16 +647,10 @@ where
             self.insert_verifier(&ibc_token);
         }
 
-        let from_account = if self.has_masp_tx {
-            Cow::Owned(MASP)
-        } else {
-            from_account.to_address()
-        };
-
         self.inner
             .borrow_mut()
             .transfer_token(
-                &from_account,
+                &from_trans_account,
                 &IBC_ESCROW_ADDRESS,
                 &ibc_token,
                 amount,
@@ -558,10 +667,20 @@ where
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
-        self.increment_per_epoch_deposit_limits(&ibc_token, amount)?;
-        self.maybe_store_masp_note_commitments(
-            to_account, &ibc_token, &amount,
+        let amount = self.maybe_handle_masp_memoless_shielding(
+            to_account,
+            &ibc_token,
+            &amount,
+            |fee| {
+                self.insert_verifier(&PGF);
+                self.inner
+                    .borrow_mut()
+                    .transfer_token(&IBC_ESCROW_ADDRESS, &PGF, &ibc_token, fee)
+                    .map_err(HostError::from)
+            },
         )?;
+
+        self.increment_per_epoch_deposit_limits(&ibc_token, amount)?;
 
         self.inner
             .borrow_mut()
@@ -582,9 +701,21 @@ where
         // The trace path of the denom is already updated if receiving the token
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
+        let amount = self.maybe_handle_masp_memoless_shielding(
+            account,
+            &ibc_token,
+            &amount,
+            |fee| {
+                self.insert_verifier(&PGF);
+                self.inner
+                    .borrow_mut()
+                    .mint_token(&PGF, &ibc_token, fee)
+                    .map_err(HostError::from)
+            },
+        )?;
+
         self.update_mint_amount(&ibc_token, amount, true)?;
         self.increment_per_epoch_deposit_limits(&ibc_token, amount)?;
-        self.maybe_store_masp_note_commitments(account, &ibc_token, &amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
         if ibc_token.is_internal()
@@ -613,7 +744,24 @@ where
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
-        self.validate_masp_withdraw(account)?;
+        let trans_account = if self.has_masp_tx {
+            Cow::Owned(MASP)
+        } else {
+            account.to_address()
+        };
+        let amount = self.maybe_handle_masp_unshielding(
+            account,
+            &ibc_token,
+            &amount,
+            |fee| {
+                self.insert_verifier(&PGF);
+                self.inner
+                    .borrow_mut()
+                    .transfer_token(&trans_account, &PGF, &ibc_token, fee)
+                    .map_err(HostError::from)
+            },
+        )?;
+
         self.update_mint_amount(&ibc_token, amount, false)?;
         self.increment_per_epoch_withdraw_limits(&ibc_token, amount)?;
 
@@ -624,16 +772,10 @@ where
             self.insert_verifier(&ibc_token);
         }
 
-        let account = if self.has_masp_tx {
-            Cow::Owned(MASP)
-        } else {
-            account.to_address()
-        };
-
         // The burn is "unminting" from the minted balance
         self.inner
             .borrow_mut()
-            .burn_token(&account, &ibc_token, amount)
+            .burn_token(&trans_account, &ibc_token, amount)
             .map_err(HostError::from)
     }
 }

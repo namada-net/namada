@@ -1,6 +1,8 @@
 //! Parameters abstract interfaces
 
+use namada_core::address::Address;
 use namada_core::chain::{BlockHeight, Epoch};
+use namada_core::dec::Dec;
 use namada_core::masp::MaspEpoch;
 pub use namada_core::parameters::*;
 use namada_core::storage;
@@ -47,6 +49,20 @@ pub trait Read<S> {
         )
         .map_err(namada_storage::Error::SimpleMessage)
     }
+
+    /// Read the shielding fee percentage over IBC of the token with address
+    /// `token_addr`.
+    fn ibc_shielding_fee_percentage(
+        storage: &S,
+        token: &Address,
+    ) -> Result<Option<Dec>>;
+
+    /// Read the unshielding fee percentage over IBC of the token with address
+    /// `token_addr`.
+    fn ibc_unshielding_fee_percentage(
+        storage: &S,
+        token: &Address,
+    ) -> Result<Option<Dec>>;
 }
 
 /// Abstract parameters storage write interface

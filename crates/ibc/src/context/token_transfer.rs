@@ -135,7 +135,7 @@ where
     }
 
     /// Add the amount to the per-epoch withdraw of the token
-    fn add_deposit(
+    fn increment_per_epoch_deposit_limits(
         &self,
         token: &Address,
         amount: Amount,
@@ -157,7 +157,7 @@ where
     }
 
     /// Add the amount to the per-epoch withdraw of the token
-    fn add_withdraw(
+    fn increment_per_epoch_withdraw_limits(
         &self,
         token: &Address,
         amount: Amount,
@@ -523,7 +523,7 @@ where
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
         self.validate_masp_withdraw(from_account)?;
-        self.add_withdraw(&ibc_token, amount)?;
+        self.increment_per_epoch_withdraw_limits(&ibc_token, amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
         if ibc_token.is_internal()
@@ -558,7 +558,7 @@ where
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
-        self.add_deposit(&ibc_token, amount)?;
+        self.increment_per_epoch_deposit_limits(&ibc_token, amount)?;
         self.maybe_store_masp_note_commitments(
             to_account, &ibc_token, &amount,
         )?;
@@ -583,7 +583,7 @@ where
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
         self.update_mint_amount(&ibc_token, amount, true)?;
-        self.add_deposit(&ibc_token, amount)?;
+        self.increment_per_epoch_deposit_limits(&ibc_token, amount)?;
         self.maybe_store_masp_note_commitments(account, &ibc_token, &amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
@@ -615,7 +615,7 @@ where
 
         self.validate_masp_withdraw(account)?;
         self.update_mint_amount(&ibc_token, amount, false)?;
-        self.add_withdraw(&ibc_token, amount)?;
+        self.increment_per_epoch_withdraw_limits(&ibc_token, amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
         if ibc_token.is_internal()

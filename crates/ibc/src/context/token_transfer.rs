@@ -722,6 +722,10 @@ where
         // The trace path of the denom is already updated if receiving the token
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
+        // NOTE: update the minted amount before paying for
+        // shielding fees, since the fees are also minted
+        self.update_mint_amount(&ibc_token, amount, true)?;
+
         let amount = self.maybe_handle_masp_memoless_shielding(
             account,
             &ibc_token,
@@ -735,7 +739,6 @@ where
             },
         )?;
 
-        self.update_mint_amount(&ibc_token, amount, true)?;
         self.increment_per_epoch_deposit_limits(&ibc_token, amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
@@ -786,7 +789,10 @@ where
             },
         )?;
 
+        // NOTE: update the burned amount after paying for
+        // unshielding fees, since the fees aren't burned
         self.update_mint_amount(&ibc_token, amount, false)?;
+
         self.increment_per_epoch_withdraw_limits(&ibc_token, amount)?;
 
         // A transfer of NUT tokens must be verified by their VP

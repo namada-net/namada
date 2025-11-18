@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
+use bitflags::bitflags;
 use ibc::apps::transfer::context::{
     TokenTransferExecutionContext, TokenTransferValidationContext,
 };
@@ -25,6 +26,16 @@ use crate::context::storage::IbcStorageContext;
 use crate::storage::{load_shielding_counter, write_shielding_counter};
 use crate::{IBC_ESCROW_ADDRESS, IbcAccountId, trace};
 
+bitflags! {
+    #[derive(
+        Debug, Clone, Copy,
+    )]
+    struct TokenTransferContextConfig: u8 {
+        const HAS_MASP_TX = 0b1;
+        const IS_REFUND = 0b10;
+    }
+}
+
 /// Token transfer context to handle tokens
 #[derive(Debug)]
 pub struct TokenTransferContext<C, Params, Token, ShieldedToken>
@@ -33,8 +44,7 @@ where
 {
     pub(crate) inner: Rc<RefCell<C>>,
     pub(crate) verifiers: Rc<RefCell<BTreeSet<Address>>>,
-    has_masp_tx: bool,
-    is_refund: bool,
+    config: TokenTransferContextConfig,
     _marker: PhantomData<(Params, Token, ShieldedToken)>,
 }
 
@@ -51,8 +61,7 @@ where
         Self {
             inner,
             verifiers,
-            has_masp_tx: false,
-            is_refund: false,
+            config: TokenTransferContextConfig::empty(),
             _marker: PhantomData,
         }
     }
@@ -64,12 +73,13 @@ where
 
     /// Set to enable a shielded transfer
     pub fn enable_shielded_transfer(&mut self) {
-        self.has_masp_tx = true;
+        self.config
+            .set(TokenTransferContextConfig::HAS_MASP_TX, true);
     }
 
     /// Set the transfer as refund
     pub fn enable_refund_transfer(&mut self) {
-        self.is_refund = true;
+        self.config.set(TokenTransferContextConfig::IS_REFUND, true);
     }
 
     fn validate_sent_coin(&self, coin: &PrefixedCoin) -> Result<(), HostError> {
@@ -140,7 +150,9 @@ where
         token: &Address,
         amount: Amount,
     ) -> Result<(), HostError> {
-        if self.is_refund {
+        let is_refund =
+            self.config.contains(TokenTransferContextConfig::IS_REFUND);
+        if is_refund {
             return Ok(());
         }
         let deposit = self.inner.borrow().deposit(token)?;
@@ -246,8 +258,11 @@ where
             namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
     {
         let mut amount = *amount;
+        let has_masp_tx = self
+            .config
+            .contains(TokenTransferContextConfig::HAS_MASP_TX);
 
-        if !self.has_masp_tx {
+        if !has_masp_tx {
             return if from_account.is_transparent() {
                 Ok(amount)
             } else {
@@ -283,7 +298,10 @@ where
         Params:
             namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
     {
-        if self.is_refund {
+        let is_refund =
+            self.config.contains(TokenTransferContextConfig::IS_REFUND);
+
+        if is_refund {
             return Ok(None);
         }
 
@@ -619,8 +637,11 @@ where
         _memo: &Memo,
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
+        let has_masp_tx = self
+            .config
+            .contains(TokenTransferContextConfig::HAS_MASP_TX);
 
-        let from_trans_account = if self.has_masp_tx {
+        let from_trans_account = if has_masp_tx {
             Cow::Owned(MASP)
         } else {
             from_account.to_address()
@@ -743,8 +764,11 @@ where
         _memo: &Memo,
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
+        let has_masp_tx = self
+            .config
+            .contains(TokenTransferContextConfig::HAS_MASP_TX);
 
-        let trans_account = if self.has_masp_tx {
+        let trans_account = if has_masp_tx {
             Cow::Owned(MASP)
         } else {
             account.to_address()

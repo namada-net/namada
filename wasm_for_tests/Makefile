@@ -14,6 +14,7 @@ wasms += tx_memory_limit
 wasms += tx_no_op
 wasms += tx_no_op_event
 wasms += tx_proposal_code
+wasms += tx_proposal_ibc_shielded_action_fees
 wasms += tx_proposal_ibc_token_inflation
 wasms += tx_proposal_ibc_unlimited_channel
 wasms += tx_proposal_masp_reward

@@ -3974,6 +3974,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tx_proposal_ibc_shielded_action_fees"
+version = "0.251.0"
+dependencies = [
+ "getrandom 0.2.15",
+ "namada_tx_prelude",
+ "rlsf",
+]
+
+[[package]]
 name = "tx_proposal_ibc_token_inflation"
 version = "0.251.0"
 dependencies = [

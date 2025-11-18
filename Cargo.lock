@@ -6005,6 +6005,7 @@ version = "0.251.0"
 dependencies = [
  "arbitrary",
  "assert_matches",
+ "bitflags 2.8.0",
  "borsh",
  "data-encoding",
  "dur",

@@ -2354,6 +2354,7 @@ dependencies = [
 name = "namada_ibc"
 version = "0.251.0"
 dependencies = [
+ "bitflags",
  "borsh",
  "data-encoding",
  "dur",

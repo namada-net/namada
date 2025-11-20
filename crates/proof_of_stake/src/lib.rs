@@ -2666,7 +2666,7 @@ where
     // Get the addresses of the validators who voted
     let vote_addresses = votes
         .iter()
-        .map(|vote| (&vote.validator_address))
+        .map(|vote| &vote.validator_address)
         .collect::<HashSet<&Address>>();
 
     let height_to_prune =

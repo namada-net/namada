@@ -560,7 +560,11 @@ impl Display for DbUpdateType {
                     "Write to key in {} CF: <{}> with {}value: {}",
                     cf.to_str(),
                     key,
-                    value.is_raw().then_some("raw ").unwrap_or_default(),
+                    if value.is_raw() {
+                        "raw "
+                    } else {
+                        Default::default()
+                    },
                     formatted
                 ))
             }
@@ -580,7 +584,11 @@ impl Display for DbUpdateType {
                     "Write to pattern in {} CF: <{}> with {}value: {}",
                     cf.to_str(),
                     pattern,
-                    value.is_raw().then_some("raw ").unwrap_or_default(),
+                    if value.is_raw() {
+                        "raw "
+                    } else {
+                        Default::default()
+                    },
                     formatted,
                 ))
             }

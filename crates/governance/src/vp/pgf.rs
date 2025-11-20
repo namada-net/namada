@@ -141,16 +141,16 @@ where
                         .map_or_else(
                             // if a steward resigns, check their signature
                             || {
-                                verifiers.contains(&steward_address).ok_or_else(
-                                    || {
+                                verifiers
+                                    .contains(&steward_address)
+                                    .ext_ok_or_else(|| {
                                         Error::new_alloc(format!(
                                             "The VP of the steward \
                                              {steward_address} should have \
                                              been triggered to check their \
                                              signature"
                                         ))
-                                    },
-                                )
+                                    })
                             },
                             // if a steward updates the reward distribution (so
                             // total_stewards_pre == total_stewards_post) check
@@ -165,7 +165,7 @@ where
                                 }
                                 steward
                                     .is_valid_reward_distribution()
-                                    .ok_or_else(|| {
+                                    .ext_ok_or_else(|| {
                                         Error::new_const(
                                             "Steward commissions are invalid",
                                         )
@@ -202,7 +202,7 @@ where
                 ))
             },
             |data| {
-                is_proposal_accepted(&ctx.pre(), data.as_ref())?.ok_or_else(
+                is_proposal_accepted(&ctx.pre(), data.as_ref())?.ext_ok_or_else(
                     || {
                         Error::new_const(
                             "PGF parameter changes can only be performed by a \
@@ -228,7 +228,7 @@ where
 
         let is_valid_balance = post_balance >= pre_balance;
 
-        is_valid_balance.ok_or_else(|| {
+        is_valid_balance.ext_ok_or_else(|| {
             Error::new_const("Only governance can debit from PGF account")
         })
     }

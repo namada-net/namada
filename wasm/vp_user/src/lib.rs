@@ -151,7 +151,7 @@ fn validate_tx(
                 Ok(())
             }
             KeyType::TokenMinted => {
-                verifiers.contains(&address::MULTITOKEN).ok_or_else(|| {
+                verifiers.contains(&address::MULTITOKEN).ext_ok_or_else(|| {
                     VpError::Erased(
                         "The Multitoken VP should have been a verifier for \
                          this transaction, since a token was minted"

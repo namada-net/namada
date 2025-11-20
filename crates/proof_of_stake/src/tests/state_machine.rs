@@ -2241,8 +2241,8 @@ impl ReferenceStateMachine for AbstractPosState {
                     let consensus_set =
                         state.consensus_set.entry(epoch).or_default();
                     let consensus_vals_len = consensus_set
-                        .iter()
-                        .map(|(_stake, validators)| validators.len() as u64)
+                        .values()
+                        .map(|validators| validators.len() as u64)
                         .sum();
 
                     if tokens < state.params.validator_stake_threshold {

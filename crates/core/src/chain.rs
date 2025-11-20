@@ -349,7 +349,7 @@ impl Epoch {
     /// length. Work-around for `Step` implementation pending on stabilization of <https://github.com/rust-lang/rust/issues/42168>.
     pub fn iter_range(self, len: u64) -> impl Iterator<Item = Epoch> + Clone {
         let start_ix: u64 = self.into();
-        let end_ix: u64 = start_ix.checked_add(len).unwrap_or(u64::MAX);
+        let end_ix: u64 = start_ix.saturating_add(len);
         (start_ix..end_ix).map(Epoch::from)
     }
 

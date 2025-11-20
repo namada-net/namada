@@ -39,7 +39,7 @@ where
 
         verifiers
             .contains(&Address::Internal(InternalAddress::Multitoken))
-            .ok_or_else(|| {
+            .ext_ok_or_else(|| {
                 let error =
                     Error::new_const("Rejecting non-multitoken transfer tx");
                 tracing::debug!("{error}");

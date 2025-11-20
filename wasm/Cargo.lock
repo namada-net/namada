@@ -4607,6 +4607,175 @@ dependencies = [
 ]
 
 [[package]]
+name = "nam-wasmer"
+version = "4.4.0-nam.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3581e8dc0cfc304075640e6899014bc1b27455c2da93dcdfa6c758e6769f42cb"
+dependencies = [
+ "bytes",
+ "cfg-if",
+ "derivative",
+ "indexmap 1.9.3",
+ "js-sys",
+ "more-asserts",
+ "nam-wasmer-compiler",
+ "nam-wasmer-compiler-cranelift",
+ "nam-wasmer-derive",
+ "nam-wasmer-types",
+ "nam-wasmer-vm",
+ "rustc-demangle",
+ "serde",
+ "serde-wasm-bindgen",
+ "shared-buffer",
+ "target-lexicon",
+ "thiserror 1.0.69",
+ "tracing",
+ "wasm-bindgen",
+ "wat",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "nam-wasmer-cache"
+version = "4.4.0-nam.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59f09ed14f6a5ad8f29df51301b5a9a94a22a8cc35d3c9e2261ec1c996928f64"
+dependencies = [
+ "blake3",
+ "hex",
+ "nam-wasmer",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "nam-wasmer-compiler"
+version = "4.4.0-nam.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a66cbcb0362b5fe96ca088540053072ca66e6acd5302998bcc817be5cc175afc"
+dependencies = [
+ "backtrace",
+ "bytes",
+ "cfg-if",
+ "enum-iterator",
+ "enumset",
+ "lazy_static",
+ "leb128",
+ "libc",
+ "memmap2 0.6.2",
+ "more-asserts",
+ "nam-wasmer-types",
+ "nam-wasmer-vm",
+ "region",
+ "rkyv",
+ "self_cell",
+ "shared-buffer",
+ "smallvec",
+ "thiserror 1.0.69",
+ "wasmparser",
+ "windows-sys 0.59.0",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "nam-wasmer-compiler-cranelift"
+version = "4.4.0-nam.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1b743a12f25f7e60a837a76399e3a522f34741305bd94a384c95c9a82e0570a"
+dependencies = [
+ "cranelift-codegen",
+ "cranelift-entity",
+ "cranelift-frontend",
+ "gimli 0.26.2",
+ "more-asserts",
+ "nam-wasmer-compiler",
+ "nam-wasmer-types",
+ "rayon",
+ "smallvec",
+ "target-lexicon",
+ "tracing",
+]
+
+[[package]]
+name = "nam-wasmer-compiler-singlepass"
+version = "4.4.0-nam.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2de27e7e6fa858bc723426de49df964dc82146802bc6f3d319713218bc57ae76"
+dependencies = [
+ "byteorder",
+ "dynasm",
+ "dynasmrt",
+ "enumset",
+ "gimli 0.26.2",
+ "lazy_static",
+ "more-asserts",
+ "nam-wasmer-compiler",
+ "nam-wasmer-types",
+ "rayon",
+ "smallvec",
+]
+
+[[package]]
+name = "nam-wasmer-derive"
+version = "4.4.0-nam.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84d709563c07f9020feb672cd9942d67a93dc611d73ddc6fff1ada13a562735b"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "nam-wasmer-types"
+version = "4.4.0-nam.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "891920ff63d1b271d4b174e553c8816e3378b4c2e2a23e21bd28c877af0efe13"
+dependencies = [
+ "bytecheck",
+ "enum-iterator",
+ "enumset",
+ "getrandom 0.2.15",
+ "hex",
+ "indexmap 1.9.3",
+ "more-asserts",
+ "rkyv",
+ "sha2 0.10.8",
+ "target-lexicon",
+ "thiserror 1.0.69",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "nam-wasmer-vm"
+version = "4.4.0-nam.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "766ce48171a49ac3994ec43fa69f25464112e3f79aa0766d699676bf3a2440d3"
+dependencies = [
+ "backtrace",
+ "cc",
+ "cfg-if",
+ "corosensei",
+ "crossbeam-queue",
+ "dashmap",
+ "derivative",
+ "enum-iterator",
+ "fnv",
+ "indexmap 1.9.3",
+ "lazy_static",
+ "libc",
+ "mach2",
+ "memoffset",
+ "more-asserts",
+ "nam-wasmer-types",
+ "region",
+ "rustversion",
+ "scopeguard",
+ "thiserror 1.0.69",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "namada_account"
 version = "0.251.0"
 dependencies = [
@@ -5059,6 +5228,7 @@ dependencies = [
  "ics23",
  "itertools 0.14.0",
  "masp_primitives",
+ "nam-wasmer",
  "namada_core",
  "namada_sdk",
  "namada_test_utils",
@@ -5077,7 +5247,6 @@ dependencies = [
  "tempfile",
  "test-log",
  "tokio",
- "wasmer",
 ]
 
 [[package]]
@@ -5182,6 +5351,10 @@ dependencies = [
  "clru",
  "git2",
  "nam-wasm-instrument",
+ "nam-wasmer",
+ "nam-wasmer-cache",
+ "nam-wasmer-compiler-singlepass",
+ "nam-wasmer-vm",
  "namada_account",
  "namada_core",
  "namada_events",
@@ -5198,10 +5371,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.12",
  "tracing",
- "wasmer",
- "wasmer-cache",
- "wasmer-compiler-singlepass",
- "wasmer-vm",
  "wasmparser",
 ]
 
@@ -8722,174 +8891,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ba64e81215916eaeb48fee292f29401d69235d62d8b8fd92a7b2844ec5ae5f7"
 dependencies = [
  "leb128",
-]
-
-[[package]]
-name = "wasmer"
-version = "4.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d920d06243e9f456c336c428a34560357dedf59d9febaae14f1995ac120cff6"
-dependencies = [
- "bytes",
- "cfg-if",
- "derivative",
- "indexmap 1.9.3",
- "js-sys",
- "more-asserts",
- "rustc-demangle",
- "serde",
- "serde-wasm-bindgen",
- "shared-buffer",
- "target-lexicon",
- "thiserror 1.0.69",
- "tracing",
- "wasm-bindgen",
- "wasmer-compiler",
- "wasmer-compiler-cranelift",
- "wasmer-derive",
- "wasmer-types",
- "wasmer-vm",
- "wat",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "wasmer-cache"
-version = "4.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e2aa507d7ab1d7f6038f60ca107bc4629c5dbf3a0e18427091b7576b0ffbbd9"
-dependencies = [
- "blake3",
- "hex",
- "thiserror 1.0.69",
- "wasmer",
-]
-
-[[package]]
-name = "wasmer-compiler"
-version = "4.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e01832173aa52345e480965f18c638a8a5a9e5e4d85a48675bdf1964147dc7f"
-dependencies = [
- "backtrace",
- "bytes",
- "cfg-if",
- "enum-iterator",
- "enumset",
- "lazy_static",
- "leb128",
- "libc",
- "memmap2 0.6.2",
- "more-asserts",
- "region",
- "rkyv",
- "self_cell",
- "shared-buffer",
- "smallvec",
- "thiserror 1.0.69",
- "wasmer-types",
- "wasmer-vm",
- "wasmparser",
- "windows-sys 0.59.0",
- "xxhash-rust",
-]
-
-[[package]]
-name = "wasmer-compiler-cranelift"
-version = "4.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c1618f53b492cf6649beeb372930e376e0f52d9842c0c5eb5aa2b548251dab6"
-dependencies = [
- "cranelift-codegen",
- "cranelift-entity",
- "cranelift-frontend",
- "gimli 0.26.2",
- "more-asserts",
- "rayon",
- "smallvec",
- "target-lexicon",
- "tracing",
- "wasmer-compiler",
- "wasmer-types",
-]
-
-[[package]]
-name = "wasmer-compiler-singlepass"
-version = "4.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2b111c55d0b8a30dba67afe8766c56b53f0055653f0bb14b1a337056263ae48"
-dependencies = [
- "byteorder",
- "dynasm",
- "dynasmrt",
- "enumset",
- "gimli 0.26.2",
- "lazy_static",
- "more-asserts",
- "rayon",
- "smallvec",
- "wasmer-compiler",
- "wasmer-types",
-]
-
-[[package]]
-name = "wasmer-derive"
-version = "4.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c5875633aea92153b6a561cb07363785ca9e07792ca6cd7c1cc371761001d8f"
-dependencies = [
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "wasmer-types"
-version = "4.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fb32f0d231b591e4c8a65e81d4647fa3180496d71a123d4948dba8551bba9c2"
-dependencies = [
- "bytecheck",
- "enum-iterator",
- "enumset",
- "getrandom 0.2.15",
- "hex",
- "indexmap 1.9.3",
- "more-asserts",
- "rkyv",
- "sha2 0.10.8",
- "target-lexicon",
- "thiserror 1.0.69",
- "xxhash-rust",
-]
-
-[[package]]
-name = "wasmer-vm"
-version = "4.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e38e9301f5bb9f18da9cda4002d74d2cb6ac1f36dcf919fd77f91fca321fb1e5"
-dependencies = [
- "backtrace",
- "cc",
- "cfg-if",
- "corosensei",
- "crossbeam-queue",
- "dashmap",
- "derivative",
- "enum-iterator",
- "fnv",
- "indexmap 1.9.3",
- "lazy_static",
- "libc",
- "mach2",
- "memoffset",
- "more-asserts",
- "region",
- "scopeguard",
- "thiserror 1.0.69",
- "wasmer-types",
- "windows-sys 0.59.0",
 ]
 
 [[package]]

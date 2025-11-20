@@ -376,7 +376,7 @@ where
     fn is_valid_parameter_change(ctx: &'ctx CTX) -> Result<()> {
         let validation_errors: Vec<crate::parameters::ValidationError> =
             read_owned_pos_params(&ctx.post())?.validate();
-        validation_errors.is_empty().ok_or_else(|| {
+        validation_errors.is_empty().ext_ok_or_else(|| {
             let validation_errors_str =
                 itertools::join(validation_errors, ", ");
             Error::new_alloc(format!(

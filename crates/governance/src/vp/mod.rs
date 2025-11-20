@@ -320,7 +320,7 @@ where
                 pre_voting_start_epoch,
                 pre_voting_end_epoch,
             )
-            .ok_or_else(|| {
+            .ext_ok_or_else(|| {
                 Error::new_alloc(format!(
                     "Validator {voter} voted outside of the voting period. \
                      Current epoch: {current_epoch}, pre voting start epoch: \
@@ -425,15 +425,15 @@ where
                     let is_valid_total_pgf_actions =
                         stewards.len() < MAX_PGF_ACTIONS;
 
-                    return if is_valid_total_pgf_actions {
+                    if is_valid_total_pgf_actions {
                         Ok(())
                     } else {
-                        return Err(Error::new_alloc(format!(
+                        Err(Error::new_alloc(format!(
                             "Maximum number of steward actions \
                              ({MAX_PGF_ACTIONS}) exceeded ({})",
                             stewards.len()
-                        )));
-                    };
+                        )))
+                    }
                 } else if let Some(address) = stewards_added.first() {
                     let author_key = gov_storage::get_author_key(proposal_id);
                     let author = Self::force_read::<Address>(
@@ -470,9 +470,9 @@ where
                         )));
                     }
 
-                    return Ok(());
+                    Ok(())
                 } else {
-                    return Err(Error::new_const("Invalid PGF proposal"));
+                    Err(Error::new_const("Invalid PGF proposal"))
                 }
             }
             ProposalType::PGFPayment(fundings) => {
@@ -537,7 +537,7 @@ where
                     .count() as u64
                     == 0;
 
-                are_targets_unique.ok_or_else(|| {
+                are_targets_unique.ext_ok_or_else(|| {
                     Error::new_const(
                         "One or more payment targets were added and removed \
                          in the same proposal",
@@ -808,7 +808,7 @@ where
         let diff = checked!(end_epoch - start_epoch)?;
         let valid_voting_period = diff.0 >= min_period && diff.0 <= max_period;
 
-        valid_voting_period.ok_or_else(|| {
+        valid_voting_period.ext_ok_or_else(|| {
             Error::new_alloc(format!(
                 "Proposal with id {proposal_id} must have a voting period \
                  with a minimum of {min_period} epochs, and a maximum of \
@@ -843,7 +843,7 @@ where
             || {
                 let is_post_funds_greater_than_minimum =
                     post_funds >= min_funds_parameter;
-                is_post_funds_greater_than_minimum.ok_or_else(|| {
+                is_post_funds_greater_than_minimum.ext_ok_or_else(|| {
                     Error::new_alloc(format!(
                         "Funds must be greater than the minimum funds of {}",
                         min_funds_parameter.native_denominated()
@@ -851,7 +851,7 @@ where
                 })?;
 
                 let post_balance_is_same = post_balance == post_funds;
-                post_balance_is_same.ok_or_else(|| {
+                post_balance_is_same.ext_ok_or_else(|| {
                     Error::new_alloc(format!(
                         "Funds and the balance of the governance account have \
                          diverged: funds {} != balance {}",
@@ -864,7 +864,7 @@ where
             |pre_balance| {
                 let is_post_funds_greater_than_minimum =
                     post_funds >= min_funds_parameter;
-                is_post_funds_greater_than_minimum.ok_or_else(|| {
+                is_post_funds_greater_than_minimum.ext_ok_or_else(|| {
                     Error::new_alloc(format!(
                         "Funds {} must be greater than the minimum funds of {}",
                         post_funds.native_denominated(),
@@ -874,7 +874,7 @@ where
 
                 let is_valid_funds = post_balance >= pre_balance
                     && checked!(post_balance - pre_balance)? == post_funds;
-                is_valid_funds.ok_or_else(|| {
+                is_valid_funds.ext_ok_or_else(|| {
                     Error::new_alloc(format!(
                         "Invalid funds {} have been written to storage",
                         post_funds.native_denominated()
@@ -911,7 +911,7 @@ where
             post_balance >= pre_balance
         };
 
-        is_valid_balance.ok_or_else(|| {
+        is_valid_balance.ext_ok_or_else(|| {
             Error::new_const("Invalid balance change for governance address")
         })
     }
@@ -933,14 +933,14 @@ where
         }
 
         let author = Self::force_read(ctx, &author_key, ReadType::Post)?;
-        namada_account::exists(&ctx.pre(), &author).true_or_else(|| {
+        namada_account::exists(&ctx.pre(), &author).ext_true_or_else(|| {
             Error::new_alloc(format!(
                 "No author account {author} could be found for the proposal \
                  with id {proposal_id}"
             ))
         })?;
 
-        verifiers.contains(&author).ok_or_else(|| {
+        verifiers.contains(&author).ext_ok_or_else(|| {
             Error::new_alloc(format!(
                 "The VP of the proposal with id {proposal_id}'s author \
                  {author} should have been triggered"
@@ -959,7 +959,7 @@ where
         let expected_counter = checked!(pre_counter + set_count)?;
         let valid_counter = expected_counter == post_counter;
 
-        valid_counter.ok_or_else(|| {
+        valid_counter.ext_ok_or_else(|| {
             Error::new_alloc(format!(
                 "Invalid proposal counter. Expected {expected_counter}, but \
                  got {post_counter} instead."
@@ -980,7 +980,7 @@ where
         // register a committing key causing a bug
         let pre_counter_is_lower = pre_counter < post_counter;
 
-        pre_counter_is_lower.ok_or_else(|| {
+        pre_counter_is_lower.ext_ok_or_else(|| {
             Error::new_alloc(format!(
                 "The value of the previous counter {pre_counter} must be \
                  lower than the value of the new counter {post_counter}."
@@ -1002,7 +1002,7 @@ where
                 ))
             },
             |data| {
-                is_proposal_accepted(&ctx.pre(), data.as_ref())?.ok_or_else(
+                is_proposal_accepted(&ctx.pre(), data.as_ref())?.ext_ok_or_else(
                     || {
                         Error::new_const(
                             "Governance parameter changes can only be \

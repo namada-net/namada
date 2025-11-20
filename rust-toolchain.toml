@@ -1,4 +1,4 @@
 [toolchain]
-channel = "1.85.1"
-components = ["rustc", "cargo", "rust-std", "rust-docs", "rls", "rust-src", "rust-analysis"]
+channel = "1.91.1"
+components = ["rustc", "cargo", "rust-std", "rust-docs", "rust-src", "rust-analyzer"]
 targets = ['wasm32-unknown-unknown']

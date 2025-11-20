@@ -77,7 +77,7 @@ where
             let bridge_pool_is_verifier =
                 verifiers.contains(&storage::bridge_pool::BRIDGE_POOL_ADDRESS);
 
-            bridge_pool_is_verifier.ok_or_else(|| {
+            bridge_pool_is_verifier.ext_ok_or_else(|| {
                 Error::new_const(
                     "Bridge pool VP was not marked as a verifier of the \
                      transaction",

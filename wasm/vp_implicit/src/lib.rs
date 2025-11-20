@@ -125,7 +125,7 @@ fn validate_tx(
                 if owner == &addr {
                     let key_was_not_already_revealed =
                         !ctx.has_key_pre(key).into_vp_error()?;
-                    key_was_not_already_revealed.ok_or_else(|| {
+                    key_was_not_already_revealed.ext_ok_or_else(|| {
                         VpError::Erased(format!(
                             "Public key of {addr} has already been revealed"
                         ))
@@ -148,7 +148,7 @@ fn validate_tx(
 
                             // Check that address matches with the address
                             // derived from the PK
-                            pk_derived_addr_is_correct.ok_or_else(|| {
+                            pk_derived_addr_is_correct.ext_ok_or_else(|| {
                                 VpError::Erased(format!(
                                     "The address derived from the revealed \
                                      public key {addr_from_pk} does not match \
@@ -191,7 +191,7 @@ fn validate_tx(
                 Ok(())
             }
             KeyType::TokenMinted => {
-                verifiers.contains(&address::MULTITOKEN).ok_or_else(|| {
+                verifiers.contains(&address::MULTITOKEN).ext_ok_or_else(|| {
                     VpError::Erased(
                         "The Multitoken VP should have been a verifier for \
                          this transaction, since a token was minted"

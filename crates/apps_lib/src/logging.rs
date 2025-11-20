@@ -21,17 +21,12 @@ const ROLLING_ENV_KEY: &str = "NAMADA_LOG_ROLLING";
 
 const LOG_FILE_NAME_PREFIX: &str = "namada.log";
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 enum Fmt {
+    #[default]
     Full,
     Json,
     Pretty,
-}
-
-impl Default for Fmt {
-    fn default() -> Self {
-        Self::Full
-    }
 }
 
 /// When logging to a file is enabled, returns a guard that handles flushing of

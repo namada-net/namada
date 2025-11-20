@@ -41,7 +41,7 @@ where
             match key_type {
                 KeyType::PARAMETER | KeyType::UNKNOWN_PARAMETER => {
                     let is_gov = Gov::is_proposal_accepted(&ctx.pre(), &data)?
-                        .ok_or_else(|| {
+                        .ext_ok_or_else(|| {
                             Error::new_alloc(format!(
                                 "Attempted to change a protocol parameter \
                                  from outside of a governance proposal, or \

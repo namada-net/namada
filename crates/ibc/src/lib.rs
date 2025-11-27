@@ -60,9 +60,7 @@ use ibc::apps::nft_transfer::types::{
     TracePrefix as NftTracePrefix, ack_success_b64,
     is_receiver_chain_source as is_nft_receiver_chain_source,
 };
-use ibc::apps::transfer::handler::{
-    send_transfer_execute, send_transfer_validate,
-};
+use ibc::apps::transfer::handler::send_transfer_validate;
 use ibc::apps::transfer::types::error::TokenTransferError;
 use ibc::apps::transfer::types::msgs::transfer::MsgTransfer as IbcMsgTransfer;
 use ibc::apps::transfer::types::{
@@ -115,6 +113,7 @@ use trace::{
     is_sender_chain_source,
 };
 
+use crate::context::middlewares::send_transfer_execute;
 use crate::storage::{
     channel_counter_key, client_counter_key, connection_counter_key,
     deposit_prefix, nft_class_key, nft_metadata_key, withdraw_prefix,

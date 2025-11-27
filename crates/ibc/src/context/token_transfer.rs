@@ -10,6 +10,8 @@ use bitflags::bitflags;
 use ibc::apps::transfer::context::{
     TokenTransferExecutionContext, TokenTransferValidationContext,
 };
+use ibc::apps::transfer::types::error::TokenTransferError;
+use ibc::apps::transfer::types::msgs::transfer::MsgTransfer;
 use ibc::apps::transfer::types::{Memo, PrefixedCoin, PrefixedDenom};
 use ibc::core::host::types::error::HostError;
 use ibc::core::host::types::identifiers::{ChannelId, PortId};
@@ -22,6 +24,7 @@ use namada_core::uint::Uint;
 use namada_tx::event::{MaspEvent, MaspEventKind, MaspTxRef};
 
 use super::common::IbcCommonContext;
+use crate::context::middlewares::MaspUnshieldingFeesExecutionContext;
 use crate::context::storage::IbcStorageContext;
 use crate::storage::{load_shielding_counter, write_shielding_counter};
 use crate::{IBC_ESCROW_ADDRESS, IbcAccountId, trace};
@@ -245,48 +248,24 @@ where
     }
 
     #[inline]
-    fn maybe_handle_masp_unshielding<F>(
+    fn maybe_handle_masp_unshielding(
         &self,
         from_account: &IbcAccountId,
-        token: &Address,
-        amount: &Amount,
-        transfer: F,
-    ) -> Result<Amount, HostError>
-    where
-        F: FnOnce(Amount) -> Result<(), HostError>,
-        Params:
-            namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
-    {
-        let mut amount = *amount;
+    ) -> Result<(), HostError> {
         let has_masp_tx = self
             .config
             .contains(TokenTransferContextConfig::HAS_MASP_TX);
 
-        if !has_masp_tx {
-            return if from_account.is_transparent() {
-                Ok(amount)
-            } else {
-                Err(HostError::Other {
-                    description: format!(
-                        "Set refund address {from_account} without including \
-                         an IBC unshielding MASP transaction"
-                    ),
-                })
-            };
+        if !has_masp_tx && from_account.is_shielded() {
+            return Err(HostError::Other {
+                description: format!(
+                    "Set refund address {from_account} without including an \
+                     IBC unshielding MASP transaction"
+                ),
+            });
         }
 
-        if let Some(fee) = self.get_masp_unshielding_fee(token, &amount)? {
-            amount =
-                amount.checked_sub(fee).ok_or_else(|| HostError::Other {
-                    description: "Unshielding fee greater than withdrawn \
-                                  amount"
-                        .to_string(),
-                })?;
-
-            transfer(fee)?;
-        }
-
-        Ok(amount)
+        Ok(())
     }
 
     fn get_masp_shielding_fee(
@@ -646,18 +625,8 @@ where
         } else {
             from_account.to_address()
         };
-        let amount = self.maybe_handle_masp_unshielding(
-            from_account,
-            &ibc_token,
-            &amount,
-            |fee| {
-                self.insert_verifier(&PGF);
-                self.inner
-                    .borrow_mut()
-                    .transfer_token(&from_trans_account, &PGF, &ibc_token, fee)
-                    .map_err(HostError::from)
-            },
-        )?;
+
+        self.maybe_handle_masp_unshielding(from_account)?;
 
         self.increment_per_epoch_withdraw_limits(&ibc_token, amount)?;
 
@@ -776,21 +745,9 @@ where
         } else {
             account.to_address()
         };
-        let amount = self.maybe_handle_masp_unshielding(
-            account,
-            &ibc_token,
-            &amount,
-            |fee| {
-                self.insert_verifier(&PGF);
-                self.inner
-                    .borrow_mut()
-                    .transfer_token(&trans_account, &PGF, &ibc_token, fee)
-                    .map_err(HostError::from)
-            },
-        )?;
 
-        // NOTE: update the burned amount after paying for
-        // unshielding fees, since the fees aren't burned
+        self.maybe_handle_masp_unshielding(account)?;
+
         self.update_mint_amount(&ibc_token, amount, false)?;
 
         self.increment_per_epoch_withdraw_limits(&ibc_token, amount)?;
@@ -807,5 +764,55 @@ where
             .borrow_mut()
             .burn_token(&trans_account, &ibc_token, amount)
             .map_err(HostError::from)
+    }
+}
+
+impl<C, Params, Token, ShieldedToken> MaspUnshieldingFeesExecutionContext
+    for TokenTransferContext<C, Params, Token, ShieldedToken>
+where
+    C: IbcCommonContext,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+{
+    fn apply_masp_unshielding_fee(
+        &mut self,
+        msg: &mut MsgTransfer,
+    ) -> Result<(), TokenTransferError> {
+        // no fee is taken if this is not a masp unshielding op
+        let has_masp_tx = self
+            .config
+            .contains(TokenTransferContextConfig::HAS_MASP_TX);
+        if !has_masp_tx {
+            return Ok(());
+        }
+
+        let (ibc_token, mut amount) = self
+            .get_token_amount(&msg.packet_data.token)
+            .map_err(TokenTransferError::Host)?;
+
+        if let Some(fee) = self
+            .get_masp_unshielding_fee(&ibc_token, &amount)
+            .map_err(TokenTransferError::Host)?
+            .filter(|fee| !fee.is_zero())
+        {
+            amount =
+                amount.checked_sub(fee).ok_or_else(|| HostError::Other {
+                    description: "Unshielding fee greater than withdrawn \
+                                  amount"
+                        .to_string(),
+                })?;
+
+            // commit the updated amount to the packet
+            msg.packet_data.token.amount = amount.into();
+
+            // transfer the fee to PGF, and trigger its vp
+            self.insert_verifier(&PGF);
+            self.inner
+                .borrow_mut()
+                .transfer_token(&MASP, &PGF, &ibc_token, fee)
+                .map_err(HostError::from)
+                .map_err(TokenTransferError::Host)?;
+        }
+
+        Ok(())
     }
 }

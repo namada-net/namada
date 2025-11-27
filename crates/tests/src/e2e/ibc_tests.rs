@@ -24,7 +24,7 @@ use namada_apps_lib::config::ethereum_bridge;
 use namada_apps_lib::config::genesis::templates;
 use namada_apps_lib::tendermint_rpc::{Client, HttpClient, Url};
 use namada_core::masp::PaymentAddress;
-use namada_sdk::address::MASP;
+use namada_sdk::address::{MASP, PGF};
 use namada_sdk::chain::Epoch;
 use namada_sdk::governance::cli::onchain::PgfFunding;
 use namada_sdk::governance::pgf::ADDRESS as PGF_ADDRESS;
@@ -75,6 +75,180 @@ const UPGRADED_CHAIN_ID: &str = "upgraded-chain";
 const CW721_WASM: &str = "cw721_base.wasm";
 const ICS721_WASM: &str = "ics721_base.wasm";
 const NFT_ID: &str = "test_nft";
+
+#[test]
+fn ibc_shielded_action_fees() -> Result<()> {
+    const PIPELINE_LEN: u64 = 2;
+
+    let update_genesis =
+        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
+            genesis.parameters.parameters.epochs_per_year =
+                epochs_per_year_from_min_duration(60);
+            genesis.parameters.gov_params.min_proposal_grace_epochs = 3;
+            genesis.parameters.ibc_params.default_mint_limit =
+                Amount::max_signed();
+            genesis
+                .parameters
+                .ibc_params
+                .default_per_epoch_throughput_limit = Amount::max_signed();
+            genesis.parameters.pos_params.pipeline_len = PIPELINE_LEN;
+            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+        };
+    let (ledger, gaia, test, test_gaia) =
+        run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
+    let _bg_ledger = ledger.background();
+    let _bg_gaia = gaia.background();
+
+    let port_id_namada = FT_PORT_ID.parse().unwrap();
+    let port_id_gaia = FT_PORT_ID.parse().unwrap();
+
+    // Create channel between Namada and Gaia while simultaneously
+    // activating shielded action fees
+    let (_bg_hermes, hermes_dir, channel_id_namada, channel_id_gaia) =
+        std::thread::scope(|s| {
+            // Activate shielded action fees for samoleans on Namada
+            // - 1% for IBC shielding ops
+            // - 2% for IBC unshielding ops
+            let proposal_thread = s.spawn(|| {
+                // Delegate tokens on Namada
+                delegate_token(&test).unwrap();
+                let rpc = get_actor_rpc(&test, Who::Validator(0));
+                let mut epoch = get_epoch(&test, &rpc).unwrap();
+                let delegated_epoch = epoch + PIPELINE_LEN;
+
+                // Wait for tokens to be delegated
+                epoch = get_epoch(&test, &rpc).unwrap();
+                while epoch < delegated_epoch {
+                    epoch = epoch_sleep(&test, &rpc, 120).unwrap();
+                }
+
+                // Launch IBC shielded action fees proposal on Namada
+                let start_epoch = propose_shielded_action_fees(&test).unwrap();
+
+                // Vote
+                epoch = get_epoch(&test, &rpc).unwrap();
+                while epoch < start_epoch {
+                    epoch = epoch_sleep(&test, &rpc, 120).unwrap();
+                }
+                submit_votes(&test).unwrap();
+
+                // Wait for grace epoch
+                let grace_epoch = start_epoch + 6u64 /* grace epoch offset */;
+                epoch = get_epoch(&test, &rpc).unwrap();
+                while epoch < grace_epoch {
+                    epoch = epoch_sleep(&test, &rpc, 120).unwrap();
+                }
+            });
+
+            // Create channel between Namada and Gaia
+            let hermes_thread = s.spawn(|| {
+                let hermes_dir = setup_hermes(&test, &test_gaia).unwrap();
+                let (channel_id_namada, channel_id_gaia) =
+                    create_channel_with_hermes(
+                        &hermes_dir,
+                        &test,
+                        &test_gaia,
+                        &port_id_namada,
+                        &port_id_gaia,
+                    )
+                    .unwrap();
+
+                // Start relaying
+                let hermes = run_hermes(&hermes_dir).unwrap();
+                let bg_hermes = hermes.background();
+
+                (bg_hermes, hermes_dir, channel_id_namada, channel_id_gaia)
+            });
+
+            proposal_thread.join().unwrap();
+            hermes_thread.join().unwrap()
+        });
+
+    // Shielding transfer 200 samoleans from Gaia to Namada
+    let albert_payment_addr = find_payment_address(&test, AA_PAYMENT_ADDRESS)?;
+    transfer_from_cosmos(
+        &test_gaia,
+        COSMOS_USER,
+        albert_payment_addr.to_string(),
+        COSMOS_COIN,
+        200,
+        &port_id_gaia,
+        &channel_id_gaia,
+        None,
+        None,
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_gaia,
+        &channel_id_gaia,
+        &test_gaia,
+    )?;
+    let ibc_denom_on_namada =
+        format!("{port_id_namada}/{channel_id_namada}/{COSMOS_COIN}");
+    check_balance(&test, PGF.to_string(), &ibc_denom_on_namada, 2)?;
+    check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 198)?;
+    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 800)?;
+
+    // Unshielding transfer 100 samoleans from Namada to Gaia
+    let gaia_receiver = find_cosmos_address(&test_gaia, COSMOS_USER)?;
+    transfer(
+        &test,
+        A_SPENDING_KEY,
+        &gaia_receiver,
+        &ibc_denom_on_namada,
+        100,
+        Some(BERTHA_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        None,
+        None,
+        None,
+        None,
+        false,
+        None,
+        None,
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+    check_balance(&test, PGF.to_string(), &ibc_denom_on_namada, 4)?;
+    check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 98)?;
+    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 898)?;
+
+    // Get refunded by unshielding to an invalid address on Gaia
+    transfer(
+        &test,
+        A_SPENDING_KEY,
+        "invalid_receiver",
+        &ibc_denom_on_namada,
+        50,
+        Some(BERTHA_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        None,
+        None,
+        None,
+        None,
+        false,
+        None,
+        None,
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+    // The balance should not have changed
+    check_balance(&test, PGF.to_string(), &ibc_denom_on_namada, 4)?;
+    check_shielded_balance(&test, AA_VIEWING_KEY, &ibc_denom_on_namada, 98)?;
+    check_cosmos_balance(&test_gaia, COSMOS_USER, COSMOS_COIN, 898)?;
+
+    Ok(())
+}
 
 #[test]
 fn ibc_to_and_from_payment_addrs() -> Result<()> {
@@ -3338,6 +3512,54 @@ fn propose_inflation(test: &Test) -> Result<Epoch> {
     });
 
     let proposal_json_path = test.test_dir.path().join("proposal.json");
+    write_json_file(proposal_json_path.as_path(), proposal_json);
+
+    let submit_proposal_args = apply_use_device(vec![
+        "init-proposal",
+        "--data-path",
+        proposal_json_path.to_str().unwrap(),
+        "--gas-limit",
+        "3000000",
+        "--node",
+        &rpc,
+    ]);
+    let mut client = run!(test, Bin::Client, submit_proposal_args, Some(100))?;
+    client.exp_string(TX_APPLIED_SUCCESS)?;
+    client.assert_success();
+    Ok(start_epoch.into())
+}
+
+fn propose_shielded_action_fees(test: &Test) -> Result<Epoch> {
+    let albert = find_address(test, ALBERT)?;
+    let rpc = get_actor_rpc(test, Who::Validator(0));
+    let epoch = get_epoch(test, &rpc)?;
+    let start_epoch = (epoch.0 + 3) / 3 * 3;
+    let proposal_json = serde_json::json!({
+        "proposal": {
+            "content": {
+                "title": "IBC shielded action fees",
+                "authors": "bing@bong.us",
+                "discussions-to": "www.github.com/anoma/aip/1",
+                "created": "2022-03-10T08:54:37Z",
+                "license": "MIT",
+                "abstract": "bing",
+                "motivation": "bong",
+                "details": "asdf",
+                "requires": "2"
+            },
+            "author": albert,
+            "voting_start_epoch": start_epoch,
+            "voting_end_epoch": start_epoch + 3_u64,
+            "activation_epoch": start_epoch + 6_u64,
+        },
+        "data": TestWasms::TxProposalIbcShieldedActionFees
+            .read_bytes()
+    });
+
+    let proposal_json_path = test
+        .test_dir
+        .path()
+        .join("proposal_ibc_shielded_action_fees.json");
     write_json_file(proposal_json_path.as_path(), proposal_json);
 
     let submit_proposal_args = apply_use_device(vec![

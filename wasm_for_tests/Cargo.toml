@@ -30,7 +30,7 @@ members = [
 authors = ["Heliax AG <hello@heliax.dev>"]
 edition = "2024"
 license = "GPL-3.0"
-version = "0.251.3"
+version = "0.251.4"
 
 [workspace.dependencies]
 namada_test_utils = { path = "../crates/test_utils" }

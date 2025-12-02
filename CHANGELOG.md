@@ -89,6 +89,25 @@ Namada v1.0.0 is the first stable release of the Namada apps.
 - updated namada libraries to libs-v0.46.1
   ([\#4123](https://github.com/anoma/namada/pull/4123))
 
+## libs-v0.251.4
+
+Namada libs v0.251.4
+
+### FEATURES
+
+- Added support for MASP frontend providers sustainability fees.
+  ([\#4790](https://github.com/anoma/namada/pull/4790))
+
+### IMPROVEMENTS
+
+- Replaced tiny-hderive dep with bip32. ([\#4963](https://github.com/namada-
+  net/namada/pull/4963))
+
+### MISCELLANEOUS
+
+- SDK and all its internal dependency crates have been re-licensed under MIT
+  license. ([\#4964](https://github.com/namada-net/namada/pull/4964))
+
 ## libs-v0.251.3
 
 Namada libs v0.251.3

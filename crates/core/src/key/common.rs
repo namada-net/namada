@@ -517,13 +517,13 @@ impl super::SigScheme for SigScheme {
         }
     }
 
-    fn mock(keypair: &SecretKey) -> Self::Signature {
-        match keypair {
-            SecretKey::Ed25519(kp) => {
-                Signature::Ed25519(ed25519::SigScheme::mock(kp))
+    fn mock(pubkey: &Self::PublicKey) -> Self::Signature {
+        match pubkey {
+            PublicKey::Ed25519(pk) => {
+                Signature::Ed25519(ed25519::SigScheme::mock(pk))
             }
-            SecretKey::Secp256k1(kp) => {
-                Signature::Secp256k1(secp256k1::SigScheme::mock(kp))
+            PublicKey::Secp256k1(pk) => {
+                Signature::Secp256k1(secp256k1::SigScheme::mock(pk))
             }
         }
     }

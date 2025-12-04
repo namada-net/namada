@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::data::{Fee, GasLimit, TxType, WrapperTx};
+use crate::section::SigningKeys;
 use crate::sign::{SignatureIndex, VerifySigError};
 use crate::{
     Authorization, Code, Data, Header, MaspBuilder, Section, Signer,
@@ -829,36 +830,37 @@ impl Tx {
     }
 
     /// Add fee payer keypair to the tx builder
+    // FIXME: same thing here, do we need these two intermediate functions?
     pub fn sign_wrapper(&mut self, keypair: common::SecretKey) -> &mut Self {
-        self.create_wrapper_sig(keypair, Authorization::new)
+        self.create_wrapper_sig(either::Left(keypair))
     }
 
     /// Mock adding fee payer keypair to the tx builder
     pub fn mock_sign_wrapper(
         &mut self,
-        keypair: common::SecretKey,
+        pubkey: common::PublicKey,
     ) -> &mut Self {
-        self.create_wrapper_sig(keypair, Authorization::mock)
+        self.create_wrapper_sig(either::Right(pubkey))
     }
 
-    fn create_wrapper_sig<F>(
+    fn create_wrapper_sig(
         &mut self,
-        keypair: common::SecretKey,
-        create_sig: F,
-    ) -> &mut Self
-    where
-        F: Fn(
-            Vec<namada_core::hash::Hash>,
-            BTreeMap<u8, common::SecretKey>,
-            Option<Address>,
-        ) -> Authorization,
-    {
+        keypair: either::Either<common::SecretKey, common::PublicKey>,
+    ) -> &mut Self {
         self.protocol_filter();
-        self.add_section(Section::Authorization(create_sig(
-            self.sechashes(),
-            [(0, keypair)].into_iter().collect(),
-            None,
-        )));
+        let auth = match keypair {
+            either::Either::Left(secret_key) => Authorization::new(
+                self.sechashes(),
+                [(0, secret_key)].into_iter().collect(),
+                None,
+            ),
+            either::Either::Right(public_keys) => Authorization::mock(
+                self.sechashes(),
+                [(0, public_keys)].into_iter().collect(),
+                None,
+            ),
+        };
+        self.add_section(Section::Authorization(auth));
         self
     }
 
@@ -870,10 +872,9 @@ impl Tx {
         signer: Option<Address>,
     ) -> &mut Self {
         self.create_sig_raw(
-            keypairs,
+            either::Left(keypairs),
             account_public_keys_map,
             signer,
-            Authorization::new,
         )
     }
 
@@ -881,47 +882,68 @@ impl Tx {
     /// signatures
     pub fn mock(
         &mut self,
-        keypairs: Vec<common::SecretKey>,
+        pubkeys: Vec<common::PublicKey>,
         account_public_keys_map: AccountPublicKeysMap,
         signer: Option<Address>,
     ) -> &mut Self {
         self.create_sig_raw(
-            keypairs,
+            either::Right(pubkeys),
             account_public_keys_map,
             signer,
-            Authorization::mock,
         )
     }
 
-    fn create_sig_raw<F>(
+    fn create_sig_raw(
         &mut self,
-        keypairs: Vec<common::SecretKey>,
+        keys: either::Either<Vec<common::SecretKey>, Vec<common::PublicKey>>,
         account_public_keys_map: AccountPublicKeysMap,
         signer: Option<Address>,
-        create_sig: F,
-    ) -> &mut Self
-    where
-        F: Fn(
-            Vec<namada_core::hash::Hash>,
-            BTreeMap<u8, common::SecretKey>,
-            Option<Address>,
-        ) -> Authorization,
-    {
+    ) -> &mut Self {
         // The inner tx signer signs the Raw version of the Header
         let hashes = vec![self.raw_header_hash()];
         self.protocol_filter();
 
-        let secret_keys = if signer.is_some() {
-            account_public_keys_map.index_secret_keys(keypairs)
+        let signing_keys = if signer.is_some() {
+            match keys {
+                either::Left(secret_keys) => SigningKeys::Secret(
+                    account_public_keys_map.index_secret_keys(secret_keys),
+                ),
+                either::Right(public_keys) => SigningKeys::Public(
+                    account_public_keys_map.index_public_keys(public_keys),
+                ),
+            }
         } else {
-            (0..).zip(keypairs).collect()
+            match keys {
+                either::Either::Left(secret_keys) => SigningKeys::Secret(
+                    secret_keys
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, key)| {
+                            (u8::try_from(idx).unwrap(), key.to_owned())
+                        })
+                        .collect(),
+                ),
+                either::Either::Right(public_keys) => SigningKeys::Public(
+                    public_keys
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, key)| {
+                            (u8::try_from(idx).unwrap(), key.to_owned())
+                        })
+                        .collect(),
+                ),
+            }
         };
 
-        self.add_section(Section::Authorization(create_sig(
-            hashes,
-            secret_keys,
-            signer,
-        )));
+        let auth = match signing_keys {
+            SigningKeys::Secret(secret_keys) => {
+                Authorization::new(hashes, secret_keys, signer)
+            }
+            SigningKeys::Public(public_keys) => {
+                Authorization::mock(hashes, public_keys, signer)
+            }
+        };
+        self.add_section(Section::Authorization(auth));
         self
     }
 

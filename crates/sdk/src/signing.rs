@@ -287,19 +287,12 @@ fn mock_hw_sig(tx: &mut Tx, pk: common::PublicKey, signable: Signable) {
         Signable::RawHeader => vec![vec![tx.raw_header_hash()]],
     };
     tx.protocol_filter();
-    let sig = match pk {
-        CommonPublicKey::Ed25519(_) => {
-            // this key has no effect other than to satisfy api constraints
-            let kp = ed25519::SigScheme::from_bytes([0; 32]);
-            CommonSignature::Ed25519(ed25519::SigScheme::mock(&kp))
+    let sig = match &pk {
+        CommonPublicKey::Ed25519(public_key) => {
+            CommonSignature::Ed25519(ed25519::SigScheme::mock(public_key))
         }
-        CommonPublicKey::Secp256k1(_) => {
-            // this key has no effect other than to satisfy api constraints
-            const SECRET_KEY_HEX: &str = "c2c72dfbff11dfb4e9d5b0a20c620c58b15bb7552753601f043db91331b0db15";
-            let sk_bytes = HEXLOWER.decode(SECRET_KEY_HEX.as_bytes()).unwrap();
-            let kp =
-                secp256k1::SecretKey::try_from_slice(&sk_bytes[..]).unwrap();
-            CommonSignature::Secp256k1(secp256k1::SigScheme::mock(&kp))
+        CommonPublicKey::Secp256k1(public_key) => {
+            CommonSignature::Secp256k1(secp256k1::SigScheme::mock(public_key))
         }
     };
     for t in targets {
@@ -361,36 +354,54 @@ where
             signing_tx_data.account_public_keys_map
         {
             let mut wallet = wallet.write().await;
-            let mut signing_tx_keypairs = vec![];
 
-            for public_key in &signing_tx_data.public_keys {
-                if !used_pubkeys.contains(public_key) {
-                    let Ok(secret_key) =
-                        find_key_by_pk(&mut wallet, args, public_key)
-                    else {
-                        // If the secret key is not found, continue because the
-                        // hardware wallet may still be able to sign this
-                        continue;
-                    };
-                    used_pubkeys.insert(public_key.clone());
-                    signing_tx_keypairs.push(secret_key);
+            if args.dry_run.is_some() {
+                // For dry-runs produce mock signatures
+                let mut signing_tx_pubkeys = vec![];
+
+                for public_key in &signing_tx_data.public_keys {
+                    if !used_pubkeys.contains(public_key) {
+                        used_pubkeys.insert(public_key.clone());
+                        signing_tx_pubkeys.push(public_key.to_owned());
+                    }
                 }
-            }
 
-            if !signing_tx_keypairs.is_empty() {
-                if args.dry_run.is_some() {
+                if !signing_tx_pubkeys.is_empty() {
+                    // FIXME: really need these two intermediate functions?
                     tx.mock(
-                        signing_tx_keypairs,
+                        signing_tx_pubkeys,
                         account_public_keys_map,
                         signing_tx_data.owner,
-                    )
-                } else {
+                    );
+                }
+            } else {
+                let mut signing_tx_keypairs = vec![];
+
+                for public_key in &signing_tx_data.public_keys {
+                    if !used_pubkeys.contains(public_key) {
+                        let Ok(secret_key) =
+                            find_key_by_pk(&mut wallet, args, public_key)
+                        else {
+                            // If the secret key is not found, continue because
+                            // the hardware wallet
+                            // may still be able to sign this
+                            // FIXME: actually because of this, do we even need
+                            // the function that mocks the hardware signatures?
+                            continue;
+                        };
+                        used_pubkeys.insert(public_key.clone());
+                        signing_tx_keypairs.push(secret_key);
+                    }
+                }
+
+                if !signing_tx_keypairs.is_empty() {
+                    // FIXME: really need these two intermediate functions?
                     tx.sign_raw(
                         signing_tx_keypairs,
                         account_public_keys_map,
                         signing_tx_data.owner,
-                    )
-                };
+                    );
+                }
             }
         }
 
@@ -456,25 +467,22 @@ where
             pubkey,
             disposable_fee_payer: _,
         }) => {
-            let key = {
-                // Lock the wallet just long enough to extract a key from it
-                // without interfering with the sign closure
-                // call
-                let mut wallet = wallet.write().await;
-                find_key_by_pk(&mut *wallet, args, pubkey)
-            };
-            match key {
-                Ok(fee_payer_keypair) => {
-                    if args.dry_run.is_some() {
-                        tx.mock_sign_wrapper(fee_payer_keypair);
-                    } else {
+            if args.dry_run.is_some() {
+                tx.mock_sign_wrapper(pubkey.to_owned());
+            } else {
+                let key = {
+                    // Lock the wallet just long enough to extract a key from it
+                    // without interfering with the sign closure
+                    // call
+                    let mut wallet = wallet.write().await;
+                    find_key_by_pk(&mut *wallet, args, pubkey)
+                };
+
+                match key {
+                    Ok(fee_payer_keypair) => {
                         tx.sign_wrapper(fee_payer_keypair);
                     }
-                }
-                Err(_) => {
-                    if args.dry_run.is_some() {
-                        mock_hw_sig(tx, pubkey.clone(), Signable::FeeRawHeader);
-                    } else {
+                    Err(_) => {
                         *tx = sign(
                             tx.clone(),
                             pubkey.clone(),

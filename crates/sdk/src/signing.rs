@@ -17,7 +17,6 @@ use namada_core::address::{Address, ImplicitAddress, MASP};
 use namada_core::arith::checked;
 use namada_core::collections::{HashMap, HashSet};
 use namada_core::ibc::primitives::IntoHostTime;
-use namada_core::key::common::{CommonPublicKey, CommonSignature};
 use namada_core::key::*;
 use namada_core::masp::{AssetData, MaspTxId, PaymentAddress};
 use namada_core::tendermint::Time as TmTime;
@@ -38,9 +37,7 @@ use namada_token::storage_key::balance_key;
 use namada_tx::data::pgf::UpdateStewardCommission;
 use namada_tx::data::pos;
 use namada_tx::data::pos::BecomeValidator;
-use namada_tx::{
-    Authorization, MaspBuilder, Section, SignatureIndex, Signer, Tx,
-};
+use namada_tx::{Authorization, MaspBuilder, Section, SignatureIndex, Tx};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
@@ -277,35 +274,6 @@ pub async fn default_sign(
     )))
 }
 
-/// When mocking signatures, if a key is in a hardware wallet,
-/// use this function instead to mock the signature
-fn mock_hw_sig(tx: &mut Tx, pk: common::PublicKey, signable: Signable) {
-    let targets = match signable {
-        Signable::FeeRawHeader => {
-            vec![tx.sechashes(), vec![tx.raw_header_hash()]]
-        }
-        Signable::RawHeader => vec![vec![tx.raw_header_hash()]],
-    };
-    tx.protocol_filter();
-    let sig = match &pk {
-        CommonPublicKey::Ed25519(public_key) => {
-            CommonSignature::Ed25519(ed25519::SigScheme::mock(public_key))
-        }
-        CommonPublicKey::Secp256k1(public_key) => {
-            CommonSignature::Secp256k1(secp256k1::SigScheme::mock(public_key))
-        }
-    };
-    for t in targets {
-        let mut signatures = BTreeMap::new();
-        signatures.insert(0, sig.clone());
-        tx.add_section(Section::Authorization(Authorization {
-            targets: t,
-            signer: Signer::PubKeys(vec![pk.clone()]),
-            signatures,
-        }));
-    }
-}
-
 /// Sign a transaction with a given signing key or public key of a given signer.
 /// If no explicit signer given, use the `default`. If no `default` is given,
 /// Error.
@@ -355,6 +323,7 @@ where
         {
             let mut wallet = wallet.write().await;
 
+            // FIXME: the dry-run check should be moved up in the logic
             if args.dry_run.is_some() {
                 // For dry-runs produce mock signatures
                 let mut signing_tx_pubkeys = vec![];
@@ -385,8 +354,6 @@ where
                             // If the secret key is not found, continue because
                             // the hardware wallet
                             // may still be able to sign this
-                            // FIXME: actually because of this, do we even need
-                            // the function that mocks the hardware signatures?
                             continue;
                         };
                         used_pubkeys.insert(public_key.clone());
@@ -405,7 +372,8 @@ where
             }
         }
 
-        // Then try to sign the raw header using the hardware wallet
+        // Then try to sign the raw header using the hardware wallet (only if
+        // this is not a dry-run requiring mock signatures)
         for pubkey in &signing_tx_data.public_keys {
             if !used_pubkeys.contains(pubkey) {
                 match &fee_auth {
@@ -418,14 +386,10 @@ where
                         used_pubkeys.insert(pubkey.clone());
                     }
                     _ => {
-                        if args.dry_run.is_some() {
-                            mock_hw_sig(
-                                tx,
-                                pubkey.clone(),
-                                Signable::RawHeader,
-                            );
-                            used_pubkeys.insert(pubkey.clone());
-                        } else if let Ok(ntx) = sign(
+                        // No need to account for mock signatures when dealing
+                        // with the hardware wallet as those are produced fully
+                        // in software here above
+                        if let Ok(ntx) = sign(
                             tx.clone(),
                             pubkey.clone(),
                             Signable::RawHeader,

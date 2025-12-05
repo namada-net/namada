@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::collections::btree_map::{Iter, Keys, Values};
 use std::hash::Hash;
 
 use masp_primitives::transaction::Transaction;
@@ -7,6 +6,7 @@ use masp_primitives::transaction::builder::Builder;
 use masp_primitives::transaction::components::sapling::builder::SaplingMetadata;
 use masp_primitives::zip32::ExtendedFullViewingKey;
 use namada_account::AccountPublicKeysMap;
+use namada_account::common::SignOrMockKey;
 use namada_core::address::Address;
 use namada_core::borsh::{
     self, BorshDeserialize, BorshSchema, BorshSerialize, BorshSerializeExt,
@@ -453,75 +453,6 @@ impl PartialEq for Signer {
     }
 }
 
-// FIXME: maybe better with a marker trait?
-/// The keys to be used for signing the transaction. Can be public keys if we
-/// just want to mock the signatures for dry-runs
-pub(crate) enum SigningKeys {
-    /// Signing keys to produce real signatures
-    Secret(BTreeMap<u8, common::SecretKey>),
-    /// Public keys for mocking purposes
-    Public(BTreeMap<u8, common::PublicKey>),
-}
-
-impl SigningKeys {
-    fn iter(
-        &self,
-    ) -> either::Either<
-        Iter<'_, u8, common::SecretKey>,
-        Iter<'_, u8, common::PublicKey>,
-    > {
-        match self {
-            SigningKeys::Secret(secret_keys) => {
-                either::Left(secret_keys.iter())
-            }
-            SigningKeys::Public(public_keys) => {
-                either::Right(public_keys.iter())
-            }
-        }
-    }
-
-    fn keys(
-        &self,
-        // FIXME: should be the either inside? Also in the other methods. In
-        // this case we should also change SignignKeys
-    ) -> either::Either<
-        Keys<'_, u8, common::SecretKey>,
-        Keys<'_, u8, common::PublicKey>,
-    > {
-        match self {
-            SigningKeys::Secret(secret_keys) => {
-                either::Left(secret_keys.keys())
-            }
-            SigningKeys::Public(public_keys) => {
-                either::Right(public_keys.keys())
-            }
-        }
-    }
-
-    fn values(
-        &self,
-    ) -> either::Either<
-        Values<'_, u8, common::SecretKey>,
-        Values<'_, u8, common::PublicKey>,
-    > {
-        match self {
-            SigningKeys::Secret(secret_keys) => {
-                either::Left(secret_keys.values())
-            }
-            SigningKeys::Public(public_keys) => {
-                either::Right(public_keys.values())
-            }
-        }
-    }
-
-    fn len(&self) -> usize {
-        match self {
-            SigningKeys::Secret(keys) => keys.len(),
-            SigningKeys::Public(keys) => keys.len(),
-        }
-    }
-}
-
 /// A section representing a multisig over another section
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[derive(
@@ -574,17 +505,14 @@ impl PartialEq for Authorization {
 }
 
 impl Authorization {
+    // FIXME: can remove these two indirections?
     /// Sign the given section hash with the given key and return a section
     pub fn new(
         targets: Vec<namada_core::hash::Hash>,
         secret_keys: BTreeMap<u8, common::SecretKey>,
         signer: Option<Address>,
     ) -> Self {
-        Self::create_signatures(
-            targets,
-            SigningKeys::Secret(secret_keys),
-            signer,
-        )
+        Self::create_signatures(targets, secret_keys, signer)
     }
 
     /// Place mock signatures over the given section hash with
@@ -594,12 +522,12 @@ impl Authorization {
         pubkeys: BTreeMap<u8, common::PublicKey>,
         signer: Option<Address>,
     ) -> Self {
-        Self::create_signatures(targets, SigningKeys::Public(pubkeys), signer)
+        Self::create_signatures(targets, pubkeys, signer)
     }
 
-    fn create_signatures(
+    pub(crate) fn create_signatures(
         targets: Vec<namada_core::hash::Hash>,
-        keys: SigningKeys,
+        keys: BTreeMap<u8, impl SignOrMockKey>,
         signer: Option<Address>,
     ) -> Self {
         // If no signer address is given, then derive the signer's public keys
@@ -614,14 +542,7 @@ impl Authorization {
                     .expect("Number of keys must not exceed `u8::MAX`"))),
                 "keys must be enumerated when signer address is absent"
             );
-            match keys.values() {
-                either::Either::Left(secret_keys) => {
-                    Signer::PubKeys(secret_keys.map(RefTo::ref_to).collect())
-                }
-                either::Either::Right(public_keys) => {
-                    Signer::PubKeys(public_keys.cloned().collect())
-                }
-            }
+            Signer::PubKeys(keys.values().map(|key| key.pubkey()).collect())
         };
 
         // Commit to the given targets
@@ -633,18 +554,10 @@ impl Authorization {
         let target = partial.get_raw_hash();
         // Turn the map of keys into a map of signatures over the commitment
         // made above
-        let signatures = match keys.iter() {
-            either::Either::Left(private_keys) => private_keys
-                .map(|(index, secret_key)| {
-                    (*index, common::SigScheme::sign(secret_key, target))
-                })
-                .collect(),
-            either::Either::Right(public_keys) => public_keys
-                .map(|(index, pubkey)| {
-                    (*index, common::SigScheme::mock(pubkey))
-                })
-                .collect(),
-        };
+        let signatures = keys
+            .iter()
+            .map(|(idx, key)| (*idx, key.sign(target)))
+            .collect();
         Self {
             signatures,
             ..partial

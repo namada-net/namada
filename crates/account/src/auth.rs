@@ -6,6 +6,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use namada_core::collections::HashMap;
 use namada_core::hints;
 use namada_core::key::common;
+use namada_core::key::common::SignOrMockKey;
 use namada_macros::BorshDeserializer;
 #[cfg(feature = "migrations")]
 use namada_migrations::*;
@@ -77,7 +78,7 @@ impl AccountPublicKeysMap {
         self.pk_to_idx.get(public_key).cloned()
     }
 
-    // FIXME: in case also join these two
+    // FIXME: can remove this?
     /// Index the given set of secret keys
     pub fn index_secret_keys(
         &self,
@@ -92,16 +93,15 @@ impl AccountPublicKeysMap {
             .collect()
     }
 
-    /// Index the given set of public keys
-    pub fn index_public_keys(
-        &self,
-        public_keys: Vec<common::PublicKey>,
-    ) -> BTreeMap<u8, common::PublicKey> {
-        public_keys
-            .into_iter()
-            .filter_map(|public_key: common::PublicKey| {
-                self.get_index_from_public_key(&public_key)
-                    .map(|index| (index, public_key))
+    /// Index the given set of keys
+    pub fn index_keys<KEY>(&self, keys: Vec<KEY>) -> BTreeMap<u8, KEY>
+    where
+        KEY: SignOrMockKey,
+    {
+        keys.into_iter()
+            .filter_map(|key| {
+                self.get_index_from_public_key(&key.pubkey())
+                    .map(|index| (index, key))
             })
             .collect()
     }

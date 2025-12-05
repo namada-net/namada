@@ -529,6 +529,55 @@ impl super::SigScheme for SigScheme {
     }
 }
 
+/// A key that can be used to produce either a valid or a mock signature
+pub trait SignOrMockKey {
+    // FIXME: should these two take ownership?
+    /// Get the public key
+    fn pubkey(&self) -> PublicKey;
+    // FIXME: remove this if not needed
+    /// Get the private key if possible ([`None`] if the underlying type is a
+    /// public key)
+    fn sigkey(&self) -> Option<SecretKey>;
+    /// Produce a signature (either a valid or a mock one)
+    fn sign(
+        &self,
+        data: impl SignableBytes,
+    ) -> <SigScheme as super::SigScheme>::Signature;
+}
+
+impl SignOrMockKey for SecretKey {
+    fn pubkey(&self) -> PublicKey {
+        self.ref_to()
+    }
+
+    fn sigkey(&self) -> Option<SecretKey> {
+        Some(self.to_owned())
+    }
+
+    fn sign(
+        &self,
+        data: impl SignableBytes,
+    ) -> <SigScheme as super::SigScheme>::Signature {
+        SigScheme::sign(self, data)
+    }
+}
+impl SignOrMockKey for PublicKey {
+    fn pubkey(&self) -> PublicKey {
+        self.to_owned()
+    }
+
+    fn sigkey(&self) -> Option<SecretKey> {
+        None
+    }
+
+    fn sign(
+        &self,
+        _: impl SignableBytes,
+    ) -> <SigScheme as super::SigScheme>::Signature {
+        SigScheme::mock(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

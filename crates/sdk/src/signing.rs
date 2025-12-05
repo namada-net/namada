@@ -323,7 +323,6 @@ where
         {
             let mut wallet = wallet.write().await;
 
-            // FIXME: the dry-run check should be moved up in the logic
             if args.dry_run.is_some() {
                 // For dry-runs produce mock signatures
                 let mut signing_tx_pubkeys = vec![];
@@ -336,7 +335,6 @@ where
                 }
 
                 if !signing_tx_pubkeys.is_empty() {
-                    // FIXME: really need these two intermediate functions?
                     tx.mock(
                         signing_tx_pubkeys,
                         account_public_keys_map,
@@ -362,7 +360,6 @@ where
                 }
 
                 if !signing_tx_keypairs.is_empty() {
-                    // FIXME: really need these two intermediate functions?
                     tx.sign_raw(
                         signing_tx_keypairs,
                         account_public_keys_map,

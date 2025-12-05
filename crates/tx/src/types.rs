@@ -648,7 +648,7 @@ impl Tx {
         let mut signatures = Vec::new();
         let section = Authorization::new(
             targets,
-            public_keys_index_map.index_secret_keys(secret_keys.to_vec()),
+            public_keys_index_map.index_keys(secret_keys.to_vec()),
             signer,
         );
         match section.signer {

@@ -78,21 +78,6 @@ impl AccountPublicKeysMap {
         self.pk_to_idx.get(public_key).cloned()
     }
 
-    // FIXME: can remove this?
-    /// Index the given set of secret keys
-    pub fn index_secret_keys(
-        &self,
-        secret_keys: Vec<common::SecretKey>,
-    ) -> BTreeMap<u8, common::SecretKey> {
-        secret_keys
-            .into_iter()
-            .filter_map(|secret_key: common::SecretKey| {
-                self.get_index_from_public_key(&secret_key.to_public())
-                    .map(|index| (index, secret_key))
-            })
-            .collect()
-    }
-
     /// Index the given set of keys
     pub fn index_keys<KEY>(&self, keys: Vec<KEY>) -> BTreeMap<u8, KEY>
     where

@@ -6,7 +6,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use namada_core::collections::HashMap;
 use namada_core::hints;
 use namada_core::key::common;
-use namada_core::key::common::SignOrMockKey;
+use namada_core::key::common::SigOrPubKey;
 use namada_macros::BorshDeserializer;
 #[cfg(feature = "migrations")]
 use namada_migrations::*;
@@ -81,7 +81,7 @@ impl AccountPublicKeysMap {
     /// Index the given set of keys
     pub fn index_keys<KEY>(&self, keys: Vec<KEY>) -> BTreeMap<u8, KEY>
     where
-        KEY: SignOrMockKey,
+        KEY: SigOrPubKey,
     {
         keys.into_iter()
             .filter_map(|key| {

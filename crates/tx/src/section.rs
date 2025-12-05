@@ -6,7 +6,7 @@ use masp_primitives::transaction::builder::Builder;
 use masp_primitives::transaction::components::sapling::builder::SaplingMetadata;
 use masp_primitives::zip32::ExtendedFullViewingKey;
 use namada_account::AccountPublicKeysMap;
-use namada_account::common::SignOrMockKey;
+use namada_account::common::SigOrPubKey;
 use namada_core::address::Address;
 use namada_core::borsh::{
     self, BorshDeserialize, BorshSchema, BorshSerialize, BorshSerializeExt,
@@ -505,7 +505,6 @@ impl PartialEq for Authorization {
 }
 
 impl Authorization {
-    // FIXME: can remove these two indirections?
     /// Sign the given section hash with the given key and return a section
     pub fn new(
         targets: Vec<namada_core::hash::Hash>,
@@ -527,7 +526,7 @@ impl Authorization {
 
     pub(crate) fn create_signatures(
         targets: Vec<namada_core::hash::Hash>,
-        keys: BTreeMap<u8, impl SignOrMockKey>,
+        keys: BTreeMap<u8, impl SigOrPubKey>,
         signer: Option<Address>,
     ) -> Self {
         // If no signer address is given, then derive the signer's public keys

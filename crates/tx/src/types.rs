@@ -8,7 +8,7 @@ use std::str::FromStr;
 
 use masp_primitives::transaction::Transaction;
 use namada_account::AccountPublicKeysMap;
-use namada_account::common::SignOrMockKey;
+use namada_account::common::SigOrPubKey;
 use namada_core::address::Address;
 use namada_core::borsh::{
     self, BorshDeserialize, BorshSchema, BorshSerialize, BorshSerializeExt,
@@ -842,7 +842,7 @@ impl Tx {
         self.create_wrapper_sig(pubkey)
     }
 
-    fn create_wrapper_sig(&mut self, keypair: impl SignOrMockKey) -> &mut Self {
+    fn create_wrapper_sig(&mut self, keypair: impl SigOrPubKey) -> &mut Self {
         self.protocol_filter();
         let auth = match keypair.sigkey() {
             Some(secret_key) => Authorization::new(
@@ -888,7 +888,7 @@ impl Tx {
         signer: Option<Address>,
     ) -> &mut Self
     where
-        KEY: SignOrMockKey,
+        KEY: SigOrPubKey,
     {
         // The inner tx signer signs the Raw version of the Header
         let hashes = vec![self.raw_header_hash()];

@@ -173,6 +173,7 @@ pub async fn syncing<
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(60))
             .user_agent(MASP_INDEXER_CLIENT_USER_AGENT)
+            .zstd(true)
             .build()
             .map_err(|err| {
                 Error::Other(format!("Failed to build http client: {err}"))

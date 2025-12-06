@@ -774,7 +774,7 @@ where
     Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
 {
     fn apply_masp_unshielding_fee(
-        &mut self,
+        &self,
         msg: &mut MsgTransfer,
     ) -> Result<(), TokenTransferError> {
         // no fee is taken if this is not a masp unshielding op

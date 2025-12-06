@@ -109,7 +109,7 @@ where
 pub trait MaspUnshieldingFeesExecutionContext {
     /// Apply a MASP unshielding fee over the given ICS-20 packet.
     fn apply_masp_unshielding_fee(
-        &mut self,
+        &self,
         msg: &mut MsgTransfer,
     ) -> Result<(), TokenTransferError>;
 }

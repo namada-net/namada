@@ -3,8 +3,10 @@ use std::io::Read;
 use color_eyre::eyre::Result;
 use namada_sdk::io::{Io, NamadaIo, display_line};
 use namada_sdk::masp::ShieldedContext;
-use namada_sdk::{Namada, NamadaImpl};
+use namada_sdk::masp::fs::FsShieldedUtils;
+use namada_sdk::{Namada, NamadaImpl, ShieldedWallet};
 use namada_wallet::DatedViewingKey;
+use tokio::signal::unix::SignalKind;
 
 use crate::cli;
 use crate::cli::api::{CliApi, CliClient};
@@ -97,8 +99,8 @@ impl CliApi {
                         )
                         .expect("Missing required shielded-sync arguments");
                         sync_args.viewing_keys.extend(extra_sync_vks);
-                        let shielded = crate::client::masp::syncing(
-                            ShieldedContext::new(shielded),
+                        let shielded = Self::scoped_shielded_sync(
+                            shielded,
                             client.clone(),
                             sync_args,
                             &io,
@@ -155,8 +157,8 @@ impl CliApi {
                         )
                         .expect("Missing required shielded-sync arguments");
                         sync_args.viewing_keys.extend(extra_sync_vks);
-                        let shielded = crate::client::masp::syncing(
-                            ShieldedContext::new(shielded),
+                        let shielded = Self::scoped_shielded_sync(
+                            shielded,
                             client.clone(),
                             sync_args,
                             &io,
@@ -203,8 +205,8 @@ impl CliApi {
                             .expect("Missing required shielded-sync arguments");
                             sync_args.viewing_keys.extend(extra_sync_vks);
                             let synced_shielded_ctx =
-                                crate::client::masp::syncing(
-                                    ShieldedContext::new(shielded),
+                                Self::scoped_shielded_sync(
+                                    shielded,
                                     client.clone(),
                                     sync_args,
                                     &io,
@@ -298,8 +300,8 @@ impl CliApi {
                             .expect("Missing required shielded-sync arguments");
                             sync_args.viewing_keys.extend(extra_sync_vks);
                             let synced_shielded_ctx =
-                                crate::client::masp::syncing(
-                                    ShieldedContext::new(shielded),
+                                Self::scoped_shielded_sync(
+                                    shielded,
                                     client.clone(),
                                     sync_args,
                                     &io,
@@ -786,8 +788,8 @@ impl CliApi {
                             .expect("Missing required shielded-sync arguments");
                             sync_args.viewing_keys.extend(extra_sync_vks);
                             let synced_shielded_ctx =
-                                crate::client::masp::syncing(
-                                    ShieldedContext::new(shielded),
+                                Self::scoped_shielded_sync(
+                                    shielded,
                                     client.clone(),
                                     sync_args,
                                     &io,
@@ -839,8 +841,8 @@ impl CliApi {
                         )
                         .expect("Missing required shielded-sync arguments");
                         sync_args.viewing_keys.extend(extra_sync_vks);
-                        let shielded = crate::client::masp::syncing(
-                            ShieldedContext::new(shielded),
+                        let shielded = Self::scoped_shielded_sync(
+                            shielded,
                             client.clone(),
                             sync_args,
                             &io,
@@ -1196,5 +1198,56 @@ impl CliApi {
             }
         }
         Ok(())
+    }
+
+    // A workaround for the custom signal handlers installed by the
+    // shielded-sync process. To prevent a hanging rpc from stalling the cli
+    // command we need to uninstall the custom handlers. Unfortunately these
+    // can't be removed, not even by dropping the
+    // [`tokio::signal::unix::Signal`] type. This function tries to restore the
+    // default behavior by simply listening for the events on the stream and
+    // calling [`panic`].
+    async fn scoped_shielded_sync<IO>(
+        shielded: ShieldedWallet<FsShieldedUtils>,
+        client: impl CliClient,
+        sync_args: namada_sdk::args::ShieldedSync,
+        io: &IO,
+    ) -> Result<ShieldedContext<FsShieldedUtils>>
+    where
+        IO: Io + Send + Sync,
+    {
+        let shielded = crate::client::masp::syncing(
+            ShieldedContext::new(shielded),
+            client,
+            sync_args,
+            io,
+        )
+        .await?;
+
+        tokio::spawn(async {
+            let mut sigterm =
+                tokio::signal::unix::signal(SignalKind::terminate()).unwrap();
+            let mut sighup =
+                tokio::signal::unix::signal(SignalKind::hangup()).unwrap();
+            let mut sigpipe =
+                tokio::signal::unix::signal(SignalKind::pipe()).unwrap();
+
+            tokio::select! {
+                     _ = tokio::signal::ctrl_c() => {
+                            panic!("Received interrupt signal, exiting...");
+                    },
+                    _= sigterm.recv() => {
+                            panic!("Received termination signal, exiting...");
+                    },
+                    _ = sighup.recv() => {
+                            panic!("Received hangup signal, exiting...");
+                    },
+                    _ = sigpipe.recv() => {
+                            panic!("Received pipe signal, exiting...");
+                    },
+            }
+        });
+
+        Ok(shielded)
     }
 }

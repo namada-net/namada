@@ -26,6 +26,7 @@ use std::marker::PhantomData;
 use namada_core::address::{Address, InternalAddress};
 use namada_core::arith::checked;
 use namada_core::chain::BlockHeight;
+use namada_core::dec::Dec;
 pub use namada_core::parameters::ProposalBytes;
 use namada_core::time::DurationSecs;
 use namada_core::{hints, token};
@@ -79,6 +80,20 @@ where
             last_block_height,
             num_blocks_to_read,
         )
+    }
+
+    fn ibc_shielding_fee_percentage(
+        storage: &S,
+        token: &Address,
+    ) -> Result<Option<Dec>> {
+        storage::read_masp_over_ibc_shielding_fee(storage, token)
+    }
+
+    fn ibc_unshielding_fee_percentage(
+        storage: &S,
+        token: &Address,
+    ) -> Result<Option<Dec>> {
+        storage::read_masp_over_ibc_unshielding_fee(storage, token)
     }
 }
 

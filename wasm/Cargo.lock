@@ -4636,9 +4636,11 @@ dependencies = [
  "chrono",
  "data-encoding",
  "ed25519-consensus",
+ "either",
  "ethabi",
  "ethbridge-structs",
  "eyre",
+ "group",
  "ibc",
  "ics23",
  "impl-num-traits",
@@ -4757,6 +4759,7 @@ dependencies = [
 name = "namada_ibc"
 version = "0.251.0"
 dependencies = [
+ "bitflags 2.8.0",
  "borsh",
  "data-encoding",
  "dur",
@@ -4951,7 +4954,6 @@ dependencies = [
  "eyre",
  "flume",
  "futures",
- "group",
  "itertools 0.14.0",
  "lazy_static",
  "leanbridgetree",

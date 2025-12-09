@@ -2,7 +2,6 @@
 
 use std::collections::{BTreeMap, BTreeSet, btree_map};
 use std::fmt;
-use std::io::{Read, Write};
 
 use eyre::{ContextCompat, WrapErr, eyre};
 use masp_primitives::asset_type::AssetType;
@@ -14,9 +13,7 @@ use masp_primitives::convert::AllowedConversion;
 use masp_primitives::ff::PrimeField;
 use masp_primitives::memo::MemoBytes;
 use masp_primitives::merkle_tree::MerklePath;
-use masp_primitives::sapling::{
-    Diversifier, Node, Note, Nullifier, ViewingKey,
-};
+use masp_primitives::sapling::{Node, Note, Nullifier, ViewingKey};
 use masp_primitives::transaction::builder::Builder;
 use masp_primitives::transaction::components::sapling::builder::BuildParams;
 use masp_primitives::transaction::components::{
@@ -31,6 +28,7 @@ use namada_core::borsh::{BorshDeserialize, BorshSerialize};
 use namada_core::chain::BlockHeight;
 use namada_core::collections::{HashMap, HashSet};
 use namada_core::control_flow;
+pub use namada_core::masp::CompactNote;
 use namada_core::masp::{
     AssetData, MaspEpoch, TransferSource, TransferTarget, encode_asset_type,
 };
@@ -177,108 +175,6 @@ impl NotePosition {
 impl fmt::Display for NotePosition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
-    }
-}
-
-/// Compact representation of a [`Note`].
-#[derive(Debug, Clone, Copy)]
-#[allow(missing_docs)]
-pub struct CompactNote {
-    pub asset_type: AssetType,
-    pub value: u64,
-    pub diversifier: Diversifier,
-    pub pk_d: masp_primitives::jubjub::SubgroupPoint,
-    pub rseed: masp_primitives::sapling::Rseed,
-}
-
-impl BorshSerialize for CompactNote {
-    fn serialize<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        use group::GroupEncoding;
-
-        BorshSerialize::serialize(&self.asset_type, writer)?;
-        BorshSerialize::serialize(&self.value, writer)?;
-        BorshSerialize::serialize(&self.diversifier, writer)?;
-        BorshSerialize::serialize(&self.pk_d.to_bytes(), writer)?;
-        BorshSerialize::serialize(&self.rseed, writer)
-    }
-}
-
-impl BorshDeserialize for CompactNote {
-    fn deserialize_reader<R: Read>(reader: &mut R) -> std::io::Result<Self> {
-        use group::GroupEncoding;
-
-        let asset_type =
-            <AssetType as BorshDeserialize>::deserialize_reader(reader)?;
-        let value = <u64 as BorshDeserialize>::deserialize_reader(reader)?;
-        let diversifier =
-            <Diversifier as BorshDeserialize>::deserialize_reader(reader)?;
-        let pk_d = masp_primitives::jubjub::SubgroupPoint::from_bytes(
-            &<[u8; 32] as BorshDeserialize>::deserialize_reader(reader)?,
-        )
-        .into_option()
-        .ok_or_else(|| std::io::Error::other("Invalid pk_d in CompactNote"))?;
-        let rseed = <masp_primitives::sapling::Rseed as BorshDeserialize>::deserialize_reader(reader)?;
-
-        Ok(Self {
-            asset_type,
-            value,
-            diversifier,
-            pk_d,
-            rseed,
-        })
-    }
-}
-
-impl CompactNote {
-    /// Create a compact version of a [`Note`].
-    pub fn new(
-        note: Note,
-        pa: masp_primitives::sapling::PaymentAddress,
-    ) -> Option<Self> {
-        let g_d = pa.g_d()?;
-        let pk_d = *pa.pk_d();
-
-        if g_d != note.g_d || pk_d != note.pk_d {
-            return None;
-        }
-
-        let diversifier = *pa.diversifier();
-        let Note {
-            asset_type,
-            value,
-            pk_d,
-            rseed,
-            ..
-        } = note;
-
-        Some(Self {
-            asset_type,
-            value,
-            diversifier,
-            pk_d,
-            rseed,
-        })
-    }
-
-    /// Convert this [`CompactNote`] back into a [`Note`].
-    pub fn into_note(self) -> Option<Note> {
-        let g_d = self.diversifier.g_d()?;
-
-        let Self {
-            asset_type,
-            value,
-            pk_d,
-            rseed,
-            ..
-        } = self;
-
-        Some(Note {
-            asset_type,
-            value,
-            g_d,
-            pk_d,
-            rseed,
-        })
     }
 }
 

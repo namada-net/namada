@@ -1,6 +1,7 @@
 //! Parameters storage
 
 use namada_core::address::Address;
+use namada_core::dec::Dec;
 use namada_core::storage::DbKeySeg;
 pub use namada_core::storage::Key;
 use namada_macros::StorageKeys;
@@ -41,6 +42,7 @@ struct Keys {
     masp_fee_payment_gas_limit: &'static str,
     gas_scale: &'static str,
     native_token_transferable: &'static str,
+    masp_over_ibc_fees: &'static str,
 }
 
 /// Returns if the key is a parameter key.
@@ -191,4 +193,42 @@ pub fn is_native_token_transferable(
             "Missing is_native_token_transferable parameter from storage",
         ),
     )
+}
+
+/// Storage key used to store the fee percentage associated with IBC shieldings
+/// of the token with address `token_addr`.
+pub fn get_masp_over_ibc_shielding_fees_of_token_key(
+    token_addr: &Address,
+) -> Key {
+    get_masp_over_ibc_fees_key_at_addr(ADDRESS)
+        .with_segment("shieldings".to_owned())
+        .with_segment(token_addr.clone())
+}
+
+/// Storage key used to store the fee percentage associated with IBC
+/// unshieldings of the token with address `token_addr`.
+pub fn get_masp_over_ibc_unshielding_fees_of_token_key(
+    token_addr: &Address,
+) -> Key {
+    get_masp_over_ibc_fees_key_at_addr(ADDRESS)
+        .with_segment("unshieldings".to_owned())
+        .with_segment(token_addr.clone())
+}
+
+/// Get the shielding fee percentage over IBC of the token with address
+/// `token_addr`.
+pub fn read_masp_over_ibc_shielding_fee(
+    storage: &impl StorageRead,
+    token_addr: &Address,
+) -> Result<Option<Dec>> {
+    storage.read(&get_masp_over_ibc_shielding_fees_of_token_key(token_addr))
+}
+
+/// Get the unshielding fee percentage over IBC of the token with address
+/// `token_addr`.
+pub fn read_masp_over_ibc_unshielding_fee(
+    storage: &impl StorageRead,
+    token_addr: &Address,
+) -> Result<Option<Dec>> {
+    storage.read(&get_masp_over_ibc_unshielding_fees_of_token_key(token_addr))
 }

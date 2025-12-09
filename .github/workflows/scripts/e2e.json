@@ -1,5 +1,7 @@
 {
     "e2e::eth_bridge_tests::everything": 4,
+    "e2e::ibc_tests::ibc_shielded_action_fees": 400,
+    "e2e::ibc_tests::ibc_to_and_from_payment_addrs": 840,
     "e2e::ibc_tests::frontend_sus_fee": 350,
     "e2e::ibc_tests::ibc_transfers": 414,
     "e2e::ibc_tests::ibc_nft_transfers": 224,

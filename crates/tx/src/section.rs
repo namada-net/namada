@@ -6,6 +6,7 @@ use masp_primitives::transaction::builder::Builder;
 use masp_primitives::transaction::components::sapling::builder::SaplingMetadata;
 use masp_primitives::zip32::ExtendedFullViewingKey;
 use namada_account::AccountPublicKeysMap;
+use namada_account::common::SigOrPubKey;
 use namada_core::address::Address;
 use namada_core::borsh::{
     self, BorshDeserialize, BorshSchema, BorshSerialize, BorshSerializeExt,
@@ -510,51 +511,37 @@ impl Authorization {
         secret_keys: BTreeMap<u8, common::SecretKey>,
         signer: Option<Address>,
     ) -> Self {
-        Self::create_signatures(
-            targets,
-            secret_keys,
-            signer,
-            common::SigScheme::sign,
-        )
+        Self::create_signatures(targets, secret_keys, signer)
     }
 
     /// Place mock signatures over the given section hash with
     /// the given key and return a section
     pub fn mock(
         targets: Vec<namada_core::hash::Hash>,
-        secret_keys: BTreeMap<u8, common::SecretKey>,
+        pubkeys: BTreeMap<u8, common::PublicKey>,
         signer: Option<Address>,
     ) -> Self {
-        Self::create_signatures(targets, secret_keys, signer, |kp, _| {
-            common::SigScheme::mock(kp)
-        })
+        Self::create_signatures(targets, pubkeys, signer)
     }
 
-    fn create_signatures<F>(
+    pub(crate) fn create_signatures(
         targets: Vec<namada_core::hash::Hash>,
-        secret_keys: BTreeMap<u8, common::SecretKey>,
+        keys: BTreeMap<u8, impl SigOrPubKey>,
         signer: Option<Address>,
-        create_sig: F,
-    ) -> Self
-    where
-        F: Fn(&common::SecretKey, namada_core::hash::Hash) -> common::Signature,
-    {
+    ) -> Self {
         // If no signer address is given, then derive the signer's public keys
-        // from the given secret keys.
+        // from the given keys.
         let signer = if let Some(addr) = signer {
             Signer::Address(addr)
         } else {
             // Make sure the corresponding public keys can be represented by a
             // vector instead of a map
             assert!(
-                secret_keys
-                    .keys()
-                    .cloned()
-                    .eq(0..(u8::try_from(secret_keys.len())
-                        .expect("Number of SKs must not exceed `u8::MAX`"))),
-                "secret keys must be enumerated when signer address is absent"
+                keys.keys().cloned().eq(0..(u8::try_from(keys.len())
+                    .expect("Number of keys must not exceed `u8::MAX`"))),
+                "keys must be enumerated when signer address is absent"
             );
-            Signer::PubKeys(secret_keys.values().map(RefTo::ref_to).collect())
+            Signer::PubKeys(keys.values().map(|key| key.pubkey()).collect())
         };
 
         // Commit to the given targets
@@ -564,11 +551,11 @@ impl Authorization {
             signatures: BTreeMap::new(),
         };
         let target = partial.get_raw_hash();
-        // Turn the map of secret keys into a map of signatures over the
-        // commitment made above
-        let signatures = secret_keys
+        // Turn the map of keys into a map of signatures over the commitment
+        // made above
+        let signatures = keys
             .iter()
-            .map(|(index, secret_key)| (*index, create_sig(secret_key, target)))
+            .map(|(idx, key)| (*idx, key.sign(target)))
             .collect();
         Self {
             signatures,

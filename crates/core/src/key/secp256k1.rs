@@ -603,7 +603,7 @@ impl super::SigScheme for SigScheme {
         }
     }
 
-    fn mock(_: &Self::SecretKey) -> Self::Signature {
+    fn mock(_: &Self::PublicKey) -> Self::Signature {
         Signature(
             k256::ecdsa::Signature::from_scalars(
                 k256::Scalar::ONE,

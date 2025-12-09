@@ -7,8 +7,8 @@ use namada_token::TransparentTransfersRef;
 pub use namada_token::testing;
 pub use namada_token::tx::apply_shielded_transfer;
 pub use namada_token::{
-    Amount, DenominatedAmount, Denomination, MaspDigitPos, Store, Transfer,
-    storage_key, utils, validate_transfer_in_out,
+    Amount, DenominatedAmount, Denomination, MaspDigitPos, ShieldedStore,
+    Store, Transfer, storage_key, utils, validate_transfer_in_out,
 };
 use namada_tx::BatchedTx;
 use namada_tx_env::Address;

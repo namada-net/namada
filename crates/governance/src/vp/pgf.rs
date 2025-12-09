@@ -284,10 +284,10 @@ mod test {
     use namada_gas::{GasMeterKind, TxGasMeter, VpGasMeter};
     use namada_proof_of_stake::test_utils::get_dummy_genesis_validator;
     use namada_state::testing::TestState;
-    use namada_state::{BlockHeight, Epoch, State, StateRead, TxIndex};
+    use namada_state::{BlockHeight, Epoch, State, StateRead};
     use namada_token::storage_key::balance_key;
     use namada_tx::data::TxType;
-    use namada_tx::{Authorization, Code, Data, Section, Tx};
+    use namada_tx::{Authorization, Code, Data, IndexedTx, Section, Tx};
     use namada_vm::WasmCacheRwAccess;
     use namada_vm::wasm::run::VpEvalWasm;
     use namada_vm::wasm::{self, VpCache};
@@ -354,7 +354,7 @@ mod test {
         let (vp_wasm_cache, _vp_cache_dir) =
             wasm::compilation_cache::common::testing::vp_cache();
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         let signer = keypair_1();
         let signer_address = Address::from(&signer.clone().ref_to());
@@ -410,7 +410,7 @@ mod test {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -441,7 +441,7 @@ mod test {
         let (vp_wasm_cache, _vp_cache_dir) =
             wasm::compilation_cache::common::testing::vp_cache();
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
 
         let signer = keypair_1();
         let signer_address = Address::from(&signer.clone().ref_to());
@@ -497,7 +497,7 @@ mod test {
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,

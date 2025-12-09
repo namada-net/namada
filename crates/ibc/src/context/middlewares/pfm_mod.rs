@@ -2,7 +2,6 @@
 //! [`TransferModule`].
 
 use std::fmt::{Debug, Formatter};
-use std::marker::PhantomData;
 
 use ibc::apps::transfer::context::TokenTransferExecutionContext;
 use ibc::apps::transfer::handler::{
@@ -37,23 +36,29 @@ use namada_state::{StorageRead, StorageWrite};
 use crate::context::IbcContext;
 use crate::context::transfer_mod::TransferModule;
 use crate::storage::inflight_packet_key;
-use crate::{Error, IbcCommonContext, IbcStorageContext, TokenTransferContext};
+use crate::{
+    Error, IbcAccountId, IbcCommonContext, IbcStorageContext,
+    TokenTransferContext,
+};
 
 /// A wrapper around an IBC transfer module necessary to
 /// build execution contexts. This allows us to implement
 /// packet forward middleware on this struct.
-pub struct PfmTransferModule<C, Params>
+pub struct PfmTransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
 {
     /// The main module
-    pub transfer_module: TransferModule<C>,
-    #[allow(missing_docs)]
-    pub _phantom: PhantomData<Params>,
+    pub transfer_module: TransferModule<C, Params, Token, ShieldedToken>,
 }
 
-impl<C: IbcCommonContext + Debug, Params> Debug
-    for PfmTransferModule<C, Params>
+impl<C, Params, Token, ShieldedToken> Debug
+    for PfmTransferModule<C, Params, Token, ShieldedToken>
+where
+    C: IbcCommonContext + Debug,
+    Params: Debug,
+    Token: Debug,
+    ShieldedToken: Debug,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(stringify!(PfmTransferModule))
@@ -63,16 +68,29 @@ impl<C: IbcCommonContext + Debug, Params> Debug
 }
 
 from_middleware! {
-    impl<C, Params> Module for PfmTransferModule<C, Params>
+    impl<C, Params, Token, ShieldedToken> Module for PfmTransferModule<C, Params, Token, ShieldedToken>
     where
         C: IbcCommonContext + Debug,
+        Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+            + Debug,
+        Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+            + Debug,
+        ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
+            + Debug,
 }
 
-impl<C, Params> MiddlewareModule for PfmTransferModule<C, Params>
+impl<C, Params, Token, ShieldedToken> MiddlewareModule
+    for PfmTransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
+    ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
+        + Debug,
 {
-    type NextMiddleware = TransferModule<C>;
+    type NextMiddleware = TransferModule<C, Params, Token, ShieldedToken>;
 
     fn next_middleware(&self) -> &Self::NextMiddleware {
         &self.transfer_module
@@ -83,10 +101,13 @@ where
     }
 }
 
-impl<C, Params> PfmContext for PfmTransferModule<C, Params>
+impl<C, Params, Token, ShieldedToken> PfmContext
+    for PfmTransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
     Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>,
+    ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>,
 {
     type Error = crate::Error;
 
@@ -106,10 +127,11 @@ where
         let mut ctx = IbcContext::<C, Params>::new(
             self.transfer_module.ctx.inner.clone(),
         );
-        let mut token_transfer_ctx = TokenTransferContext::new(
-            self.transfer_module.ctx.inner.clone(),
-            Default::default(),
-        );
+        let mut token_transfer_ctx =
+            TokenTransferContext::<_, Params, Token, ShieldedToken>::new(
+                self.transfer_module.ctx.inner.clone(),
+                Default::default(),
+            );
 
         self.transfer_module.ctx.insert_verifier(&MULTITOKEN);
 
@@ -125,10 +147,11 @@ where
         data: PacketData,
     ) -> Result<(), Self::Error> {
         tracing::debug!(?packet, ?data, "PFM receive_refund_execute");
-        let mut token_transfer_ctx = TokenTransferContext::new(
-            self.transfer_module.ctx.inner.clone(),
-            self.transfer_module.ctx.verifiers.clone(),
-        );
+        let mut token_transfer_ctx =
+            TokenTransferContext::<_, Params, Token, ShieldedToken>::new(
+                self.transfer_module.ctx.inner.clone(),
+                self.transfer_module.ctx.verifiers.clone(),
+            );
         self.transfer_module.ctx.insert_verifier(&MULTITOKEN);
         refund_packet_token_execute(&mut token_transfer_ctx, packet, &data)
             .map_err(Error::TokenTransfer)
@@ -146,10 +169,11 @@ where
                  packet",
             );
 
-        let mut token_transfer_ctx = TokenTransferContext::new(
-            self.transfer_module.ctx.inner.clone(),
-            self.transfer_module.ctx.verifiers.clone(),
-        );
+        let mut token_transfer_ctx =
+            TokenTransferContext::<_, Params, Token, ShieldedToken>::new(
+                self.transfer_module.ctx.inner.clone(),
+                self.transfer_module.ctx.verifiers.clone(),
+            );
 
         self.transfer_module.ctx.insert_verifier(&MULTITOKEN);
 
@@ -169,7 +193,7 @@ where
 
             token_transfer_ctx
                 .escrow_coins_execute(
-                    &IBC_ADDRESS,
+                    &IbcAccountId::Transparent(IBC_ADDRESS),
                     &msg.refund_port_id,
                     &msg.refund_channel_id,
                     &coin,
@@ -187,7 +211,11 @@ where
             };
 
             token_transfer_ctx
-                .burn_coins_execute(&IBC_ADDRESS, &coin, &String::new().into())
+                .burn_coins_execute(
+                    &IbcAccountId::Transparent(IBC_ADDRESS),
+                    &coin,
+                    &String::new().into(),
+                )
                 .map_err(|e| Error::TokenTransfer(e.into()))
         }
     }

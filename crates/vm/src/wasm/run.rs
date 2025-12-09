@@ -261,6 +261,7 @@ where
     );
 
     // Instantiate the wasm module
+    let start = std::time::Instant::now();
     let instance = {
         let mut store = store.borrow_mut();
         let imports = tx_imports(&mut *store, env.clone());
@@ -332,6 +333,8 @@ where
         tx_data_ptr,
         tx_data_len,
     );
+    let elapsed = start.elapsed();
+    tracing::error!("Time to run {:#?}: {:#?}", tx_code.code.hash(), elapsed);
 
     let wasm_gas_meter = RefCell::into_inner(wasm_gas_meter);
     wasm_gas_meter
@@ -913,7 +916,10 @@ where
 /// Prepare a wasm store for untrusted code.
 pub fn untrusted_wasm_store(limit: Limit<BaseTunables>) -> wasmer::Store {
     // Use Singlepass compiler with the default settings
-    let compiler = wasmer_compiler_singlepass::Singlepass::default();
+    let mut compiler = wasmer_compiler_llvm::LLVM::new();
+    //FIXME: also try with the Aggressive option
+    compiler.opt_level(wasmer_compiler_llvm::LLVMOptLevel::Default);
+    // let compiler = wasmer_compiler_singlepass::Singlepass::default();
     let mut engine = <Engine as NativeEngineExt>::new(
         Box::new(compiler),
         // NB: The default target corresponds to the host's triplet
@@ -1083,6 +1089,7 @@ fn inject_alloc(module: elements::Module) -> Result<elements::Module> {
 
 // Fetch or compile a WASM code from the cache or storage. Account for the
 // loading and code compilation gas costs.
+//FIXME: here
 fn fetch_or_compile<S, CN, CA>(
     wasm_cache: &mut Cache<CN, CA>,
     code_or_hash: &Commitment,
@@ -1152,6 +1159,7 @@ where
             Ok((module, store))
         }
         Commitment::Id(code) => {
+            //FIXME: what if we receive a transaction with attached code instead of hash? Maybe we still look for the cached wasm module without recompiling
             let tx_len = code.len() as u64;
             gas_meter
                 .borrow_mut()

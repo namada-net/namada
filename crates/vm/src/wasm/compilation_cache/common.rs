@@ -78,7 +78,7 @@ struct ModuleCacheScale;
 
 impl WeightScale<CacheKey, Module> for ModuleCacheScale {
     fn weight(&self, _key: &CacheKey, _value: &Module) -> usize {
-        1
+        10
     }
 }
 
@@ -376,6 +376,7 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
     }
 
     /// Compile a WASM module and persist the compiled modules to files.
+    //FIXME: here
     pub fn compile_or_fetch(
         &mut self,
         code: impl AsRef<[u8]>,
@@ -387,6 +388,7 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
             gas_meter_kind,
         };
 
+        //FIXME: check this read_write thing
         if !A::is_read_write() {
             // It doesn't update the cache and files
             let progress = self.progress.read().unwrap();
@@ -416,7 +418,17 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
 
         tracing::info!("Compiling {} {}.", N::name(), hash.to_string());
 
+        //FIXME: TODO:
+        //    - Benchmark how faster we go with LLVM. I can use a localnet and try a few transactions with the two compilers
+        //    - Benchmark how slower is the compilation step. This can be a problem for governance proposals and when we need to run a new transaction/vp for the first time (or if the cache is not big enough)
+        //    - Is this a breaking consensus change? Technically no
+        //    - Check if we can update wasmer to v6 without breaking consensus (it's even faster)
+        //    - In case there would be the need to recompute all the gas costs in theory
+
+        //FIXME: need to instrument compilation and execution steps
+
         match wasm::run::prepare_wasm_code(code, gas_meter_kind) {
+            //FIXME: here
             Ok(code) => match compile(code, &self.store) {
                 Ok(module) => {
                     // Write the file
@@ -431,15 +443,15 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
                     let mut progress = self.progress.write().unwrap();
                     progress.insert(key, Compilation::Done);
 
-                    // Put into cache, ignore result if it's full
-                    let mut in_memory = self.in_memory.write().unwrap();
-                    let _ = in_memory.put_with_weight(
-                        CacheKey {
-                            code_hash: hash,
-                            gas_meter_kind,
-                        },
-                        module.clone(),
-                    );
+                    // // Put into cache, ignore result if it's full
+                    // let mut in_memory = self.in_memory.write().unwrap();
+                    // let _ = in_memory.put_with_weight(
+                    //     CacheKey {
+                    //         code_hash: hash,
+                    //         gas_meter_kind,
+                    //     },
+                    //     module.clone(),
+                    // );
 
                     Ok(Some((module, store())))
                 }
@@ -469,103 +481,104 @@ impl<N: CacheName, A: WasmCacheAccess> Cache<N, A> {
 
     /// Pre-compile a WASM module to a file. The compilation runs in a new OS
     /// thread and the function returns immediately.
+    //FIXME: here to populate the cache
     pub fn pre_compile(
         &mut self,
         code: impl AsRef<[u8]>,
         gas_meter_kind: GasMeterKind,
     ) {
         if A::is_read_write() {
-            let hash = hash_of_code(&code);
-            let key = CacheKey {
-                code_hash: hash,
-                gas_meter_kind,
-            };
-            let mut progress = self.progress.write().unwrap();
-            match progress.get(&key) {
-                Some(_) => {
-                    // Already known, do nothing
-                }
-                None => {
-                    if module_file_exists(&self.dir, &hash, gas_meter_kind) {
-                        progress.insert(key, Compilation::Done);
-                        return;
-                    }
-                    progress.insert(key, Compilation::Compiling);
-                    drop(progress);
-                    let progress = self.progress.clone();
-                    let code = code.as_ref().to_vec();
-                    let dir = self.dir.clone();
-                    let store = self.store.clone();
-                    std::thread::spawn(move || {
-                        tracing::info!("Compiling WASM {}.", hash.to_string());
+            // let hash = hash_of_code(&code);
+            // let key = CacheKey {
+            //     code_hash: hash,
+            //     gas_meter_kind,
+            // };
+            // let mut progress = self.progress.write().unwrap();
+            // match progress.get(&key) {
+            //     Some(_) => {
+            //         // Already known, do nothing
+            //     }
+            //     None => {
+            //         if module_file_exists(&self.dir, &hash, gas_meter_kind) {
+            //             progress.insert(key, Compilation::Done);
+            //             return;
+            //         }
+            //         progress.insert(key, Compilation::Compiling);
+            //         drop(progress);
+            //         let progress = self.progress.clone();
+            //         let code = code.as_ref().to_vec();
+            //         let dir = self.dir.clone();
+            //         let store = self.store.clone();
+            //         std::thread::spawn(move || {
+            //             tracing::info!("Compiling WASM {}.", hash.to_string());
 
-                        let _module = match wasm::run::prepare_wasm_code(
-                            code,
-                            gas_meter_kind,
-                        ) {
-                            Ok(code) => {
-                                match compile(code, &store) {
-                                    Ok(module) => {
-                                        // Write the file
-                                        file_write_module(
-                                            &dir,
-                                            &module,
-                                            &hash,
-                                            gas_meter_kind,
-                                        );
+            //             let _module = match wasm::run::prepare_wasm_code(
+            //                 code,
+            //                 gas_meter_kind,
+            //             ) {
+            //                 Ok(code) => {
+            //                     match compile(code, &store) {
+            //                         Ok(module) => {
+            //                             // Write the file
+            //                             file_write_module(
+            //                                 &dir,
+            //                                 &module,
+            //                                 &hash,
+            //                                 gas_meter_kind,
+            //                             );
 
-                                        // Update progress
-                                        let mut progress =
-                                            progress.write().unwrap();
-                                        progress.insert(key, Compilation::Done);
-                                        tracing::info!(
-                                            "Finished compiling WASM {hash}."
-                                        );
-                                        if progress.values().all(
-                                            |compilation| {
-                                                matches!(
-                                                    compilation,
-                                                    Compilation::Done
-                                                )
-                                            },
-                                        ) {
-                                            tracing::info!(
-                                                "Finished compiling all {}.",
-                                                N::name()
-                                            )
-                                        }
-                                        module
-                                    }
-                                    Err(err) => {
-                                        let mut progress =
-                                            progress.write().unwrap();
-                                        tracing::info!(
-                                            "Failed to compile WASM {} with {}",
-                                            hash.to_string(),
-                                            err
-                                        );
-                                        progress.swap_remove(&key);
-                                        return Err(err);
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                let mut progress = progress.write().unwrap();
-                                tracing::info!(
-                                    "Failed to prepare WASM {} with {}",
-                                    hash.to_string(),
-                                    err
-                                );
-                                progress.swap_remove(&key);
-                                return Err(err);
-                            }
-                        };
+            //                             // Update progress
+            //                             let mut progress =
+            //                                 progress.write().unwrap();
+            //                             progress.insert(key, Compilation::Done);
+            //                             tracing::info!(
+            //                                 "Finished compiling WASM {hash}."
+            //                             );
+            //                             if progress.values().all(
+            //                                 |compilation| {
+            //                                     matches!(
+            //                                         compilation,
+            //                                         Compilation::Done
+            //                                     )
+            //                                 },
+            //                             ) {
+            //                                         tracing::info!(
+            //                                             "Finished compiling all {}.",
+            //                                             N::name()
+            //                                         )
+            //                                     }
+            //                                     module
+            //                                 }
+            //                                 Err(err) => {
+            //                                     let mut progress =
+            //                                         progress.write().unwrap();
+            //                                     tracing::info!(
+            //                                         "Failed to compile WASM {} with {}",
+            //                                         hash.to_string(),
+            //                                         err
+            //                                     );
+            //                                     progress.swap_remove(&key);
+            //                                     return Err(err);
+            //                                 }
+            //                             }
+            //                         }
+            //                         Err(err) => {
+            //                             let mut progress = progress.write().unwrap();
+            //                             tracing::info!(
+            //                                 "Failed to prepare WASM {} with {}",
+            //                                 hash.to_string(),
+            //                                 err
+            //                             );
+            //                             progress.swap_remove(&key);
+            //                             return Err(err);
+            //                         }
+            //                     };
 
-                        let res: Result<(), wasm::run::Error> = Ok(());
-                        res
-                    });
-                }
-            }
+            //                     let res: Result<(), wasm::run::Error> = Ok(());
+            //                     res
+            //                 });
+            //             }
+            // }
         }
     }
 
@@ -590,7 +603,13 @@ fn compile(
     code: impl AsRef<[u8]>,
     store: &Store,
 ) -> Result<Module, wasm::run::Error> {
-    universal::compile(code, store).map_err(wasm::run::Error::CompileError)
+    let start = std::time::Instant::now();
+    let res = universal::compile(code, store)
+        .map_err(wasm::run::Error::CompileError)?;
+    let elapsed = start.elapsed();
+    tracing::error!("Time to compile {:#?}: {:#?}", res.name(), elapsed);
+
+    Ok(res)
 }
 
 fn file_ext() -> &'static str {

@@ -20,7 +20,7 @@ wasm-runtime = [
   "rayon",
   "wasm-instrument",
   "wasmer-cache",
-  "wasmer-compiler-singlepass",
+  "wasmer-compiler-llvm",
   "wasmer-vm",
   "wasmer",
 ]
@@ -49,6 +49,7 @@ tracing.workspace = true
 wasm-instrument = { workspace = true, optional = true }
 wasmer = { workspace = true, optional = true }
 wasmer-cache = { workspace = true, optional = true }
+wasmer-compiler-llvm = { workspace = true, optional = true }
 wasmer-compiler-singlepass = { workspace = true, optional = true }
 wasmer-vm = { workspace = true, optional = true }
 wasmparser.workspace = true

@@ -149,7 +149,7 @@ impl Ledger {
                 base_dir: base_dir.as_ref().to_owned(),
                 block_cache_bytes: None,
                 vp_wasm_compilation_cache_bytes: None,
-                tx_wasm_compilation_cache_bytes: None,
+                tx_wasm_compilation_cache_bytes: Some(1),
                 // Default corresponds to 1 hour of past blocks at 1 block/sec
                 storage_read_past_height_limit: Some(3600),
                 db_dir: DB_DIR.into(),

@@ -342,6 +342,8 @@ pub struct TxShieldedTransfer<C: NamadaTypes = SdkTypes> {
     pub gas_spending_key: Option<C::SpendingKey>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
+    /// Optional data for the implicit shielded-sync
+    pub shielded_sync: Option<ShieldedSync<C>>,
 }
 
 impl<C: NamadaTypes> TxBuilder<C> for TxShieldedTransfer<C> {
@@ -442,6 +444,8 @@ pub struct TxUnshieldingTransfer<C: NamadaTypes = SdkTypes> {
     pub frontend_sus_fee: Option<(C::TransferTarget, Dec)>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
+    /// Optional data for the implicit shielded-sync
+    pub shielded_sync: Option<ShieldedSync<C>>,
 }
 
 impl<C: NamadaTypes> TxBuilder<C> for TxUnshieldingTransfer<C> {
@@ -821,6 +825,8 @@ pub struct TxIbcTransfer<C: NamadaTypes = SdkTypes> {
     pub frontend_sus_fee: Option<(C::TransferTarget, Dec)>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
+    /// Optional data for the implicit shielded-sync
+    pub shielded_sync: Option<ShieldedSync<C>>,
 }
 
 impl<C: NamadaTypes> TxBuilder<C> for TxIbcTransfer<C> {
@@ -1927,16 +1933,19 @@ pub struct QueryBalance<C: NamadaTypes = SdkTypes> {
     pub no_conversions: bool,
     /// Optional height to query balances at
     pub height: Option<C::BlockHeight>,
+    /// Optional data for the implicit shielded-sync
+    pub shielded_sync: Option<ShieldedSync<C>>,
 }
 
-/// Get an estimate for the MASP rewards for the next
-/// MASP epoch.
+/// Get an estimate for the MASP rewards for the next MASP epoch.
 #[derive(Clone, Debug)]
 pub struct QueryShieldingRewardsEstimate<C: NamadaTypes = SdkTypes> {
     /// Common query args
     pub query: Query<C>,
     /// Viewing key
     pub owner: C::ViewingKey,
+    /// Optional data for the implicit shielded-sync
+    pub shielded_sync: Option<ShieldedSync<C>>,
 }
 
 /// Query historical transfer(s)
@@ -2468,8 +2477,6 @@ impl TxReactivateValidator {
 /// viewing keys. Syncing can be told to stop at a given
 /// block height.
 pub struct ShieldedSync<C: NamadaTypes = SdkTypes> {
-    /// The ledger address
-    pub ledger_address: C::ConfigRpcTendermintAddress,
     /// Height to sync up to. Defaults to most recent
     pub last_query_height: Option<BlockHeight>,
     /// Spending keys used to determine note ownership

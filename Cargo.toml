@@ -218,7 +218,7 @@ rand = {version = "0.8", default-features = false}
 rand_core = {version = "0.6", default-features = false}
 rayon = "1.5"
 regex = "1.10"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "zstd"] }
 ripemd = "0.1"
 rlimit = "0.10"
 rocksdb = {version = "0.23", features = ["zstd", "bindgen-runtime"], default-features = false}

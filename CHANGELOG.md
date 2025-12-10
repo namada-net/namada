@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## v201.0.8
+
+Namada apps v201.0.8
+
+### IMPROVEMENTS
+
+- Replaced tiny-hderive dep with bip32. ([\#4963](https://github.com/namada-
+  net/namada/pull/4963))
+- Accept zstd compressed data from MASP indexer.
+  ([\#4995](https://github.com/namada-net/namada/pull/4995))
+
+### MISCELLANEOUS
+
+- SDK and all its internal dependency crates have been re-licensed under MIT
+  license. ([\#4964](https://github.com/namada-net/namada/pull/4964))
+
 ## v201.0.7
 
 Namada apps v201.0.7

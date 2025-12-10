@@ -11,7 +11,7 @@ keywords.workspace = true
 license = "GPL-3.0-or-later"
 readme.workspace = true
 repository.workspace = true
-version = "201.0.7"
+version = "201.0.8"
 
 # Namada CLI that aggregates some common commands for the node and the client
 [[bin]]

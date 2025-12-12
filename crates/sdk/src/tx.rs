@@ -3616,8 +3616,8 @@ async fn get_masp_fee_payment_amount<N: Namada>(
     })
 }
 
-// Extract the validate amount for the masp frontend sustainability fee
-async fn compute_masp_frontend_sus_fee(
+/// Extract the validate amount for the masp frontend sustainability fee
+pub async fn compute_masp_frontend_sus_fee(
     context: &impl Namada,
     input_amount: &namada_token::DenominatedAmount,
     percentage: &namada_core::dec::Dec,

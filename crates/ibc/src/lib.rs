@@ -113,7 +113,10 @@ use trace::{
     is_sender_chain_source,
 };
 
-use crate::context::middlewares::send_transfer_execute;
+use crate::context::middlewares::{
+    MaspUnshieldingFeesExecutionContext, send_transfer_execute,
+};
+use crate::context::token_transfer::ParamsStorageAdapter;
 use crate::storage::{
     channel_counter_key, client_counter_key, connection_counter_key,
     deposit_prefix, nft_class_key, nft_metadata_key, withdraw_prefix,
@@ -305,12 +308,17 @@ where
         }
     }
 
-    fn apply_ibc_packet<Transfer: BorshDeserialize>(
-        storage: &S,
+    fn apply_ibc_packet<PreS, Params, Transfer>(
+        storage_pre: PreS,
+        storage_post: &S,
         tx_data: &[u8],
         mut accum: ChangedBalances,
         keys_changed: &BTreeSet<namada_core::storage::Key>,
-    ) -> StorageResult<ChangedBalances> {
+    ) -> StorageResult<ChangedBalances>
+    where
+        Params: namada_systems::parameters::Read<PreS>,
+        Transfer: BorshDeserialize,
+    {
         let msg = decode_message::<Transfer>(tx_data)
             .into_storage_result()
             .ok();
@@ -325,24 +333,37 @@ where
                 let addr = TAddrData::Ibc(receiver.clone());
                 accum.decoder.insert(ibc_taddr(receiver), addr);
                 accum = apply_transfer_msg(
-                    storage,
+                    storage_post,
                     accum,
-                    &ibc_transfer,
+                    ibc_transfer,
                     keys_changed,
+                    |ibc_transfer| {
+                        // Recreate the original packet, by applying middlewares
+                        let adapter = ParamsStorageAdapter::<_, Params>::adapt(
+                            storage_pre,
+                        );
+                        adapter
+                            .apply_masp_unshielding_fee(ibc_transfer)
+                            .into_storage_result()
+                    },
                 )?;
             }
             Some(IbcMessage::NftTransfer(msg)) => {
                 // Need to set NFT data because the message doesn't include them
-                let message = retrieve_nft_data(storage, msg.message)?;
+                let message = retrieve_nft_data(storage_post, msg.message)?;
                 let ibc_transfer = IbcTransferInfo::try_from(message)?;
                 let receiver = ibc_transfer.receiver.clone();
                 let addr = TAddrData::Ibc(receiver.clone());
                 accum.decoder.insert(ibc_taddr(receiver), addr);
                 accum = apply_transfer_msg(
-                    storage,
+                    storage_post,
                     accum,
-                    &ibc_transfer,
+                    ibc_transfer,
                     keys_changed,
+                    |_ibc_transfer| {
+                        // NOOP
+                        Ok(())
+                    },
                 )?;
             }
             // This event is emitted on the receiver
@@ -390,7 +411,7 @@ where
                         let ibc_denom = packet_data.token.denom.to_string();
                         let amount: Amount = packet_data.token.amount.into();
                         accum = packet_kind.apply_msg(
-                            storage,
+                            storage_post,
                             accum,
                             &packet,
                             vec![ibc_denom],
@@ -418,7 +439,7 @@ where
                             })
                             .collect();
                         accum = packet_kind.apply_msg(
-                            storage,
+                            storage_post,
                             accum,
                             &packet,
                             ibc_traces,
@@ -577,21 +598,24 @@ fn check_packet_receiving(
 }
 
 // Apply the given transfer message to the changed balances structure
-fn apply_transfer_msg<S>(
+fn apply_transfer_msg<S, F>(
     storage: &S,
     mut accum: ChangedBalances,
-    ibc_transfer: &IbcTransferInfo,
+    mut ibc_transfer: IbcTransferInfo,
     keys_changed: &BTreeSet<Key>,
+    alter_ibc_transfer: F,
 ) -> StorageResult<ChangedBalances>
 where
     S: StorageRead,
+    F: FnOnce(&mut IbcTransferInfo) -> StorageResult<()>,
 {
-    check_ibc_transfer(storage, ibc_transfer, keys_changed)?;
+    check_ibc_transfer(storage, &ibc_transfer, keys_changed)?;
+    alter_ibc_transfer(&mut ibc_transfer)?;
 
     let IbcTransferInfo {
-        ibc_traces,
-        src_port_id,
-        src_channel_id,
+        ref ibc_traces,
+        ref src_port_id,
+        ref src_channel_id,
         amount,
         receiver,
         ..
@@ -600,7 +624,7 @@ where
     let receiver = ibc_taddr(receiver.clone());
     for ibc_trace in ibc_traces {
         let token = convert_to_address(ibc_trace).into_storage_result()?;
-        let delta = ValueSum::from_pair(token, *amount);
+        let delta = ValueSum::from_pair(token, amount);
         // If there is a transfer to the IBC account, then deduplicate the
         // balance increase since we already account for it below
         if is_sender_chain_source(ibc_trace, src_port_id, src_channel_id) {

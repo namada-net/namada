@@ -88,8 +88,8 @@ pub fn send_transfer_execute<SendPacketCtx, TokenCtx>(
 ) -> Result<(), TokenTransferError>
 where
     SendPacketCtx: SendPacketExecutionContext,
-    TokenCtx:
-        TokenTransferExecutionContext + MaspUnshieldingFeesExecutionContext,
+    TokenCtx: TokenTransferExecutionContext
+        + MaspUnshieldingFeesExecutionContext<MsgTransfer>,
 {
     macro_rules! assemble_middlewares {
         ($base:expr) => { $base };
@@ -106,11 +106,11 @@ where
 }
 
 /// Context that handles ICS-20 MASP unshielding fees.
-pub trait MaspUnshieldingFeesExecutionContext {
+pub trait MaspUnshieldingFeesExecutionContext<Msg> {
     /// Apply a MASP unshielding fee over the given ICS-20 packet.
     fn apply_masp_unshielding_fee(
         &self,
-        msg: &mut MsgTransfer,
+        msg: &mut Msg,
     ) -> Result<(), TokenTransferError>;
 }
 
@@ -128,8 +128,8 @@ where
         MsgTransfer,
     ) -> Result<(), TokenTransferError>,
     SendPacketCtx: SendPacketExecutionContext,
-    TokenCtx:
-        TokenTransferExecutionContext + MaspUnshieldingFeesExecutionContext,
+    TokenCtx: TokenTransferExecutionContext
+        + MaspUnshieldingFeesExecutionContext<MsgTransfer>,
 {
     |send_packet_ctx_a, token_ctx_a, mut msg| {
         token_ctx_a.apply_masp_unshielding_fee(&mut msg)?;

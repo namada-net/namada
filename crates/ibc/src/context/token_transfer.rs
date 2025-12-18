@@ -21,6 +21,7 @@ use namada_core::arith::{CheckedAdd, checked};
 use namada_core::masp::{AssetData, CompactNote, PaymentAddress};
 use namada_core::token::{Amount, MaspDigitPos};
 use namada_core::uint::Uint;
+use namada_state::StorageRead;
 use namada_tx::event::{MaspEvent, MaspEventKind, MaspTxRef};
 
 use super::common::IbcCommonContext;
@@ -99,30 +100,6 @@ where
             }
             _ => Ok(()),
         }
-    }
-
-    /// Get the token address and the amount from PrefixedCoin. If the base
-    /// denom is not an address, it returns `IbcToken`
-    fn get_token_amount(
-        &self,
-        coin: &PrefixedCoin,
-    ) -> Result<(Address, Amount), HostError> {
-        let token = match Address::decode(coin.denom.base_denom.as_str()) {
-            Ok(token_addr) if coin.denom.trace_path.is_empty() => token_addr,
-            _ => trace::ibc_token(coin.denom.to_string()),
-        };
-
-        // Convert IBC amount to Namada amount for the token
-        let uint_amount = Uint(primitive_types::U256::from(coin.amount).0);
-        let amount = Amount::from_uint(uint_amount, 0).map_err(|e| {
-            HostError::Other {
-                description: format!(
-                    "The IBC amount is invalid: Coin {coin}, Error {e}",
-                ),
-            }
-        })?;
-
-        Ok((token, amount))
     }
 
     /// Update the mint amount of the token
@@ -309,20 +286,11 @@ where
         Params:
             namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
     {
-        let Some(fee_percentage) = Params::ibc_unshielding_fee_percentage(
+        get_masp_unshielding_fee::<_, Params>(
             self.inner.borrow().storage(),
             token,
-        )?
-        else {
-            return Ok(None);
-        };
-
-        Ok(Some(amount.checked_mul_dec(fee_percentage).ok_or_else(
-            || HostError::Other {
-                description:
-                    "Overflow in MASP unshielding fee computation".to_string(),
-            },
-        )?))
+            amount,
+        )
     }
 
     fn store_masp_note_commitments(
@@ -340,7 +308,6 @@ where
             >,
     {
         use namada_events::extend::ComposeEvent;
-        use namada_state::StorageRead;
         use namada_tx::event::ProtocolIbcShielding;
 
         if amount.is_zero() {
@@ -370,8 +337,6 @@ where
             })?;
 
         let epoched_asset = {
-            use namada_state::StorageRead;
-
             let masp_epoch = {
                 let current_epoch =
                     self.inner.borrow().storage().get_block_epoch()?;
@@ -615,7 +580,7 @@ where
         coin: &PrefixedCoin,
         _memo: &Memo,
     ) -> Result<(), HostError> {
-        let (ibc_token, amount) = self.get_token_amount(coin)?;
+        let (ibc_token, amount) = get_token_amount(coin)?;
         let has_masp_tx = self
             .config
             .contains(TokenTransferContextConfig::HAS_MASP_TX);
@@ -655,7 +620,7 @@ where
         _channel_id: &ChannelId,
         coin: &PrefixedCoin,
     ) -> Result<(), HostError> {
-        let (ibc_token, amount) = self.get_token_amount(coin)?;
+        let (ibc_token, amount) = get_token_amount(coin)?;
 
         let amount = self.maybe_handle_masp_memoless_shielding(
             to_account,
@@ -689,7 +654,7 @@ where
         coin: &PrefixedCoin,
     ) -> Result<(), HostError> {
         // The trace path of the denom is already updated if receiving the token
-        let (ibc_token, amount) = self.get_token_amount(coin)?;
+        let (ibc_token, amount) = get_token_amount(coin)?;
 
         // NOTE: update the minted amount before paying for
         // shielding fees, since the fees are also minted
@@ -735,7 +700,7 @@ where
         coin: &PrefixedCoin,
         _memo: &Memo,
     ) -> Result<(), HostError> {
-        let (ibc_token, amount) = self.get_token_amount(coin)?;
+        let (ibc_token, amount) = get_token_amount(coin)?;
         let has_masp_tx = self
             .config
             .contains(TokenTransferContextConfig::HAS_MASP_TX);
@@ -767,7 +732,104 @@ where
     }
 }
 
-impl<C, Params, Token, ShieldedToken> MaspUnshieldingFeesExecutionContext
+/// Get the token address and the amount from PrefixedCoin. If the base
+/// denom is not an address, it returns `IbcToken`
+fn get_token_amount(
+    coin: &PrefixedCoin,
+) -> Result<(Address, Amount), HostError> {
+    let token = match Address::decode(coin.denom.base_denom.as_str()) {
+        Ok(token_addr) if coin.denom.trace_path.is_empty() => token_addr,
+        _ => trace::ibc_token(coin.denom.to_string()),
+    };
+
+    // Convert IBC amount to Namada amount for the token
+    let uint_amount = Uint(primitive_types::U256::from(coin.amount).0);
+    let amount =
+        Amount::from_uint(uint_amount, 0).map_err(|e| HostError::Other {
+            description: format!(
+                "The IBC amount is invalid: Coin {coin}, Error {e}",
+            ),
+        })?;
+
+    Ok((token, amount))
+}
+
+fn get_masp_unshielding_fee<S, Params>(
+    storage: &S,
+    token: &Address,
+    amount: &Amount,
+) -> Result<Option<Amount>, HostError>
+where
+    Params: namada_systems::parameters::Read<S>,
+{
+    let Some(fee_percentage) =
+        Params::ibc_unshielding_fee_percentage(storage, token)?
+    else {
+        return Ok(None);
+    };
+
+    Ok(Some(amount.checked_mul_dec(fee_percentage).ok_or_else(
+        || HostError::Other {
+            description:
+                "Overflow in MASP unshielding fee computation".to_string(),
+        },
+    )?))
+}
+
+#[allow(missing_docs)]
+pub struct ParamsStorageAdapter<S, Params>(S, PhantomData<Params>);
+
+impl<S, Params> ParamsStorageAdapter<S, Params> {
+    #[allow(missing_docs)]
+    pub const fn adapt(storage: S) -> Self {
+        Self(storage, PhantomData)
+    }
+}
+
+impl<S, Params> MaspUnshieldingFeesExecutionContext<crate::IbcTransferInfo>
+    for ParamsStorageAdapter<S, Params>
+where
+    Params: namada_systems::parameters::Read<S>,
+{
+    fn apply_masp_unshielding_fee(
+        &self,
+        msg: &mut crate::IbcTransferInfo,
+    ) -> Result<(), TokenTransferError> {
+        for trace in msg.ibc_traces.iter() {
+            let ibc_token =
+                crate::trace::convert_to_address(trace).map_err(|err| {
+                    HostError::Other {
+                        description: format!(
+                            "Failed to convert {trace:?} to address: {err}"
+                        ),
+                    }
+                })?;
+
+            if let Some(fee) = get_masp_unshielding_fee::<_, Params>(
+                &self.0,
+                &ibc_token,
+                &msg.amount,
+            )
+            .map_err(TokenTransferError::Host)?
+            .filter(|fee| !fee.is_zero())
+            {
+                msg.amount =
+                    // NOTE: we're adding the fee, because we want to recreate the
+                    // original packet
+                    msg.amount.checked_add(fee).ok_or_else(|| HostError::Other {
+                        description: "Unshielding fee greater than withdrawn \
+                                      amount"
+                            .to_string(),
+                    })?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl<C, Params, Token, ShieldedToken>
+    MaspUnshieldingFeesExecutionContext<MsgTransfer>
     for TokenTransferContext<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
@@ -785,8 +847,7 @@ where
             return Ok(());
         }
 
-        let (ibc_token, mut amount) = self
-            .get_token_amount(&msg.packet_data.token)
+        let (ibc_token, mut amount) = get_token_amount(&msg.packet_data.token)
             .map_err(TokenTransferError::Host)?;
 
         if let Some(fee) = self

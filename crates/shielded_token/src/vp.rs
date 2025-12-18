@@ -513,7 +513,8 @@ where
             undated_post,
         } = changed_balances;
         let ibc::ChangedBalances { decoder, pre, post } =
-            Ibc::apply_ibc_packet::<Transfer>(
+            Ibc::apply_ibc_packet::<_, Params, Transfer>(
+                ctx.pre(),
                 &ctx.post(),
                 tx_data,
                 ibc::ChangedBalances { decoder, pre, post },

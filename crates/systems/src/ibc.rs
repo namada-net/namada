@@ -19,12 +19,16 @@ pub trait Read<S> {
     ) -> Result<Option<Either<(), masp_primitives::transaction::Transaction>>>;
 
     /// Apply relevant IBC packets to the changed balances structure
-    fn apply_ibc_packet<Transfer: BorshDeserialize>(
-        storage: &S,
+    fn apply_ibc_packet<PreS, Params, Transfer>(
+        storage_pre: PreS,
+        storage_post: &S,
         tx_data: &[u8],
         acc: ChangedBalances,
         keys_changed: &BTreeSet<storage::Key>,
-    ) -> Result<ChangedBalances>;
+    ) -> Result<ChangedBalances>
+    where
+        Params: crate::parameters::Read<PreS>,
+        Transfer: BorshDeserialize;
 }
 
 /// Balances changed by a transaction

@@ -113,10 +113,7 @@ use trace::{
     is_sender_chain_source,
 };
 
-use crate::context::middlewares::{
-    MaspUnshieldingFeesExecutionContext, send_transfer_execute,
-};
-use crate::context::token_transfer::ParamsStorageAdapter;
+use crate::context::middlewares::send_transfer_execute;
 use crate::storage::{
     channel_counter_key, client_counter_key, connection_counter_key,
     deposit_prefix, nft_class_key, nft_metadata_key, withdraw_prefix,
@@ -164,6 +161,7 @@ impl From<Error> for StorageError {
     }
 }
 
+#[derive(Debug)]
 struct IbcTransferInfo {
     src_port_id: PortId,
     src_channel_id: ChannelId,
@@ -183,6 +181,11 @@ impl TryFrom<IbcMsgTransfer> for IbcTransferInfo {
     ) -> std::result::Result<Self, Self::Error> {
         let packet_data = serde_json::to_vec(&message.packet_data)
             .map_err(StorageError::new)?;
+        tracing::warn!(
+            ?message,
+            ?packet_data,
+            "parsing IbcTransferInfo from IbcMsgTransfer"
+        );
         let ibc_traces = vec![message.packet_data.token.denom.to_string()];
         let amount: Amount = message.packet_data.token.amount.into();
         let receiver = message.packet_data.receiver.to_string();
@@ -328,6 +331,7 @@ where
             Some(IbcMessage::Transfer(msg)) => {
                 // Get the packet commitment from post-storage that corresponds
                 // to this event
+                tracing::warn!(msg = ?msg.message, "calling apply_transfer_msg");
                 let ibc_transfer = IbcTransferInfo::try_from(msg.message)?;
                 let receiver = ibc_transfer.receiver.clone();
                 let addr = TAddrData::Ibc(receiver.clone());
@@ -337,14 +341,60 @@ where
                     accum,
                     ibc_transfer,
                     keys_changed,
-                    |ibc_transfer| {
-                        // Recreate the original packet, by applying middlewares
-                        let adapter = ParamsStorageAdapter::<_, Params>::adapt(
-                            storage_pre,
-                        );
-                        adapter
-                            .apply_masp_unshielding_fee(ibc_transfer)
-                            .into_storage_result()
+                    |packet_data_vec| {
+                        let mut packet_data =
+                            serde_json::from_slice::<PacketData>(
+                                packet_data_vec,
+                            )
+                            .map_err(StorageError::new)?;
+
+                        let token = trace::convert_to_address(
+                            packet_data.token.denom.to_string(),
+                        )
+                        .map_err(|e| {
+                            Error::Trace(format!(
+                                "Failed to convert IBC trace to Namada \
+                                 address: {e}"
+                            ))
+                        })
+                        .into_storage_result()?;
+
+                        let Some(fee_percentage) =
+                            Params::ibc_unshielding_fee_percentage(
+                                &storage_pre,
+                                &token,
+                            )?
+                        else {
+                            return Ok(());
+                        };
+
+                        let old_amount: Amount =
+                            packet_data.token.amount.into();
+                        let fee = old_amount
+                            .checked_mul_dec(fee_percentage)
+                            .ok_or(StorageError::new_const(
+                                "IBC unshielding fee overflow",
+                            ))?;
+
+                        if fee.is_zero() {
+                            return Ok(());
+                        }
+
+                        packet_data.token.amount = old_amount
+                            .checked_sub(fee)
+                            .ok_or_else(|| {
+                                StorageError::new_const(
+                                    "Unshielding fee greater than withdrawn \
+                                     amount",
+                                )
+                            })?
+                            .into();
+
+                        packet_data_vec.clear();
+                        serde_json::to_writer(packet_data_vec, &packet_data)
+                            .map_err(StorageError::new)?;
+
+                        Ok(())
                     },
                 )?;
             }
@@ -525,14 +575,17 @@ impl fmt::Display for IbcAccountId {
     }
 }
 
-fn check_ibc_transfer<S>(
+fn check_ibc_transfer<S, F>(
     storage: &S,
     ibc_transfer: &IbcTransferInfo,
     keys_changed: &BTreeSet<Key>,
+    alter_packet_data: F,
 ) -> StorageResult<()>
 where
     S: StorageRead,
+    F: FnOnce(&mut Vec<u8>) -> StorageResult<()>,
 {
+    tracing::warn!(?ibc_transfer, "calling check_ibc_transfer");
     let IbcTransferInfo {
         src_port_id,
         src_channel_id,
@@ -553,6 +606,9 @@ where
         )));
     }
 
+    let mut packet_data = packet_data.clone();
+    alter_packet_data(&mut packet_data)?;
+
     // The commitment is also validated in IBC VP. Make sure that for when
     // IBC VP isn't triggered.
     let actual: PacketCommitment = storage
@@ -563,7 +619,7 @@ where
         )))?
         .into();
     let expected = compute_packet_commitment(
-        packet_data,
+        &packet_data,
         timeout_height,
         timeout_timestamp,
     );
@@ -601,16 +657,20 @@ fn check_packet_receiving(
 fn apply_transfer_msg<S, F>(
     storage: &S,
     mut accum: ChangedBalances,
-    mut ibc_transfer: IbcTransferInfo,
+    ibc_transfer: IbcTransferInfo,
     keys_changed: &BTreeSet<Key>,
-    alter_ibc_transfer: F,
+    alter_packet_data: F,
 ) -> StorageResult<ChangedBalances>
 where
     S: StorageRead,
-    F: FnOnce(&mut IbcTransferInfo) -> StorageResult<()>,
+    F: FnOnce(&mut Vec<u8>) -> StorageResult<()>,
 {
-    check_ibc_transfer(storage, &ibc_transfer, keys_changed)?;
-    alter_ibc_transfer(&mut ibc_transfer)?;
+    check_ibc_transfer(
+        storage,
+        &ibc_transfer,
+        keys_changed,
+        alter_packet_data,
+    )?;
 
     let IbcTransferInfo {
         ref ibc_traces,

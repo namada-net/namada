@@ -776,60 +776,7 @@ where
     )?))
 }
 
-#[allow(missing_docs)]
-pub struct ParamsStorageAdapter<S, Params>(S, PhantomData<Params>);
-
-impl<S, Params> ParamsStorageAdapter<S, Params> {
-    #[allow(missing_docs)]
-    pub const fn adapt(storage: S) -> Self {
-        Self(storage, PhantomData)
-    }
-}
-
-impl<S, Params> MaspUnshieldingFeesExecutionContext<crate::IbcTransferInfo>
-    for ParamsStorageAdapter<S, Params>
-where
-    Params: namada_systems::parameters::Read<S>,
-{
-    fn apply_masp_unshielding_fee(
-        &self,
-        msg: &mut crate::IbcTransferInfo,
-    ) -> Result<(), TokenTransferError> {
-        for trace in msg.ibc_traces.iter() {
-            let ibc_token =
-                crate::trace::convert_to_address(trace).map_err(|err| {
-                    HostError::Other {
-                        description: format!(
-                            "Failed to convert {trace:?} to address: {err}"
-                        ),
-                    }
-                })?;
-
-            if let Some(fee) = get_masp_unshielding_fee::<_, Params>(
-                &self.0,
-                &ibc_token,
-                &msg.amount,
-            )
-            .map_err(TokenTransferError::Host)?
-            .filter(|fee| !fee.is_zero())
-            {
-                msg.amount =
-                    // NOTE: we're adding the fee, because we want to recreate the
-                    // original packet
-                    msg.amount.checked_add(fee).ok_or_else(|| HostError::Other {
-                        description: "Unshielding fee greater than withdrawn \
-                                      amount"
-                            .to_string(),
-                    })?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl<C, Params, Token, ShieldedToken>
-    MaspUnshieldingFeesExecutionContext<MsgTransfer>
+impl<C, Params, Token, ShieldedToken> MaspUnshieldingFeesExecutionContext
     for TokenTransferContext<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
@@ -839,15 +786,18 @@ where
         &self,
         msg: &mut MsgTransfer,
     ) -> Result<(), TokenTransferError> {
+        tracing::warn!(?msg, "called apply_masp_unshielding_fee");
+
         // no fee is taken if this is not a masp unshielding op
         let has_masp_tx = self
             .config
             .contains(TokenTransferContextConfig::HAS_MASP_TX);
         if !has_masp_tx {
+            tracing::warn!("apply_masp_unshielding_fee has no masp tx");
             return Ok(());
         }
 
-        let (ibc_token, mut amount) = get_token_amount(&msg.packet_data.token)
+        let (ibc_token, amount) = get_token_amount(&msg.packet_data.token)
             .map_err(TokenTransferError::Host)?;
 
         if let Some(fee) = self
@@ -855,7 +805,7 @@ where
             .map_err(TokenTransferError::Host)?
             .filter(|fee| !fee.is_zero())
         {
-            amount =
+            let new_amount =
                 amount.checked_sub(fee).ok_or_else(|| HostError::Other {
                     description: "Unshielding fee greater than withdrawn \
                                   amount"
@@ -863,7 +813,7 @@ where
                 })?;
 
             // commit the updated amount to the packet
-            msg.packet_data.token.amount = amount.into();
+            msg.packet_data.token.amount = new_amount.into();
 
             // transfer the fee to PGF, and trigger its vp
             self.insert_verifier(&PGF);
@@ -872,6 +822,15 @@ where
                 .transfer_token(&MASP, &PGF, &ibc_token, fee)
                 .map_err(HostError::from)
                 .map_err(TokenTransferError::Host)?;
+
+            tracing::warn!(
+                %ibc_token,
+                %fee,
+                original_amount = %amount,
+                %new_amount,
+                new_msg = ?msg,
+                "apply_masp_unshielding_fee fees applied"
+            );
         }
 
         Ok(())

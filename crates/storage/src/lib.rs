@@ -110,7 +110,7 @@ pub trait StorageRead {
     fn get_pred_epochs(&self) -> Result<Epochs>;
 
     /// Get the transaction index.
-    fn get_tx_index(&self) -> Result<TxIndex>;
+    fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)>;
 
     /// Get the native token address
     fn get_native_token(&self) -> Result<Address>;
@@ -476,8 +476,8 @@ pub mod testing {
             Ok(self.pred_epochs.clone())
         }
 
-        fn get_tx_index(&self) -> Result<TxIndex> {
-            Ok(TxIndex::default())
+        fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)> {
+            Ok(Default::default())
         }
 
         fn get_native_token(&self) -> Result<Address> {

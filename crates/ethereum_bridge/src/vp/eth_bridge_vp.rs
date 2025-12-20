@@ -158,10 +158,10 @@ mod tests {
     use namada_core::ethereum_events::EthAddress;
     use namada_gas::{GasMeterKind, TxGasMeter, VpGasMeter};
     use namada_state::testing::TestState;
-    use namada_state::{StateRead, StorageWrite, TxIndex};
+    use namada_state::{StateRead, StorageWrite};
     use namada_trans_token::storage_key::{balance_key, minted_balance_key};
     use namada_tx::data::TxType;
-    use namada_tx::{Tx, TxCommitments};
+    use namada_tx::{IndexedTx, Tx, TxCommitments};
     use namada_vm::WasmCacheRwAccess;
     use namada_vm::wasm::VpCache;
     use namada_vm::wasm::run::VpEvalWasm;
@@ -238,13 +238,14 @@ mod tests {
         gas_meter: &'ctx RefCell<VpGasMeter>,
         keys_changed: &'ctx BTreeSet<Key>,
         verifiers: &'ctx BTreeSet<Address>,
+        indexed_tx: &'ctx IndexedTx,
     ) -> Ctx<'ctx, TestState> {
         Ctx::new(
             &crate::ADDRESS,
             state,
             tx,
             cmt,
-            &TxIndex(0),
+            indexed_tx,
             gas_meter,
             keys_changed,
             verifiers,
@@ -384,6 +385,7 @@ mod tests {
             &TxGasMeter::new(u64::MAX, 1),
         ));
         let batched_tx = tx.batch_ref_first_tx().unwrap();
+        let indexed_tx = IndexedTx::default();
         let ctx = setup_ctx(
             batched_tx.tx,
             batched_tx.cmt,
@@ -391,6 +393,7 @@ mod tests {
             &gas_meter,
             &keys_changed,
             &verifiers,
+            &indexed_tx,
         );
 
         let res = EthBridge::validate_tx(
@@ -441,6 +444,7 @@ mod tests {
             &TxGasMeter::new(u64::MAX, 1),
         ));
         let batched_tx = tx.batch_ref_first_tx().unwrap();
+        let indexed_tx = IndexedTx::default();
         let ctx = setup_ctx(
             batched_tx.tx,
             batched_tx.cmt,
@@ -448,6 +452,7 @@ mod tests {
             &gas_meter,
             &keys_changed,
             &verifiers,
+            &indexed_tx,
         );
 
         let res = EthBridge::validate_tx(
@@ -501,6 +506,7 @@ mod tests {
             &TxGasMeter::new(u64::MAX, 1),
         ));
         let batched_tx = tx.batch_ref_first_tx().unwrap();
+        let indexed_tx = IndexedTx::default();
         let ctx = setup_ctx(
             batched_tx.tx,
             batched_tx.cmt,
@@ -508,6 +514,7 @@ mod tests {
             &gas_meter,
             &keys_changed,
             &verifiers,
+            &indexed_tx,
         );
 
         let res = EthBridge::validate_tx(

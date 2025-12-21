@@ -27,8 +27,8 @@ pub use namada_core::chain::{BlockHeader, BlockHeight, Epoch, Epochs};
 use namada_core::hash::Hash;
 use namada_events::{Event, EventType};
 use namada_gas::Gas;
-pub use namada_storage::{Error, Key, Result, StorageRead, TxIndex};
-use namada_tx::BatchedTxRef;
+pub use namada_storage::{Error, Key, Result, StorageRead};
+use namada_tx::{BatchedTxRef, IndexedTx};
 
 /// Validity predicate's environment is available for native VPs and WASM VPs
 pub trait VpEnv<'view>
@@ -83,7 +83,7 @@ where
     fn get_block_epoch(&self) -> Result<Epoch>;
 
     /// Get the shielded transaction index.
-    fn get_tx_index(&self) -> Result<TxIndex>;
+    fn get_tx_index(&self) -> Result<IndexedTx>;
 
     /// Get the address of the native token.
     fn get_native_token(&self) -> Result<Address>;

@@ -7384,7 +7384,7 @@ pub mod args {
                             "The expiration datetime of the masp transaction, \
                              after which the tx won't be accepted anymore. If \
                              not provided, a default will be set. Example: \
-                             2012-12-12T12:12:12Z"
+                             2012-12-12T12:12:00.000000000+00:00"
                         ))
                         .conflicts_with_all([NO_EXPIRATION.name]),
                 )

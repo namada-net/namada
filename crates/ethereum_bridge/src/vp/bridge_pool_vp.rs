@@ -636,10 +636,10 @@ mod test_bridge_pool_vp {
     use namada_gas::{GasMeterKind, TxGasMeter, VpGasMeter};
     use namada_state::testing::TestState;
     use namada_state::write_log::WriteLog;
-    use namada_state::{StateRead, StorageWrite, TxIndex};
+    use namada_state::{StateRead, StorageWrite};
     use namada_trans_token::storage_key::balance_key;
-    use namada_tx::Tx;
     use namada_tx::data::TxType;
+    use namada_tx::{IndexedTx, Tx};
     use namada_vm::WasmCacheRwAccess;
     use namada_vm::wasm::VpCache;
     use namada_vm::wasm::run::VpEvalWasm;
@@ -913,6 +913,7 @@ mod test_bridge_pool_vp {
         gas_meter: &'ctx RefCell<VpGasMeter>,
         keys_changed: &'ctx BTreeSet<Key>,
         verifiers: &'ctx BTreeSet<Address>,
+        indexed_tx: &'ctx IndexedTx,
     ) -> Ctx<'ctx, TestState> {
         let batched_tx = tx.batch_ref_first_tx().unwrap();
         Ctx::new(
@@ -920,7 +921,7 @@ mod test_bridge_pool_vp {
             state,
             batched_tx.tx,
             batched_tx.cmt,
-            &TxIndex(0),
+            indexed_tx,
             gas_meter,
             keys_changed,
             verifiers,
@@ -1004,7 +1005,15 @@ mod test_bridge_pool_vp {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
-        let ctx = setup_ctx(&tx, &state, &gas_meter, &keys_changed, &verifiers);
+        let indexed_tx = IndexedTx::default();
+        let ctx = setup_ctx(
+            &tx,
+            &state,
+            &gas_meter,
+            &keys_changed,
+            &verifiers,
+            &indexed_tx,
+        );
 
         let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
         tx.add_data(transfer);
@@ -1360,7 +1369,15 @@ mod test_bridge_pool_vp {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
-        let ctx = setup_ctx(&tx, &state, &gas_meter, &keys_changed, &verifiers);
+        let indexed_tx = IndexedTx::default();
+        let ctx = setup_ctx(
+            &tx,
+            &state,
+            &gas_meter,
+            &keys_changed,
+            &verifiers,
+            &indexed_tx,
+        );
 
         let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
         tx.add_data(transfer);
@@ -1418,7 +1435,15 @@ mod test_bridge_pool_vp {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
-        let ctx = setup_ctx(&tx, &state, &gas_meter, &keys_changed, &verifiers);
+        let indexed_tx = IndexedTx::default();
+        let ctx = setup_ctx(
+            &tx,
+            &state,
+            &gas_meter,
+            &keys_changed,
+            &verifiers,
+            &indexed_tx,
+        );
 
         let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
         tx.add_data(transfer);
@@ -1497,7 +1522,15 @@ mod test_bridge_pool_vp {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
-        let ctx = setup_ctx(&tx, &state, &gas_meter, &keys_changed, &verifiers);
+        let indexed_tx = IndexedTx::default();
+        let ctx = setup_ctx(
+            &tx,
+            &state,
+            &gas_meter,
+            &keys_changed,
+            &verifiers,
+            &indexed_tx,
+        );
 
         let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
         tx.add_data(transfer);
@@ -1571,7 +1604,15 @@ mod test_bridge_pool_vp {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
-        let ctx = setup_ctx(&tx, &state, &gas_meter, &keys_changed, &verifiers);
+        let indexed_tx = IndexedTx::default();
+        let ctx = setup_ctx(
+            &tx,
+            &state,
+            &gas_meter,
+            &keys_changed,
+            &verifiers,
+            &indexed_tx,
+        );
 
         let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
         tx.add_data(transfer);
@@ -1662,7 +1703,15 @@ mod test_bridge_pool_vp {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
-        let ctx = setup_ctx(&tx, &state, &gas_meter, &keys_changed, &verifiers);
+        let indexed_tx = IndexedTx::default();
+        let ctx = setup_ctx(
+            &tx,
+            &state,
+            &gas_meter,
+            &keys_changed,
+            &verifiers,
+            &indexed_tx,
+        );
 
         let mut tx = Tx::new(state.in_mem().chain_id.clone(), None);
         tx.add_data(transfer);
@@ -1739,7 +1788,15 @@ mod test_bridge_pool_vp {
         let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
             &TxGasMeter::new(u64::MAX, 1),
         ));
-        let ctx = setup_ctx(&tx, &state, &gas_meter, &keys_changed, &verifiers);
+        let indexed_tx = IndexedTx::default();
+        let ctx = setup_ctx(
+            &tx,
+            &state,
+            &gas_meter,
+            &keys_changed,
+            &verifiers,
+            &indexed_tx,
+        );
 
         let mut tx = Tx::from_type(TxType::Raw);
         tx.push_default_inner_tx();

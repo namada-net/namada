@@ -1639,6 +1639,7 @@ pub async fn osmosis_denom_from_namada_denom(
     lcd_rpc_addr: &str,
     registry_contract_addr: &str,
     namada_denom: &str,
+    swap_into_znam: bool,
 ) -> Result<(String, Address), Error> {
     async fn fetch_contract_data(
         contract_addr: &str,
@@ -1701,7 +1702,7 @@ pub async fn osmosis_denom_from_namada_denom(
     let namada_chain_name = fetch_contract_data(
         registry_contract_addr,
         lcd_rpc_addr,
-        &chain_name_req("tnam"),
+        &chain_name_req(if swap_into_znam { "znam" } else { "tnam" }),
     )
     .await?;
     let osmosis_chain_name = fetch_contract_data(

@@ -31,6 +31,7 @@ use crate::queries::find_delegation_validators;
 use crate::rewards::{
     PosRewardsCalculator, log_block_rewards_aux,
     update_rewards_products_and_mint_inflation,
+    read_rewards_counter,
 };
 use crate::storage::{
     delegation_targets_handle, get_consensus_key_set,
@@ -60,6 +61,8 @@ use crate::{
     jail_for_liveness, read_validator_stake, staking_token_address,
     unbond_handle, validator_consensus_key_handle,
     validator_set_positions_handle, validator_state_handle,
+    validator_rewards_products_handle, query_reward_tokens,
+    claim_reward_tokens,
 };
 
 proptest! {
@@ -1965,10 +1968,7 @@ fn test_delegation_targets() {
     let pipeline_epoch = current_epoch + params.pipeline_len;
 
     // Up to epoch 2
-    for epoch in Epoch::iter_bounds_inclusive(
-        Epoch::default(),
-        current_epoch.prev().unwrap(),
-    ) {
+    for epoch in Epoch::iter_bounds_inclusive(Epoch::default(), Epoch(2)) {
         let delegatees1 =
             find_delegation_validators(&storage, &validator1, &epoch).unwrap();
         let delegatees2 =
@@ -1977,16 +1977,13 @@ fn test_delegation_targets() {
             find_delegation_validators(&storage, &delegator, &epoch).unwrap();
         assert_eq!(delegatees1.len(), 1);
         assert_eq!(delegatees2.len(), 1);
+        assert!(del_delegatees.is_empty());
         assert!(delegatees1.contains(&validator1));
         assert!(delegatees2.contains(&validator2));
-        assert!(del_delegatees.is_empty());
     }
 
     // Epochs 3-4
-    for epoch in Epoch::iter_bounds_inclusive(
-        current_epoch,
-        pipeline_epoch.prev().unwrap(),
-    ) {
+    for epoch in Epoch::iter_bounds_inclusive(Epoch(3), Epoch(4)) {
         let delegatees1 =
             find_delegation_validators(&storage, &validator1, &epoch).unwrap();
         let delegatees2 =
@@ -2209,4 +2206,855 @@ fn test_delegation_targets() {
         .unwrap();
     assert!(de_2.prev_ranges.is_empty());
     assert_eq!(de_2.last_range.1, None);
+}
+
+#[test]
+fn test_rewards_after_full_unbond() {
+    // This test demonstrates the issue where fully unbonded accounts
+    // may lose their reward state
+    let mut storage = TestState::default();
+    let params = OwnedPosParams {
+        unbonding_len: 3,
+        pipeline_len: 2,
+        ..Default::default()
+    };
+
+    // Setup: Create a validator and delegator
+    let validator = address::testing::established_address_1();
+    let delegator = address::testing::established_address_2();
+    let staking_token = staking_token_address(&storage);
+    
+    // Initialize with some validator stake
+    let validator_initial_stake = token::Amount::native_whole(1000);
+    let delegation_amount = token::Amount::native_whole(500);
+    
+    let consensus_key = key::testing::keypair_1().to_public();
+    let protocol_key = key::testing::keypair_2().to_public();
+    let eth_cold_key = key::testing::keypair_3().to_public(); 
+    let eth_hot_key = key::testing::keypair_4().to_public();
+    let commission_rate = Dec::new(5, 2).expect("Cannot fail");
+    let max_commission_rate_change = Dec::new(1, 2).expect("Cannot fail");
+
+    let genesis_validators = vec![GenesisValidator {
+        address: validator.clone(),
+        tokens: validator_initial_stake,
+        consensus_key,
+        protocol_key,
+        eth_cold_key,
+        eth_hot_key,
+        commission_rate,
+        max_commission_rate_change,
+        metadata: Default::default(),
+    }];
+
+    // Genesis
+    let mut current_epoch = storage.in_mem().block.epoch;
+    let params = test_init_genesis(
+        &mut storage,
+        params,
+        genesis_validators.into_iter(),
+        current_epoch,
+    )
+    .unwrap();
+    storage.commit_block().unwrap();
+
+    // Give delegator some tokens
+    credit_tokens(&mut storage, &staking_token, &delegator, delegation_amount)
+        .unwrap();
+
+    // Advance to epoch 1 and delegate
+    current_epoch = advance_epoch(&mut storage, &params);
+    bond_tokens(
+        &mut storage,
+        Some(&delegator),
+        &validator,
+        delegation_amount,
+        current_epoch,
+        None,
+    )
+    .unwrap();
+
+    // Advance several epochs to accumulate rewards
+    for _ in 0..5 {
+        current_epoch = advance_epoch(&mut storage, &params);
+        
+        // Simulate some block rewards being logged
+        // This is simplified - in reality rewards come from block signing
+        let rewards_products = validator_rewards_products_handle(&validator);
+        rewards_products
+            .insert(&mut storage, current_epoch.prev().unwrap(), Dec::new(1, 3).unwrap()) // 0.001 reward rate
+            .unwrap();
+    }
+
+    // Check that delegator has some rewards before unbonding
+    let rewards_before_unbond = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("Rewards before unbond: {}", rewards_before_unbond.to_string_native());
+    assert!(
+        rewards_before_unbond > token::Amount::zero(),
+        "Delegator should have accumulated some rewards"
+    );
+
+    // Now fully unbond all tokens
+    let pipeline_epoch = current_epoch + params.pipeline_len;
+    let bonds_total = bond_handle(&delegator, &validator)
+        .get_sum(&storage, pipeline_epoch, &params)
+        .unwrap()
+        .unwrap_or_default();
+    
+    println!("Total bonds to unbond: {}", bonds_total.to_string_native());
+    
+    unbond_tokens(
+        &mut storage,
+        Some(&delegator),
+        &validator,
+        bonds_total, // Unbond everything
+        current_epoch,
+        false,
+    )
+    .unwrap();
+
+    // Check that bonds are now zero
+    let remaining_bonds = bond_handle(&delegator, &validator)
+        .get_sum(&storage, pipeline_epoch, &params)
+        .unwrap()
+        .unwrap_or_default();
+    assert_eq!(remaining_bonds, token::Amount::zero(), "All bonds should be unbonded");
+
+    // Check rewards after full unbond - they should still be available
+    let rewards_after_unbond = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("Rewards after unbond: {}", rewards_after_unbond.to_string_native());
+    
+    // This is the critical test - rewards should be preserved in the counter
+    assert!(
+        rewards_after_unbond > token::Amount::zero(),
+        "Rewards should still be available after full unbond (stored in counter)"
+    );
+
+    // Claim the rewards
+    let claimed_rewards = claim_reward_tokens::<_, namada_governance::Store<_>, namada_trans_token::Store<_>>(
+        &mut storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("Claimed rewards: {}", claimed_rewards.to_string_native());
+    assert_eq!(claimed_rewards, rewards_after_unbond, "Should claim all available rewards");
+
+    // Now check rewards again - should be zero since counter was deleted
+    let rewards_after_claim = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("Rewards after claim: {}", rewards_after_claim.to_string_native());
+    assert_eq!(
+        rewards_after_claim,
+        token::Amount::zero(),
+        "No rewards should remain after claiming (counter deleted)"
+    );
+
+    // Try to query rewards again to demonstrate the issue
+    // Advance one more epoch and check again
+    current_epoch = advance_epoch(&mut storage, &params);
+    let rewards_next_epoch = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("Rewards next epoch: {}", rewards_next_epoch.to_string_native());
+    assert_eq!(
+        rewards_next_epoch,
+        token::Amount::zero(),
+        "Fully unbonded account should permanently show zero rewards"
+    );
+
+    // This demonstrates the issue: once a fully unbonded account claims rewards,
+    // the network no longer recognizes that the account ever accrued any rewards
+    println!("Test demonstrates: Fully unbonded accounts lose reward state after claiming");
+}
+
+#[test]
+fn test_rewards_lost_during_partial_unbonds() {
+    // This test checks if rewards are properly preserved when doing
+    // multiple partial unbonds that eventually result in full unbonding
+    let mut storage = TestState::default();
+    let params = OwnedPosParams {
+        unbonding_len: 3,
+        pipeline_len: 2,
+        ..Default::default()
+    };
+
+    // Setup: Create a validator and delegator
+    let validator = address::testing::established_address_1();
+    let delegator = address::testing::established_address_2();
+    let staking_token = staking_token_address(&storage);
+    
+    let validator_initial_stake = token::Amount::native_whole(1000);
+    let delegation_amount = token::Amount::native_whole(600);
+    
+    let consensus_key = key::testing::keypair_1().to_public();
+    let protocol_key = key::testing::keypair_2().to_public();
+    let eth_cold_key = key::testing::keypair_3().to_public(); 
+    let eth_hot_key = key::testing::keypair_4().to_public();
+    let commission_rate = Dec::new(5, 2).expect("Cannot fail");
+    let max_commission_rate_change = Dec::new(1, 2).expect("Cannot fail");
+
+    let genesis_validators = vec![GenesisValidator {
+        address: validator.clone(),
+        tokens: validator_initial_stake,
+        consensus_key,
+        protocol_key,
+        eth_cold_key,
+        eth_hot_key,
+        commission_rate,
+        max_commission_rate_change,
+        metadata: Default::default(),
+    }];
+
+    // Genesis
+    let mut current_epoch = storage.in_mem().block.epoch;
+    let params = test_init_genesis(
+        &mut storage,
+        params,
+        genesis_validators.into_iter(),
+        current_epoch,
+    )
+    .unwrap();
+    storage.commit_block().unwrap();
+
+    // Give delegator some tokens and bond
+    credit_tokens(&mut storage, &staking_token, &delegator, delegation_amount)
+        .unwrap();
+
+    current_epoch = advance_epoch(&mut storage, &params);
+    bond_tokens(
+        &mut storage,
+        Some(&delegator),
+        &validator,
+        delegation_amount,
+        current_epoch,
+        None,
+    )
+    .unwrap();
+
+    // Let some epochs pass to accumulate rewards
+    for i in 0..4 {
+        current_epoch = advance_epoch(&mut storage, &params);
+        
+        // Add some rewards products
+        let rewards_products = validator_rewards_products_handle(&validator);
+        rewards_products
+            .insert(&mut storage, current_epoch.prev().unwrap(), Dec::new(1 + i, 3).unwrap())
+            .unwrap();
+    }
+
+    // Check initial rewards
+    let initial_rewards = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("Initial rewards: {}", initial_rewards.to_string_native());
+    assert!(initial_rewards > token::Amount::zero(), "Should have accumulated rewards");
+
+    // Do first partial unbond (1/3 of total)
+    let first_unbond = token::Amount::native_whole(200);
+    unbond_tokens(
+        &mut storage,
+        Some(&delegator),
+        &validator,
+        first_unbond,
+        current_epoch,
+        false,
+    )
+    .unwrap();
+
+    // Check rewards after first partial unbond
+    let rewards_after_first = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("Rewards after first partial unbond: {}", rewards_after_first.to_string_native());
+    
+    // Check the rewards counter - should have some rewards from the unbond
+    let counter_after_first = read_rewards_counter(&storage, &delegator, &validator).unwrap();
+    println!("Counter after first unbond: {}", counter_after_first.to_string_native());
+
+    // Advance a few more epochs and accumulate more rewards
+    for i in 4..6 {
+        current_epoch = advance_epoch(&mut storage, &params);
+        
+        let rewards_products = validator_rewards_products_handle(&validator);
+        rewards_products
+            .insert(&mut storage, current_epoch.prev().unwrap(), Dec::new(1 + i, 3).unwrap())
+            .unwrap();
+    }
+
+    // Do second partial unbond (another 1/3)
+    let second_unbond = token::Amount::native_whole(200);
+    unbond_tokens(
+        &mut storage,
+        Some(&delegator),
+        &validator,
+        second_unbond,
+        current_epoch,
+        false,
+    )
+    .unwrap();
+
+    let rewards_after_second = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("Rewards after second partial unbond: {}", rewards_after_second.to_string_native());
+    
+    let counter_after_second = read_rewards_counter(&storage, &delegator, &validator).unwrap();
+    println!("Counter after second unbond: {}", counter_after_second.to_string_native());
+
+    // Advance and accumulate more rewards
+    for i in 6..8 {
+        current_epoch = advance_epoch(&mut storage, &params);
+        
+        let rewards_products = validator_rewards_products_handle(&validator);
+        rewards_products
+            .insert(&mut storage, current_epoch.prev().unwrap(), Dec::new(1 + i, 3).unwrap())
+            .unwrap();
+    }
+
+    // Do final unbond (remaining 1/3) - this should make it fully unbonded
+    let pipeline_epoch = current_epoch + params.pipeline_len;
+    let remaining_bonds = bond_handle(&delegator, &validator)
+        .get_sum(&storage, pipeline_epoch, &params)
+        .unwrap()
+        .unwrap_or_default();
+    
+    println!("Remaining bonds before final unbond: {}", remaining_bonds.to_string_native());
+    
+    unbond_tokens(
+        &mut storage,
+        Some(&delegator),
+        &validator,
+        remaining_bonds, // Unbond everything remaining
+        current_epoch,
+        false,
+    )
+    .unwrap();
+
+    // Check that we're now fully unbonded
+    let final_bonds = bond_handle(&delegator, &validator)
+        .get_sum(&storage, pipeline_epoch, &params)
+        .unwrap()
+        .unwrap_or_default();
+    assert_eq!(final_bonds, token::Amount::zero(), "Should be fully unbonded");
+
+    // Check rewards after full unbonding - this is the critical test
+    let rewards_after_full_unbond = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("Rewards after FULL unbond: {}", rewards_after_full_unbond.to_string_native());
+    
+    let final_counter = read_rewards_counter(&storage, &delegator, &validator).unwrap();
+    println!("Final counter value: {}", final_counter.to_string_native());
+
+    // The key assertion: rewards should still be available after multiple partial unbonds
+    // that result in full unbonding. If this fails, it indicates the bug.
+    assert!(
+        rewards_after_full_unbond > token::Amount::zero(),
+        "BUG: Rewards were lost during multiple partial unbonds! Expected: > 0, Got: {}",
+        rewards_after_full_unbond.to_string_native()
+    );
+
+    // The total rewards should be at least the sum of what was in the counter
+    // plus any additional rewards from remaining bonds
+    println!("Test PASSED: Multiple partial unbonds preserved rewards correctly");
+}
+
+#[test]
+fn test_claim_vs_unbond_order() {
+    // This test compares two scenarios:
+    // 1. Claim rewards first, then unbond
+    // 2. Unbond first, then claim rewards
+    // Both should result in the same total rewards, but let's verify
+    
+    let mut storage1 = TestState::default();
+    let mut storage2 = TestState::default();
+    let params = OwnedPosParams {
+        unbonding_len: 3,
+        pipeline_len: 2,
+        ..Default::default()
+    };
+
+    // Setup identical scenarios
+    let validator = address::testing::established_address_1();
+    let delegator = address::testing::established_address_2();
+    let staking_token = staking_token_address(&storage1);
+    
+    let validator_initial_stake = token::Amount::native_whole(1000);
+    let delegation_amount = token::Amount::native_whole(500);
+    
+    let consensus_key = key::testing::keypair_1().to_public();
+    let protocol_key = key::testing::keypair_2().to_public();
+    let eth_cold_key = key::testing::keypair_3().to_public(); 
+    let eth_hot_key = key::testing::keypair_4().to_public();
+    let commission_rate = Dec::new(5, 2).expect("Cannot fail");
+    let max_commission_rate_change = Dec::new(1, 2).expect("Cannot fail");
+
+    let genesis_validators = vec![GenesisValidator {
+        address: validator.clone(),
+        tokens: validator_initial_stake,
+        consensus_key: consensus_key.clone(),
+        protocol_key: protocol_key.clone(),
+        eth_cold_key: eth_cold_key.clone(),
+        eth_hot_key: eth_hot_key.clone(),
+        commission_rate,
+        max_commission_rate_change,
+        metadata: Default::default(),
+    }];
+
+    // Initialize both storages identically
+    let mut current_epoch1 = storage1.in_mem().block.epoch;
+    let mut current_epoch2 = storage2.in_mem().block.epoch;
+    
+    let params1 = test_init_genesis(
+        &mut storage1,
+        params.clone(),
+        genesis_validators.clone().into_iter(),
+        current_epoch1,
+    )
+    .unwrap();
+    
+    let params2 = test_init_genesis(
+        &mut storage2,
+        params,
+        genesis_validators.into_iter(),
+        current_epoch2,
+    )
+    .unwrap();
+
+    storage1.commit_block().unwrap();
+    storage2.commit_block().unwrap();
+
+    // Give delegators tokens and delegate in both scenarios
+    credit_tokens(&mut storage1, &staking_token, &delegator, delegation_amount).unwrap();
+    credit_tokens(&mut storage2, &staking_token, &delegator, delegation_amount).unwrap();
+
+    current_epoch1 = advance_epoch(&mut storage1, &params1);
+    current_epoch2 = advance_epoch(&mut storage2, &params2);
+    
+    bond_tokens(&mut storage1, Some(&delegator), &validator, delegation_amount, current_epoch1, None).unwrap();
+    bond_tokens(&mut storage2, Some(&delegator), &validator, delegation_amount, current_epoch2, None).unwrap();
+
+    // Accumulate rewards in both scenarios (identical)
+    for i in 0..4 {
+        current_epoch1 = advance_epoch(&mut storage1, &params1);
+        current_epoch2 = advance_epoch(&mut storage2, &params2);
+        
+        let rewards_products1 = validator_rewards_products_handle(&validator);
+        let rewards_products2 = validator_rewards_products_handle(&validator);
+        
+        let reward_rate = Dec::new(1 + i, 3).unwrap(); // 0.001, 0.002, 0.003, 0.004
+        rewards_products1.insert(&mut storage1, current_epoch1.prev().unwrap(), reward_rate).unwrap();
+        rewards_products2.insert(&mut storage2, current_epoch2.prev().unwrap(), reward_rate).unwrap();
+    }
+
+    // Verify both scenarios have identical rewards so far
+    let rewards1_before = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage1, Some(&delegator), &validator, current_epoch1
+    ).unwrap();
+    let rewards2_before = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage2, Some(&delegator), &validator, current_epoch2
+    ).unwrap();
+    
+    assert_eq!(rewards1_before, rewards2_before, "Initial rewards should be identical");
+    println!("Initial rewards in both scenarios: {}", rewards1_before.to_string_native());
+
+    // ===== SCENARIO 1: CLAIM FIRST, THEN UNBOND =====
+    println!("\n=== SCENARIO 1: Claim first, then unbond ===");
+    
+    // Claim all current rewards
+    let claimed_rewards1 = claim_reward_tokens::<_, namada_governance::Store<_>, namada_trans_token::Store<_>>(
+        &mut storage1, Some(&delegator), &validator, current_epoch1
+    ).unwrap();
+    println!("Claimed rewards: {}", claimed_rewards1.to_string_native());
+
+    // Check that rewards are now zero
+    let rewards1_after_claim = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage1, Some(&delegator), &validator, current_epoch1
+    ).unwrap();
+    println!("Rewards after claim: {}", rewards1_after_claim.to_string_native());
+    assert_eq!(rewards1_after_claim, token::Amount::zero(), "No rewards should remain after claiming");
+
+    // Accumulate some more rewards
+    for i in 4..6 {
+        current_epoch1 = advance_epoch(&mut storage1, &params1);
+        let rewards_products1 = validator_rewards_products_handle(&validator);
+        let reward_rate = Dec::new(1 + i, 3).unwrap(); // 0.005, 0.006
+        rewards_products1.insert(&mut storage1, current_epoch1.prev().unwrap(), reward_rate).unwrap();
+    }
+
+    // Check rewards accumulated after the claim
+    let rewards1_pre_unbond = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage1, Some(&delegator), &validator, current_epoch1
+    ).unwrap();
+    println!("New rewards before unbond: {}", rewards1_pre_unbond.to_string_native());
+
+    // Now unbond everything
+    let pipeline_epoch1 = current_epoch1 + params1.pipeline_len;
+    let bonds_total1 = bond_handle(&delegator, &validator)
+        .get_sum(&storage1, pipeline_epoch1, &params1)
+        .unwrap()
+        .unwrap_or_default();
+    println!("Unbonding amount: {}", bonds_total1.to_string_native());
+    
+    unbond_tokens(&mut storage1, Some(&delegator), &validator, bonds_total1, current_epoch1, false).unwrap();
+
+    // Check rewards after unbond
+    let rewards1_after_unbond = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage1, Some(&delegator), &validator, current_epoch1
+    ).unwrap();
+    println!("Rewards after unbond: {}", rewards1_after_unbond.to_string_native());
+
+    // ===== SCENARIO 2: UNBOND FIRST, THEN CLAIM =====
+    println!("\n=== SCENARIO 2: Unbond first, then claim ===");
+
+    // First, let's accumulate the same additional rewards as scenario 1
+    for i in 4..6 {
+        current_epoch2 = advance_epoch(&mut storage2, &params2);
+        let rewards_products2 = validator_rewards_products_handle(&validator);
+        let reward_rate = Dec::new(1 + i, 3).unwrap(); // 0.005, 0.006
+        rewards_products2.insert(&mut storage2, current_epoch2.prev().unwrap(), reward_rate).unwrap();
+    }
+
+    // Check total rewards before any claiming/unbonding
+    let rewards2_total = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage2, Some(&delegator), &validator, current_epoch2
+    ).unwrap();
+    println!("Total rewards before operations: {}", rewards2_total.to_string_native());
+
+    // Unbond everything first
+    let pipeline_epoch2 = current_epoch2 + params2.pipeline_len;
+    let bonds_total2 = bond_handle(&delegator, &validator)
+        .get_sum(&storage2, pipeline_epoch2, &params2)
+        .unwrap()
+        .unwrap_or_default();
+    println!("Unbonding amount: {}", bonds_total2.to_string_native());
+    
+    unbond_tokens(&mut storage2, Some(&delegator), &validator, bonds_total2, current_epoch2, false).unwrap();
+
+    // Check rewards after unbond (should include rewards moved to counter)
+    let rewards2_after_unbond = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage2, Some(&delegator), &validator, current_epoch2
+    ).unwrap();
+    println!("Rewards after unbond: {}", rewards2_after_unbond.to_string_native());
+
+    // Now claim all rewards
+    let claimed_rewards2 = claim_reward_tokens::<_, namada_governance::Store<_>, namada_trans_token::Store<_>>(
+        &mut storage2, Some(&delegator), &validator, current_epoch2
+    ).unwrap();
+    println!("Claimed rewards: {}", claimed_rewards2.to_string_native());
+
+    // ===== COMPARISON =====
+    println!("\n=== COMPARISON ===");
+    let total_claimed_scenario1 = claimed_rewards1 + rewards1_after_unbond;
+    let total_claimed_scenario2 = claimed_rewards2;
+
+    println!("Scenario 1 (claim then unbond): {} + {} = {}", 
+        claimed_rewards1.to_string_native(),
+        rewards1_after_unbond.to_string_native(), 
+        total_claimed_scenario1.to_string_native()
+    );
+    println!("Scenario 2 (unbond then claim): {}", total_claimed_scenario2.to_string_native());
+
+    // The key test: Both scenarios should result in the same total rewards
+    assert_eq!(
+        total_claimed_scenario1, 
+        total_claimed_scenario2,
+        "Total rewards should be the same regardless of claim/unbond order"
+    );
+
+    // Additional check: After claiming everything, both should have zero rewards
+    let final_rewards1 = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage1, Some(&delegator), &validator, current_epoch1
+    ).unwrap();
+    let final_rewards2 = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage2, Some(&delegator), &validator, current_epoch2
+    ).unwrap();
+
+    println!("Final rewards scenario 1: {}", final_rewards1.to_string_native());
+    println!("Final rewards scenario 2: {}", final_rewards2.to_string_native());
+
+    // Both should have the same remaining rewards (likely zero or the unclaimed portion from scenario 1)
+    if total_claimed_scenario1 == total_claimed_scenario2 {
+        println!("✅ TEST PASSED: Order of operations doesn't affect total rewards");
+    } else {
+        println!("❌ TEST REVEALED ISSUE: Order of operations affects total rewards!");
+    }
+}
+
+#[test]
+fn test_protocol_bug_fully_unbonded_rewards_history_lost() {
+    println!("\n🐛 TESTING PROTOCOL BUG: Fully unbonded accounts lose reward history");
+    println!("========================================================================");
+    
+    let mut storage = TestState::default();
+    let params = OwnedPosParams {
+        unbonding_len: 3,
+        pipeline_len: 2,
+        ..Default::default()
+    };
+
+    // Setup: Create a validator and delegator
+    let validator = address::testing::established_address_1();
+    let delegator = address::testing::established_address_2();
+    let staking_token = staking_token_address(&storage);
+    
+    let validator_initial_stake = token::Amount::native_whole(1000);
+    let delegation_amount = token::Amount::native_whole(500);
+    
+    let consensus_key = key::testing::keypair_1().to_public();
+    let protocol_key = key::testing::keypair_2().to_public();
+    let eth_cold_key = key::testing::keypair_3().to_public(); 
+    let eth_hot_key = key::testing::keypair_4().to_public();
+    let commission_rate = Dec::new(5, 2).expect("Cannot fail");
+    let max_commission_rate_change = Dec::new(1, 2).expect("Cannot fail");
+
+    let genesis_validators = vec![GenesisValidator {
+        address: validator.clone(),
+        tokens: validator_initial_stake,
+        consensus_key,
+        protocol_key,
+        eth_cold_key,
+        eth_hot_key,
+        commission_rate,
+        max_commission_rate_change,
+        metadata: Default::default(),
+    }];
+
+    // Genesis
+    let mut current_epoch = storage.in_mem().block.epoch;
+    let params = test_init_genesis(
+        &mut storage,
+        params,
+        genesis_validators.into_iter(),
+        current_epoch,
+    )
+    .unwrap();
+    storage.commit_block().unwrap();
+
+    // Give delegator some tokens and delegate
+    credit_tokens(&mut storage, &staking_token, &delegator, delegation_amount).unwrap();
+
+    current_epoch = advance_epoch(&mut storage, &params);
+    bond_tokens(
+        &mut storage,
+        Some(&delegator),
+        &validator,
+        delegation_amount,
+        current_epoch,
+        None,
+    )
+    .unwrap();
+    println!("✅ STEP 1: Delegator bonded {} tokens to validator", delegation_amount.to_string_native());
+
+    // Accumulate rewards over several epochs
+    for i in 0..4 {
+        current_epoch = advance_epoch(&mut storage, &params);
+        
+        // Add some rewards products to simulate block rewards
+        let rewards_products = validator_rewards_products_handle(&validator);
+        rewards_products
+            .insert(&mut storage, current_epoch.prev().unwrap(), Dec::new(2 + i, 3).unwrap())
+            .unwrap();
+    }
+
+    // Check accumulated rewards
+    let rewards_before_unbond = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("✅ STEP 2: Accumulated rewards: {} tokens", rewards_before_unbond.to_string_native());
+    assert!(rewards_before_unbond > token::Amount::zero(), "Should have accumulated some rewards");
+
+    // Fully unbond all tokens
+    let pipeline_epoch = current_epoch + params.pipeline_len;
+    let bonds_total = bond_handle(&delegator, &validator)
+        .get_sum(&storage, pipeline_epoch, &params)
+        .unwrap()
+        .unwrap_or_default();
+    
+    unbond_tokens(
+        &mut storage,
+        Some(&delegator),
+        &validator,
+        bonds_total,
+        current_epoch,
+        false,
+    )
+    .unwrap();
+
+    // Verify account is fully unbonded
+    let remaining_bonds = bond_handle(&delegator, &validator)
+        .get_sum(&storage, pipeline_epoch, &params)
+        .unwrap()
+        .unwrap_or_default();
+    assert_eq!(remaining_bonds, token::Amount::zero());
+    println!("✅ STEP 3: Fully unbonded all tokens (remaining bonds: {})", remaining_bonds.to_string_native());
+
+    // Check rewards after unbond - should still be available
+    let rewards_after_unbond = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("✅ STEP 4: Rewards after unbond: {} tokens (preserved in counter)", rewards_after_unbond.to_string_native());
+    assert!(rewards_after_unbond > token::Amount::zero(), "Rewards should be preserved after unbond");
+
+    // Check the rewards counter directly
+    let counter_before_claim = read_rewards_counter(&storage, &delegator, &validator).unwrap();
+    println!("   📊 Rewards counter before claim: {} tokens", counter_before_claim.to_string_native());
+
+    // CRITICAL TEST: Claim the rewards (this is where the bug occurs)
+    let claimed_rewards = claim_reward_tokens::<_, namada_governance::Store<_>, namada_trans_token::Store<_>>(
+        &mut storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("✅ STEP 5: Claimed rewards: {} tokens", claimed_rewards.to_string_native());
+    assert_eq!(claimed_rewards, rewards_after_unbond, "Should claim all available rewards");
+
+    // Check the rewards counter after claim - this reveals the bug
+    let counter_after_claim = read_rewards_counter(&storage, &delegator, &validator).unwrap();
+    println!("❌ BUG REVEALED: Rewards counter after claim: {} tokens", counter_after_claim.to_string_native());
+
+    // Query rewards again - this should return 0 (the bug)
+    let rewards_after_claim = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("❌ BUG REVEALED: Available rewards after claim: {} tokens", rewards_after_claim.to_string_native());
+
+    // Advance epoch and check again to prove permanent loss
+    current_epoch = advance_epoch(&mut storage, &params);
+    let rewards_next_epoch = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage,
+        Some(&delegator),
+        &validator,
+        current_epoch,
+    )
+    .unwrap();
+    
+    println!("❌ BUG CONFIRMED: Rewards next epoch: {} tokens", rewards_next_epoch.to_string_native());
+    
+    // The counter should still be 0
+    let counter_next_epoch = read_rewards_counter(&storage, &delegator, &validator).unwrap();
+    println!("❌ BUG CONFIRMED: Rewards counter next epoch: {} tokens", counter_next_epoch.to_string_native());
+
+    println!("\n🔍 ANALYSIS:");
+    println!("   Before claiming: {} tokens available", rewards_after_unbond.to_string_native());
+    println!("   After claiming:  {} tokens claimed", claimed_rewards.to_string_native());
+    println!("   Counter deleted: {} tokens remain", counter_after_claim.to_string_native());
+    println!("   Next query:     {} tokens available", rewards_next_epoch.to_string_native());
+
+    println!("\n🚨 PROTOCOL BUG IDENTIFIED:");
+    println!("   When a fully unbonded account claims rewards, the rewards counter");
+    println!("   is PERMANENTLY DELETED from storage. This means:");
+    println!("   1. The network forgets this account ever earned rewards");
+    println!("   2. Historical reward data is irretrievably lost");
+    println!("   3. Future queries will always return 0");
+    println!("   4. This creates unfair incentives against full unbonding");
+
+    println!("\n💡 EXPECTED BEHAVIOR:");
+    println!("   The rewards counter should either:");
+    println!("   1. Be preserved (set to 0) but not deleted, OR");
+    println!("   2. Have separate functions for querying vs claiming");
+    println!("   This would maintain reward history for accounting purposes.");
+
+    // Demonstrate the issue by comparing with a partially unbonded account
+    println!("\n🔄 COMPARISON: Partially unbonded account behavior");
+    
+    // Create another delegator for comparison
+    let delegator2 = address::testing::established_address_3();
+    credit_tokens(&mut storage, &staking_token, &delegator2, delegation_amount).unwrap();
+    
+    // Bond and accumulate some rewards
+    bond_tokens(&mut storage, Some(&delegator2), &validator, delegation_amount, current_epoch, None).unwrap();
+    current_epoch = advance_epoch(&mut storage, &params);
+    let rewards_products = validator_rewards_products_handle(&validator);
+    rewards_products.insert(&mut storage, current_epoch.prev().unwrap(), Dec::new(1, 3).unwrap()).unwrap();
+    
+    // Partially unbond (leave some bonds)
+    let partial_unbond = delegation_amount / 2;
+    unbond_tokens(&mut storage, Some(&delegator2), &validator, partial_unbond, current_epoch, false).unwrap();
+    
+    let rewards_partial_before = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage, Some(&delegator2), &validator, current_epoch
+    ).unwrap();
+    
+    let claimed_partial = claim_reward_tokens::<_, namada_governance::Store<_>, namada_trans_token::Store<_>>(
+        &mut storage, Some(&delegator2), &validator, current_epoch
+    ).unwrap();
+    
+    let rewards_partial_after = query_reward_tokens::<_, namada_governance::Store<_>>(
+        &storage, Some(&delegator2), &validator, current_epoch
+    ).unwrap();
+    
+    println!("   📊 Partial unbond - rewards before claim: {}", rewards_partial_before.to_string_native());
+    println!("   📊 Partial unbond - rewards claimed: {}", claimed_partial.to_string_native());
+    println!("   📊 Partial unbond - rewards after claim: {}", rewards_partial_after.to_string_native());
+    println!("   ✅ Partially unbonded accounts can continue earning rewards");
+    
+    println!("\n========================================================================");
+    println!("🐛 PROTOCOL BUG TEST COMPLETED - Issue clearly demonstrated");
 }

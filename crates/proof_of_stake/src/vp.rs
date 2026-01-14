@@ -105,7 +105,9 @@ where
         // The key is src bond ID and value is pair of (dest_validator, amount)
         let mut redelegations: BTreeMap<BondId, (Address, token::Amount)> =
             Default::default();
-        let mut claimed_rewards: BTreeSet<BondId> = Default::default();
+        // The value is an optional rewards receiver
+        let mut claimed_rewards: BTreeMap<BondId, Option<Address>> =
+            Default::default();
         let mut changed_commission: BTreeSet<Address> = Default::default();
         let mut changed_metadata: BTreeSet<Address> = Default::default();
         let mut changed_consensus_key: BTreeSet<Address> = Default::default();
@@ -241,6 +243,7 @@ where
                     PosAction::ClaimRewards(ClaimRewards {
                         validator,
                         source,
+                        receiver,
                     }) => {
                         let bond_id = BondId {
                             source: source.unwrap_or_else(|| validator.clone()),
@@ -256,7 +259,7 @@ where
                             )
                             .into());
                         }
-                        claimed_rewards.insert(bond_id);
+                        claimed_rewards.insert(bond_id, receiver);
                     }
                     PosAction::CommissionChange(validator) => {
                         if !verifiers.contains(&validator) {

@@ -82,7 +82,7 @@ Please see the [contributing page](./CONTRIBUTING.md).
 
 ### Dependencies
 
-The ledger currently requires [CometBFT v0.37.16](https://github.com/cometbft/cometbft/releases/tag/v0.37.16) is installed and available on path. This can be achieved through following [these instructions](https://github.com/cometbft/cometbft/blob/main/docs/tutorials/install.md).
+The ledger currently requires [CometBFT v0.37.17](https://github.com/cometbft/cometbft/releases/tag/v0.37.17) is installed and available on path. This can be achieved through following [these instructions](https://github.com/cometbft/cometbft/blob/main/docs/tutorials/install.md).
 
 #### Hermes
 

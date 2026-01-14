@@ -38,6 +38,7 @@ env:
   LEDGER_APP_VERSION: "3.0.7"
   ROLE: arn:aws:iam::375643557360:role/github-runners-ci-shared
   SCCACHE_ERROR_LOG: /tmp/sccache_log.txt
+  DOMAIN: namada
 
 jobs:
   changelog:
@@ -58,7 +59,7 @@ jobs:
   rust-docs:
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
-    runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 4vcpu-8ram-x86-namada]
     timeout-minutes: 20
 
     steps:
@@ -76,7 +77,7 @@ jobs:
           RUNS_ON_S3_BUCKET_CACHE: ${{ env.CACHE_BUCKET }}
         with:
           path: /root/.cargo
-          key: /cache/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
+          key: /cache/${{ env.DOMAIN }}/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
       - name: Start sccache server
         id: sccache
         run: sccache --start-server
@@ -92,7 +93,7 @@ jobs:
   lints:
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
-    runs-on: [self-hosted, 8vcpu-16ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 8vcpu-16ram-x86-namada]
     timeout-minutes: 15
 
     steps:
@@ -110,7 +111,7 @@ jobs:
           RUNS_ON_S3_BUCKET_CACHE: ${{ env.CACHE_BUCKET }}
         with:
           path: /root/.cargo
-          key: /cache/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
+          key: /cache/${{ env.DOMAIN }}/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
       - name: Start sccache server
         id: sccache
         run: sccache --start-server
@@ -127,7 +128,7 @@ jobs:
 
   build-wasm:
     timeout-minutes: 10
-    runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 4vcpu-8ram-x86-namada]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     strategy:
@@ -161,7 +162,7 @@ jobs:
           RUNS_ON_S3_BUCKET_CACHE: ${{ env.CACHE_BUCKET }}
         with:
           path: /root/.cargo
-          key: /cache/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
+          key: /cache/${{ env.DOMAIN }}/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
       - name: Build ${{ matrix.make.name }}
         run: make ${{ matrix.make.command }}
       - name: Upload ${{ matrix.make.name }} artifacts
@@ -177,7 +178,7 @@ jobs:
     timeout-minutes: 30
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
-    runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 4vcpu-8ram-x86-namada]
     needs: [build-wasm]
 
     steps:
@@ -195,7 +196,7 @@ jobs:
           RUNS_ON_S3_BUCKET_CACHE: ${{ env.CACHE_BUCKET }}
         with:
           path: /root/.cargo
-          key: /cache/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
+          key: /cache/${{ env.DOMAIN }}/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
       - name: Download wasm artifacts
         uses: actions/download-artifact@v4
         with:
@@ -221,7 +222,7 @@ jobs:
         run: cargo cache --autoclean-expensive
 
   test-unit:
-    runs-on: [self-hosted, 8vcpu-16ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 8vcpu-16ram-x86-namada]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     timeout-minutes: 30
@@ -242,7 +243,7 @@ jobs:
           RUNS_ON_S3_BUCKET_CACHE: ${{ env.CACHE_BUCKET }}
         with:
           path: /root/.cargo
-          key: /cache/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
+          key: /cache/${{ env.DOMAIN }}/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
       - name: Start sccache server
         id: sccache
         run: sccache --start-server
@@ -274,7 +275,7 @@ jobs:
         run: sccache --stop-server || true
 
   check-packages:
-    runs-on: [self-hosted, 8vcpu-16ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 8vcpu-16ram-x86-namada]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     timeout-minutes: 15
@@ -294,7 +295,7 @@ jobs:
           RUNS_ON_S3_BUCKET_CACHE: ${{ env.CACHE_BUCKET }}
         with:
           path: /root/.cargo
-          key: /cache/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
+          key: /cache/${{ env.DOMAIN }}/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
       - name: Start sccache server
         id: sccache
         run: sccache --start-server
@@ -310,7 +311,7 @@ jobs:
         run: sccache --stop-server || true
 
   test-integration:
-    runs-on: [self-hosted, 16vcpu-32ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 16vcpu-32ram-x86-namada]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     timeout-minutes: 120
@@ -331,7 +332,7 @@ jobs:
           RUNS_ON_S3_BUCKET_CACHE: ${{ env.CACHE_BUCKET }}
         with:
           path: /root/.cargo
-          key: /cache/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
+          key: /cache/${{ env.DOMAIN }}/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
       - name: Start sccache server
         id: sccache
         run: sccache --start-server
@@ -363,7 +364,7 @@ jobs:
         run: sccache --stop-server || true
 
   check-benchmarks:
-    runs-on: [self-hosted, 16vcpu-32ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 16vcpu-32ram-x86-namada]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     if: github.event.pull_request.draft == false || contains(github.head_ref, 'mergify/merge-queue') || contains(github.ref_name, 'mergify/merge-queue')
@@ -385,7 +386,7 @@ jobs:
           RUNS_ON_S3_BUCKET_CACHE: ${{ env.CACHE_BUCKET }}
         with:
           path: /root/.cargo
-          key: /cache/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
+          key: /cache/${{ env.DOMAIN }}/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
       - name: Start sccache server
         id: sccache
         run: sccache --start-server
@@ -411,7 +412,7 @@ jobs:
         run: sccache --stop-server || true
 
   build-binaries:
-    runs-on: [self-hosted, 16vcpu-32ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 16vcpu-32ram-x86-namada]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     timeout-minutes: 25
@@ -431,7 +432,7 @@ jobs:
           RUNS_ON_S3_BUCKET_CACHE: ${{ env.CACHE_BUCKET }}
         with:
           path: /root/.cargo
-          key: /cache/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
+          key: /cache/${{ env.DOMAIN }}/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
       - name: Start sccache server
         id: sccache
         run: sccache --start-server
@@ -462,7 +463,7 @@ jobs:
         run: sccache --stop-server || true
 
   test-e2e:
-    runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 4vcpu-8ram-x86-namada]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     if: github.event.pull_request.draft == false || contains(github.head_ref, 'mergify/merge-queue') || contains(github.ref_name, 'mergify/merge-queue')
@@ -493,7 +494,7 @@ jobs:
           RUNS_ON_S3_BUCKET_CACHE: ${{ env.CACHE_BUCKET }}
         with:
           path: /root/.cargo
-          key: /cache/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
+          key: /cache/${{ env.DOMAIN }}/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
       - name: Start sccache server
         id: sccache
         run: sccache --start-server
@@ -633,7 +634,7 @@ jobs:
           make cpp_test
 
   test-e2e-with-device-automation:
-    runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 4vcpu-8ram-x86-namada]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     if: github.event.pull_request.draft == false || contains(github.head_ref, 'mergify/merge-queue') || contains(github.ref_name, 'mergify/merge-queue')
@@ -655,7 +656,7 @@ jobs:
           RUNS_ON_S3_BUCKET_CACHE: ${{ env.CACHE_BUCKET }}
         with:
           path: /root/.cargo
-          key: /cache/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
+          key: /cache/${{ env.DOMAIN }}/${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/Cargo.lock') }}-${{ env.NIGHTLY }}
       - name: Start sccache server
         id: sccache
         run: sccache --start-server
@@ -727,7 +728,7 @@ jobs:
         run: sccache --stop-server || true
 
   check-sdk-licenses:
-    runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
+    runs-on: [self-hosted, 4vcpu-8ram-x86-namada]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     timeout-minutes: 5

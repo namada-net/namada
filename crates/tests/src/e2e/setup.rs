@@ -1136,7 +1136,14 @@ where
     let is_shielded_sync = matches!(bin, Bin::Client)
         && args
             .peek()
-            .map(|fst_arg| fst_arg.as_ref() == "shielded-sync")
+            .map(|fst_arg| {
+                fst_arg.as_ref() == "transfer"
+                    || fst_arg.as_ref() == "unshield"
+                    || fst_arg.as_ref() == "ibc-transfer"
+                    || fst_arg.as_ref() == "balance"
+                    || fst_arg.as_ref() == "estimate-shielding-rewards"
+                    || fst_arg.as_ref() == "osmosis-swap"
+            })
             .unwrap_or_default();
 
     // Root cargo workspace manifest path

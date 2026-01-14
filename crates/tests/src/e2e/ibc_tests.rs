@@ -3430,8 +3430,6 @@ fn check_shielded_balance(
 ) -> Result<()> {
     let rpc = get_actor_rpc(test, Who::Validator(0));
 
-    shielded_sync(test, owner.as_ref())?;
-
     let query_args = vec![
         "balance",
         "--owner",
@@ -3482,8 +3480,6 @@ fn check_inflated_balance(
     test: &Test,
     viewing_key: impl AsRef<str>,
 ) -> Result<()> {
-    shielded_sync(test, viewing_key.as_ref())?;
-
     let rpc = get_actor_rpc(test, Who::Validator(0));
     let query_args = vec![
         "balance",
@@ -3502,20 +3498,6 @@ fn check_inflated_balance(
     assert!(balance > 0.0);
     client.assert_success();
 
-    Ok(())
-}
-
-fn shielded_sync(test: &Test, viewing_key: impl AsRef<str>) -> Result<()> {
-    let rpc = get_actor_rpc(test, Who::Validator(0));
-    let tx_args = vec![
-        "shielded-sync",
-        "--viewing-keys",
-        viewing_key.as_ref(),
-        "--node",
-        &rpc,
-    ];
-    let mut client = run!(test, Bin::Client, tx_args, Some(120))?;
-    client.assert_success();
     Ok(())
 }
 
@@ -4583,8 +4565,6 @@ fn osmosis_xcs() -> Result<()> {
     )?
     .assert_success();
 
-    shielded_sync(&test_namada, AA_VIEWING_KEY)?;
-
     let query_args = vec![
         "balance",
         "--owner",
@@ -4714,7 +4694,7 @@ fn osmosis_xcs() -> Result<()> {
             "--gas-limit",
             "500000",
         ],
-        Some(40),
+        Some(120),
     )?;
 
     // confirm trade

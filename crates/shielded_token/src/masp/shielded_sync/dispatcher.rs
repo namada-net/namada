@@ -304,7 +304,7 @@ where
             ..Default::default()
         };
 
-        ctx.load_confirmed().await;
+        ctx.load().await;
 
         ctx
     };

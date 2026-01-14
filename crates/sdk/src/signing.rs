@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
-use borsh::BorshDeserialize;
+use borsh::{BorshDeserialize, BorshSerialize};
 use data_encoding::HEXLOWER;
 use itertools::Itertools;
 use masp_primitives::asset_type::AssetType;
@@ -64,7 +64,15 @@ use crate::wallet::{Wallet, WalletIo};
 use crate::{Namada, args, rpc};
 
 /// A structure holding the signing data to craft a transaction
-#[derive(Clone, Debug, PartialEq)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    BorshSerialize,
+    BorshDeserialize,
+)]
 pub struct SigningTxData {
     /// The address owning the transaction
     pub owner: Option<Address>,
@@ -81,7 +89,9 @@ pub struct SigningTxData {
 }
 
 /// The fee's authorization
-#[derive(Clone, Debug)]
+#[derive(
+    Clone, Debug, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
 pub enum FeeAuthorization {
     /// A wrapper signer
     Signer {
@@ -95,7 +105,9 @@ pub enum FeeAuthorization {
 }
 
 /// A structure holding the signing data for a wrapper transaction
-#[derive(Clone, Debug)]
+#[derive(
+    Clone, Debug, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
 pub struct SigningWrapperData {
     /// The signing data for each one of the inner transactions of this batch
     pub signing_data: Vec<SigningTxData>,
@@ -128,7 +140,9 @@ impl SigningWrapperData {
 }
 
 #[allow(missing_docs)]
-#[derive(Clone, Debug)]
+#[derive(
+    Clone, Debug, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
 pub enum SigningData {
     Inner(SigningTxData),
     Wrapper(SigningWrapperData),

@@ -32,15 +32,15 @@ wasms += vp_verify_signature
 
 # Build all wasms in release mode
 all:
-	RUSTFLAGS='-C link-arg=-s' $(cargo) build --release --target wasm32-unknown-unknown --target-dir 'target'
+	RUSTFLAGS='-C link-arg=-s -C target-feature=-bulk-memory,-bulk-memory-opt' $(cargo) build --release --target wasm32-unknown-unknown --target-dir 'target'
 	cp target/wasm32-unknown-unknown/release/*.wasm .
 
 release-unwind:
-	RUSTFLAGS='-C link-arg=-s' $(cargo) build --features debug-panic-hook --profile release_unwind --target wasm32-unknown-unknown --target-dir 'target'
+	RUSTFLAGS='-C link-arg=-s -C target-feature=-bulk-memory,-bulk-memory-opt' $(cargo) build --features debug-panic-hook --profile release_unwind --target wasm32-unknown-unknown --target-dir 'target'
 	cp target/wasm32-unknown-unknown/release_unwind/*.wasm .
 
 debug:
-	RUSTFLAGS='-C link-arg=-s' $(cargo) build --target wasm32-unknown-unknown --target-dir 'target'
+	RUSTFLAGS='-C link-arg=-s -C target-feature=-bulk-memory,-bulk-memory-opt' $(cargo) build --target wasm32-unknown-unknown --target-dir 'target'
 	cp target/wasm32-unknown-unknown/debug/*.wasm .
 
 check:

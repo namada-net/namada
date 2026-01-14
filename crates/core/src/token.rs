@@ -1488,7 +1488,7 @@ mod tests {
     fn test_token_amount_from_u128() {
         for val in [
             u128::MIN,
-            u128::MIN + 1,
+            1,
             u128::from(u64::MAX) - 1,
             u128::from(u64::MAX),
             u128::from(u64::MAX) + 1,

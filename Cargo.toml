@@ -265,12 +265,12 @@ uint = "0.10"
 warp = "0.3"
 wasmparser = "0.121"
 wasm-instrument = { package = "nam-wasm-instrument", version = "0.5.2", features = ["sign_ext"] }
-wasmer = "4.3.5"
-wasmer-cache = "4.3.5"
-wasmer-compiler = "4.3.5"
-wasmer-compiler-singlepass = "4.3.5"
-wasmer-types = "4.3.5"
-wasmer-vm = "4.3.5"
+wasmer = { package = "nam-wasmer", version = "4.4.0-nam.0" }
+wasmer-cache = { package = "nam-wasmer-cache", version = "4.4.0-nam.0" }
+wasmer-compiler = { package = "nam-wasmer-compiler", version = "4.4.0-nam.0" }
+wasmer-compiler-singlepass = { package = "nam-wasmer-compiler-singlepass", version = "4.4.0-nam.0" }
+wasmer-types = { package = "nam-wasmer-types", version = "4.4.0-nam.0" }
+wasmer-vm = { package = "nam-wasmer-vm", version = "4.4.0-nam.0" }
 wasmtimer = "0.4"
 winapi = "0.3"
 xorf = { version = "0.11", features = ["serde"] }

@@ -1,11 +1,11 @@
-use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
+use borsh::{BorshDeserialize, BorshSerialize};
 use namada_core::ethereum_events::EthereumEvent;
 use namada_macros::BorshDeserializer;
 #[cfg(feature = "migrations")]
 use namada_migrations::*;
 use namada_vote_ext::ethereum_events::MultiSignedEthEvent;
 
-use crate::protocol::transactions::votes::{Tally, Votes, dedupe};
+use crate::protocol::transactions::votes::{Votes, dedupe};
 
 /// Represents an Ethereum event being seen by some validators
 #[derive(
@@ -38,24 +38,6 @@ impl From<MultiSignedEthEvent> for EthMsgUpdate {
             seen_by: dedupe(signers),
         }
     }
-}
-
-/// Represents an event stored under `eth_msgs`
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    BorshSerialize,
-    BorshDeserialize,
-    BorshDeserializer,
-    BorshSchema,
-)]
-pub struct EthMsg {
-    /// The event being stored
-    pub body: EthereumEvent,
-    /// Tallying of votes for this event
-    pub votes: Tally,
 }
 
 #[cfg(test)]

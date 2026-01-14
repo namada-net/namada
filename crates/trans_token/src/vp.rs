@@ -232,7 +232,7 @@ where
                         == dec_mint.checked_sub(inc_mint)
                 };
 
-            token_changes_are_balanced.ok_or_else(|| {
+            token_changes_are_balanced.ext_ok_or_else(|| {
                 Error::new_const(
                     "The transaction's token changes are unbalanced",
                 )
@@ -255,7 +255,7 @@ where
                         if minter
                             == Address::Internal(InternalAddress::Ibc) =>
                     {
-                        verifiers.contains(&minter).ok_or_else(|| {
+                        verifiers.contains(&minter).ext_ok_or_else(|| {
                             Error::new_const("The IBC VP was not triggered")
                         })
                     }
@@ -283,7 +283,7 @@ where
             },
             |data| {
                 Gov::is_proposal_accepted(&ctx.pre(), data.as_ref())?
-                    .ok_or_else(|| {
+                    .ext_ok_or_else(|| {
                         Error::new_const(
                             "Token parameter changes can only be performed by \
                              a governance proposal that has been accepted",

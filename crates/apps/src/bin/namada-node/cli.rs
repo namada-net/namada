@@ -156,15 +156,15 @@ fn sleep_until(time: Option<DateTimeUtc>) {
     if let Some(time) = time {
         #[allow(clippy::disallowed_methods)]
         let now = Utc::now();
-        if let Ok(sleep_time) = time.0.signed_duration_since(now).to_std() {
-            if !sleep_time.is_zero() {
-                tracing::info!(
-                    "Waiting ledger start time: {:?}, time left: {:?}",
-                    time,
-                    sleep_time
-                );
-                std::thread::sleep(sleep_time)
-            }
+        if let Ok(sleep_time) = time.0.signed_duration_since(now).to_std()
+            && !sleep_time.is_zero()
+        {
+            tracing::info!(
+                "Waiting ledger start time: {:?}, time left: {:?}",
+                time,
+                sleep_time
+            );
+            std::thread::sleep(sleep_time)
         }
     }
 }

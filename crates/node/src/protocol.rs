@@ -1441,7 +1441,7 @@ where
                                     .contains(&Address::Internal(
                                         InternalAddress::Multitoken,
                                     ))
-                                    .ok_or_else(|| {
+                                    .ext_ok_or_else(|| {
                                         Error::AccessForbidden(
                                             internal_addr.clone(),
                                         )

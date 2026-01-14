@@ -2491,10 +2491,6 @@ mod test_signing {
     }
     #[cfg_attr(feature = "async-send", async_trait::async_trait)]
     #[cfg_attr(not(feature = "async-send"), async_trait::async_trait(?Send))]
-    #[rustversion::attr(
-        nightly,
-        allow(elided_named_lifetimes, reason = "Not actually named")
-    )]
     impl Namada for TestNamadaImpl {
         type ShieldedUtils = FsShieldedUtils;
         type WalletUtils = TestWalletUtils;

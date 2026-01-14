@@ -32,6 +32,7 @@ pub use namada_sdk::*;
 /// A type corresponding to cometbft `FilePVLastSignState` in `privval/file.go`
 /// stored in `cometbft/data/priv_validator_state.json`
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[cfg(test)]
 struct LastSignState {
     // i64 encoded as a string
     pub height: String,

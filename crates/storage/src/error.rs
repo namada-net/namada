@@ -137,8 +137,7 @@ impl std::fmt::Display for CustomError {
 /// static string (handy for WASM).
 pub trait OptionExt<T> {
     /// Transforms the [`Option<T>`] into a [`Result<T>`], mapping
-    /// [`Some(v)`] to [`Ok(v)`] and [`None`] to the given static error
-    /// message.
+    /// `Some(v)` to `Ok(v)` and `None` to the given static error message.
     fn ok_or_err_msg(self, msg: &'static str) -> Result<T>;
 }
 

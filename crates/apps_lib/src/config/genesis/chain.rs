@@ -303,8 +303,9 @@ impl Finalized {
         &self,
         add_persistent_peers: bool,
     ) -> Vec<TendermintAddress> {
-        add_persistent_peers.then(|| {
-            self.transactions
+        if add_persistent_peers {
+            {
+                self.transactions
                 .validator_account
                 .as_ref()
                 .map(|txs| {
@@ -313,8 +314,10 @@ impl Finalized {
                         .collect()
                 })
                 .unwrap_or_default()
-        })
-        .unwrap_or_default()
+            }
+        } else {
+            Default::default()
+        }
     }
 
     /// Get the chain parameters set in genesis

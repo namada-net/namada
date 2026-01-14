@@ -41,7 +41,7 @@ fn tx_section_signature_validation(c: &mut Criterion) {
 
     let multisig = Authorization::new(
         vec![section_hash],
-        pkim.index_secret_keys(vec![defaults::albert_keypair()]),
+        pkim.index_keys(vec![defaults::albert_keypair()]),
         None,
     );
 

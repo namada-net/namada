@@ -466,7 +466,7 @@ mod tests {
         tx.set_code(Code::new(vec![], None));
         tx.add_section(Section::Authorization(Authorization::new(
             vec![tx.raw_header_hash()],
-            pks_map.index_secret_keys(vec![keypair]),
+            pks_map.index_keys(vec![keypair]),
             None,
         )));
         let signed_tx = tx.batch_first_tx();
@@ -694,7 +694,7 @@ mod tests {
         tx_data.set_code(Code::new(vec![], None));
         tx_data.add_section(Section::Authorization(Authorization::new(
             vec![tx_data.raw_header_hash()],
-            pks_map.index_secret_keys(vec![sk3]),
+            pks_map.index_keys(vec![sk3]),
             None,
         )));
         let signed_tx = tx_data.batch_first_tx();
@@ -1006,7 +1006,7 @@ mod tests {
         tx.set_code(Code::new(vec![], None));
         tx.add_section(Section::Authorization(Authorization::new(
             vec![tx.raw_header_hash()],
-            pks_map.index_secret_keys(vec![secret_key]),
+            pks_map.index_keys(vec![secret_key]),
             None,
         )));
         let signed_tx = tx.batch_first_tx();
@@ -1102,7 +1102,7 @@ mod tests {
         tx.set_code(Code::new(vec![], None));
         tx.add_section(Section::Authorization(Authorization::new(
             vec![tx.raw_header_hash()],
-            pks_map.index_secret_keys(vec![secret_key]),
+            pks_map.index_keys(vec![secret_key]),
             None,
         )));
         let signed_tx = tx.batch_first_tx();
@@ -1209,7 +1209,7 @@ mod tests {
         tx.set_code(Code::new(vec![], None));
         tx.add_section(Section::Authorization(Authorization::new(
             vec![tx.raw_header_hash()],
-            pks_map.index_secret_keys(vec![secret_key]),
+            pks_map.index_keys(vec![secret_key]),
             None,
         )));
         let signed_tx = tx.batch_first_tx();
@@ -1382,7 +1382,7 @@ mod tests {
             tx.set_data(Data::new(vec![]));
             tx.add_section(Section::Authorization(Authorization::new(
                 vec![tx.raw_header_hash()],
-                pks_map.index_secret_keys(vec![keypair]),
+                pks_map.index_keys(vec![keypair]),
                 None,
             )));
             let signed_tx = tx.batch_first_tx();
@@ -1480,7 +1480,7 @@ mod tests {
         tx.set_code(Code::new(vec![], None));
         tx.add_section(Section::Authorization(Authorization::new(
             vec![tx.raw_header_hash()],
-            pks_map.index_secret_keys(vec![keypair]),
+            pks_map.index_keys(vec![keypair]),
             None,
         )));
         let signed_tx = tx.batch_first_tx();
@@ -1531,7 +1531,7 @@ mod tests {
         tx.set_code(Code::new(vec![], None));
         tx.add_section(Section::Authorization(Authorization::new(
             vec![tx.raw_header_hash()],
-            pks_map.index_secret_keys(vec![keypair]),
+            pks_map.index_keys(vec![keypair]),
             None,
         )));
         let signed_tx = tx.batch_first_tx();
@@ -1605,7 +1605,7 @@ mod tests {
         tx.add_memo(&[1, 2, 3]);
         tx.add_section(Section::Authorization(Authorization::new(
             vec![tx.raw_header_hash()],
-            pks_map.index_secret_keys(vec![keypair]),
+            pks_map.index_keys(vec![keypair]),
             None,
         )));
 

@@ -517,15 +517,65 @@ impl super::SigScheme for SigScheme {
         }
     }
 
-    fn mock(keypair: &SecretKey) -> Self::Signature {
-        match keypair {
-            SecretKey::Ed25519(kp) => {
-                Signature::Ed25519(ed25519::SigScheme::mock(kp))
+    fn mock(pubkey: &Self::PublicKey) -> Self::Signature {
+        match pubkey {
+            PublicKey::Ed25519(pk) => {
+                Signature::Ed25519(ed25519::SigScheme::mock(pk))
             }
-            SecretKey::Secp256k1(kp) => {
-                Signature::Secp256k1(secp256k1::SigScheme::mock(kp))
+            PublicKey::Secp256k1(pk) => {
+                Signature::Secp256k1(secp256k1::SigScheme::mock(pk))
             }
         }
+    }
+}
+
+/// Share behavior for both private and public keys. Useful to dispatch function
+/// calls when mocking signatures
+pub trait SigOrPubKey {
+    /// Get the public key
+    fn pubkey(&self) -> PublicKey;
+
+    /// Get the private key if possible ([`None`] if the underlying type is a
+    /// public key)
+    fn sigkey(&self) -> Option<SecretKey>;
+
+    /// Produce a signature (either a valid or a mock one)
+    fn sign(
+        &self,
+        data: impl SignableBytes,
+    ) -> <SigScheme as super::SigScheme>::Signature;
+}
+
+impl SigOrPubKey for SecretKey {
+    fn pubkey(&self) -> PublicKey {
+        self.ref_to()
+    }
+
+    fn sigkey(&self) -> Option<SecretKey> {
+        Some(self.to_owned())
+    }
+
+    fn sign(
+        &self,
+        data: impl SignableBytes,
+    ) -> <SigScheme as super::SigScheme>::Signature {
+        SigScheme::sign(self, data)
+    }
+}
+impl SigOrPubKey for PublicKey {
+    fn pubkey(&self) -> PublicKey {
+        self.to_owned()
+    }
+
+    fn sigkey(&self) -> Option<SecretKey> {
+        None
+    }
+
+    fn sign(
+        &self,
+        _: impl SignableBytes,
+    ) -> <SigScheme as super::SigScheme>::Signature {
+        SigScheme::mock(self)
     }
 }
 

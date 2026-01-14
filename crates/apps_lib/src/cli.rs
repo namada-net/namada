@@ -3665,6 +3665,7 @@ pub mod args {
     pub const RAW_PUBLIC_KEY_HASH_OPT: ArgOpt<String> =
         RAW_PUBLIC_KEY_HASH.opt();
     pub const RECEIVER: Arg<String> = arg("receiver");
+    pub const RECEIVER_ADDR: ArgOpt<WalletAddress> = arg_opt("receiver");
     pub const REFUND_TARGET: ArgOpt<WalletTransferTarget> =
         arg_opt("refund-target");
     pub const RELAYER: Arg<Address> = arg("relayer");
@@ -6553,6 +6554,7 @@ pub mod args {
                 tx,
                 validator: chain_ctx.get(&self.validator),
                 source: self.source.map(|x| chain_ctx.get(&x)),
+                receiver: self.receiver.map(|x| chain_ctx.get(&x)),
                 tx_code_path: self.tx_code_path.to_path_buf(),
             })
         }
@@ -6563,11 +6565,13 @@ pub mod args {
             let tx = Tx::parse(matches);
             let validator = VALIDATOR.parse(matches);
             let source = SOURCE_OPT.parse(matches);
+            let receiver = RECEIVER_ADDR.parse(matches);
             let tx_code_path = PathBuf::from(TX_CLAIM_REWARDS_WASM);
             Self {
                 tx,
                 validator,
                 source,
+                receiver,
                 tx_code_path,
             }
         }
@@ -6578,6 +6582,11 @@ pub mod args {
                 .arg(SOURCE_OPT.def().help(wrap!(
                     "Source address for claiming rewards for a bond. For \
                      self-bonds, the validator is also the source."
+                )))
+                .arg(RECEIVER_ADDR.def().help(wrap!(
+                    "An optional receiver address. If not given, the rewards \
+                     will be received by the owner (i.e. the source of a \
+                     delegation or the validator of a self-bond)."
                 )))
         }
     }

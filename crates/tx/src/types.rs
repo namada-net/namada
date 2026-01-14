@@ -8,6 +8,7 @@ use std::str::FromStr;
 
 use masp_primitives::transaction::Transaction;
 use namada_account::AccountPublicKeysMap;
+use namada_account::common::SigOrPubKey;
 use namada_core::address::Address;
 use namada_core::borsh::{
     self, BorshDeserialize, BorshSchema, BorshSerialize, BorshSerializeExt,
@@ -647,7 +648,7 @@ impl Tx {
         let mut signatures = Vec::new();
         let section = Authorization::new(
             targets,
-            public_keys_index_map.index_secret_keys(secret_keys.to_vec()),
+            public_keys_index_map.index_keys(secret_keys.to_vec()),
             signer,
         );
         match section.signer {
@@ -830,35 +831,32 @@ impl Tx {
 
     /// Add fee payer keypair to the tx builder
     pub fn sign_wrapper(&mut self, keypair: common::SecretKey) -> &mut Self {
-        self.create_wrapper_sig(keypair, Authorization::new)
+        self.create_wrapper_sig(keypair)
     }
 
     /// Mock adding fee payer keypair to the tx builder
     pub fn mock_sign_wrapper(
         &mut self,
-        keypair: common::SecretKey,
+        pubkey: common::PublicKey,
     ) -> &mut Self {
-        self.create_wrapper_sig(keypair, Authorization::mock)
+        self.create_wrapper_sig(pubkey)
     }
 
-    fn create_wrapper_sig<F>(
-        &mut self,
-        keypair: common::SecretKey,
-        create_sig: F,
-    ) -> &mut Self
-    where
-        F: Fn(
-            Vec<namada_core::hash::Hash>,
-            BTreeMap<u8, common::SecretKey>,
-            Option<Address>,
-        ) -> Authorization,
-    {
+    fn create_wrapper_sig(&mut self, keypair: impl SigOrPubKey) -> &mut Self {
         self.protocol_filter();
-        self.add_section(Section::Authorization(create_sig(
-            self.sechashes(),
-            [(0, keypair)].into_iter().collect(),
-            None,
-        )));
+        let auth = match keypair.sigkey() {
+            Some(secret_key) => Authorization::new(
+                self.sechashes(),
+                [(0, secret_key)].into_iter().collect(),
+                None,
+            ),
+            None => Authorization::mock(
+                self.sechashes(),
+                [(0, keypair.pubkey())].into_iter().collect(),
+                None,
+            ),
+        };
+        self.add_section(Section::Authorization(auth));
         self
     }
 
@@ -869,59 +867,42 @@ impl Tx {
         account_public_keys_map: AccountPublicKeysMap,
         signer: Option<Address>,
     ) -> &mut Self {
-        self.create_sig_raw(
-            keypairs,
-            account_public_keys_map,
-            signer,
-            Authorization::new,
-        )
+        self.create_sig_raw(keypairs, account_public_keys_map, signer)
     }
 
     /// Add signing keys to the tx builder with mock
     /// signatures
     pub fn mock(
         &mut self,
-        keypairs: Vec<common::SecretKey>,
+        pubkeys: Vec<common::PublicKey>,
         account_public_keys_map: AccountPublicKeysMap,
         signer: Option<Address>,
     ) -> &mut Self {
-        self.create_sig_raw(
-            keypairs,
-            account_public_keys_map,
-            signer,
-            Authorization::mock,
-        )
+        self.create_sig_raw(pubkeys, account_public_keys_map, signer)
     }
 
-    fn create_sig_raw<F>(
+    fn create_sig_raw<KEY>(
         &mut self,
-        keypairs: Vec<common::SecretKey>,
+        keys: Vec<KEY>,
         account_public_keys_map: AccountPublicKeysMap,
         signer: Option<Address>,
-        create_sig: F,
     ) -> &mut Self
     where
-        F: Fn(
-            Vec<namada_core::hash::Hash>,
-            BTreeMap<u8, common::SecretKey>,
-            Option<Address>,
-        ) -> Authorization,
+        KEY: SigOrPubKey,
     {
         // The inner tx signer signs the Raw version of the Header
         let hashes = vec![self.raw_header_hash()];
         self.protocol_filter();
 
-        let secret_keys = if signer.is_some() {
-            account_public_keys_map.index_secret_keys(keypairs)
+        let signing_keys = if signer.is_some() {
+            account_public_keys_map.index_keys(keys)
         } else {
-            (0..).zip(keypairs).collect()
+            (0..).zip(keys).collect()
         };
 
-        self.add_section(Section::Authorization(create_sig(
-            hashes,
-            secret_keys,
-            signer,
-        )));
+        let auth =
+            Authorization::create_signatures(hashes, signing_keys, signer);
+        self.add_section(Section::Authorization(auth));
         self
     }
 

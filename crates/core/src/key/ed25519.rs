@@ -403,7 +403,7 @@ impl super::SigScheme for SigScheme {
         }
     }
 
-    fn mock(_: &Self::SecretKey) -> Self::Signature {
+    fn mock(_: &Self::PublicKey) -> Self::Signature {
         Signature(ed25519_consensus::Signature::from([0; 64]))
     }
 }

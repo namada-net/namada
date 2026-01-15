@@ -70,6 +70,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.ROLE }}
+          role-duration-seconds: 7200
       - name: Cache cargo
         id: cache
         uses: runs-on/cache@v4
@@ -104,6 +105,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.ROLE }}
+          role-duration-seconds: 7200
       - name: Cache cargo
         id: cache
         uses: runs-on/cache@v4
@@ -155,6 +157,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.ROLE }}
+          role-duration-seconds: 7200
       - name: Cache cargo
         id: cache
         uses: runs-on/cache@v4
@@ -189,6 +192,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.ROLE }}
+          role-duration-seconds: 7200
       - name: Cache cargo
         id: cache
         uses: runs-on/cache@v4
@@ -236,6 +240,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.ROLE }}
+          role-duration-seconds: 7200
       - name: Cache cargo
         id: cache
         uses: runs-on/cache@v4
@@ -288,6 +293,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.ROLE }}
+          role-duration-seconds: 7200
       - name: Cache cargo
         id: cache
         uses: runs-on/cache@v4
@@ -325,6 +331,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.ROLE }}
+          role-duration-seconds: 7200
       - name: Cache cargo
         id: cache
         uses: runs-on/cache@v4
@@ -379,6 +386,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.ROLE }}
+          role-duration-seconds: 7200
       - name: Cache cargo
         id: cache
         uses: runs-on/cache@v4
@@ -425,6 +433,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.ROLE }}
+          role-duration-seconds: 7200
       - name: Cache cargo
         id: cache
         uses: runs-on/cache@v4
@@ -487,6 +496,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.ROLE }}
+          role-duration-seconds: 7200
       - name: Cache cargo
         id: cache
         uses: runs-on/cache@v4
@@ -649,6 +659,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.ROLE }}
+          role-duration-seconds: 7200
       - name: Cache cargo
         id: cache
         uses: runs-on/cache@v4
@@ -741,6 +752,7 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.ROLE }}
+          role-duration-seconds: 7200
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-binstall

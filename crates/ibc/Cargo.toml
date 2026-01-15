@@ -36,6 +36,7 @@ namada_tx.workspace = true
 namada_vp.workspace = true
 
 arbitrary = { workspace = true, optional = true }
+bitflags.workspace = true
 borsh.workspace = true
 data-encoding.workspace = true
 dur.workspace = true

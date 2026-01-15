@@ -28,8 +28,10 @@ pub mod storage;
 pub mod trace;
 pub mod vp;
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -58,9 +60,7 @@ use ibc::apps::nft_transfer::types::{
     TracePrefix as NftTracePrefix, ack_success_b64,
     is_receiver_chain_source as is_nft_receiver_chain_source,
 };
-use ibc::apps::transfer::handler::{
-    send_transfer_execute, send_transfer_validate,
-};
+use ibc::apps::transfer::handler::send_transfer_validate;
 use ibc::apps::transfer::types::error::TokenTransferError;
 use ibc::apps::transfer::types::msgs::transfer::MsgTransfer as IbcMsgTransfer;
 use ibc::apps::transfer::types::{
@@ -69,8 +69,10 @@ use ibc::apps::transfer::types::{
 use ibc::core::channel::types::acknowledgement::AcknowledgementStatus;
 use ibc::core::channel::types::commitment::compute_ack_commitment;
 use ibc::core::channel::types::msgs::{
-    MsgRecvPacket as IbcMsgRecvPacket, PacketMsg,
+    MsgAcknowledgement as IbcMsgAcknowledgement,
+    MsgRecvPacket as IbcMsgRecvPacket, MsgTimeout as IbcMsgTimeout, PacketMsg,
 };
+use ibc::core::channel::types::packet::Packet;
 use ibc::core::channel::types::timeout::{TimeoutHeight, TimeoutTimestamp};
 use ibc::core::entrypoint::{execute, validate};
 use ibc::core::handler::types::error::HandlerError;
@@ -87,12 +89,13 @@ use masp_primitives::transaction::Transaction as MaspTransaction;
 pub use msg::*;
 use namada_core::address::{self, Address};
 use namada_core::arith::{CheckedAdd, CheckedSub, checked};
+use namada_core::either::{Either, Left, Right};
 use namada_core::ibc::apps::nft_transfer::types::packet::PacketData as NftPacketData;
 use namada_core::ibc::core::channel::types::commitment::{
     AcknowledgementCommitment, PacketCommitment, compute_packet_commitment,
 };
 pub use namada_core::ibc::*;
-use namada_core::masp::{TAddrData, addr_taddr, ibc_taddr};
+use namada_core::masp::{PaymentAddress, TAddrData, addr_taddr, ibc_taddr};
 use namada_core::masp_primitives::transaction::components::ValueSum;
 use namada_core::token::Amount;
 use namada_events::EmitEvents;
@@ -101,7 +104,6 @@ use namada_state::{
     State, StorageHasher, StorageRead, StorageWrite, WlState,
 };
 use namada_systems::ibc::ChangedBalances;
-use namada_systems::trans_token;
 pub use nft::*;
 use prost::Message;
 use thiserror::Error;
@@ -111,6 +113,7 @@ use trace::{
     is_sender_chain_source,
 };
 
+use crate::context::middlewares::send_transfer_execute;
 use crate::storage::{
     channel_counter_key, client_counter_key, connection_counter_key,
     deposit_prefix, nft_class_key, nft_metadata_key, withdraw_prefix,
@@ -158,6 +161,7 @@ impl From<Error> for StorageError {
     }
 }
 
+#[derive(Debug)]
 struct IbcTransferInfo {
     src_port_id: PortId,
     src_channel_id: ChannelId,
@@ -177,13 +181,13 @@ impl TryFrom<IbcMsgTransfer> for IbcTransferInfo {
     ) -> std::result::Result<Self, Self::Error> {
         let packet_data = serde_json::to_vec(&message.packet_data)
             .map_err(StorageError::new)?;
+        tracing::warn!(
+            ?message,
+            ?packet_data,
+            "parsing IbcTransferInfo from IbcMsgTransfer"
+        );
         let ibc_traces = vec![message.packet_data.token.denom.to_string()];
-        let amount = message
-            .packet_data
-            .token
-            .amount
-            .try_into()
-            .into_storage_result()?;
+        let amount: Amount = message.packet_data.token.amount.into();
         let receiver = message.packet_data.receiver.to_string();
         Ok(Self {
             src_port_id: message.port_id_on_a,
@@ -229,6 +233,41 @@ impl TryFrom<IbcMsgNftTransfer> for IbcTransferInfo {
     }
 }
 
+enum MaspPacketBalanceChange {
+    Recv,
+    Timeout,
+    AckFailure,
+}
+
+impl MaspPacketBalanceChange {
+    fn apply_msg<S>(
+        &self,
+        storage: &S,
+        accum: ChangedBalances,
+        packet: &Packet,
+        ibc_traces: Vec<String>,
+        amount: Amount,
+        keys_changed: &BTreeSet<Key>,
+    ) -> StorageResult<ChangedBalances>
+    where
+        S: StorageRead,
+    {
+        match self {
+            Self::Recv => apply_recv_msg(
+                storage,
+                accum,
+                packet,
+                ibc_traces,
+                amount,
+                keys_changed,
+            ),
+            Self::Timeout | Self::AckFailure => {
+                apply_refund_msg(accum, packet, ibc_traces, amount)
+            }
+        }
+    }
+}
+
 /// IBC storage `Keys/Read/Write` implementation
 #[derive(Debug)]
 pub struct Store<S>(PhantomData<S>);
@@ -239,28 +278,50 @@ where
 {
     fn try_extract_masp_tx_from_envelope<Transfer: BorshDeserialize>(
         tx_data: &[u8],
-    ) -> StorageResult<Option<masp_primitives::transaction::Transaction>> {
-        let msg = decode_message::<Transfer>(tx_data)
-            .into_storage_result()
-            .ok();
-        let tx = if let Some(IbcMessage::Envelope(envelope)) = msg {
-            Some(extract_masp_tx_from_envelope(&envelope).ok_or_else(|| {
-                StorageError::new_const(
-                    "Missing MASP transaction in IBC message",
-                )
-            })?)
+    ) -> StorageResult<
+        Option<Either<(), masp_primitives::transaction::Transaction>>,
+    > {
+        if let Ok(IbcMessage::Envelope(envelope)) =
+            decode_message::<Transfer>(tx_data)
+        {
+            if let MsgEnvelope::Packet(PacketMsg::Recv(msg)) = &*envelope {
+                // The RECV packet either contained an IBC shielding tx,
+                // or a single payment address, which will be used by
+                // the protocol to mint a MASP note
+                Ok(Some(
+                    extract_masp_tx_from_packet(&msg.packet)
+                        .map_or(Left(()), Right),
+                ))
+            } else if matches!(
+                &*envelope,
+                MsgEnvelope::Packet(PacketMsg::Ack(_) | PacketMsg::Timeout(_))
+            ) {
+                // In case we get an ACK or TIMEOUT, assume we are dealing
+                // with a shielded refund
+                Ok(Some(Left(())))
+            } else {
+                Err(StorageError::new_const(
+                    "Only Recv, Ack or Timeout packet envelopes can alter the \
+                     state of the MASP from an IBC counterparty chain",
+                ))
+            }
         } else {
-            None
-        };
-        Ok(tx)
+            // If there is no IBC envelope packet, give up
+            Ok(None)
+        }
     }
 
-    fn apply_ibc_packet<Transfer: BorshDeserialize>(
-        storage: &S,
+    fn apply_ibc_packet<PreS, Params, Transfer>(
+        storage_pre: PreS,
+        storage_post: &S,
         tx_data: &[u8],
         mut accum: ChangedBalances,
         keys_changed: &BTreeSet<namada_core::storage::Key>,
-    ) -> StorageResult<ChangedBalances> {
+    ) -> StorageResult<ChangedBalances>
+    where
+        Params: namada_systems::parameters::Read<PreS>,
+        Transfer: BorshDeserialize,
+    {
         let msg = decode_message::<Transfer>(tx_data)
             .into_storage_result()
             .ok();
@@ -270,52 +331,139 @@ where
             Some(IbcMessage::Transfer(msg)) => {
                 // Get the packet commitment from post-storage that corresponds
                 // to this event
+                tracing::warn!(msg = ?msg.message, "calling apply_transfer_msg");
                 let ibc_transfer = IbcTransferInfo::try_from(msg.message)?;
                 let receiver = ibc_transfer.receiver.clone();
                 let addr = TAddrData::Ibc(receiver.clone());
                 accum.decoder.insert(ibc_taddr(receiver), addr);
                 accum = apply_transfer_msg(
-                    storage,
+                    storage_post,
                     accum,
-                    &ibc_transfer,
+                    ibc_transfer,
                     keys_changed,
+                    |packet_data_vec| {
+                        let mut packet_data =
+                            serde_json::from_slice::<PacketData>(
+                                packet_data_vec,
+                            )
+                            .map_err(StorageError::new)?;
+
+                        let token = trace::convert_to_address(
+                            packet_data.token.denom.to_string(),
+                        )
+                        .map_err(|e| {
+                            Error::Trace(format!(
+                                "Failed to convert IBC trace to Namada \
+                                 address: {e}"
+                            ))
+                        })
+                        .into_storage_result()?;
+
+                        let Some(fee_percentage) =
+                            Params::ibc_unshielding_fee_percentage(
+                                &storage_pre,
+                                &token,
+                            )?
+                        else {
+                            return Ok(());
+                        };
+
+                        let old_amount: Amount =
+                            packet_data.token.amount.into();
+                        let fee = old_amount
+                            .checked_mul_dec(fee_percentage)
+                            .ok_or(StorageError::new_const(
+                                "IBC unshielding fee overflow",
+                            ))?;
+
+                        if fee.is_zero() {
+                            return Ok(());
+                        }
+
+                        packet_data.token.amount = old_amount
+                            .checked_sub(fee)
+                            .ok_or_else(|| {
+                                StorageError::new_const(
+                                    "Unshielding fee greater than withdrawn \
+                                     amount",
+                                )
+                            })?
+                            .into();
+
+                        packet_data_vec.clear();
+                        serde_json::to_writer(packet_data_vec, &packet_data)
+                            .map_err(StorageError::new)?;
+
+                        Ok(())
+                    },
                 )?;
             }
             Some(IbcMessage::NftTransfer(msg)) => {
                 // Need to set NFT data because the message doesn't include them
-                let message = retrieve_nft_data(storage, msg.message)?;
+                let message = retrieve_nft_data(storage_post, msg.message)?;
                 let ibc_transfer = IbcTransferInfo::try_from(message)?;
                 let receiver = ibc_transfer.receiver.clone();
                 let addr = TAddrData::Ibc(receiver.clone());
                 accum.decoder.insert(ibc_taddr(receiver), addr);
                 accum = apply_transfer_msg(
-                    storage,
+                    storage_post,
                     accum,
-                    &ibc_transfer,
+                    ibc_transfer,
                     keys_changed,
+                    |_ibc_transfer| {
+                        // NOOP
+                        Ok(())
+                    },
                 )?;
             }
             // This event is emitted on the receiver
-            Some(IbcMessage::Envelope(envelope)) => {
-                if let MsgEnvelope::Packet(PacketMsg::Recv(msg)) = *envelope {
-                    if msg.packet.port_id_on_b.as_str() == PORT_ID_STR {
-                        let packet_data = serde_json::from_slice::<PacketData>(
-                            &msg.packet.data,
-                        )
-                        .map_err(StorageError::new)?;
+            Some(IbcMessage::Envelope(envelope)) => 'handle_envelope: {
+                if let MsgEnvelope::Packet(packet_msg) = *envelope {
+                    let (packet, packet_kind) = match packet_msg {
+                        PacketMsg::Recv(IbcMsgRecvPacket {
+                            packet, ..
+                        }) => (packet, MaspPacketBalanceChange::Recv),
+                        PacketMsg::Timeout(IbcMsgTimeout {
+                            packet, ..
+                        }) => (packet, MaspPacketBalanceChange::Timeout),
+                        PacketMsg::Ack(IbcMsgAcknowledgement {
+                            packet,
+                            acknowledgement,
+                            ..
+                        }) => {
+                            let success_ack_commitment = compute_ack_commitment(
+                                &AcknowledgementStatus::success(
+                                    ack_success_b64(),
+                                )
+                                .into(),
+                            );
+                            let ack_commitment =
+                                compute_ack_commitment(&acknowledgement);
+
+                            if ack_commitment == success_ack_commitment {
+                                break 'handle_envelope;
+                            }
+
+                            (packet, MaspPacketBalanceChange::AckFailure)
+                        }
+                        _ => {
+                            break 'handle_envelope;
+                        }
+                    };
+
+                    if packet.port_id_on_b.as_str() == PORT_ID_STR {
+                        let packet_data =
+                            serde_json::from_slice::<PacketData>(&packet.data)
+                                .map_err(StorageError::new)?;
                         let receiver = packet_data.receiver.to_string();
                         let addr = TAddrData::Ibc(receiver.clone());
                         accum.decoder.insert(ibc_taddr(receiver), addr);
                         let ibc_denom = packet_data.token.denom.to_string();
-                        let amount = packet_data
-                            .token
-                            .amount
-                            .try_into()
-                            .into_storage_result()?;
-                        accum = apply_recv_msg(
-                            storage,
+                        let amount: Amount = packet_data.token.amount.into();
+                        accum = packet_kind.apply_msg(
+                            storage_post,
                             accum,
-                            &msg,
+                            &packet,
                             vec![ibc_denom],
                             amount,
                             keys_changed,
@@ -323,7 +471,7 @@ where
                     } else {
                         let packet_data =
                             serde_json::from_slice::<NftPacketData>(
-                                &msg.packet.data,
+                                &packet.data,
                             )
                             .map_err(StorageError::new)?;
                         let receiver = packet_data.receiver.to_string();
@@ -340,10 +488,10 @@ where
                                 )
                             })
                             .collect();
-                        accum = apply_recv_msg(
-                            storage,
+                        accum = packet_kind.apply_msg(
+                            storage_post,
                             accum,
-                            &msg,
+                            &packet,
                             ibc_traces,
                             Amount::from_u64(1),
                             keys_changed,
@@ -356,14 +504,88 @@ where
     }
 }
 
-fn check_ibc_transfer<S>(
+/// Account id for IBC transfers.
+#[derive(Debug)]
+pub enum IbcAccountId {
+    /// Transparent account.
+    Transparent(Address),
+    /// Shielded account.
+    Shielded(PaymentAddress),
+}
+
+impl IbcAccountId {
+    /// Check whether this is a transparent address.
+    pub const fn is_transparent(&self) -> bool {
+        matches!(self, Self::Transparent(_))
+    }
+
+    /// Check whether this is a shielded address.
+    pub const fn is_shielded(&self) -> bool {
+        matches!(self, Self::Shielded(_))
+    }
+
+    /// Convert this [`IbcAccountId`] to a transparent address.
+    pub fn to_address(&self) -> Cow<'_, Address> {
+        match self {
+            Self::Transparent(addr) => Cow::Borrowed(addr),
+            Self::Shielded(_) => Cow::Owned(address::MASP),
+        }
+    }
+}
+
+impl FromStr for IbcAccountId {
+    type Err = HostError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match () {
+            // assume we have a transparent addr
+            _ if s.starts_with('t') => {
+                Ok(IbcAccountId::Transparent(s.parse().map_err(|err| {
+                    HostError::Other {
+                        description: format!(
+                            "Failed to parse IBC transparent address {s:?}: \
+                             {err}"
+                        ),
+                    }
+                })?))
+            }
+            // assume we have a shielded addr
+            _ if s.starts_with('z') => {
+                Ok(IbcAccountId::Shielded(s.parse().map_err(|err| {
+                    HostError::Other {
+                        description: format!(
+                            "Failed to parse IBC shielded address {s:?}: {err}"
+                        ),
+                    }
+                })?))
+            }
+            _ => Err(HostError::Other {
+                description: format!("Unknown IBC address {s:?}"),
+            }),
+        }
+    }
+}
+
+impl fmt::Display for IbcAccountId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Transparent(addr) => write!(f, "{addr}"),
+            Self::Shielded(addr) => write!(f, "{addr}"),
+        }
+    }
+}
+
+fn check_ibc_transfer<S, F>(
     storage: &S,
     ibc_transfer: &IbcTransferInfo,
     keys_changed: &BTreeSet<Key>,
+    alter_packet_data: F,
 ) -> StorageResult<()>
 where
     S: StorageRead,
+    F: FnOnce(&mut Vec<u8>) -> StorageResult<()>,
 {
+    tracing::warn!(?ibc_transfer, "calling check_ibc_transfer");
     let IbcTransferInfo {
         src_port_id,
         src_channel_id,
@@ -384,6 +606,9 @@ where
         )));
     }
 
+    let mut packet_data = packet_data.clone();
+    alter_packet_data(&mut packet_data)?;
+
     // The commitment is also validated in IBC VP. Make sure that for when
     // IBC VP isn't triggered.
     let actual: PacketCommitment = storage
@@ -394,7 +619,7 @@ where
         )))?
         .into();
     let expected = compute_packet_commitment(
-        packet_data,
+        &packet_data,
         timeout_height,
         timeout_timestamp,
     );
@@ -410,42 +635,47 @@ where
 
 // Check that the packet receipt key has been changed
 fn check_packet_receiving(
-    msg: &IbcMsgRecvPacket,
+    packet: &Packet,
     keys_changed: &BTreeSet<Key>,
 ) -> StorageResult<()> {
     let receipt_key = storage::receipt_key(
-        &msg.packet.port_id_on_b,
-        &msg.packet.chan_id_on_b,
-        msg.packet.seq_on_a,
+        &packet.port_id_on_b,
+        &packet.chan_id_on_b,
+        packet.seq_on_a,
     );
     if !keys_changed.contains(&receipt_key) {
         return Err(StorageError::new_alloc(format!(
             "The packet has not been received: Port ID {}, Channel ID {}, \
              Sequence {}",
-            msg.packet.port_id_on_b,
-            msg.packet.chan_id_on_b,
-            msg.packet.seq_on_a,
+            packet.port_id_on_b, packet.chan_id_on_b, packet.seq_on_a,
         )));
     }
     Ok(())
 }
 
 // Apply the given transfer message to the changed balances structure
-fn apply_transfer_msg<S>(
+fn apply_transfer_msg<S, F>(
     storage: &S,
     mut accum: ChangedBalances,
-    ibc_transfer: &IbcTransferInfo,
+    ibc_transfer: IbcTransferInfo,
     keys_changed: &BTreeSet<Key>,
+    alter_packet_data: F,
 ) -> StorageResult<ChangedBalances>
 where
     S: StorageRead,
+    F: FnOnce(&mut Vec<u8>) -> StorageResult<()>,
 {
-    check_ibc_transfer(storage, ibc_transfer, keys_changed)?;
+    check_ibc_transfer(
+        storage,
+        &ibc_transfer,
+        keys_changed,
+        alter_packet_data,
+    )?;
 
     let IbcTransferInfo {
-        ibc_traces,
-        src_port_id,
-        src_channel_id,
+        ref ibc_traces,
+        ref src_port_id,
+        ref src_channel_id,
         amount,
         receiver,
         ..
@@ -454,7 +684,7 @@ where
     let receiver = ibc_taddr(receiver.clone());
     for ibc_trace in ibc_traces {
         let token = convert_to_address(ibc_trace).into_storage_result()?;
-        let delta = ValueSum::from_pair(token, *amount);
+        let delta = ValueSum::from_pair(token, amount);
         // If there is a transfer to the IBC account, then deduplicate the
         // balance increase since we already account for it below
         if is_sender_chain_source(ibc_trace, src_port_id, src_channel_id) {
@@ -514,7 +744,7 @@ where
 fn apply_recv_msg<S>(
     storage: &S,
     mut accum: ChangedBalances,
-    msg: &IbcMsgRecvPacket,
+    packet: &Packet,
     ibc_traces: Vec<String>,
     amount: Amount,
     keys_changed: &BTreeSet<Key>,
@@ -523,14 +753,14 @@ where
     S: StorageRead,
 {
     // First check that the packet receipt is reflecteed in the state changes
-    check_packet_receiving(msg, keys_changed)?;
+    check_packet_receiving(packet, keys_changed)?;
     // If the transfer was a failure, then enable funds to
     // be withdrawn from the IBC internal address
     if is_receiving_success(
         storage,
-        &msg.packet.port_id_on_b,
-        &msg.packet.chan_id_on_b,
-        msg.packet.seq_on_a,
+        &packet.port_id_on_b,
+        &packet.chan_id_on_b,
+        packet.seq_on_a,
     )? {
         for ibc_trace in ibc_traces {
             // Only artificially increase the IBC internal address pre-balance
@@ -539,16 +769,16 @@ where
             // received.
             if !is_receiver_chain_source_str(
                 &ibc_trace,
-                &msg.packet.port_id_on_a,
-                &msg.packet.chan_id_on_a,
+                &packet.port_id_on_a,
+                &packet.chan_id_on_a,
             ) {
                 // Get the received token
                 let token = received_ibc_token(
                     ibc_trace,
-                    &msg.packet.port_id_on_a,
-                    &msg.packet.chan_id_on_a,
-                    &msg.packet.port_id_on_b,
-                    &msg.packet.chan_id_on_b,
+                    &packet.port_id_on_a,
+                    &packet.chan_id_on_a,
+                    &packet.port_id_on_b,
+                    &packet.chan_id_on_b,
                 )
                 .into_storage_result()?;
                 let delta = ValueSum::from_pair(token.clone(), amount);
@@ -572,6 +802,49 @@ where
     Ok(accum)
 }
 
+// Apply the given refund message (originating from an ACK error, or TIMEOUT)
+// to the changed balances structure
+fn apply_refund_msg(
+    mut accum: ChangedBalances,
+    packet: &Packet,
+    ibc_traces: Vec<String>,
+    amount: Amount,
+) -> StorageResult<ChangedBalances> {
+    for ibc_trace in ibc_traces {
+        // Only artificially increase the IBC internal address pre-balance
+        // if sending involves burning. We do not do this in the escrow
+        // case since the pre-balance already accounts for the amount being
+        // sent.
+        if !is_sender_chain_source(
+            &ibc_trace,
+            &packet.port_id_on_a,
+            &packet.chan_id_on_a,
+        ) {
+            // Get the sent token
+            let token = trace::convert_to_address(ibc_trace)
+                .map_err(|e| Error::Trace(format!("Invalid base token: {e}")))
+                .into_storage_result()?;
+            let delta = ValueSum::from_pair(token.clone(), amount);
+            // Enable funds to be taken from the IBC internal
+            // address and be deposited elsewhere
+            // Required for the IBC internal Address to release
+            // funds
+            let ibc_taddr = addr_taddr(address::IBC);
+            let pre_entry = accum
+                .pre
+                .get(&ibc_taddr)
+                .cloned()
+                .unwrap_or(ValueSum::zero());
+            accum.pre.insert(
+                ibc_taddr,
+                checked!(pre_entry + &delta).map_err(StorageError::new)?,
+            );
+        }
+    }
+
+    Ok(accum)
+}
+
 /// Internal transfer data extracted from the wrapping IBC transaction
 #[derive(Debug)]
 pub struct InternalData<Transfer> {
@@ -585,21 +858,24 @@ pub struct InternalData<Transfer> {
 
 /// IBC actions to handle IBC operations
 #[derive(Debug)]
-pub struct IbcActions<'a, C, Params, Token>
+pub struct IbcActions<'a, C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
 {
     ctx: IbcContext<C, Params>,
     router: IbcRouter<'a>,
     verifiers: Rc<RefCell<BTreeSet<Address>>>,
-    _marker: PhantomData<Token>,
+    _marker: PhantomData<(Token, ShieldedToken)>,
 }
 
-impl<'a, C, Params, Token> IbcActions<'a, C, Params, Token>
+impl<'a, C, Params, Token, ShieldedToken>
+    IbcActions<'a, C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
     Params: namada_systems::parameters::Read<C::Storage>,
-    Token: trans_token::Keys,
+    Token: namada_systems::trans_token::Keys
+        + namada_systems::trans_token::Read<C::Storage>,
+    ShieldedToken: namada_systems::shielded_token::Write<C::Storage>,
 {
     /// Make new IBC actions
     pub fn new(
@@ -632,24 +908,25 @@ where
         let message = decode_message::<Transfer>(tx_data)?;
         let result = match message {
             IbcMessage::Transfer(msg) => {
-                let mut token_transfer_ctx = TokenTransferContext::new(
+                let mut token_transfer_ctx = TokenTransferContext::<
+                    _,
+                    Params,
+                    Token,
+                    ShieldedToken,
+                >::new(
                     self.ctx.inner.clone(),
                     self.verifiers.clone(),
                 );
                 // Add the source to the set of verifiers
                 self.verifiers.borrow_mut().insert(
-                    Address::from_str(msg.message.packet_data.sender.as_ref())
-                        .map_err(|_| {
-                            Error::TokenTransfer(
-                                HostError::Other {
-                                    description: format!(
-                                        "Cannot convert the sender address {}",
-                                        msg.message.packet_data.sender
-                                    ),
-                                }
-                                .into(),
-                            )
-                        })?,
+                    msg.message
+                        .packet_data
+                        .sender
+                        .as_ref()
+                        .parse::<IbcAccountId>()
+                        .map_err(|err| Error::TokenTransfer(err.into()))?
+                        .to_address()
+                        .into_owned(),
                 );
                 if msg.transfer.is_some() {
                     token_transfer_ctx.enable_shielded_transfer();
@@ -679,18 +956,14 @@ where
                 }
                 // Add the source to the set of verifiers
                 self.verifiers.borrow_mut().insert(
-                    Address::from_str(msg.message.packet_data.sender.as_ref())
-                        .map_err(|_| {
-                            Error::NftTransfer(
-                                HostError::Other {
-                                    description: format!(
-                                        "Cannot convert the sender address {}",
-                                        msg.message.packet_data.sender
-                                    ),
-                                }
-                                .into(),
-                            )
-                        })?,
+                    msg.message
+                        .packet_data
+                        .sender
+                        .as_ref()
+                        .parse::<IbcAccountId>()
+                        .map_err(|err| Error::TokenTransfer(err.into()))?
+                        .to_address()
+                        .into_owned(),
                 );
                 // Record the tokens credited/debited in this NFT transfer
                 let tokens = msg
@@ -725,12 +998,12 @@ where
                 if let Some(verifier) = get_envelope_verifier(envelope.as_ref())
                 {
                     self.verifiers.borrow_mut().insert(
-                        Address::from_str(verifier.as_ref()).map_err(|_| {
-                            Error::Other(format!(
-                                "Cannot convert the address {}",
-                                verifier,
-                            ))
-                        })?,
+                        verifier
+                            .as_ref()
+                            .parse::<IbcAccountId>()
+                            .map_err(|err| Error::TokenTransfer(err.into()))?
+                            .to_address()
+                            .into_owned(),
                     );
                 }
                 execute(&mut self.ctx, &mut self.router, *envelope.clone())
@@ -819,7 +1092,12 @@ where
         let message = decode_message::<Transfer>(tx_data)?;
         let result = match message {
             IbcMessage::Transfer(msg) => {
-                let mut token_transfer_ctx = TokenTransferContext::new(
+                let mut token_transfer_ctx = TokenTransferContext::<
+                    _,
+                    Params,
+                    Token,
+                    ShieldedToken,
+                >::new(
                     self.ctx.inner.clone(),
                     verifiers.clone(),
                 );

@@ -287,6 +287,13 @@ impl Amount {
         DenominatedAmount::from_str(string).map(|den| den.amount)
     }
 
+    /// Multiply by a decimal, with the result rounded down.
+    pub fn checked_mul_dec(&self, dec: Dec) -> Option<Amount> {
+        self.raw
+            .checked_mul_div(dec.abs(), Uint::exp10(POS_DECIMAL_PRECISION as _))
+            .map(|(result, _)| result.into())
+    }
+
     /// Multiply by a decimal [`Dec`] with the result rounded up. Returns an
     /// error if the dec is negative. Checks for overflow.
     pub fn mul_ceil(&self, dec: Dec) -> Result<Self, arith::Error> {
@@ -1064,12 +1071,9 @@ impl From<Amount> for IbcAmount {
     }
 }
 
-impl TryFrom<IbcAmount> for Amount {
-    type Error = AmountParseError;
-
-    fn try_from(amount: IbcAmount) -> Result<Self, Self::Error> {
-        let uint = Uint(primitive_types::U256::from(amount).0);
-        Self::from_uint(uint, 0)
+impl From<IbcAmount> for Amount {
+    fn from(amount: IbcAmount) -> Self {
+        Uint(primitive_types::U256::from(amount).0).into()
     }
 }
 

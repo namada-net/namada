@@ -1,6 +1,9 @@
 //! Parameters abstract interfaces
 
-use namada_core::chain::BlockHeight;
+use namada_core::address::Address;
+use namada_core::chain::{BlockHeight, Epoch};
+use namada_core::dec::Dec;
+use namada_core::masp::MaspEpoch;
 pub use namada_core::parameters::*;
 use namada_core::storage;
 use namada_core::time::DurationSecs;
@@ -37,6 +40,29 @@ pub trait Read<S> {
         last_block_height: BlockHeight,
         num_blocks_to_read: u64,
     ) -> Result<DurationSecs>;
+
+    /// Read the current MASP epoch
+    fn masp_epoch(storage: &S, current_epoch: Epoch) -> Result<MaspEpoch> {
+        MaspEpoch::try_from_epoch(
+            current_epoch,
+            Self::masp_epoch_multiplier(storage)?,
+        )
+        .map_err(namada_storage::Error::SimpleMessage)
+    }
+
+    /// Read the shielding fee percentage over IBC of the token with address
+    /// `token_addr`.
+    fn ibc_shielding_fee_percentage(
+        storage: &S,
+        token: &Address,
+    ) -> Result<Option<Dec>>;
+
+    /// Read the unshielding fee percentage over IBC of the token with address
+    /// `token_addr`.
+    fn ibc_unshielding_fee_percentage(
+        storage: &S,
+        token: &Address,
+    ) -> Result<Option<Dec>>;
 }
 
 /// Abstract parameters storage write interface

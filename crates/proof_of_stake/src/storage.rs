@@ -726,7 +726,6 @@ where
 {
     let offset = offset_opt.unwrap_or(params.pipeline_len);
     let total_deltas = total_deltas_handle();
-    let total_active_deltas = total_active_deltas_handle();
     let offset_epoch = checked!(current_epoch + offset)?;
 
     // Update total deltas
@@ -744,20 +743,46 @@ where
 
     // Update total active voting power
     if update_active_voting_power {
-        let active_delta = total_active_deltas
-            .get_delta_val(storage, offset_epoch)?
-            .unwrap_or_default();
-        total_active_deltas.set::<S, Gov>(
+        update_total_active_deltas::<S, Gov>(
             storage,
-            active_delta.checked_add(delta).expect(
-                "Total active voting power updated amount should not overflow",
-            ),
+            params,
+            delta,
             current_epoch,
-            offset,
+            offset_opt,
         )?;
     }
 
     Ok(())
+}
+
+/// Update PoS total active deltas.
+pub fn update_total_active_deltas<S, Gov>(
+    storage: &mut S,
+    params: &OwnedPosParams,
+    delta: token::Change,
+    current_epoch: namada_core::chain::Epoch,
+    offset_opt: Option<u64>,
+) -> Result<()>
+where
+    S: StorageRead + StorageWrite,
+    Gov: governance::Read<S>,
+{
+    let offset = offset_opt.unwrap_or(params.pipeline_len);
+
+    let total_active_deltas = total_active_deltas_handle();
+    let offset_epoch = checked!(current_epoch + offset)?;
+
+    let active_delta = total_active_deltas
+        .get_delta_val(storage, offset_epoch)?
+        .unwrap_or_default();
+    total_active_deltas.set::<S, Gov>(
+        storage,
+        active_delta.checked_add(delta).expect(
+            "Total active voting power updated amount should not overflow",
+        ),
+        current_epoch,
+        offset,
+    )
 }
 
 /// Read PoS validator's email.

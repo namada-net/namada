@@ -53,7 +53,7 @@ where
                 &tx,
                 &wrapper,
                 &request.data,
-                &TxIndex::default(),
+                TxIndex::default(),
                 height,
                 &tx_gas_meter,
                 &mut shell_params,

@@ -107,7 +107,6 @@ mod test_nuts {
     use namada_core::address::testing::arb_non_internal_address;
     use namada_core::borsh::BorshSerializeExt;
     use namada_core::ethereum_events::testing::DAI_ERC20_ETH_ADDRESS;
-    use namada_core::storage::TxIndex;
     use namada_gas::{GasMeterKind, TxGasMeter, VpGasMeter};
     use namada_state::testing::TestState;
     use namada_state::{StateRead, StorageWrite};
@@ -186,12 +185,13 @@ mod test_nuts {
             &TxGasMeter::new(u64::MAX, 1),
         ));
         let batched_tx = tx.batch_ref_first_tx().unwrap();
+        let indexed_tx = Default::default();
         let ctx = Ctx::new(
             &Address::Internal(InternalAddress::Nut(DAI_ERC20_ETH_ADDRESS)),
             &state,
             batched_tx.tx,
             batched_tx.cmt,
-            &TxIndex(0),
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,

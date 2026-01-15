@@ -677,3 +677,30 @@ pub fn inflight_packet_key(inflight_packet_key: &InFlightPacketKey) -> Key {
         .with_segment(inflight_packet_key.channel.to_string())
         .with_segment(inflight_packet_key.sequence.to_string())
 }
+
+/// Get a MASP shieldings counter key.
+///
+/// The value stored under this key is used to compute
+/// deterministic rseeds for MASP notes.
+pub fn masp_shielding_counter_key() -> Key {
+    const MASP_SUBKEY: &str = "masp";
+    const SHIELDING_COUNTER_SUBKEY: &str = "shielding_counter";
+
+    middlewares_prefix()
+        .with_segment(MASP_SUBKEY.to_string())
+        .with_segment(SHIELDING_COUNTER_SUBKEY.to_string())
+}
+
+/// Load the IBC shielding counter in storage.
+pub fn load_shielding_counter<S: StorageRead>(storage: &S) -> Result<u64> {
+    let key = masp_shielding_counter_key();
+    Ok(storage.read::<u64>(&key)?.unwrap_or_default())
+}
+
+/// Write the IBC shielding counter to storage.
+pub fn write_shielding_counter<S: StorageWrite>(
+    storage: &mut S,
+    counter: u64,
+) -> Result<()> {
+    storage.write(&masp_shielding_counter_key(), counter)
+}

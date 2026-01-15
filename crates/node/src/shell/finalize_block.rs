@@ -1198,6 +1198,7 @@ where
                 _,
                 parameters::Store<_>,
                 token::Store<_>,
+                token::ShieldedStore<_>,
                 token::Transfer,
             >(state, token, source, target)
         },
@@ -1254,6 +1255,7 @@ where
                 _,
                 parameters::Store<_>,
                 token::Store<_>,
+                token::ShieldedStore<_>,
                 token::Transfer,
             >(state, token, source, target)
         },
@@ -5690,12 +5692,13 @@ mod test_finalize_block {
         let keys_changed = BTreeSet::from([min_confirmations_key()]);
         let verifiers = BTreeSet::default();
         let batched_tx = tx.batch_ref_first_tx().unwrap();
+        let indexed_tx = namada_sdk::tx::IndexedTx::default();
         let ctx = namada_vp::native_vp::Ctx::<_, _, VpEvalWasm<_, _, _>>::new(
             shell.mode.get_validator_address().expect("Test failed"),
             shell.state.read_only(),
             batched_tx.tx,
             batched_tx.cmt,
-            &TxIndex(0),
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,

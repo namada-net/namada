@@ -1,5 +1,6 @@
 {
     "e2e::eth_bridge_tests::everything": 4,
+    "e2e::ibc_tests::ibc_to_and_from_payment_addrs": 840,
     "e2e::ibc_tests::frontend_sus_fee": 350,
     "e2e::ibc_tests::ibc_transfers": 414,
     "e2e::ibc_tests::ibc_nft_transfers": 224,
@@ -11,8 +12,8 @@
     "e2e::ibc_tests::ibc_pfm_happy_flows": 485,
     "e2e::ibc_tests::ibc_pfm_unhappy_flows": 485,
     "e2e::ibc_tests::ibc_upgrade_client": 280,
-    "e2e::ibc_tests::ibc_shielded_recv_middleware_happy_flow": 280,
-    "e2e::ibc_tests::ibc_shielded_recv_middleware_unhappy_flow": 280,
+    "e2e::ibc_tests::ibc_voluntary_fees_middleware_happy_flow": 280,
+    "e2e::ibc_tests::ibc_voluntary_fees_middleware_unhappy_flow": 280,
     "e2e::eth_bridge_tests::test_add_to_bridge_pool": 10,
     "e2e::ledger_tests::double_signing_gets_slashed": 12,
     "e2e::ledger_tests::ledger_many_txs_in_a_block": 55,

@@ -1,12 +1,11 @@
 //! Middleware entry points on Namada.
 
 pub mod pfm_mod;
-pub mod shielded_recv;
+pub mod voluntary_fees;
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::rc::Rc;
 
 use ibc::core::host::types::identifiers::PortId;
@@ -17,35 +16,47 @@ use ibc_middleware_packet_forward::PacketForwardMiddleware;
 use namada_core::address::Address;
 
 use self::pfm_mod::PfmTransferModule;
-use self::shielded_recv::ShieldedRecvModule;
+use self::voluntary_fees::VoluntaryFeesModule;
 use crate::context::transfer_mod::TransferModule;
 use crate::{IbcCommonContext, IbcStorageContext};
 
 /// The stack of middlewares of the transfer module.
-pub type TransferMiddlewares<C, Params> =
-    OverflowReceiveMiddleware<ShieldedRecvModule<C, Params>>;
+pub type TransferMiddlewares<C, Params, Token, ShieldedToken> =
+    OverflowReceiveMiddleware<
+        VoluntaryFeesModule<C, Params, Token, ShieldedToken>,
+    >;
 
 /// Create a new instance of [`TransferMiddlewares`]
-pub fn create_transfer_middlewares<C, Params>(
+pub fn create_transfer_middlewares<C, Params, Token, ShieldedToken>(
     ctx: Rc<RefCell<C>>,
     verifiers: Rc<RefCell<BTreeSet<Address>>>,
-) -> TransferMiddlewares<C, Params>
+) -> TransferMiddlewares<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
-    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
+    ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
+        + Debug,
 {
-    OverflowReceiveMiddleware::wrap(ShieldedRecvModule {
+    OverflowReceiveMiddleware::wrap(VoluntaryFeesModule {
         next: PacketForwardMiddleware::wrap(PfmTransferModule {
             transfer_module: TransferModule::new(ctx, verifiers),
-            _phantom: PhantomData,
         }),
     })
 }
 
-impl<C, Params> crate::ModuleWrapper for TransferMiddlewares<C, Params>
+impl<C, Params, Token, ShieldedToken> crate::ModuleWrapper
+    for TransferMiddlewares<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
-    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
+    ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
+        + Debug,
 {
     fn as_module(&self) -> &dyn Module {
         self

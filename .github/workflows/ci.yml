@@ -6,7 +6,6 @@ on:
       - main
       - "maint-[0-9]+.[0-9]+"
       - "maint-libs-[0-9]+.[0-9]+"
-  # Run in PRs with conflicts (https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#pull_request)
   pull_request:
     branches:
       - main
@@ -30,14 +29,20 @@ env:
   GIT_LFS_SKIP_SMUDGE: 1
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: full
-  CACHE_BUCKET: github-runners-remote-cache-shared
-  SCCACHE_BUCKET: github-runners-remote-cache-shared
+  CACHE_BUCKET: namada-infra-sccache-glob
+  SCCACHE_BUCKET: namada-infra-sccache-glob
+  SCCACHE_REGION: eu-west-1
   AWS_REGION: us-west-2
   NIGHTLY: nightly-2025-03-27
   NAMADA_MASP_PARAMS_DIR: /masp/.masp-params
   LEDGER_APP_VERSION: "3.0.7"
-  ROLE: arn:aws:iam::375643557360:role/github-runners-ci-shared
+  ROLE: arn:aws:iam::375643557360:role/namada-infra-ci-glob
   SCCACHE_ERROR_LOG: /tmp/sccache_log.txt
+  # RUSTFLAGS is part of the cargo/sccache fingerprint, so it is set once here
+  # to let every job share compiled artifacts. Jobs that need a different value
+  # override it explicitly (the e2e binaries build with debug assertions, and
+  # the jobs running outside the CI container have no mold/clang available).
+  RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=/usr/local/bin/mold"
 
 jobs:
   changelog:
@@ -58,7 +63,7 @@ jobs:
   rust-docs:
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
-    runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
+    runs-on: [namada-runners-ubuntu]
     timeout-minutes: 20
 
     steps:
@@ -92,7 +97,7 @@ jobs:
   lints:
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
-    runs-on: [self-hosted, 8vcpu-16ram-ubuntu22-namada-x86]
+    runs-on: [namada-runners-ubuntu]
     timeout-minutes: 15
 
     steps:
@@ -127,7 +132,7 @@ jobs:
 
   build-wasm:
     timeout-minutes: 10
-    runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
+    runs-on: [namada-runners-ubuntu]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     strategy:
@@ -177,7 +182,7 @@ jobs:
     timeout-minutes: 30
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
-    runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
+    runs-on: [namada-runners-ubuntu]
     needs: [build-wasm]
 
     steps:
@@ -209,8 +214,6 @@ jobs:
       - name: Test Wasm
         # run: cargo +${{ env.NIGHTLY }} nextest run --manifest-path wasm/Cargo.toml
         run: make test-wasm-with-coverage
-        env:
-          RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=/usr/local/bin/mold"
       - name: Store coverage file artifact
         uses: actions/upload-artifact@v4
         with:
@@ -221,7 +224,7 @@ jobs:
         run: cargo cache --autoclean-expensive
 
   test-unit:
-    runs-on: [self-hosted, 8vcpu-16ram-ubuntu22-namada-x86]
+    runs-on: [namada-runners-ubuntu]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     timeout-minutes: 30
@@ -259,8 +262,6 @@ jobs:
       - name: Run unit tests with coverage
         run: make test-unit-with-coverage
         # run: cargo +${{ env.NIGHTLY }} llvm-cov nextest run -E 'not test(e2e)' -E 'not test(integration)' -E 'not test(pos_state_machine_test)' --features namada/testing --no-fail-fast --lcov --output-path lcov.info
-        env:
-          RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=/usr/local/bin/mold"
       - name: Store coverage file artifact
         uses: actions/upload-artifact@v4
         with:
@@ -274,7 +275,7 @@ jobs:
         run: sccache --stop-server || true
 
   check-packages:
-    runs-on: [self-hosted, 8vcpu-16ram-ubuntu22-namada-x86]
+    runs-on: [namada-runners-ubuntu]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     timeout-minutes: 15
@@ -300,8 +301,6 @@ jobs:
         run: sccache --start-server
       - name: Check crates build with default features
         run: make check-crates
-        env:
-          RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=/usr/local/bin/mold"
       - name: Clean cargo cache
         if: steps.cache.outputs.cache-hit != 'true'
         run: cargo cache --autoclean-expensive
@@ -310,7 +309,7 @@ jobs:
         run: sccache --stop-server || true
 
   test-integration:
-    runs-on: [self-hosted, 16vcpu-32ram-ubuntu22-namada-x86]
+    runs-on: [namada-runners-ubuntu]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     timeout-minutes: 120
@@ -348,8 +347,6 @@ jobs:
       - name: Run integration tests with coverage
         run: make test-integration-with-coverage
         # run: cargo +${{ env.NIGHTLY }} nextest run -E 'test(integration)' --test-threads 1 --no-fail-fast
-        env:
-          RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=/usr/local/bin/mold"
       - name: Store coverage file artifact
         uses: actions/upload-artifact@v4
         with:
@@ -363,7 +360,7 @@ jobs:
         run: sccache --stop-server || true
 
   check-benchmarks:
-    runs-on: [self-hosted, 16vcpu-32ram-ubuntu22-namada-x86]
+    runs-on: [namada-runners-ubuntu]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     if: github.event.pull_request.draft == false || contains(github.head_ref, 'mergify/merge-queue') || contains(github.ref_name, 'mergify/merge-queue')
@@ -401,8 +398,6 @@ jobs:
           path: wasm_for_tests
       - name: Run benchmarks tests
         run: make test-benches
-        env:
-          RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=/usr/local/bin/mold"
       - name: Clean cargo cache
         if: steps.cache.outputs.cache-hit != 'true'
         run: cargo cache --autoclean-expensive
@@ -411,7 +406,7 @@ jobs:
         run: sccache --stop-server || true
 
   build-binaries:
-    runs-on: [self-hosted, 16vcpu-32ram-ubuntu22-namada-x86]
+    runs-on: [namada-runners-ubuntu]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     timeout-minutes: 25
@@ -462,7 +457,7 @@ jobs:
         run: sccache --stop-server || true
 
   test-e2e:
-    runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
+    runs-on: [namada-runners-ubuntu-larger]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     if: github.event.pull_request.draft == false || contains(github.head_ref, 'mergify/merge-queue') || contains(github.ref_name, 'mergify/merge-queue')
@@ -594,6 +589,8 @@ jobs:
 
     env:
       RUSTC_WRAPPER: ""
+      # Runs outside the CI container, where mold and clang are not installed
+      RUSTFLAGS: ""
 
     steps:
       - name: Checkout repo
@@ -633,7 +630,7 @@ jobs:
           make cpp_test
 
   test-e2e-with-device-automation:
-    runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
+    runs-on: [namada-runners-ubuntu]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     if: github.event.pull_request.draft == false || contains(github.head_ref, 'mergify/merge-queue') || contains(github.ref_name, 'mergify/merge-queue')
@@ -727,7 +724,7 @@ jobs:
         run: sccache --stop-server || true
 
   check-sdk-licenses:
-    runs-on: [self-hosted, 4vcpu-8ram-ubuntu22-namada-x86]
+    runs-on: [namada-runners-ubuntu]
     container:
       image: ghcr.io/heliaxdev/namada-ci:namada-v2.3.0
     timeout-minutes: 5

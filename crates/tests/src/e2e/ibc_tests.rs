@@ -965,8 +965,14 @@ fn ibc_token_inflation() -> Result<()> {
     let hermes = run_hermes(&hermes_dir)?;
     let _bg_hermes = hermes.background();
 
-    // wait for the grace
-    let grace_epoch = start_epoch + 6u64;
+    // Wait for the grace epoch, when the proposal is activated and the IBC
+    // token is added to the MASP token map, plus one more MASP epoch. The
+    // conversions for the token are only published at the MASP epoch that
+    // follows its registration, and the client undates any note whose dated
+    // asset type it cannot decode (see `get_asset_type`). An undated note is
+    // excluded from the rewardable balance forever, so shielding before the
+    // conversions exist would yield no inflation at all.
+    let grace_epoch = start_epoch + 6u64 + MASP_EPOCH_MULTIPLIER;
     while epoch < grace_epoch {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }

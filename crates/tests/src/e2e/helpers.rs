@@ -334,15 +334,32 @@ pub fn wait_for_block_height(
     let start = Instant::now();
     let loop_timeout = Duration::new(timeout_secs, 0);
     loop {
-        let current = get_height(test, ledger_address)?;
-        if current >= height {
-            break Ok(());
-        }
-        #[allow(clippy::disallowed_methods)]
-        if Instant::now().duration_since(start) > loop_timeout {
-            return Err(eyre!(
-                "Timed out waiting for height {height}, current {current}"
-            ));
+        // Right after the node is started its RPC may not be serving yet, in
+        // which case the client exits without reporting a height. Treat that
+        // as "not ready" and keep polling until the timeout elapses.
+        let current = match get_height(test, ledger_address) {
+            Ok(current) => Some(current),
+            Err(err) => {
+                #[allow(clippy::disallowed_methods)]
+                if Instant::now().duration_since(start) > loop_timeout {
+                    return Err(eyre!(
+                        "Timed out waiting for height {height}, the last \
+                         query failed with: {err}"
+                    ));
+                }
+                None
+            }
+        };
+        if let Some(current) = current {
+            if current >= height {
+                break Ok(());
+            }
+            #[allow(clippy::disallowed_methods)]
+            if Instant::now().duration_since(start) > loop_timeout {
+                return Err(eyre!(
+                    "Timed out waiting for height {height}, current {current}"
+                ));
+            }
         }
         sleep(1);
     }

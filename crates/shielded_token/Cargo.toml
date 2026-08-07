@@ -30,13 +30,15 @@ testing = [
 ]
 download-params = ["masp_proofs/download-params"]
 masp = [
+  "masp_proofs",
   "namada_io",
   "namada_wallet",
   "namada_core/control_flow",
   "namada_core/task_env",
   "flume",
 ]
-historic = ["masp"]
+historic = ["masp", "masp-validation"]
+masp-validation = ["masp_proofs"]
 
 [dependencies]
 namada_account.workspace = true
@@ -64,7 +66,7 @@ itertools.workspace = true
 lazy_static.workspace = true
 linkme = { workspace = true, optional = true }
 masp_primitives.workspace = true
-masp_proofs.workspace = true
+masp_proofs = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
 rand_core.workspace = true
 rand.workspace = true

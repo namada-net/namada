@@ -34,6 +34,7 @@ pub use namada_trans_token::*;
 pub mod tx;
 
 /// Validity predicates
+#[cfg(feature = "masp-validation")]
 pub mod vp {
     pub use namada_shielded_token::vp::MaspVp;
     // The error and result type are the same as in `namada_trans_token` -

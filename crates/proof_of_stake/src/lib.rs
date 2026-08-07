@@ -2914,6 +2914,46 @@ where
     Ok(res)
 }
 
+/// Query the  validator's reward product for a given epoch.
+pub fn query_validator_rewards_products<S, Gov>(
+    storage: &S,
+    validator: &Address,
+    epoch: Option<Epoch>,
+) -> Result<Vec<(Epoch, Dec)>>
+where
+    S: StorageRead,
+    Gov: governance::Read<S>,
+{
+    let rewards_products = validator_rewards_products_handle(validator);
+    // Query for a specific epoch or all epochs
+    let result = if let Some(epoch) = epoch {
+        tracing::debug!("Querying rewards product for epoch {:?}", epoch);
+        rewards_products
+            .get(storage, &epoch)?
+            .map(|product| vec![(epoch, product)])
+            .unwrap_or_else(|| {
+                tracing::debug!(
+                    "No rewards product found for epoch {:?}",
+                    epoch
+                );
+                vec![]
+            })
+    } else {
+        tracing::debug!("Querying rewards products for all epochs");
+        rewards_products
+            .iter(storage)?
+            .filter_map(|res| match res {
+                Ok((epoch, product)) => Some(Ok((epoch, product))),
+                Err(e) => {
+                    tracing::error!("Failed to read rewards product: {:?}", e);
+                    None
+                }
+            })
+            .collect::<Result<Vec<_>>>()?
+    };
+    Ok(result)
+}
+
 /// Jail a validator by removing it from and updating the validator sets and
 /// changing a its state to `Jailed`. Validators are jailed for liveness and for
 /// misbehaving.

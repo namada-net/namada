@@ -7,6 +7,7 @@ use namada_core::address::Address;
 use namada_core::arith::{self, checked};
 use namada_core::chain::Epoch;
 use namada_core::collections::{HashMap, HashSet};
+use namada_core::dec::Dec;
 use namada_core::key::{common, tm_consensus_key_raw_hash};
 use namada_core::token;
 use namada_proof_of_stake::parameters::PosParams;
@@ -34,7 +35,9 @@ use namada_proof_of_stake::types::{
     LivenessInfo, Slash, ValidatorLiveness, ValidatorMetaData,
     WeightedValidator,
 };
-use namada_proof_of_stake::{bond_amount, query_reward_tokens};
+use namada_proof_of_stake::{
+    bond_amount, query_reward_tokens, query_validator_rewards_products,
+};
 use namada_state::{DB, DBIter, KeySeg, StorageHasher, StorageRead};
 use namada_storage::collections::lazy_map;
 use namada_storage::{OptionExt, ResultExt};
@@ -104,6 +107,9 @@ router! {POS,
 
     ( "bond" / [source: Address] / [validator: Address] / [epoch: opt Epoch] )
         -> token::Amount = bond,
+
+    ( "rewards_products" / [validator: Address] / [epoch: opt Epoch])
+    -> Vec<(Epoch, Dec)> = rewards_products,
 
     ( "rewards" / [validator: Address] / [source: opt Address] / [epoch: opt Epoch] )
         -> token::Amount = rewards,
@@ -584,6 +590,20 @@ where
         }
     }
     Ok(total)
+}
+
+fn rewards_products<D, H, V, T>(
+    ctx: RequestCtx<'_, D, H, V, T>,
+    validator: Address,
+    epoch: Option<Epoch>,
+) -> namada_storage::Result<Vec<(Epoch, Dec)>>
+where
+    D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
+    H: 'static + StorageHasher + Sync,
+{
+    query_validator_rewards_products::<_, governance::Store<_>>(
+        ctx.state, &validator, epoch,
+    )
 }
 
 fn rewards<D, H, V, T>(

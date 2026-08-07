@@ -2087,9 +2087,9 @@ checksum = "04cbf5b083de1c7e0222a7a51dbfdba1cbe1c6ab0b15e29fff3f6c077fd9cd9f"
 
 [[package]]
 name = "masp_note_encryption"
-version = "3.0.9"
+version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a127537c9cb25c537abdc6d6927b2b54b29b3d942cf0d0927d6c51139cc4337"
+checksum = "1fdf01c62897570d2193388302f2a9cdcc5063dbdd64f6488192d06161204f33"
 dependencies = [
  "borsh",
  "chacha20",
@@ -2102,9 +2102,9 @@ dependencies = [
 
 [[package]]
 name = "masp_primitives"
-version = "3.0.9"
+version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d42eeaf78c1272970751c7ed9c678694f3ac815afae75abedfeda8a055e646d8"
+checksum = "461a9604dc0c7b6a107c0ed4439cc5a1150afcfd9f14677ddef1591877975641"
 dependencies = [
  "aes",
  "bip0039",
@@ -3031,7 +3031,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
  "heck",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "log",
  "multimap",
  "once_cell",
@@ -3051,7 +3051,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.98",

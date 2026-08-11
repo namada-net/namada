@@ -30,8 +30,9 @@ use ibc::core::router::types::module::{ModuleExtras, ModuleId};
 use ibc::primitives::Signer;
 use namada_core::address::Address;
 
-use super::common::IbcCommonContext;
 use super::token_transfer::TokenTransferContext;
+use crate::context::common::IbcCommonContext;
+use crate::context::storage::IbcStorageContext;
 
 /// IBC module wrapper for getting the reference of the module
 pub trait ModuleWrapper: Module {
@@ -50,15 +51,16 @@ pub trait ModuleWrapper: Module {
 
 /// IBC module for token transfer
 #[derive(Debug)]
-pub struct TransferModule<C>
+pub struct TransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
 {
     /// IBC actions
-    pub ctx: TokenTransferContext<C>,
+    pub ctx: TokenTransferContext<C, Params, Token, ShieldedToken>,
 }
 
-impl<C> TransferModule<C>
+impl<C, Params, Token, ShieldedToken>
+    TransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
 {
@@ -73,9 +75,16 @@ where
     }
 }
 
-impl<C> ModuleWrapper for TransferModule<C>
+impl<C, Params, Token, ShieldedToken> ModuleWrapper
+    for TransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
+    ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
+        + Debug,
 {
     fn as_module(&self) -> &dyn Module {
         self
@@ -94,9 +103,16 @@ where
     }
 }
 
-impl<C> Module for TransferModule<C>
+impl<C, Params, Token, ShieldedToken> Module
+    for TransferModule<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext + Debug,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>
+        + Debug,
+    ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>
+        + Debug,
 {
     #[allow(clippy::too_many_arguments)]
     fn on_chan_open_init_validate(

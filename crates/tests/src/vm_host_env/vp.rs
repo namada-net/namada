@@ -6,9 +6,9 @@ use namada_sdk::gas::{TxGasMeter, VpGasMeter};
 use namada_sdk::state::mockdb::MockDB;
 use namada_sdk::state::prefix_iter::PrefixIterators;
 use namada_sdk::state::testing::TestState;
-use namada_sdk::storage::{self, Key, TxIndex};
-use namada_sdk::tx::Tx;
+use namada_sdk::storage::{self, Key};
 use namada_sdk::tx::data::TxType;
+use namada_sdk::tx::{IndexedTx, Tx};
 use namada_tx_prelude::BatchedTx;
 use namada_vm::WasmCacheRwAccess;
 use namada_vm::host_env::gas_meter::GasMeter;
@@ -47,7 +47,7 @@ pub struct TestVpEnv {
     pub iterators: PrefixIterators<'static, MockDB>,
     pub gas_meter: RefCell<GasMeter<VpGasMeter>>,
     pub batched_tx: BatchedTx,
-    pub tx_index: TxIndex,
+    pub indexed_tx: IndexedTx,
     pub keys_changed: BTreeSet<storage::Key>,
     pub verifiers: BTreeSet<Address>,
     pub eval_runner: native_vp_host_env::VpEval,
@@ -80,7 +80,7 @@ impl Default for TestVpEnv {
                 )),
             )),
             batched_tx,
-            tx_index: TxIndex::default(),
+            indexed_tx: IndexedTx::default(),
             keys_changed: BTreeSet::default(),
             verifiers: BTreeSet::default(),
             eval_runner,
@@ -237,7 +237,7 @@ mod native_vp_host_env {
                                 iterators,
                                 gas_meter,
                                 batched_tx,
-                                tx_index,
+                                indexed_tx,
                                 keys_changed,
                                 verifiers,
                                 eval_runner,
@@ -254,7 +254,7 @@ mod native_vp_host_env {
                                 gas_meter,
                                 &batched_tx.tx,
                                 &batched_tx.cmt,
-                                tx_index,
+                                indexed_tx,
                                 verifiers,
                                 result_buffer,
                                 yielded_value,
@@ -282,7 +282,7 @@ mod native_vp_host_env {
                                 iterators,
                                 gas_meter,
                                 batched_tx,
-                                tx_index,
+                                indexed_tx,
                                 keys_changed,
                                 verifiers,
                                 eval_runner,
@@ -299,7 +299,7 @@ mod native_vp_host_env {
                                 gas_meter,
                                 &batched_tx.tx,
                                 &batched_tx.cmt,
-                                tx_index,
+                                indexed_tx,
                                 verifiers,
                                 result_buffer,
                                 yielded_value,

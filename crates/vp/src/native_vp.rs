@@ -12,7 +12,7 @@ use namada_core::borsh::BorshDeserialize;
 use namada_core::chain::{ChainId, Epochs};
 use namada_gas::{Gas, GasMeterKind, GasMetering, VpGasMeter};
 use namada_state::{ConversionState, ReadConversionState};
-use namada_tx::{BatchedTxRef, Tx, TxCommitments};
+use namada_tx::{BatchedTxRef, IndexedTx, Tx, TxCommitments};
 
 use super::vp_host_fns;
 use crate::state::prefix_iter::PrefixIterators;
@@ -58,7 +58,7 @@ where
     pub cmt: &'a TxCommitments,
     /// The transaction index is used to obtain the shielded transaction's
     /// parent
-    pub tx_index: &'a TxIndex,
+    pub indexed_tx: &'a IndexedTx,
     /// The storage keys that have been changed. Used for calls to `eval`.
     pub keys_changed: &'a BTreeSet<Key>,
     /// The verifiers whose validity predicates should be triggered. Used for
@@ -124,7 +124,7 @@ where
         state: &'a S,
         tx: &'a Tx,
         cmt: &'a TxCommitments,
-        tx_index: &'a TxIndex,
+        indexed_tx: &'a IndexedTx,
         gas_meter: &'a RefCell<VpGasMeter>,
         keys_changed: &'a BTreeSet<Key>,
         verifiers: &'a BTreeSet<Address>,
@@ -138,7 +138,7 @@ where
             gas_meter,
             tx,
             cmt,
-            tx_index,
+            indexed_tx,
             keys_changed,
             verifiers,
             vp_wasm_cache,
@@ -229,8 +229,14 @@ where
         self.ctx.get_block_epoch()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex> {
-        self.ctx.get_tx_index().into_storage_result()
+    fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)> {
+        self.ctx.get_tx_index().into_storage_result().map(
+            |IndexedTx {
+                 block_height,
+                 block_index,
+                 batch_index,
+             }| (block_height, block_index, batch_index),
+        )
     }
 
     fn get_native_token(&self) -> Result<Address> {
@@ -307,8 +313,14 @@ where
         self.ctx.get_block_epoch()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex> {
-        self.ctx.get_tx_index().into_storage_result()
+    fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)> {
+        self.ctx.get_tx_index().into_storage_result().map(
+            |IndexedTx {
+                 block_height,
+                 block_index,
+                 batch_index,
+             }| (block_height, block_index, batch_index),
+        )
     }
 
     fn get_native_token(&self) -> Result<Address> {
@@ -378,8 +390,8 @@ where
             .into_storage_result()
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex> {
-        vp_host_fns::get_tx_index(self.gas_meter, self.tx_index)
+    fn get_tx_index(&self) -> Result<IndexedTx> {
+        vp_host_fns::get_tx_index(self.gas_meter, self.indexed_tx)
             .into_storage_result()
     }
 

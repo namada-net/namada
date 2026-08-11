@@ -142,7 +142,7 @@ where
             .map(|(tx_index, tx_bytes)| {
                 let result = self.check_proposal_tx(
                     tx_bytes,
-                    &TxIndex::must_from_usize(tx_index),
+                    TxIndex::must_from_usize(tx_index),
                     &mut metadata,
                     &mut temp_state,
                     block_time,
@@ -194,7 +194,7 @@ where
     pub fn check_proposal_tx<CA>(
         &self,
         tx_bytes: &[u8],
-        tx_index: &TxIndex,
+        tx_index: TxIndex,
         metadata: &mut ValidationMeta,
         temp_state: &mut TempWlState<'static, D, H>,
         block_time: DateTimeUtc,
@@ -534,6 +534,7 @@ where
                     &wrapper,
                     &tx,
                     tx_index,
+                    self.get_current_decision_height(),
                     block_proposer,
                     &mut ShellParams::new(
                         &RefCell::new(tx_gas_meter),
@@ -567,7 +568,8 @@ where
 fn process_proposal_fee_check<D, H, CA>(
     wrapper: &WrapperTx,
     tx: &Tx,
-    tx_index: &TxIndex,
+    tx_index: TxIndex,
+    height: BlockHeight,
     proposer: &Address,
     shell_params: &mut ShellParams<'_, TempWlState<'static, D, H>, D, H, CA>,
 ) -> ShellResult<()>
@@ -586,8 +588,15 @@ where
 
     fee_data_check(wrapper, minimum_gas_price, shell_params)?;
 
-    protocol::transfer_fee(shell_params, proposer, tx, wrapper, tx_index)
-        .map_or_else(|e| Err(Error::TxApply(e)), |_| Ok(()))
+    protocol::transfer_fee(
+        shell_params,
+        proposer,
+        tx,
+        wrapper,
+        tx_index,
+        height,
+    )
+    .map_or_else(|e| Err(Error::TxApply(e)), |_| Ok(()))
 }
 
 /// We test the failure cases of [`process_proposal`]. The happy flows

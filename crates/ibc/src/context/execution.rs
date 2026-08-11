@@ -253,10 +253,12 @@ where
     }
 
     fn emit_ibc_event(&mut self, event: IbcEvent) -> Result<(), HostError> {
-        let event = event.try_into().expect("The event should be converted");
+        let event: crate::event::IbcEvent =
+            event.try_into().expect("The event should be converted");
+
         self.inner
             .borrow_mut()
-            .emit_ibc_event(event)
+            .emit_event(event.into())
             .map_err(HostError::from)
     }
 

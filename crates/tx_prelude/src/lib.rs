@@ -50,7 +50,9 @@ pub use namada_state::{
     collections, iter_prefix, iter_prefix_bytes,
 };
 use namada_token::MaspTransaction;
-pub use namada_tx::{BatchedTx, Section, Tx, action, data as transaction};
+pub use namada_tx::{
+    BatchedTx, IndexedTx, Section, Tx, action, data as transaction,
+};
 pub use namada_tx_env::TxEnv;
 use namada_vm_env::tx::*;
 use namada_vm_env::{read_from_buffer, read_key_val_bytes_from_buffer};
@@ -240,9 +242,19 @@ impl StorageRead for Ctx {
         ))
     }
 
-    fn get_tx_index(&self) -> Result<TxIndex> {
-        let tx_index = unsafe { namada_tx_get_tx_index() };
-        Ok(TxIndex(tx_index))
+    fn get_tx_index(&self) -> Result<(BlockHeight, TxIndex, Option<u32>)> {
+        // NOTE: the conversion to i64 is infallible
+        let read_result = unsafe { namada_tx_get_tx_index() } as i64;
+        let bytes = read_from_buffer(read_result, namada_tx_result_buffer)
+            .ok_or(Error::SimpleMessage(
+                "Missing result from `namada_tx_get_tx_index` call",
+            ))?;
+        let IndexedTx {
+            block_height,
+            block_index,
+            batch_index,
+        } = namada_core::decode(bytes).expect("Cannot decode tx index");
+        Ok((block_height, block_index, batch_index))
     }
 }
 

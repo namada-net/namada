@@ -5,7 +5,9 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use namada_core::address::Address;
+use namada_core::masp_primitives::asset_type::AssetType;
 use namada_core::token::Amount;
+use namada_events::Event;
 use namada_ibc::context::middlewares::create_transfer_middlewares;
 pub use namada_ibc::event::{IbcEvent, IbcEventType};
 pub use namada_ibc::storage::{
@@ -18,6 +20,7 @@ pub use namada_ibc::{
     IbcActions, IbcCommonContext, IbcStorageContext, NftTransferModule,
     ProofSpec, TransferModule,
 };
+use namada_state::in_mem_virtual_storage;
 use namada_tx_env::TxEnv;
 
 use crate::{Ctx, Result, parameters, token};
@@ -27,14 +30,22 @@ use crate::{Ctx, Result, parameters, token};
 /// execution.
 pub fn ibc_actions(
     ctx: &mut Ctx,
-) -> IbcActions<'_, Ctx, crate::parameters::Store<Ctx>, token::Store<Ctx>> {
+) -> IbcActions<
+    '_,
+    Ctx,
+    crate::parameters::Store<Ctx>,
+    token::Store<Ctx>,
+    token::ShieldedStore<Ctx>,
+> {
     let ctx = Rc::new(RefCell::new(ctx.clone()));
     let verifiers = Rc::new(RefCell::new(BTreeSet::<Address>::new()));
     let mut actions = IbcActions::new(ctx.clone(), verifiers.clone());
-    let module = create_transfer_middlewares::<_, parameters::Store<Ctx>>(
-        ctx.clone(),
-        verifiers,
-    );
+    let module = create_transfer_middlewares::<
+        _,
+        parameters::Store<Ctx>,
+        token::Store<Ctx>,
+        token::ShieldedStore<Ctx>,
+    >(ctx.clone(), verifiers);
     actions.add_transfer_module(module);
     let module = NftTransferModule::<Ctx, token::Store<Ctx>>::new(ctx);
     actions.add_transfer_module(module);
@@ -56,7 +67,13 @@ impl IbcStorageContext for Ctx {
         super::log_string(message);
     }
 
-    fn emit_ibc_event(&mut self, event: IbcEvent) -> Result<()> {
+    fn has_conversion(&self, asset_type: &AssetType) -> Result<bool> {
+        Ok(self
+            .read_temp(&in_mem_virtual_storage::has_conversion_key(asset_type))?
+            .unwrap_or_default())
+    }
+
+    fn emit_event(&mut self, event: Event) -> Result<()> {
         <Ctx as TxEnv>::emit_event(self, event)
     }
 

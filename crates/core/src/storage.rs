@@ -55,7 +55,7 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// The length of the transaction index
-pub const TX_INDEX_LENGTH: usize = 4;
+pub const TX_INDEX_LENGTH: usize = 8 + 4 + 1 + 4;
 /// The length of the epoch type
 pub const EPOCH_TYPE_LENGTH: usize = 8;
 

@@ -2,12 +2,14 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Display;
+use std::io::{Read, Write};
 use std::num::ParseIntError;
 use std::str::FromStr;
 
 use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
+use data_encoding::HEXUPPER;
 use masp_primitives::asset_type::AssetType;
-use masp_primitives::sapling::ViewingKey;
+use masp_primitives::sapling::{Diversifier, Note, ViewingKey};
 use masp_primitives::transaction::TransparentAddress;
 pub use masp_primitives::transaction::{
     Transaction as MaspTransaction, TxId as TxIdInner,
@@ -554,6 +556,39 @@ impl PaymentAddress {
         // hex of the first 40 chars of the hash
         format!("{:.width$X}", hasher.finalize(), width = HASH_HEX_LEN)
     }
+
+    /// Encode a payment address in compatibility mode (i.e. with the legacy
+    /// Bech32 encoding)
+    pub fn encode_compat(&self) -> String {
+        use crate::string_encoding::Format;
+
+        bech32::encode::<bech32::Bech32>(Self::HRP, self.to_bytes().as_ref())
+            .unwrap_or_else(|_| {
+                panic!(
+                    "The human-readable part {} should never cause a failure",
+                    Self::HRP
+                )
+            })
+    }
+
+    /// Create a note owned by this payment address
+    ///
+    /// ## Caution
+    ///
+    /// The value of `rseed` must be unique between each note appended
+    /// to the commitment tree, in order to avoid nullifier collisions,
+    /// when generating notes deterministically.
+    pub fn create_note(
+        &self,
+        asset_type: AssetType,
+        value: u64,
+        rseed: [u8; 32],
+    ) -> Option<masp_primitives::sapling::Note> {
+        use masp_primitives::sapling::Rseed;
+
+        self.0
+            .create_note(asset_type, value, Rseed::AfterZip212(rseed))
+    }
 }
 
 impl From<PaymentAddress> for masp_primitives::sapling::PaymentAddress {
@@ -953,10 +988,278 @@ impl FromStr for MaspValue {
     }
 }
 
+/// Compact representation of a [`Note`].
+#[derive(Debug, Clone, Copy, BorshSerialize, BorshDeserialize)]
+#[allow(missing_docs)]
+pub struct CompactNote {
+    pub asset_type: AssetType,
+    pub value: u64,
+    pub diversifier: Diversifier,
+    #[borsh(
+        serialize_with = "compact_note_pk_d_borsh::serialize",
+        deserialize_with = "compact_note_pk_d_borsh::deserialize"
+    )]
+    pub pk_d: masp_primitives::jubjub::SubgroupPoint,
+    pub rseed: masp_primitives::sapling::Rseed,
+}
+
+mod compact_note_pk_d_borsh {
+    #![allow(missing_docs)]
+
+    use group::GroupEncoding;
+
+    use super::*;
+
+    pub fn serialize<W: Write>(
+        pk_d: &masp_primitives::jubjub::SubgroupPoint,
+        writer: &mut W,
+    ) -> std::io::Result<()> {
+        BorshSerialize::serialize(&pk_d.to_bytes(), writer)
+    }
+
+    pub fn deserialize<R: Read>(
+        reader: &mut R,
+    ) -> std::io::Result<masp_primitives::jubjub::SubgroupPoint> {
+        masp_primitives::jubjub::SubgroupPoint::from_bytes(
+            &<[u8; 32] as BorshDeserialize>::deserialize_reader(reader)?,
+        )
+        .into_option()
+        .ok_or_else(|| std::io::Error::other("Invalid pk_d in CompactNote"))
+    }
+}
+
+impl serde::Serialize for CompactNote {
+    fn serialize<S>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let encoded = HEXUPPER.encode(&self.serialize_to_vec());
+        serde::Serialize::serialize(&encoded, serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for CompactNote {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let encoded: String = serde::Deserialize::deserialize(deserializer)?;
+
+        let borsh_bytes =
+            HEXUPPER.decode(encoded.as_bytes()).map_err(Error::custom)?;
+
+        <Self as BorshDeserialize>::try_from_slice(&borsh_bytes)
+            .map_err(Error::custom)
+    }
+}
+
+impl CompactNote {
+    /// Create a compact version of a [`Note`].
+    pub fn new(
+        note: Note,
+        pa: masp_primitives::sapling::PaymentAddress,
+    ) -> Option<Self> {
+        let g_d = pa.g_d()?;
+        let pk_d = *pa.pk_d();
+
+        if g_d != note.g_d || pk_d != note.pk_d {
+            return None;
+        }
+
+        let diversifier = *pa.diversifier();
+        let Note {
+            asset_type,
+            value,
+            pk_d,
+            rseed,
+            ..
+        } = note;
+
+        Some(Self {
+            asset_type,
+            value,
+            diversifier,
+            pk_d,
+            rseed,
+        })
+    }
+
+    /// Convert this [`CompactNote`] back into a [`Note`].
+    pub fn into_note(self) -> Option<Note> {
+        let g_d = self.diversifier.g_d()?;
+
+        let Self {
+            asset_type,
+            value,
+            pk_d,
+            rseed,
+            ..
+        } = self;
+
+        Some(Note {
+            asset_type,
+            value,
+            g_d,
+            pk_d,
+            rseed,
+        })
+    }
+
+    /// Extract a dummy [`MaspTransaction`], from unencrypted notes minted
+    /// by the protocol.
+    #[allow(clippy::result_large_err)]
+    pub fn extract_dummy_tx(
+        notes: &[Self],
+    ) -> std::io::Result<MaspTransaction> {
+        use group::GroupEncoding;
+        use masp_primitives::consensus::{BranchId, MainNetwork};
+        use masp_primitives::num_traits::CheckedSub;
+        use masp_primitives::sapling::note_encryption::sapling_note_encryption;
+        use masp_primitives::transaction::components::{
+            I128Sum, OutputDescription, sapling, transparent,
+        };
+        use masp_primitives::transaction::{TransactionData, TxVersion};
+
+        // dummy signature
+        let sig = [0u8; 64];
+
+        let (transparent_inputs, shielded_outputs, sapling_value_balance) =
+            notes.iter().try_fold(
+                (vec![], vec![], I128Sum::zero()),
+                |(mut t, mut s, mut bal), cnote| {
+                    const GROTH_PROOF_BYTES: usize = 48 + 96 + 48;
+
+                    let payment_addr =
+                        masp_primitives::sapling::PaymentAddress::from_parts(
+                            cnote.diversifier,
+                            cnote.pk_d,
+                        )
+                        .ok_or_else(|| std::io::Error::other("invalid payment address in CompactNote"))?;
+                    let note = cnote.into_note().unwrap();
+
+                    let note_ciphertexts = sapling_note_encryption::<MainNetwork>(
+                        None,
+                        note,
+                        payment_addr,
+                        masp_primitives::memo::MemoBytes::empty(),
+                    );
+
+                    t.push(transparent::TxIn {
+                        asset_type: note.asset_type,
+                        value: note.value,
+                        address: TAddrData::Addr(IBC).taddress(),
+                        transparent_sig: (),
+                    });
+
+                    s.push(OutputDescription {
+                        cv: Default::default(),
+                        cmu: note.cmu(),
+                        ephemeral_key: note_ciphertexts.epk().to_bytes().into(),
+                        enc_ciphertext: note_ciphertexts.encrypt_note_plaintext(),
+                        out_ciphertext: [0; 80],
+                        zkproof: [0u8; GROTH_PROOF_BYTES],
+                    });
+
+                    bal = bal.checked_sub(&I128Sum::from_pair(
+                        note.asset_type,
+                        note.value.into(),
+                    ))
+                    .ok_or_else(|| {
+                        std::io::Error::other(
+                            "underflow in CompactNote sapling balance computation",
+                        )
+                    })?;
+
+                    Ok::<_, std::io::Error>((t, s, bal))
+                },
+            )?;
+
+        let data = TransactionData::from_parts(
+            TxVersion::MASPv5,
+            BranchId::MASP,
+            // bogus values for these two heights
+            0,
+            0.into(),
+            // transparent bundle - here we have transparent inputs
+            Some(transparent::Bundle {
+                vin: transparent_inputs,
+                vout: vec![],
+                authorization: transparent::Authorized,
+            }),
+            // sapling bundle - here we have shielded outputs
+            Some(sapling::Bundle {
+                shielded_spends: vec![],
+                shielded_converts: vec![],
+                shielded_outputs,
+                value_balance: sapling_value_balance,
+                authorization: sapling::Authorized {
+                    binding_sig:
+                        masp_primitives::sapling::redjubjub::Signature::read(
+                            &mut sig.as_slice(),
+                        )
+                        .expect("reading the sig shouldn't fail"),
+                },
+            }),
+        );
+
+        data.freeze()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::address;
+
+    #[test]
+    fn test_trial_decrypt_protocol_shielding() {
+        use masp_primitives::consensus::MainNetwork;
+        use masp_primitives::sapling::note_encryption::{
+            PreparedIncomingViewingKey, try_sapling_note_decryption,
+        };
+        use masp_primitives::transaction::components::OutputDescription;
+        use masp_primitives::transaction::{Authorization, Authorized};
+
+        type Proof = OutputDescription<
+            <
+            <Authorized as Authorization>::SaplingAuth
+            as masp_primitives::transaction::components::sapling::Authorization
+            >::Proof
+        >;
+
+        let sk = ExtendedSpendingKey::from(
+            masp_primitives::zip32::ExtendedSpendingKey::master(&[0_u8]),
+        );
+        let vk = sk.to_viewing_key().as_viewing_key();
+        let (_, pa) = sk.0.default_address();
+
+        let cnote = CompactNote {
+            asset_type: AssetType::new(b"test").unwrap(),
+            value: 1234u64,
+            diversifier: *pa.diversifier(),
+            pk_d: *pa.pk_d(),
+            rseed: masp_primitives::sapling::Rseed::AfterZip212([0xff; 32]),
+        };
+
+        let dummy_tx = CompactNote::extract_dummy_tx(&[cnote]).unwrap();
+
+        for so in dummy_tx.sapling_bundle().unwrap().shielded_outputs.iter() {
+            assert!(
+                try_sapling_note_decryption::<_, Proof>(
+                    &MainNetwork,
+                    1.into(),
+                    &PreparedIncomingViewingKey::new(&vk.ivk()),
+                    so,
+                )
+                .is_some()
+            );
+        }
+    }
 
     #[test]
     fn test_extended_spending_key_serialize() {

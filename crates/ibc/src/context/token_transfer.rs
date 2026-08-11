@@ -1,7 +1,9 @@
 //! IBC token transfer context
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::marker::PhantomData;
 use std::rc::Rc;
 
 use ibc::apps::transfer::context::{
@@ -12,24 +14,31 @@ use ibc::core::host::types::error::HostError;
 use ibc::core::host::types::identifiers::{ChannelId, PortId};
 use ibc::core::primitives::Signer;
 use namada_core::address::{Address, InternalAddress, MASP};
-use namada_core::token::Amount;
+use namada_core::arith::{CheckedAdd, checked};
+use namada_core::masp::{AssetData, CompactNote, PaymentAddress};
+use namada_core::token::{Amount, MaspDigitPos};
 use namada_core::uint::Uint;
+use namada_tx::event::{MaspEvent, MaspEventKind, MaspTxRef};
 
 use super::common::IbcCommonContext;
-use crate::{IBC_ESCROW_ADDRESS, trace};
+use crate::context::storage::IbcStorageContext;
+use crate::storage::{load_shielding_counter, write_shielding_counter};
+use crate::{IBC_ESCROW_ADDRESS, IbcAccountId, trace};
 
 /// Token transfer context to handle tokens
 #[derive(Debug)]
-pub struct TokenTransferContext<C>
+pub struct TokenTransferContext<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
 {
     pub(crate) inner: Rc<RefCell<C>>,
     pub(crate) verifiers: Rc<RefCell<BTreeSet<Address>>>,
-    is_shielded: bool,
+    has_masp_tx: bool,
+    _marker: PhantomData<(Params, Token, ShieldedToken)>,
 }
 
-impl<C> TokenTransferContext<C>
+impl<C, Params, Token, ShieldedToken>
+    TokenTransferContext<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
 {
@@ -41,7 +50,8 @@ where
         Self {
             inner,
             verifiers,
-            is_shielded: false,
+            has_masp_tx: false,
+            _marker: PhantomData,
         }
     }
 
@@ -52,7 +62,7 @@ where
 
     /// Set to enable a shielded transfer
     pub fn enable_shielded_transfer(&mut self) {
-        self.is_shielded = true;
+        self.has_masp_tx = true;
     }
 
     fn validate_sent_coin(&self, coin: &PrefixedCoin) -> Result<(), HostError> {
@@ -130,7 +140,10 @@ where
                 .ok_or_else(|| HostError::Other {
                     description: "The per-epoch deposit overflowed".to_string(),
                 })?;
-        self.inner.borrow_mut().store_deposit(token, added_deposit)
+        self.inner
+            .borrow_mut()
+            .store_deposit(token, added_deposit)?;
+        Ok(())
     }
 
     /// Add the amount to the per-epoch withdraw of the token
@@ -170,34 +183,252 @@ where
             &ibc_denom,
         )
     }
+
+    fn validate_masp_withdraw(
+        &self,
+        from_account: &IbcAccountId,
+    ) -> Result<(), HostError> {
+        if from_account.is_shielded() && !self.has_masp_tx {
+            return Err(HostError::Other {
+                description: format!(
+                    "Set refund address {from_account} without including an \
+                     IBC unshielding MASP transaction"
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn maybe_store_masp_note_commitments(
+        &self,
+        to_account: &IbcAccountId,
+        token: &Address,
+        amount: &Amount,
+    ) -> Result<(), HostError>
+    where
+        Params:
+            namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+        Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>,
+        ShieldedToken: namada_systems::shielded_token::Write<
+                <C as IbcStorageContext>::Storage,
+            >,
+    {
+        if let IbcAccountId::Shielded(owner_pa) = to_account {
+            self.store_masp_note_commitments(owner_pa, token, amount)?;
+        }
+        Ok(())
+    }
+
+    fn store_masp_note_commitments(
+        &self,
+        owner_pa: &PaymentAddress,
+        token: &Address,
+        amount: &Amount,
+    ) -> Result<(), HostError>
+    where
+        Params:
+            namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+        Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>,
+        ShieldedToken: namada_systems::shielded_token::Write<
+                <C as IbcStorageContext>::Storage,
+            >,
+    {
+        use namada_events::extend::ComposeEvent;
+        use namada_state::StorageRead;
+        use namada_tx::event::ProtocolIbcShielding;
+
+        if amount.is_zero() {
+            return Ok(());
+        }
+
+        let mut notes = vec![];
+        let mut note_commitments = vec![];
+
+        let mut next_shielding_counter = load_shielding_counter(
+            self.inner.borrow().storage(),
+        )
+        .map_err(|err| HostError::Other {
+            description: format!(
+                "Failed to load IBC shielding counter from storage: {err}"
+            ),
+        })?;
+
+        let denom = Token::read_denom(self.inner.borrow().storage(), token)
+            .map_err(|err| HostError::Other {
+                description: format!(
+                    "Failed to read token denom of {token}: {err}"
+                ),
+            })?
+            .ok_or_else(|| HostError::Other {
+                description: format!("No token denom in storage for {token}"),
+            })?;
+
+        let epoched_asset = {
+            use namada_state::StorageRead;
+
+            let masp_epoch = {
+                let current_epoch =
+                    self.inner.borrow().storage().get_block_epoch()?;
+                Params::masp_epoch(
+                    self.inner.borrow().storage(),
+                    current_epoch,
+                )?
+            };
+            let asset = AssetData {
+                token: token.clone(),
+                denom,
+                // NB: assume there are conversions for all
+                // other digit positions
+                position: MaspDigitPos::Zero,
+                epoch: Some(masp_epoch),
+            };
+            let asset_type = asset.encode().map_err(|_| HostError::Other {
+                description: format!(
+                    "Failed to create asset type of IBC shielding: {asset:?}"
+                ),
+            })?;
+
+            // NB: attribute an epoch to the asset so that
+            // it can earn rewards, assuming it has conversions
+            // in the conversion state at the current masp epoch
+            self.inner
+                .borrow()
+                .has_conversion(&asset_type)?
+                .then_some(masp_epoch)
+        };
+
+        for (digit, note_value) in MaspDigitPos::iter()
+            .zip(amount.iter_words())
+            .filter(|(_, word)| *word != 0u64)
+        {
+            let asset = AssetData {
+                token: token.clone(),
+                denom,
+                position: digit,
+                epoch: epoched_asset,
+            };
+            let asset_type = asset.encode().map_err(|_| HostError::Other {
+                description: format!(
+                    "Failed to create asset type of IBC shielding: {asset:?}"
+                ),
+            })?;
+
+            let rseed = namada_core::hash::Hash::sha256(format!(
+                "Namada IBC shielding {next_shielding_counter}"
+            ))
+            .0;
+
+            checked!(next_shielding_counter += 1).map_err(|_err| {
+                HostError::Other {
+                    description: "Arithmetic overflow in IBC shielding \
+                                  counter increment"
+                        .to_string(),
+                }
+            })?;
+
+            let note = owner_pa
+                .create_note(asset_type, note_value, rseed)
+                .ok_or_else(|| HostError::Other {
+                    description: format!(
+                        "Invalid payment address used to mint note: {owner_pa}"
+                    ),
+                })?;
+
+            note_commitments.push(note.commitment());
+            notes.push(
+                CompactNote::new(note, (*owner_pa).into())
+                    .expect("The payment address has already been validated"),
+            );
+        }
+
+        write_shielding_counter(
+            self.inner.borrow_mut().storage_mut(),
+            next_shielding_counter,
+        )
+        .map_err(|err| HostError::Other {
+            description: format!(
+                "Failed to write IBC shielding counter to storage: {err}"
+            ),
+        })?;
+
+        let tx_index = self
+            .inner
+            .borrow()
+            .storage()
+            .get_tx_index()
+            .map_err(|err| HostError::Other {
+                description: format!("Failed to read tx index: {err}"),
+            })?
+            .into();
+        self.inner.borrow_mut().emit_event(
+            MaspEvent {
+                tx_index,
+                kind: MaspEventKind::Transfer,
+                data: MaspTxRef::Unencrypted(notes),
+            }
+            .with(ProtocolIbcShielding)
+            .into(),
+        )?;
+
+        // update the undated asset balance
+        if epoched_asset.is_none() {
+            let current_amount = ShieldedToken::read_undated_balance(
+                self.inner.borrow().storage(),
+                token,
+            )
+            .map_err(|err| HostError::Other {
+                description: format!(
+                    "Failed to read undated asset balance of {token}: {err}"
+                ),
+            })?;
+
+            ShieldedToken::write_undated_balance(
+                self.inner.borrow_mut().storage_mut(),
+                token,
+                current_amount.checked_add(*amount).ok_or_else(|| {
+                    HostError::Other {
+                        description: format!(
+                            "Arithmetic overflow in IBC shielding undated \
+                             asset balance increment of {token}",
+                        ),
+                    }
+                })?,
+            )
+            .map_err(|err| HostError::Other {
+                description: format!(
+                    "Failed to write undated asset balance of {token}: {err}"
+                ),
+            })?;
+        }
+
+        ShieldedToken::update_commitment_tree(
+            self.inner.borrow_mut().storage_mut(),
+            note_commitments,
+        )
+        .map_err(HostError::from)
+    }
 }
 
-impl<C> TokenTransferValidationContext for TokenTransferContext<C>
+impl<C, Params, Token, ShieldedToken> TokenTransferValidationContext
+    for TokenTransferContext<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
 {
-    type AccountId = Address;
+    type AccountId = IbcAccountId;
 
     fn sender_account(
         &self,
         signer: &Signer,
     ) -> Result<Self::AccountId, HostError> {
-        Address::decode(signer.as_ref()).map_err(|e| HostError::Other {
-            description: format!(
-                "Decoding the signer failed: {signer}, error {e}"
-            ),
-        })
+        signer.as_ref().parse()
     }
 
     fn receiver_account(
         &self,
         signer: &Signer,
     ) -> Result<Self::AccountId, HostError> {
-        Address::try_from(signer).map_err(|e| HostError::Other {
-            description: format!(
-                "Decoding the signer failed: {signer}, error {e}"
-            ),
-        })
+        signer.as_ref().parse()
     }
 
     fn get_port(&self) -> Result<PortId, HostError> {
@@ -263,9 +494,13 @@ where
     }
 }
 
-impl<C> TokenTransferExecutionContext for TokenTransferContext<C>
+impl<C, Params, Token, ShieldedToken> TokenTransferExecutionContext
+    for TokenTransferContext<C, Params, Token, ShieldedToken>
 where
     C: IbcCommonContext,
+    Params: namada_systems::parameters::Read<<C as IbcStorageContext>::Storage>,
+    ShieldedToken: namada_systems::shielded_token::Write<<C as IbcStorageContext>::Storage>,
+    Token: namada_systems::trans_token::Read<<C as IbcStorageContext>::Storage>,
 {
     fn escrow_coins_execute(
         &mut self,
@@ -277,6 +512,7 @@ where
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
+        self.validate_masp_withdraw(from_account)?;
         self.add_withdraw(&ibc_token, amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
@@ -286,16 +522,16 @@ where
             self.insert_verifier(&ibc_token);
         }
 
-        let from_account = if self.is_shielded {
-            &MASP
+        let from_account = if self.has_masp_tx {
+            Cow::Owned(MASP)
         } else {
-            from_account
+            from_account.to_address()
         };
 
         self.inner
             .borrow_mut()
             .transfer_token(
-                from_account,
+                &from_account,
                 &IBC_ESCROW_ADDRESS,
                 &ibc_token,
                 amount,
@@ -313,10 +549,18 @@ where
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
         self.add_deposit(&ibc_token, amount)?;
+        self.maybe_store_masp_note_commitments(
+            to_account, &ibc_token, &amount,
+        )?;
 
         self.inner
             .borrow_mut()
-            .transfer_token(&IBC_ESCROW_ADDRESS, to_account, &ibc_token, amount)
+            .transfer_token(
+                &IBC_ESCROW_ADDRESS,
+                &to_account.to_address(),
+                &ibc_token,
+                amount,
+            )
             .map_err(HostError::from)
     }
 
@@ -330,6 +574,7 @@ where
 
         self.update_mint_amount(&ibc_token, amount, true)?;
         self.add_deposit(&ibc_token, amount)?;
+        self.maybe_store_masp_note_commitments(account, &ibc_token, &amount)?;
 
         // A transfer of NUT tokens must be verified by their VP
         if ibc_token.is_internal()
@@ -338,13 +583,15 @@ where
             self.insert_verifier(&ibc_token);
         }
 
+        let account = account.to_address();
+
         // Store the IBC denom with the token hash to be able to retrieve it
         // later
-        self.maybe_store_ibc_denom(account, coin)?;
+        self.maybe_store_ibc_denom(&account, coin)?;
 
         self.inner
             .borrow_mut()
-            .mint_token(account, &ibc_token, amount)
+            .mint_token(&account, &ibc_token, amount)
             .map_err(HostError::from)
     }
 
@@ -356,6 +603,7 @@ where
     ) -> Result<(), HostError> {
         let (ibc_token, amount) = self.get_token_amount(coin)?;
 
+        self.validate_masp_withdraw(account)?;
         self.update_mint_amount(&ibc_token, amount, false)?;
         self.add_withdraw(&ibc_token, amount)?;
 
@@ -366,12 +614,16 @@ where
             self.insert_verifier(&ibc_token);
         }
 
-        let account = if self.is_shielded { &MASP } else { account };
+        let account = if self.has_masp_tx {
+            Cow::Owned(MASP)
+        } else {
+            account.to_address()
+        };
 
         // The burn is "unminting" from the minted balance
         self.inner
             .borrow_mut()
-            .burn_token(account, &ibc_token, amount)
+            .burn_token(&account, &ibc_token, amount)
             .map_err(HostError::from)
     }
 }

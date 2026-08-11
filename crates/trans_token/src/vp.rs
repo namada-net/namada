@@ -358,10 +358,12 @@ mod tests {
     use namada_ibc::trace::ibc_token;
     use namada_parameters::storage::get_native_token_transferable_key;
     use namada_state::testing::TestState;
-    use namada_state::{StateRead, StorageWrite, TxIndex};
+    use namada_state::{StateRead, StorageWrite};
     use namada_tx::action::Write;
     use namada_tx::data::TxType;
-    use namada_tx::{Authorization, BatchedTx, Code, Data, Section, Tx};
+    use namada_tx::{
+        Authorization, BatchedTx, Code, Data, IndexedTx, Section, Tx,
+    };
     use namada_vm::WasmCacheRwAccess;
     use namada_vm::wasm::VpCache;
     use namada_vm::wasm::compilation_cache::common::testing::vp_cache;
@@ -447,7 +449,7 @@ mod tests {
         let dest = established_address_2();
         let keys_changed = transfer(&mut state, &src, &dest);
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -463,7 +465,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -497,7 +499,7 @@ mod tests {
             .write(&dest_key, amount.serialize_to_vec())
             .expect("write failed");
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -511,7 +513,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -564,7 +566,7 @@ mod tests {
             .expect("write failed");
         keys_changed.insert(minter_key);
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -584,7 +586,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -635,7 +637,7 @@ mod tests {
             .expect("write failed");
         keys_changed.insert(minter_key);
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -651,7 +653,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -697,7 +699,7 @@ mod tests {
 
         // no minter is set
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -711,7 +713,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -764,7 +766,7 @@ mod tests {
             .expect("write failed");
         keys_changed.insert(minter_key);
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -780,7 +782,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -813,7 +815,7 @@ mod tests {
 
         keys_changed.insert(minter_key);
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -829,7 +831,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -865,7 +867,7 @@ mod tests {
 
         keys_changed.insert(key);
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -879,7 +881,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -909,7 +911,7 @@ mod tests {
         let key = get_native_token_transferable_key();
         state.write(&key, false).unwrap();
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -924,7 +926,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -961,7 +963,7 @@ mod tests {
         let key = get_native_token_transferable_key();
         state.write(&key, false).unwrap();
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -977,7 +979,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1012,7 +1014,7 @@ mod tests {
         let key = get_native_token_transferable_key();
         state.write(&key, false).unwrap();
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -1027,7 +1029,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1062,7 +1064,7 @@ mod tests {
         let key = get_native_token_transferable_key();
         state.write(&key, false).unwrap();
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -1078,7 +1080,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1118,7 +1120,7 @@ mod tests {
         let key = get_native_token_transferable_key();
         state.write(&key, false).unwrap();
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -1134,7 +1136,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &verifiers,
@@ -1165,7 +1167,7 @@ mod tests {
         let mut keys_changed = transfer(&mut state, &src1, &dest1);
         keys_changed.append(&mut transfer(&mut state, &src2, &dest2));
 
-        let tx_index = TxIndex::default();
+        let indexed_tx = IndexedTx::default();
         let BatchedTx { tx, cmt } = dummy_tx(&state);
         let gas_meter =
             RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
@@ -1187,7 +1189,7 @@ mod tests {
                 &state,
                 &tx,
                 &cmt,
-                &tx_index,
+                &indexed_tx,
                 &gas_meter,
                 &keys_changed,
                 &verifiers,
@@ -1219,7 +1221,7 @@ mod tests {
             &state,
             &tx,
             &cmt,
-            &tx_index,
+            &indexed_tx,
             &gas_meter,
             &keys_changed,
             &parties,

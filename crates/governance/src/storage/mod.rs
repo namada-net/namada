@@ -17,6 +17,7 @@ use namada_core::hash::Hash;
 use namada_core::token;
 use namada_state::{Error, Result, StorageRead, StorageWrite, iter_prefix};
 use namada_systems::trans_token;
+use proposal::{ContPGFTarget, PGFAction};
 
 use crate::ADDRESS as governance_address;
 use crate::parameters::GovernanceParameters;
@@ -52,7 +53,7 @@ where
     storage.write(&author_key, data.author.clone())?;
 
     let proposal_type_key = governance_keys::get_proposal_type_key(proposal_id);
-    match data.r#type {
+    match data.r#type.clone() {
         ProposalType::DefaultWithWasm(_) => {
             storage.write(&proposal_type_key, data.r#type.clone())?;
             let proposal_code_key =
@@ -61,6 +62,35 @@ where
             let proposal_code =
                 code.ok_or(Error::new_const("Missing proposal code"))?;
             storage.write(&proposal_code_key, proposal_code)?;
+        }
+        ProposalType::PGFPayment(a) => {
+            let transformed_data = a
+                .into_iter()
+                .map(|action| match action {
+                    proposal::PGFAction::Continuous(add_remove) => {
+                        let pgf_target = match add_remove {
+                            proposal::AddRemove::Add(c_tgt) => {
+                                proposal::AddRemove::Add(ContPGFTarget {
+                                    target: c_tgt.target,
+                                    end_epoch: c_tgt.end_epoch,
+                                    proposal_id: None,
+                                })
+                            }
+                            proposal::AddRemove::Remove(c) => {
+                                proposal::AddRemove::Remove(c)
+                            }
+                        };
+                        proposal::PGFAction::Continuous(pgf_target)
+                    }
+                    proposal::PGFAction::Retro(pgftarget) => {
+                        proposal::PGFAction::Retro(pgftarget)
+                    }
+                })
+                .collect::<BTreeSet<PGFAction>>();
+            storage.write(
+                &proposal_type_key,
+                ProposalType::PGFPayment(transformed_data),
+            )?;
         }
         _ => storage.write(&proposal_type_key, data.r#type.clone())?,
     }

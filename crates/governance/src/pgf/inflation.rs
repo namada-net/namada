@@ -6,10 +6,11 @@ use namada_systems::{parameters, trans_token};
 
 use crate::pgf::storage::{
     get_continuous_pgf_payments, get_parameters, get_stewards,
+    remove_cpgf_target,
 };
 use crate::storage::proposal::{PGFIbcTarget, PGFTarget};
 
-/// Apply the PGF inflation.
+/// Apply the PGF inflation. Also
 pub fn apply_inflation<S, Params, TransToken, F>(
     storage: &mut S,
     transfer_over_ibc: F,
@@ -26,6 +27,7 @@ where
     let epochs_per_year = Params::epochs_per_year(storage)?;
     let total_supply = TransToken::get_effective_total_native_supply(storage)?;
 
+    // Mint tokens into the PGF address
     let pgf_inflation_amount = total_supply
         .mul_floor(pgf_parameters.pgf_inflation_rate)?
         .checked_div_u64(epochs_per_year)
@@ -39,18 +41,31 @@ where
     )?;
 
     tracing::info!(
-        "Minting {} tokens for PGF rewards distribution into the PGF account \
-         (total supply {}).",
+        "Minting {} native tokens for PGF rewards distribution into the PGF \
+         account (total supply: {}).",
         pgf_inflation_amount.to_string_native(),
         total_supply.to_string_native()
     );
 
     let mut pgf_fundings = get_continuous_pgf_payments(storage)?;
     // prioritize the payments by oldest gov proposal ID
-    pgf_fundings.sort_by(|a, b| a.id.cmp(&b.id));
+    pgf_fundings.sort_by(|a, b| a.proposal_id.cmp(&b.proposal_id));
 
-    for funding in pgf_fundings {
-        let result = match &funding.detail {
+    let current_epoch = storage.get_block_epoch()?;
+
+    // Act on the continuous PGF fundings in storage: either distribute or
+    // remove expired ones
+    for c_target in pgf_fundings {
+        let proposal_id = c_target.proposal_id;
+        let str_target_address = c_target.target();
+        // Remove expired fundings from storage
+        if c_target.is_expired(current_epoch) {
+            remove_cpgf_target(storage, proposal_id, &str_target_address)?;
+            continue;
+        }
+
+        // Transfer PGF payment to target
+        let result = match &c_target.target {
             PGFTarget::Internal(target) => TransToken::transfer(
                 storage,
                 &staking_token,
@@ -68,16 +83,18 @@ where
         match result {
             Ok(()) => {
                 tracing::info!(
-                    "Paying {} tokens for {} project.",
-                    funding.detail.amount().to_string_native(),
-                    &funding.detail.target(),
+                    "Successfully transferred CPGF payment of {} native \
+                     tokens to {}.",
+                    c_target.amount().to_string_native(),
+                    &c_target.target(),
                 );
             }
             Err(_) => {
                 tracing::warn!(
-                    "Failed to pay {} tokens for {} project.",
-                    funding.detail.amount().to_string_native(),
-                    &funding.detail.target(),
+                    "Failed to transfer CPGF payment of {} native tokens to \
+                     {}.",
+                    c_target.amount().to_string_native(),
+                    &c_target.target(),
                 );
             }
         }
@@ -104,15 +121,16 @@ where
             .is_ok()
             {
                 tracing::info!(
-                    "Minting {} tokens for steward {} (total supply {})..",
+                    "Minting {} native tokens for steward {} (total supply: \
+                     {})..",
                     pgf_steward_reward.to_string_native(),
                     address,
                     total_supply.to_string_native()
                 );
             } else {
                 tracing::warn!(
-                    "Failed minting {} tokens for steward {} (total supply \
-                     {})..",
+                    "Failed minting {} native tokens for steward {} (total \
+                     supply: {})..",
                     pgf_steward_reward.to_string_native(),
                     address,
                     total_supply.to_string_native()

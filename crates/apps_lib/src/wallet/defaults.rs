@@ -4,8 +4,8 @@
 pub use dev::{
     addresses, albert_address, albert_keypair, bertha_address, bertha_keypair,
     christel_address, christel_keypair, daewon_address, daewon_keypair,
-    derive_template_dir, ester_address, ester_keypair, frank_keypair,
-    get_unencrypted_keypair, is_use_device, keys, tokens,
+    derive_template_dir, ester_address, ester_keypair, frank_address,
+    frank_keypair, get_unencrypted_keypair, is_use_device, keys, tokens,
     validator_account_keypair, validator_address, validator_keypair,
     validator_keys,
 };
@@ -117,6 +117,11 @@ mod dev {
             .find_address("christel")
             .expect("Christel's address should be in the pre-genesis wallet")
             .into_owned()
+    }
+
+    /// An established user address for testing & development
+    pub fn frank_address() -> Address {
+        (&frank_keypair().ref_to()).into()
     }
 
     /// An implicit user address for testing & development

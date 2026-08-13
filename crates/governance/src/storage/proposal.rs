@@ -139,11 +139,12 @@ impl TryFrom<PgfFundingProposal> for InitProposalData {
             .continuous
             .iter()
             .cloned()
-            .map(|target| {
-                if target.amount().is_zero() {
-                    PGFAction::Continuous(AddRemove::Remove(target))
-                } else {
-                    PGFAction::Continuous(AddRemove::Add(target))
+            .map(|c_target| match c_target.action {
+                PgfAction::Add => {
+                    PGFAction::Continuous(AddRemove::Add(c_target.target))
+                }
+                PgfAction::Remove => {
+                    PGFAction::Continuous(AddRemove::Remove(c_target.target))
                 }
             })
             .collect::<BTreeSet<PGFAction>>();
@@ -166,33 +167,6 @@ impl TryFrom<PgfFundingProposal> for InitProposalData {
             voting_end_epoch: value.proposal.voting_end_epoch,
             activation_epoch: value.proposal.activation_epoch,
         })
-    }
-}
-
-/// Storage struture for pgf fundings
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    BorshSerialize,
-    BorshDeserialize,
-    BorshDeserializer,
-    Serialize,
-    Deserialize,
-)]
-pub struct StoragePgfFunding {
-    /// The data about the pgf funding
-    pub detail: PGFTarget,
-    /// The id of the proposal that added this funding
-    pub id: u64,
-}
-
-impl StoragePgfFunding {
-    /// Init a new pgf funding struct
-    pub fn new(detail: PGFTarget, id: u64) -> Self {
-        Self { detail, id }
     }
 }
 
@@ -255,6 +229,117 @@ where
         match self {
             AddRemove::Add(address) => write!(f, "Add({})", &address),
             AddRemove::Remove(address) => write!(f, "Remove({})", &address),
+        }
+    }
+}
+
+/// Continuous PGF target.
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[derive(
+    Debug,
+    Clone,
+    BorshSchema,
+    BorshSerialize,
+    BorshDeserialize,
+    BorshDeserializer,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+    Hash,
+)]
+pub struct ContPGFTarget {
+    /// PGF target
+    pub target: PGFTarget,
+    /// The epoch at which the funding ends, if any
+    ///
+    /// This may be set only when adding the target.
+    pub end_epoch: Option<Epoch>,
+    /// The proposal ID that added this PGF payment.
+    ///
+    /// This must be set when removing PGF target and cannot be set when adding
+    /// it.
+    pub proposal_id: Option<u64>,
+}
+
+impl Display for ContPGFTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.target.clone() {
+            PGFTarget::Internal(t) => {
+                write!(
+                    f,
+                    "Internal address={}, amount={}, end epoch = {}",
+                    t.target,
+                    t.amount,
+                    if let Some(epoch) = self.end_epoch {
+                        epoch.0.to_string()
+                    } else {
+                        String::from("None")
+                    }
+                )
+            }
+            PGFTarget::Ibc(t) => {
+                write!(
+                    f,
+                    "IBC address={}, amount={}, end epoch = {}",
+                    t.target,
+                    t.amount,
+                    if let Some(epoch) = self.end_epoch {
+                        epoch.0.to_string()
+                    } else {
+                        String::from("None")
+                    }
+                )
+            }
+        }
+    }
+}
+
+/// Stored Continuous PGF target
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    BorshSchema,
+    BorshSerialize,
+    BorshDeserialize,
+    BorshDeserializer,
+    Serialize,
+    Deserialize,
+    Eq,
+    Ord,
+    PartialOrd,
+    Hash,
+)]
+pub struct StoredContPGFTarget {
+    /// PGF target
+    pub target: PGFTarget,
+    /// The epoch at which the funding ends, if any
+    pub end_epoch: Option<Epoch>,
+    /// The proposal ID that added this PGF payment
+    pub proposal_id: u64,
+}
+
+impl StoredContPGFTarget {
+    /// Returns the funding target as String
+    pub fn target(&self) -> String {
+        self.target.target()
+    }
+
+    /// Returns the funding amount
+    pub fn amount(&self) -> token::Amount {
+        self.target.amount()
+    }
+
+    /// Check if the funding is expired
+    pub fn is_expired(&self, current_epoch: Epoch) -> bool {
+        if let Some(end_epoch) = self.end_epoch {
+            current_epoch >= end_epoch
+        } else {
+            false
         }
     }
 }
@@ -357,7 +442,7 @@ pub struct PGFInternalTarget {
 )]
 pub enum PGFAction {
     /// A continuous payment
-    Continuous(AddRemove<PGFTarget>),
+    Continuous(AddRemove<ContPGFTarget>),
     /// A retro payment
     Retro(PGFTarget),
 }
@@ -660,10 +745,43 @@ pub mod testing {
         ]
     }
 
+    prop_compose! {
+        /// Generate a proposal initialization
+        pub fn arb_cpgf_target()(
+            target in arb_pgf_target(),
+            end_epoch in arb_epoch_opt(),
+            proposal_id in 0..u64::MAX,
+        ) -> ContPGFTarget {
+            ContPGFTarget {
+                target,
+                end_epoch,
+                proposal_id: Some(proposal_id),
+            }
+        }
+    }
+
+    fn arb_epoch_opt() -> impl Strategy<Value = Option<Epoch>> {
+        prop_oneof![Just(None), arb_epoch().prop_map(Some),]
+    }
+
     /// Generate an arbitrary PGF action
     pub fn arb_pgf_action() -> impl Strategy<Value = PGFAction> {
         prop_oneof![
-            arb_add_remove(arb_pgf_target()).prop_map(PGFAction::Continuous),
+            arb_add_remove(arb_cpgf_target()).prop_map(|add_rm| {
+                let add_rm = match add_rm {
+                    AddRemove::Add(target) => AddRemove::Add(ContPGFTarget {
+                        proposal_id: None,
+                        ..target
+                    }),
+                    AddRemove::Remove(target) => {
+                        AddRemove::Remove(ContPGFTarget {
+                            end_epoch: None,
+                            ..target
+                        })
+                    }
+                };
+                PGFAction::Continuous(add_rm)
+            }),
             arb_pgf_target().prop_map(PGFAction::Retro),
         ]
     }

@@ -551,7 +551,7 @@ impl Key {
     }
 
     /// Returns a key of wasm code's hash of the given name
-    pub fn wasm_code_name(code_name: String) -> Self {
+    pub fn wasm_code_hash(code_name: String) -> Self {
         let mut segments =
             Self::from(PARAMETERS.to_owned().to_db_key()).segments;
         segments.push(DbKeySeg::StringSeg(WASM_KEY_PREFIX.to_owned()));
@@ -577,6 +577,16 @@ impl Key {
         segments.push(DbKeySeg::StringSeg(WASM_KEY_PREFIX.to_owned()));
         segments.push(DbKeySeg::StringSeg(WASM_HASH_PREFIX.to_owned()));
         segments.push(DbKeySeg::StringSeg(code_path.as_ref().to_string()));
+        Key { segments }
+    }
+
+    /// Returns a key of the wasm name of the given code hash
+    pub fn wasm_code_name(code_hash: &Hash) -> Self {
+        let mut segments =
+            Self::from(PARAMETERS.to_owned().to_db_key()).segments;
+        segments.push(DbKeySeg::StringSeg(WASM_KEY_PREFIX.to_owned()));
+        segments.push(DbKeySeg::StringSeg(WASM_HASH_PREFIX.to_owned()));
+        segments.push(DbKeySeg::StringSeg(code_hash.to_string()));
         Key { segments }
     }
 

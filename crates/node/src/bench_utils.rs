@@ -280,11 +280,12 @@ impl BenchShellInner {
         batched_tx: &BatchedTxRef<'_>,
     ) -> BTreeSet<Address> {
         let gas_meter = RefCell::new(TxGasMeter::new(u64::MAX, 1));
+        let indexed_tx = IndexedTx::default();
         run::tx(
             &mut self.inner.state,
             &gas_meter,
             None,
-            &TxIndex(0),
+            &indexed_tx,
             batched_tx.tx,
             batched_tx.cmt,
             &mut self.inner.vp_wasm_cache,

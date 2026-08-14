@@ -818,6 +818,23 @@ where
             _ => None,
         };
 
+        // Temporary migration code to fix the total active stake value
+        if let Some(height) =
+            std::env::var("NAMADA_MIGRATION_HEIGHT").ok().map(|height| {
+                <BlockHeight as std::str::FromStr>::from_str(height.trim())
+                    .expect(
+                        "Invalid block height set in \
+                         `NAMADA_MIGRATION_HEIGHT` env var",
+                    )
+            })
+        {
+            if height == height_to_commit {
+                proof_of_stake::fix_total_active_stake::<_, governance::Store<_>>(
+                    &mut self.state,
+                ).expect("Must be able to fix total active stake")
+            }
+        }
+
         self.state
             .commit_block()
             .expect("Encountered a storage error while committing a block");

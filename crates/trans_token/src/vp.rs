@@ -60,34 +60,40 @@ where
             Params::is_native_token_transferable(&ctx.pre())?;
         let actions = ctx.read_actions()?;
         // The native token can be transferred to and out of the `PoS` and `Gov`
-        // accounts, even if `is_native_token_transferable` is false
+        // accounts, even if `is_native_token_transferable` is false. Balance
+        // changes on these protocol-owned accounts always have to be backed
+        // by a matching action, regardless of the transferability setting.
+        let is_protocol_owner =
+            |bal_owner: &Address| *bal_owner == POS || *bal_owner == GOV;
+        let protocol_owner =
+            |bal_owner: &Address| -> Owner<'_> {
+                if is_protocol_owner(bal_owner) {
+                    Owner::Protocol
+                } else {
+                    Owner::Account(bal_owner)
+                }
+            };
         let is_allowed_inc = |token: &Address, bal_owner: &Address| -> bool {
             *token != native_token
-                || is_native_token_transferable
+                || (is_native_token_transferable
+                    && !is_protocol_owner(bal_owner))
                 || (!actions.is_empty()
                     && actions.iter().all(|action| {
                         has_bal_inc_protocol_action(
                             action,
-                            if *bal_owner == POS || *bal_owner == GOV {
-                                Owner::Protocol
-                            } else {
-                                Owner::Account(bal_owner)
-                            },
+                            protocol_owner(bal_owner),
                         )
                     }))
         };
         let is_allowed_dec = |token: &Address, bal_owner: &Address| -> bool {
             *token != native_token
-                || is_native_token_transferable
+                || (is_native_token_transferable
+                    && !is_protocol_owner(bal_owner))
                 || (!actions.is_empty()
                     && actions.iter().all(|action| {
                         has_bal_dec_protocol_action(
                             action,
-                            if *bal_owner == POS || *bal_owner == GOV {
-                                Owner::Protocol
-                            } else {
-                                Owner::Account(bal_owner)
-                            },
+                            protocol_owner(bal_owner),
                         )
                     }))
         };

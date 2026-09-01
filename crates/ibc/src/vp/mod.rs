@@ -14,7 +14,7 @@ use borsh::BorshDeserialize;
 use context::{
     PseudoExecutionContext, PseudoExecutionStorage, VpValidationContext,
 };
-use namada_core::address::Address;
+use namada_core::address::{Address, IBC};
 use namada_core::arith::checked;
 use namada_core::collections::HashSet;
 use namada_core::storage::Key;
@@ -276,6 +276,32 @@ where
         }
 
         for key in changed_ibc_keys {
+            let actual = self.ctx.read_bytes_post(key)?;
+            match_value(key, actual, ctx.borrow().get_changed_value(key))?;
+        }
+
+        // Check that the escrow balances only changed as reproduced by the
+        // pseudo execution
+        let changed_escrow_keys: HashSet<&Key> = keys_changed
+            .iter()
+            .filter(|k| {
+                Token::is_any_token_balance_key(k)
+                    .map(|[_, owner]| owner == &IBC)
+                    .unwrap_or(false)
+            })
+            .collect();
+        if changed_escrow_keys.len()
+            != ctx.borrow().get_changed_escrow_balance_keys().len()
+        {
+            return Err(VpError::StateChange(format!(
+                "The changed escrow balance keys mismatched: Actual {:?}, \
+                 Expected {:?}",
+                changed_escrow_keys,
+                ctx.borrow().get_changed_escrow_balance_keys()
+            ))
+            .into());
+        }
+        for key in changed_escrow_keys {
             let actual = self.ctx.read_bytes_post(key)?;
             match_value(key, actual, ctx.borrow().get_changed_value(key))?;
         }

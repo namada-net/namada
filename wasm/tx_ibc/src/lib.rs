@@ -16,6 +16,22 @@ fn apply_tx(ctx: &mut Ctx, tx_data: BatchedTx) -> TxResult {
         if let Some(transfers) = data.transparent {
             let (_debited_accounts, tokens) =
                 if let Some(transparent) = transfers.transparent_part() {
+                    let transparent_sources = transparent.sources();
+                    let transparent_targets = transparent.targets();
+                    // Transfers into or out of the escrow account are only
+                    // performed by the protocol itself, a message must not
+                    // move funds on its behalf in its transfer payload
+                    if transparent_sources
+                        .keys()
+                        .chain(transparent_targets.keys())
+                        .any(|(owner, _)| owner == &ibc::IBC_ESCROW_ADDRESS)
+                    {
+                        return Err(Error::new_const(
+                            "Transparent transfer involving the escrow \
+                             account isn't allowed",
+                        ));
+                    }
+
                     token::validate_transfer_in_out(
                         transparent.sources,
                         transparent.targets,

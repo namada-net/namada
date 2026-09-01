@@ -15,8 +15,8 @@ pub use namada_ibc::storage::{
 };
 pub use namada_ibc::trace::ibc_token;
 pub use namada_ibc::{
-    IbcActions, IbcCommonContext, IbcStorageContext, NftTransferModule,
-    ProofSpec, TransferModule,
+    IbcActions, IbcCommonContext, IbcStorageContext, IBC_ESCROW_ADDRESS,
+    NftTransferModule, ProofSpec, TransferModule,
 };
 use namada_tx_env::TxEnv;
 

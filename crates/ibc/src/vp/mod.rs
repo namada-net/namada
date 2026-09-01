@@ -2415,6 +2415,13 @@ mod tests {
             .write(&withdraw_key, bytes)
             .expect("write failed");
         keys_changed.insert(withdraw_key);
+        // escrow balance
+        let escrow_balance_key = namada_token::storage_key::balance_key(&nam(), &IBC);
+        let _ = state
+            .write_log_mut()
+            .write(&escrow_balance_key, amount.serialize_to_vec())
+            .expect("write failed");
+        keys_changed.insert(escrow_balance_key);
         // event
         let transfer_event = TransferEvent {
             sender: msg.packet_data.sender.clone(),
@@ -2945,6 +2952,13 @@ mod tests {
             .write(&deposit_key, bytes)
             .expect("write failed");
         keys_changed.insert(deposit_key);
+        // escrow balance (refunded)
+        let escrow_balance_key = namada_token::storage_key::balance_key(&nam(), &IBC);
+        let _ = state
+            .write_log_mut()
+            .write(&escrow_balance_key, Amount::default().serialize_to_vec())
+            .expect("write failed");
+        keys_changed.insert(escrow_balance_key);
         // event
         let timeout_event = TimeoutEvent {
             refund_receiver: data.sender,
@@ -3104,6 +3118,13 @@ mod tests {
             .write(&deposit_key, bytes)
             .expect("write failed");
         keys_changed.insert(deposit_key);
+        // escrow balance (refunded)
+        let escrow_balance_key = namada_token::storage_key::balance_key(&nam(), &IBC);
+        let _ = state
+            .write_log_mut()
+            .write(&escrow_balance_key, Amount::default().serialize_to_vec())
+            .expect("write failed");
+        keys_changed.insert(escrow_balance_key);
         // event
         let timeout_event = TimeoutEvent {
             refund_receiver: data.sender,
@@ -3272,6 +3293,13 @@ mod tests {
             .write(&withdraw_key, bytes)
             .expect("write failed");
         keys_changed.insert(withdraw_key);
+        // escrow balance
+        let escrow_balance_key = namada_token::storage_key::balance_key(&ibc_token, &IBC);
+        let _ = state
+            .write_log_mut()
+            .write(&escrow_balance_key, Amount::from_u64(1).serialize_to_vec())
+            .expect("write failed");
+        keys_changed.insert(escrow_balance_key);
         // event
         let transfer_event = NftTransferEvent {
             sender: msg.packet_data.sender.clone(),
@@ -3662,6 +3690,13 @@ mod tests {
             .write(&withdraw_key, bytes)
             .expect("write failed");
         keys_changed.insert(withdraw_key);
+        // escrow balance
+        let escrow_balance_key = namada_token::storage_key::balance_key(&ibc_token, &IBC);
+        let _ = state
+            .write_log_mut()
+            .write(&escrow_balance_key, amount.serialize_to_vec())
+            .expect("write failed");
+        keys_changed.insert(escrow_balance_key);
         // event
         let transfer_event = TransferEvent {
             sender: msg.packet_data.sender.clone(),

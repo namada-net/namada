@@ -1347,6 +1347,12 @@ where
                 // Validate the inner txs after. Even if the batch is non-atomic
                 // we still reject it if just one of the inner txs is
                 // invalid
+                if let Err(err) = tx.validate_batch() {
+                    response.code = ResultCode::InvalidTx.into();
+                    response.log =
+                        format!("{INVALID_MSG}: {err}");
+                    return response;
+                }
                 for cmt in tx.commitments() {
                     // Tx allowlist
                     if let Err(err) =

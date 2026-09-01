@@ -957,6 +957,31 @@ impl Tx {
         &self.header.batch
     }
 
+    /// Check that every inner transaction reference in the header points to
+    /// sections that are present in the transaction.
+    pub fn validate_batch(&self) -> std::result::Result<(), String> {
+        if self.header.batch.is_empty() {
+            return Ok(());
+        }
+        let section_hashes: HashSet<_> =
+            self.sechashes().into_iter().collect();
+        for cmt in &self.header.batch {
+            if !section_hashes.contains(&cmt.code_hash) {
+                return Err(format!(
+                    "The transaction references a missing code section: {}",
+                    cmt.code_hash
+                ));
+            }
+            if !section_hashes.contains(&cmt.data_hash) {
+                return Err(format!(
+                    "The transaction references a missing data section: {}",
+                    cmt.data_hash
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Get the reference to the first inner transaction
     pub fn first_commitments(&self) -> Option<&TxCommitments> {
         self.header.batch.first()

@@ -35,9 +35,12 @@ mod escrow_drain_tests {
     use namada_sdk::ibc::primitives::Timestamp;
     use namada_sdk::ibc::{IBC_ESCROW_ADDRESS, MsgTransfer};
     use namada_sdk::key::{self, RefTo};
+    use namada_sdk::proof_of_stake::OwnedPosParams;
+    use namada_sdk::proof_of_stake::test_utils::get_dummy_genesis_validator;
+    use namada_sdk::storage::Epoch;
     use namada_sdk::token::{self, Amount, Transfer};
     use namada_sdk::tx::{TX_IBC_WASM, TX_TRANSFER_WASM, Tx};
-    use namada_sdk::validation::MultitokenVp;
+    use namada_sdk::validation::{MultitokenVp, PosVp};
     use namada_tx_prelude::BorshSerializeExt;
 
     use crate::native_vp::TestNativeVpEnv;
@@ -111,6 +114,22 @@ mod escrow_drain_tests {
             token::NATIVE_MAX_DECIMAL_PLACES.into(),
         )
         .unwrap();
+        // Initialize PoS genesis so that the PoS VP can run over the state
+        tx_env.state.in_mem_mut().block.epoch = Epoch(1);
+        namada_sdk::proof_of_stake::test_utils::test_init_genesis::<
+            _,
+            namada_sdk::parameters::Store<_>,
+            namada_sdk::governance::Store<_>,
+            namada_sdk::token::Store<_>,
+        >(
+            &mut tx_env.state,
+            OwnedPosParams::default(),
+            std::iter::once(get_dummy_genesis_validator()),
+            Epoch(1),
+        )
+        .unwrap();
+        tx_env.state.commit_tx_batch();
+        tx_env.state.commit_block().unwrap();
         tx_env.spawn_accounts([&attacker]);
         // Fund the staking escrow
         tx_env.credit_tokens(&pos, &native_token, drain);
@@ -153,6 +172,29 @@ mod escrow_drain_tests {
         );
         assert!(
             err.to_string().contains("isn't allowed"),
+            "unexpected rejection reason: {err}"
+        );
+
+        // The PoS VP must also reject: the escrow balance decreased without
+        // any Withdraw or ClaimRewards action
+        let tx_env = vp_env.tx_env;
+        let gas_meter = RefCell::new(VpGasMeter::new_from_meter(
+            &*tx_env.gas_meter.borrow(),
+        ));
+        let vp_env = TestNativeVpEnv::from_tx_env(tx_env, pos);
+        let ctx = vp_env.ctx(&gas_meter);
+        let result = PosVp::validate_tx(
+            &ctx,
+            &vp_env.tx_env.batched_tx.to_ref(),
+            ctx.keys_changed,
+            ctx.verifiers,
+        );
+        let err = result.expect_err(
+            "PoS VP must reject the unauthorized debit of the PoS escrow",
+        );
+        assert!(
+            err.to_string()
+                .contains("PoS balance decreased without any Withdraw or"),
             "unexpected rejection reason: {err}"
         );
     }

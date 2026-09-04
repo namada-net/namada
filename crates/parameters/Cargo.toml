@@ -25,6 +25,7 @@ namada_systems.workspace = true
 namada_tx.workspace = true
 namada_vp_env.workspace = true
 
+sha2.workspace = true
 smooth-operator.workspace = true
 thiserror.workspace = true
 

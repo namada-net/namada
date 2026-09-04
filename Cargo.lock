@@ -6258,6 +6258,7 @@ dependencies = [
  "namada_systems",
  "namada_tx",
  "namada_vp_env",
+ "sha2 0.10.8",
  "smooth-operator",
  "thiserror 2.0.12",
 ]

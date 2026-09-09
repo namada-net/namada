@@ -1575,7 +1575,8 @@ fn shielded_recv_memo_value(
 // middleware stack can produce, so packet-forward memos no longer commit.
 // Re-enable together with the fixed middleware.
 #[test]
-#[ignore = "packet-forward memos are rejected by the IBC VP until the fixed middleware is re-enabled"]
+#[ignore = "packet-forward memos are rejected by the IBC VP until the fixed \
+            middleware is re-enabled"]
 fn ibc_pfm_happy_flows() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
@@ -1878,7 +1879,8 @@ fn ibc_pfm_happy_flows() -> Result<()> {
 // middleware stack can produce, so packet-forward memos no longer commit.
 // Re-enable together with the fixed middleware.
 #[test]
-#[ignore = "packet-forward memos are rejected by the IBC VP until the fixed middleware is re-enabled"]
+#[ignore = "packet-forward memos are rejected by the IBC VP until the fixed \
+            middleware is re-enabled"]
 fn ibc_pfm_unhappy_flows() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
@@ -2310,7 +2312,8 @@ fn ibc_pfm_unhappy_flows() -> Result<()> {
 // middleware stack can produce, so osmosis_swap memos no longer commit.
 // Re-enable together with the fixed middleware.
 #[test]
-#[ignore = "osmosis_swap memos are rejected by the IBC VP until the fixed middleware is re-enabled"]
+#[ignore = "osmosis_swap memos are rejected by the IBC VP until the fixed \
+            middleware is re-enabled"]
 fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
@@ -2438,7 +2441,8 @@ fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
 // middleware stack can produce, so osmosis_swap memos no longer commit.
 // Re-enable together with the fixed middleware.
 #[test]
-#[ignore = "osmosis_swap memos are rejected by the IBC VP until the fixed middleware is re-enabled"]
+#[ignore = "osmosis_swap memos are rejected by the IBC VP until the fixed \
+            middleware is re-enabled"]
 fn ibc_shielded_recv_middleware_unhappy_flow() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {

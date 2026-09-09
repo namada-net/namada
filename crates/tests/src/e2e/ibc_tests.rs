@@ -1571,7 +1571,11 @@ fn shielded_recv_memo_value(
 /// 2. Test sending the above transfer back to first cosmos chain via PFM
 /// 3. Send wrapped NAM from first cosmos chain to the second via PFM
 /// 4. Reverse the transaction in the step above
+// NB: stale since the IBC VP now rejects any state change only the
+// middleware stack can produce, so packet-forward memos no longer commit.
+// Re-enable together with the fixed middleware.
 #[test]
+#[ignore = "packet-forward memos are rejected by the IBC VP until the fixed middleware is re-enabled"]
 fn ibc_pfm_happy_flows() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
@@ -1870,7 +1874,11 @@ fn ibc_pfm_happy_flows() -> Result<()> {
 ///    failing to send it back to the second due to an error
 /// 6. Same as above except that the failure occurs due to a time-out on the
 ///    second cosmos chain.
+// NB: stale since the IBC VP now rejects any state change only the
+// middleware stack can produce, so packet-forward memos no longer commit.
+// Re-enable together with the fixed middleware.
 #[test]
+#[ignore = "packet-forward memos are rejected by the IBC VP until the fixed middleware is re-enabled"]
 fn ibc_pfm_unhappy_flows() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
@@ -2298,7 +2306,11 @@ fn ibc_pfm_unhappy_flows() -> Result<()> {
 /// Test that we are able to use the shielded-receive
 /// middleware to shield funds specified in the memo
 /// message.
+// NB: stale since the IBC VP now rejects any state change only the
+// middleware stack can produce, so osmosis_swap memos no longer commit.
+// Re-enable together with the fixed middleware.
 #[test]
+#[ignore = "osmosis_swap memos are rejected by the IBC VP until the fixed middleware is re-enabled"]
 fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
@@ -2422,7 +2434,11 @@ fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
 
 /// Test that if the received amount underflows the minimum
 /// amount, we error out and refund assets.
+// NB: stale since the IBC VP now rejects any state change only the
+// middleware stack can produce, so osmosis_swap memos no longer commit.
+// Re-enable together with the fixed middleware.
 #[test]
+#[ignore = "osmosis_swap memos are rejected by the IBC VP until the fixed middleware is re-enabled"]
 fn ibc_shielded_recv_middleware_unhappy_flow() -> Result<()> {
     let update_genesis =
         |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {

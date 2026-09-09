@@ -10,10 +10,10 @@
 //! source chain — so the attacker keeps the remainder *and* gets
 //! refunded:
 //!
-//! - mint variant (foreign token arriving): the remainder is freshly
-//!   minted, unbacked vouchers;
-//! - unescrow variant (a home token returning): the remainder is paid
-//!   out of the real IBC escrow.
+//! - mint variant (foreign token arriving): the remainder is freshly minted,
+//!   unbacked vouchers;
+//! - unescrow variant (a home token returning): the remainder is paid out of
+//!   the real IBC escrow.
 //!
 //! The IBC VP pseudo-executes against the bare transfer module, so any
 //! state change only the middleware stack can produce (the eager
@@ -123,8 +123,8 @@ mod overflow_recv_tests {
             attacker,
         );
         // Override the amount and the memo for the attack.
-        let mut data: PacketData = serde_json::from_slice(&packet.data)
-            .expect("packet data parses");
+        let mut data: PacketData =
+            serde_json::from_slice(&packet.data).expect("packet data parses");
         data.token.amount = Amount::from_u64(ATTACK_AMOUNT).into();
         data.memo = overflow_recv_memo(attacker).into();
         packet.data = serde_json::to_vec(&data).expect("packet data encodes");
@@ -167,10 +167,13 @@ mod overflow_recv_tests {
     /// as `AcknowledgementCommitment` = sha256(ack bytes)
     /// (ibc-core-channel-types `commitment.rs`).
     fn expected_error_ack_commitment(receiver: &Address) -> Vec<u8> {
-        let msg =
-            format!("Shielded receive error: Address {receiver} is not the MASP");
+        let msg = format!(
+            "Shielded receive error: Address {receiver} is not the MASP"
+        );
         let ack_bytes = format!(r#"{{"error":"{msg}"}}"#);
-        namada_sdk::hash::Hash::sha256(ack_bytes.as_bytes()).0.to_vec()
+        namada_sdk::hash::Hash::sha256(ack_bytes.as_bytes())
+            .0
+            .to_vec()
     }
 
     /// Mint variant: a foreign token arrives over the channel (its denom
@@ -189,8 +192,12 @@ mod overflow_recv_tests {
             env.spawn_accounts([&attacker]);
         });
 
-        let packet =
-            attack_packet(port_id.clone(), channel_id.clone(), base_token, &attacker);
+        let packet = attack_packet(
+            port_id.clone(),
+            channel_id.clone(),
+            base_token,
+            &attacker,
+        );
 
         let env = recv_via_ibc_actions(packet);
 
@@ -206,10 +213,12 @@ mod overflow_recv_tests {
             "the shielded-recv error ack must be committed"
         );
 
-        let result = ibc::validate_ibc_vp_from_tx(&env, &env.batched_tx.to_ref());
+        let result =
+            ibc::validate_ibc_vp_from_tx(&env, &env.batched_tx.to_ref());
         assert!(
             result.is_err(),
-            "IBC VP must reject the overflow-receive mint attack, got: {result:?}"
+            "IBC VP must reject the overflow-receive mint attack, got: \
+             {result:?}"
         );
     }
 
@@ -251,7 +260,8 @@ mod overflow_recv_tests {
 
         let env = recv_via_ibc_actions(packet);
 
-        let result = ibc::validate_ibc_vp_from_tx(&env, &env.batched_tx.to_ref());
+        let result =
+            ibc::validate_ibc_vp_from_tx(&env, &env.batched_tx.to_ref());
         assert!(
             result.is_err(),
             "IBC VP must reject the overflow-receive unescrow attack, got: \

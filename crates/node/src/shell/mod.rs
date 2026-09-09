@@ -1349,8 +1349,7 @@ where
                 // invalid
                 if let Err(err) = tx.validate_batch() {
                     response.code = ResultCode::InvalidTx.into();
-                    response.log =
-                        format!("{INVALID_MSG}: {err}");
+                    response.log = format!("{INVALID_MSG}: {err}");
                     return response;
                 }
                 for cmt in tx.commitments() {

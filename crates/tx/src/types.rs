@@ -963,8 +963,7 @@ impl Tx {
         if self.header.batch.is_empty() {
             return Ok(());
         }
-        let section_hashes: HashSet<_> =
-            self.sechashes().into_iter().collect();
+        let section_hashes: HashSet<_> = self.sechashes().into_iter().collect();
         for cmt in &self.header.batch {
             if !section_hashes.contains(&cmt.code_hash) {
                 return Err(format!(

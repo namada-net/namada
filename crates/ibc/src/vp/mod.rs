@@ -2419,7 +2419,8 @@ mod tests {
             .expect("write failed");
         keys_changed.insert(withdraw_key);
         // escrow balance
-        let escrow_balance_key = namada_token::storage_key::balance_key(&nam(), &IBC);
+        let escrow_balance_key =
+            namada_token::storage_key::balance_key(&nam(), &IBC);
         let _ = state
             .write_log_mut()
             .write(&escrow_balance_key, amount.serialize_to_vec())
@@ -2956,7 +2957,8 @@ mod tests {
             .expect("write failed");
         keys_changed.insert(deposit_key);
         // escrow balance (refunded)
-        let escrow_balance_key = namada_token::storage_key::balance_key(&nam(), &IBC);
+        let escrow_balance_key =
+            namada_token::storage_key::balance_key(&nam(), &IBC);
         let _ = state
             .write_log_mut()
             .write(&escrow_balance_key, Amount::default().serialize_to_vec())
@@ -3122,7 +3124,8 @@ mod tests {
             .expect("write failed");
         keys_changed.insert(deposit_key);
         // escrow balance (refunded)
-        let escrow_balance_key = namada_token::storage_key::balance_key(&nam(), &IBC);
+        let escrow_balance_key =
+            namada_token::storage_key::balance_key(&nam(), &IBC);
         let _ = state
             .write_log_mut()
             .write(&escrow_balance_key, Amount::default().serialize_to_vec())
@@ -3297,7 +3300,8 @@ mod tests {
             .expect("write failed");
         keys_changed.insert(withdraw_key);
         // escrow balance
-        let escrow_balance_key = namada_token::storage_key::balance_key(&ibc_token, &IBC);
+        let escrow_balance_key =
+            namada_token::storage_key::balance_key(&ibc_token, &IBC);
         let _ = state
             .write_log_mut()
             .write(&escrow_balance_key, Amount::from_u64(1).serialize_to_vec())
@@ -3694,7 +3698,8 @@ mod tests {
             .expect("write failed");
         keys_changed.insert(withdraw_key);
         // escrow balance
-        let escrow_balance_key = namada_token::storage_key::balance_key(&ibc_token, &IBC);
+        let escrow_balance_key =
+            namada_token::storage_key::balance_key(&ibc_token, &IBC);
         let _ = state
             .write_log_mut()
             .write(&escrow_balance_key, amount.serialize_to_vec())

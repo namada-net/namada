@@ -14,7 +14,7 @@ use borsh::BorshDeserialize;
 use context::{
     PseudoExecutionContext, PseudoExecutionStorage, VpValidationContext,
 };
-use namada_core::address::Address;
+use namada_core::address::{Address, IBC};
 use namada_core::arith::checked;
 use namada_core::collections::HashSet;
 use namada_core::storage::Key;
@@ -31,7 +31,6 @@ use namada_vp::VpEnv;
 use namada_vp::native_vp::{Ctx, CtxPreStorageRead, NativeVp, VpEvaluator};
 use thiserror::Error;
 
-use crate::context::middlewares::create_transfer_middlewares;
 use crate::core::channel::types::msgs::PacketMsg;
 use crate::core::handler::types::msgs::MsgEnvelope;
 use crate::core::host::types::identifiers::ChainId as IbcChainId;
@@ -44,7 +43,7 @@ use crate::storage::{
 use crate::trace::calc_hash;
 use crate::{
     COMMITMENT_PREFIX, Error as ActionError, IbcActions, IbcMessage,
-    NftTransferModule, ValidationParams,
+    NftTransferModule, TransferModule, ValidationParams,
 };
 
 #[allow(missing_docs)]
@@ -253,10 +252,13 @@ where
             ctx.clone(),
             verifiers.clone(),
         );
-        let module = create_transfer_middlewares::<_, ParamsPseudo>(
-            ctx.clone(),
-            verifiers,
-        );
+        // NB: the VP pseudo-executes against the bare transfer module,
+        // *not* the middleware stack. Any state change that only the
+        // middleware stack produces (overflow-receive payouts, packet
+        // forwarding, shielded-recv acks) can then never be reproduced
+        // here, so memo-triggered packets are rejected outright. See
+        // `crates/tests/src/native_vp/overflow_recv.rs`.
+        let module = TransferModule::new(ctx.clone(), verifiers);
         actions.add_transfer_module(module);
         let module = NftTransferModule::<_, Token>::new(ctx.clone());
         actions.add_transfer_module(module);
@@ -276,6 +278,32 @@ where
         }
 
         for key in changed_ibc_keys {
+            let actual = self.ctx.read_bytes_post(key)?;
+            match_value(key, actual, ctx.borrow().get_changed_value(key))?;
+        }
+
+        // Check that the escrow balances only changed as reproduced by the
+        // pseudo execution
+        let changed_escrow_keys: HashSet<&Key> = keys_changed
+            .iter()
+            .filter(|k| {
+                Token::is_any_token_balance_key(k)
+                    .map(|[_, owner]| owner == &IBC)
+                    .unwrap_or(false)
+            })
+            .collect();
+        if changed_escrow_keys.len()
+            != ctx.borrow().get_changed_escrow_balance_keys().len()
+        {
+            return Err(VpError::StateChange(format!(
+                "The changed escrow balance keys mismatched: Actual {:?}, \
+                 Expected {:?}",
+                changed_escrow_keys,
+                ctx.borrow().get_changed_escrow_balance_keys()
+            ))
+            .into());
+        }
+        for key in changed_escrow_keys {
             let actual = self.ctx.read_bytes_post(key)?;
             match_value(key, actual, ctx.borrow().get_changed_value(key))?;
         }
@@ -320,8 +348,9 @@ where
             IbcActions::<_, Params, Token>::new(ctx.clone(), verifiers.clone());
         actions.set_validation_params(self.validation_params()?);
 
-        let module =
-            create_transfer_middlewares::<_, Params>(ctx.clone(), verifiers);
+        // NB: as in `validate_state`, validate against the bare transfer
+        // module so that middleware-only state changes are never accepted.
+        let module = TransferModule::new(ctx.clone(), verifiers);
         actions.add_transfer_module(module);
         let module = NftTransferModule::<_, Token>::new(ctx);
         actions.add_transfer_module(module);
@@ -2389,6 +2418,14 @@ mod tests {
             .write(&withdraw_key, bytes)
             .expect("write failed");
         keys_changed.insert(withdraw_key);
+        // escrow balance
+        let escrow_balance_key =
+            namada_token::storage_key::balance_key(&nam(), &IBC);
+        let _ = state
+            .write_log_mut()
+            .write(&escrow_balance_key, amount.serialize_to_vec())
+            .expect("write failed");
+        keys_changed.insert(escrow_balance_key);
         // event
         let transfer_event = TransferEvent {
             sender: msg.packet_data.sender.clone(),
@@ -2919,6 +2956,14 @@ mod tests {
             .write(&deposit_key, bytes)
             .expect("write failed");
         keys_changed.insert(deposit_key);
+        // escrow balance (refunded)
+        let escrow_balance_key =
+            namada_token::storage_key::balance_key(&nam(), &IBC);
+        let _ = state
+            .write_log_mut()
+            .write(&escrow_balance_key, Amount::default().serialize_to_vec())
+            .expect("write failed");
+        keys_changed.insert(escrow_balance_key);
         // event
         let timeout_event = TimeoutEvent {
             refund_receiver: data.sender,
@@ -3078,6 +3123,14 @@ mod tests {
             .write(&deposit_key, bytes)
             .expect("write failed");
         keys_changed.insert(deposit_key);
+        // escrow balance (refunded)
+        let escrow_balance_key =
+            namada_token::storage_key::balance_key(&nam(), &IBC);
+        let _ = state
+            .write_log_mut()
+            .write(&escrow_balance_key, Amount::default().serialize_to_vec())
+            .expect("write failed");
+        keys_changed.insert(escrow_balance_key);
         // event
         let timeout_event = TimeoutEvent {
             refund_receiver: data.sender,
@@ -3246,6 +3299,14 @@ mod tests {
             .write(&withdraw_key, bytes)
             .expect("write failed");
         keys_changed.insert(withdraw_key);
+        // escrow balance
+        let escrow_balance_key =
+            namada_token::storage_key::balance_key(&ibc_token, &IBC);
+        let _ = state
+            .write_log_mut()
+            .write(&escrow_balance_key, Amount::from_u64(1).serialize_to_vec())
+            .expect("write failed");
+        keys_changed.insert(escrow_balance_key);
         // event
         let transfer_event = NftTransferEvent {
             sender: msg.packet_data.sender.clone(),
@@ -3636,6 +3697,14 @@ mod tests {
             .write(&withdraw_key, bytes)
             .expect("write failed");
         keys_changed.insert(withdraw_key);
+        // escrow balance
+        let escrow_balance_key =
+            namada_token::storage_key::balance_key(&ibc_token, &IBC);
+        let _ = state
+            .write_log_mut()
+            .write(&escrow_balance_key, amount.serialize_to_vec())
+            .expect("write failed");
+        keys_changed.insert(escrow_balance_key);
         // event
         let transfer_event = TransferEvent {
             sender: msg.packet_data.sender.clone(),

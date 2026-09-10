@@ -8,7 +8,7 @@ use namada_core::address::Address;
 use namada_core::arith::checked;
 use namada_core::booleans::BoolResultUnitExt;
 use namada_core::storage::Key;
-use namada_systems::governance;
+use namada_systems::{governance, trans_token};
 use namada_tx::BatchedTxRef;
 use namada_tx::action::{
     Action, Bond, ClaimRewards, PosAction, Redelegation, Unbond, Withdraw,
@@ -23,7 +23,7 @@ use crate::storage::{
 };
 use crate::storage_key::is_params_key;
 use crate::types::BondId;
-use crate::{storage_key, token};
+use crate::{ADDRESS, StorageRead, storage_key, token};
 
 #[allow(missing_docs)]
 #[derive(Error, Debug)]
@@ -41,15 +41,16 @@ impl From<VpError> for Error {
 }
 
 /// Proof-of-Stake validity predicate
-pub struct PosVp<'ctx, CTX, Gov> {
+pub struct PosVp<'ctx, CTX, Gov, TokenKeys> {
     /// Generic types for DI
-    pub _marker: PhantomData<(&'ctx CTX, Gov)>,
+    pub _marker: PhantomData<(&'ctx CTX, Gov, TokenKeys)>,
 }
 
-impl<'ctx, CTX, Gov> PosVp<'ctx, CTX, Gov>
+impl<'ctx, CTX, Gov, TokenKeys> PosVp<'ctx, CTX, Gov, TokenKeys>
 where
     CTX: VpEnv<'ctx> + namada_tx::action::Read<Err = Error>,
     Gov: governance::Read<<CTX as VpEnv<'ctx>>::Pre>,
+    TokenKeys: trans_token::Keys,
 {
     /// Run the validity predicate
     pub fn validate_tx(
@@ -357,6 +358,32 @@ where
                     "The per-epoch maximum commission rate change provided \
                      must be a decimal between 0 and 1.",
                 ));
+            }
+        }
+
+        // Guard the PoS escrow balance: the balance of the PoS internal
+        // account lives under the Multitoken prefix, outside of the
+        // `is_pos_key` check above, so any debit of it has to be explicitly
+        // backed by a matching `Withdraw` or `ClaimRewards` action
+        for key in keys_changed {
+            if let Some([_token, owner]) =
+                TokenKeys::is_any_token_balance_key(key)
+            {
+                if owner == &ADDRESS {
+                    let pre: token::Amount =
+                        ctx.pre().read(key)?.unwrap_or_default();
+                    let post: token::Amount =
+                        ctx.post().read(key)?.unwrap_or_default();
+                    if post < pre
+                        && withdrawals.is_empty()
+                        && claimed_rewards.is_empty()
+                    {
+                        return Err(Error::new_const(
+                            "PoS balance decreased without any Withdraw or \
+                             ClaimRewards action",
+                        ));
+                    }
+                }
             }
         }
 

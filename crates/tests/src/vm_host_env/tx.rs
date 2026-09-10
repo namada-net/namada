@@ -250,14 +250,17 @@ impl TestTxEnv {
             &mut self.tx_wasm_cache,
             wasm::run::GasMeterKind::MutGlobal,
             false,
-        )
-        .and(Ok(()));
+        );
 
         *self.gas_meter.borrow_mut() = GasMeter::Native(
             gas_meter.replace_with(|_| unsafe { TxGasMeter::placeholder() }),
         );
 
-        res
+        // Record the verifiers inserted by the transaction the same way the
+        // protocol shell does, so that VP validation is faithful
+        let verifiers = res?;
+        self.verifiers.extend(verifiers);
+        Ok(())
     }
 }
 

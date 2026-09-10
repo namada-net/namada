@@ -52,6 +52,7 @@ impl<'view, 'a, S, CA, EVAL, Token>
 where
     S: 'static + StateRead,
     EVAL: VpEvaluator<'a, S, CA, EVAL>,
+    Token: token::Keys,
 {
     /// Generate new pseudo execution context
     pub fn new(ctx: CtxPreStorageRead<'view, 'a, S, CA, EVAL>) -> Self {
@@ -71,6 +72,20 @@ where
             .store
             .keys()
             .filter(|k| is_ibc_key(k))
+            .collect()
+    }
+
+    /// Get the escrow balance keys changed during the pseudo execution
+    pub(crate) fn get_changed_escrow_balance_keys(&self) -> HashSet<&Key> {
+        use namada_core::address::IBC;
+        self.storage
+            .store
+            .keys()
+            .filter(|k| {
+                <Token as token::Keys>::is_any_token_balance_key(k)
+                    .map(|[_, owner]| owner == &IBC)
+                    .unwrap_or(false)
+            })
             .collect()
     }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Make a release archive from built Namada binaries and dylib(s)
-# depends on cargo-about 0.5.2
+# depends on cargo-about 0.8.0
 
 set -e
 

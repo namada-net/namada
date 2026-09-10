@@ -737,11 +737,12 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.ROLE }}
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-binstall
       - name: Install cargo-about
-        run: cargo binstall cargo-about@0.8.0 --no-confirm
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@0.8.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Check SDK licenses
         run: |
           cd crates/sdk

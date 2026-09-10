@@ -1439,29 +1439,14 @@ impl BenchShieldedCtx {
             timeout_timestamp_on_b: TimeoutTimestamp::At(timeout_timestamp),
         };
 
-        let vectorized_transfer =
+        let masp_section_hash =
             Transfer::deserialize(&mut tx.tx.data(&tx.cmt).unwrap().as_slice())
+                .unwrap()
+                .shielded_section_hash
                 .unwrap();
-        let sources =
-            vec![vectorized_transfer.sources.into_iter().next().unwrap()]
-                .into_iter()
-                .collect();
-        let targets =
-            vec![vectorized_transfer.targets.into_iter().next().unwrap()]
-                .into_iter()
-                .collect();
-        let transfer = Transfer {
-            sources,
-            targets,
-            shielded_section_hash: Some(
-                vectorized_transfer.shielded_section_hash.unwrap(),
-            ),
-        };
-        let masp_tx = tx
-            .tx
-            .get_masp_section(&transfer.shielded_section_hash.unwrap())
-            .unwrap()
-            .clone();
+        let transfer = Transfer::masp(masp_section_hash);
+        let masp_tx =
+            tx.tx.get_masp_section(&masp_section_hash).unwrap().clone();
         let msg = MsgTransfer::<token::Transfer> {
             message: msg,
             transfer: Some(transfer),

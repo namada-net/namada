@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Make a release archive from built Namada binaries and dylib(s)
-# depends on cargo-about 0.5.2
+# depends on cargo-about 0.8.0
 
 set -e
 
@@ -15,7 +15,7 @@ cd target/release && \
 ln ${BIN} ../../${PACKAGE_NAME} && \
 cd ../.. && \
 ln wasm/*.*.wasm wasm/checksums.json ${PACKAGE_NAME}/wasm && \
-ln LICENSE ${PACKAGE_NAME} && \
+ln LICENSE-GPL LICENSE-MIT ${PACKAGE_NAME} && \
 cargo about generate about.hbs --fail --output-file ${PACKAGE_NAME}/LICENSE.thirdparty && \
 tar -c -z -f ${PACKAGE_NAME}.tar.gz ${PACKAGE_NAME} && \
 rm -rf ${PACKAGE_NAME}

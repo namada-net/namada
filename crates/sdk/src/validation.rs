@@ -21,6 +21,7 @@ pub type PosVp<'ctx, CTX> = proof_of_stake::vp::PosVp<
     'ctx,
     CTX,
     governance::Store<<CTX as VpEnv<'ctx>>::Pre>,
+    TokenKeys,
 >;
 
 /// Native IBC VP

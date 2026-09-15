@@ -5,7 +5,7 @@ use data_encoding::HEXUPPER;
 use namada_sdk::parameters;
 use namada_sdk::proof_of_stake::storage::find_validator_by_raw_hash;
 use namada_sdk::tx::data::protocol::ProtocolTxType;
-use namada_vote_ext::{ConsensusVersion, protocol_tx_data_variants};
+use namada_vote_ext::protocol_tx_data_variants;
 
 use super::block_alloc::{BlockGas, BlockSpace};
 use super::{version_compat, *};
@@ -79,7 +79,7 @@ where
                 )
         };
 
-        let mut marker_version = None;
+        let mut found_marker = false;
         let tx_results = self.process_txs(
             &req.txs,
             req.time
@@ -87,21 +87,21 @@ where
                 .try_into()
                 .expect("Failed conversion of Comet timestamp"),
             &native_block_proposer_address,
-            &mut marker_version,
+            &mut found_marker,
         );
 
         // Every proposal must carry a consensus version marker tx. A
         // proposal without one was not built by a node running a
         // compatible version and may cause state divergence.
-        let Some(marker_version) = marker_version else {
-            tracing::warn!(
+        if !found_marker {
+            tracing::error!(
                 proposer = ?HEXUPPER.encode(&req.proposer_address),
                 height = req.height,
                 hash = ?HEXUPPER.encode(&req.hash),
                 "Proposal has no consensus version marker, it will be rejected"
             );
             return (ProcessProposal::Reject, tx_results);
-        };
+        }
 
         // Erroneous transactions were detected when processing
         // the leader's proposal. We allow txs that are invalid at runtime
@@ -120,11 +120,6 @@ where
                 "Found invalid transactions, proposed block will be rejected"
             );
         }
-        tracing::info!(
-            proposer_version = %marker_version.0,
-            this_version = namada_sdk::consensus_version(),
-            "Accepted consensus version marker in proposal"
-        );
         (
             if invalid_txs {
                 ProcessProposal::Reject
@@ -146,7 +141,7 @@ where
         txs: &[TxBytes],
         block_time: DateTimeUtc,
         block_proposer: &Address,
-        marker_version: &mut Option<ConsensusVersion>,
+        found_marker: &mut bool,
     ) -> Vec<TxResult> {
         // This is safe as neither the inner `db` nor `in_mem` are
         // actually mutable, only the `write_log` which is owned by
@@ -170,7 +165,7 @@ where
                     &mut vp_wasm_cache,
                     &mut tx_wasm_cache,
                     block_proposer,
-                    marker_version,
+                    found_marker,
                 );
                 let error_code = ResultCode::from_u32(result.code).unwrap();
                 if let ResultCode::Ok = error_code {
@@ -224,7 +219,7 @@ where
         vp_wasm_cache: &mut VpCache<CA>,
         tx_wasm_cache: &mut TxCache<CA>,
         block_proposer: &Address,
-        marker_version: &mut Option<ConsensusVersion>,
+        found_marker: &mut bool,
     ) -> TxResult
     where
         CA: 'static + WasmCacheAccess + Sync,
@@ -445,7 +440,7 @@ where
                                     .into(),
                             }
                         } else {
-                            check_version_marker(&tx, marker_version)
+                            check_version_marker(&tx, found_marker)
                         }
                     }
                 }
@@ -610,19 +605,16 @@ where
     }
 }
 
-/// Evaluate the consensus version marker tx of a proposal, recording
-/// the marker's version in `marker_version` if it is compatible.
-fn check_version_marker(
-    tx: &Tx,
-    marker_version: &mut Option<ConsensusVersion>,
-) -> TxResult {
+/// Evaluate the consensus version marker tx of a proposal, flagging
+/// its presence in `found_marker` if it is compatible.
+fn check_version_marker(tx: &Tx, found_marker: &mut bool) -> TxResult {
     match version_compat::extract_marker_version(tx) {
         Some(version) => {
             if version_compat::is_version_compatible(
                 namada_sdk::consensus_version(),
                 &version,
             ) {
-                *marker_version = Some(version);
+                *found_marker = true;
                 TxResult {
                     code: ResultCode::Ok.into(),
                     info: "Process proposal accepted the consensus version \
@@ -630,6 +622,12 @@ fn check_version_marker(
                         .into(),
                 }
             } else {
+                tracing::error!(
+                    proposer_version = %version.0,
+                    this_version = namada_sdk::consensus_version(),
+                    "Proposal carries an incompatible consensus version, it \
+                     will be rejected"
+                );
                 TxResult {
                     code: ResultCode::IncompatibleVersion.into(),
                     info: format!(
@@ -642,12 +640,18 @@ fn check_version_marker(
                 }
             }
         }
-        None => TxResult {
-            code: ResultCode::InvalidTx.into(),
-            info: "Process proposal rejected this proposal because the \
-                   consensus version marker was not deserializable"
-                .into(),
-        },
+        None => {
+            tracing::error!(
+                "Proposal carries a consensus version marker that could not \
+                 be deserialized, it will be rejected"
+            );
+            TxResult {
+                code: ResultCode::InvalidTx.into(),
+                info: "Process proposal rejected this proposal because the \
+                       consensus version marker was not deserializable"
+                    .into(),
+            }
+        }
     }
 }
 

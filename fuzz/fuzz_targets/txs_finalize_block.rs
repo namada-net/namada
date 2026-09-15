@@ -47,8 +47,12 @@ fuzz_target!(|txs: Vec<Tx>| {
     let proposer_pk = wallet::defaults::validator_keypair().to_public();
     let proposer_address = Address::from(&proposer_pk);
     let block_time = DateTimeUtc::now();
-    let processing_results =
-        shell.process_txs(&txs_bytes, block_time, &proposer_address, &mut None);
+    let processing_results = shell.process_txs(
+        &txs_bytes,
+        block_time,
+        &proposer_address,
+        &mut false,
+    );
     let mut txs = Vec::with_capacity(txs_bytes.len());
     for (result, tx) in
         processing_results.into_iter().zip(txs_bytes.into_iter())

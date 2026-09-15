@@ -4,6 +4,7 @@ use std::cell::RefCell;
 
 use namada_sdk::address::Address;
 use namada_sdk::gas::TxGasMeter;
+use namada_sdk::hints;
 use namada_sdk::key::tm_raw_hash_to_string;
 use namada_sdk::parameters::get_gas_scale;
 use namada_sdk::proof_of_stake::storage::find_validator_by_raw_hash;
@@ -66,9 +67,16 @@ where
             let mut alloc = self.get_protocol_txs_allocator();
             // reserve space at the front of the proposal for the version
             // marker tx, which is not allocated via the state machine
-            alloc.reserve_version_marker_space(
-                version_marker_bytes.len() as u64,
-            );
+            if hints::unlikely(
+                !alloc.reserve_version_marker_space(
+                    version_marker_bytes.len() as u64
+                ),
+            ) {
+                panic!(
+                    "The configured proposal bytes limit cannot fit the \
+                     consensus version marker tx, the node is misconfigured"
+                );
+            }
             // add initial protocol txs
             let (alloc, mut txs) =
                 self.build_protocol_tx_with_normal_txs(alloc, &mut req.txs);

@@ -433,41 +433,19 @@ where
                             .to_string(),
                     },
                     ProtocolTxType::ConsensusVersionMarker => {
-                        match version_compat::extract_marker_version(&tx) {
-                            Some(version) => {
-                                if version_compat::is_version_compatible(
-                                    namada_sdk::consensus_version(),
-                                    &version,
-                                ) {
-                                    *marker_version = Some(version);
-                                    TxResult {
-                                        code: ResultCode::Ok.into(),
-                                        info: "Process proposal accepted the \
-                                               consensus version marker"
-                                            .into(),
-                                    }
-                                } else {
-                                    TxResult {
-                                        code: ResultCode::IncompatibleVersion
-                                            .into(),
-                                        info: format!(
-                                            "Process proposal rejected this \
-                                             proposal because it carries an \
-                                             incompatible software version: \
-                                             expected {}, found {}",
-                                            namada_sdk::consensus_version(),
-                                            version.0
-                                        ),
-                                    }
-                                }
-                            }
-                            None => TxResult {
+                        // The marker must be the first tx of the proposal.
+                        // This also precludes duplicate markers, as only
+                        // one tx can occupy the first position.
+                        if tx_index.0 != 0 {
+                            TxResult {
                                 code: ResultCode::InvalidTx.into(),
                                 info: "Process proposal rejected this \
-                                       proposal because the consensus version \
-                                       marker was not deserializable"
+                                       proposal because its consensus version \
+                                       marker is not the first transaction"
                                     .into(),
-                            },
+                            }
+                        } else {
+                            check_version_marker(&tx, marker_version)
                         }
                     }
                 }
@@ -629,6 +607,47 @@ where
         _req: shim::request::RevertProposal,
     ) -> shim::response::RevertProposal {
         Default::default()
+    }
+}
+
+/// Evaluate the consensus version marker tx of a proposal, recording
+/// the marker's version in `marker_version` if it is compatible.
+fn check_version_marker(
+    tx: &Tx,
+    marker_version: &mut Option<ConsensusVersion>,
+) -> TxResult {
+    match version_compat::extract_marker_version(tx) {
+        Some(version) => {
+            if version_compat::is_version_compatible(
+                namada_sdk::consensus_version(),
+                &version,
+            ) {
+                *marker_version = Some(version);
+                TxResult {
+                    code: ResultCode::Ok.into(),
+                    info: "Process proposal accepted the consensus version \
+                           marker"
+                        .into(),
+                }
+            } else {
+                TxResult {
+                    code: ResultCode::IncompatibleVersion.into(),
+                    info: format!(
+                        "Process proposal rejected this proposal because it \
+                         carries an incompatible software version: expected \
+                         {}, found {}",
+                        namada_sdk::consensus_version(),
+                        version.0
+                    ),
+                }
+            }
+        }
+        None => TxResult {
+            code: ResultCode::InvalidTx.into(),
+            info: "Process proposal rejected this proposal because the \
+                   consensus version marker was not deserializable"
+                .into(),
+        },
     }
 }
 

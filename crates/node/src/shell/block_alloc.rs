@@ -167,9 +167,18 @@ impl BlockAllocator<states::BuildingProtocolTxBatch<WithNormalTxs>> {
     /// is injected at the front of the proposal outside of the
     /// [`BlockAllocator`] state machine. All subsequent space accounting
     /// is bounded by the total block space minus this reserve.
+    ///
+    /// Returns `false` if the configured block space cannot contain the
+    /// marker, in which case a proposal must not be constructed.
     #[inline]
-    pub fn reserve_version_marker_space(&mut self, bytes: u64) {
-        self.block.allotted = self.block.allotted.saturating_sub(bytes);
+    pub fn reserve_version_marker_space(&mut self, bytes: u64) -> bool {
+        match self.block.allotted.checked_sub(bytes) {
+            Some(rest) => {
+                self.block.allotted = rest;
+                true
+            }
+            None => false,
+        }
     }
 }
 

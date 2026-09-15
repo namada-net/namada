@@ -690,6 +690,7 @@ mod test_process_proposal {
         get_bp_bytes_to_sign,
     };
     use crate::shims::abcipp_shim_types::shim::request::ProcessedTx;
+    use crate::tendermint_proto::google::protobuf::Timestamp;
 
     const GAS_LIMIT: u64 = 100_000;
 
@@ -2042,5 +2043,93 @@ mod test_process_proposal {
             response.result.info,
             format!("Tx contains more than {MAX_TX_SECTIONS_LEN} sections."),
         );
+    }
+
+    /// Check that a proposal carrying a consensus version marker with
+    /// the node's own consensus version is accepted.
+    #[test]
+    #[allow(clippy::cast_possible_wrap)]
+    fn test_accept_matching_consensus_version() {
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let marker = version_compat::build_version_marker_tx(
+            namada_sdk::consensus_version(),
+            shell.chain_id.clone(),
+        )
+        .to_bytes();
+
+        #[allow(clippy::disallowed_methods)]
+        let time = DateTimeUtc::now();
+        let (response, tx_results) =
+            shell.shell.process_proposal(RequestProcessProposal {
+                txs: vec![marker.into()],
+                proposer_address: HEXUPPER
+                    .decode(
+                        wallet::defaults::validator_keypair()
+                            .to_public()
+                            .tm_raw_hash()
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .into(),
+                time: Some(Timestamp {
+                    seconds: time.0.timestamp(),
+                    nanos: time.0.timestamp_subsec_nanos() as i32,
+                }),
+                ..Default::default()
+            });
+
+        assert_eq!(
+            response,
+            crate::shims::abcipp_shim_types::shim::response::ProcessProposal::Accept
+        );
+        let [result] = tx_results.as_slice() else {
+            panic!("Expected exactly one tx result")
+        };
+        assert_eq!(result.code, u32::from(ResultCode::Ok));
+    }
+
+    /// Check that a proposal carrying a consensus version marker with
+    /// a version incompatible with the node's own is rejected.
+    #[test]
+    #[allow(clippy::cast_possible_wrap)]
+    fn test_reject_incompatible_consensus_version() {
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let marker = version_compat::build_version_marker_tx(
+            namada_sdk::consensus_version() + 1,
+            shell.chain_id.clone(),
+        )
+        .to_bytes();
+
+        #[allow(clippy::disallowed_methods)]
+        let time = DateTimeUtc::now();
+        let (response, tx_results) =
+            shell.shell.process_proposal(RequestProcessProposal {
+                txs: vec![marker.into()],
+                proposer_address: HEXUPPER
+                    .decode(
+                        wallet::defaults::validator_keypair()
+                            .to_public()
+                            .tm_raw_hash()
+                            .as_bytes(),
+                    )
+                    .unwrap()
+                    .into(),
+                time: Some(Timestamp {
+                    seconds: time.0.timestamp(),
+                    nanos: time.0.timestamp_subsec_nanos() as i32,
+                }),
+                ..Default::default()
+            });
+
+        assert_eq!(
+            response,
+            crate::shims::abcipp_shim_types::shim::response::ProcessProposal::Reject
+        );
+        let [result] = tx_results.as_slice() else {
+            panic!("Expected exactly one tx result")
+        };
+        assert_eq!(result.code, u32::from(ResultCode::IncompatibleVersion));
     }
 }

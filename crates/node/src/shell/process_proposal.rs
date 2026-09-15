@@ -713,6 +713,31 @@ mod test_process_proposal {
 
     const GAS_LIMIT: u64 = 100_000;
 
+    /// Build a [`RequestProcessProposal`] with the given txs, as if
+    /// proposed by the default test validator.
+    #[allow(clippy::cast_possible_wrap)]
+    fn proposal_request(txs: Vec<Vec<u8>>) -> RequestProcessProposal {
+        #[allow(clippy::disallowed_methods)]
+        let time = DateTimeUtc::now();
+        RequestProcessProposal {
+            txs: txs.into_iter().map(Into::into).collect(),
+            proposer_address: HEXUPPER
+                .decode(
+                    wallet::defaults::validator_keypair()
+                        .to_public()
+                        .tm_raw_hash()
+                        .as_bytes(),
+                )
+                .unwrap()
+                .into(),
+            time: Some(Timestamp {
+                seconds: time.0.timestamp(),
+                nanos: time.0.timestamp_subsec_nanos() as i32,
+            }),
+            ..Default::default()
+        }
+    }
+
     /// Check that we reject a validator set update protocol tx
     /// if the bridge is not active.
     #[test]
@@ -2067,7 +2092,6 @@ mod test_process_proposal {
     /// Check that a proposal carrying a consensus version marker with
     /// the node's own consensus version is accepted.
     #[test]
-    #[allow(clippy::cast_possible_wrap)]
     fn test_accept_matching_consensus_version() {
         let (shell, _recv, _, _) = test_utils::setup();
 
@@ -2077,26 +2101,8 @@ mod test_process_proposal {
         )
         .to_bytes();
 
-        #[allow(clippy::disallowed_methods)]
-        let time = DateTimeUtc::now();
         let (response, tx_results) =
-            shell.shell.process_proposal(RequestProcessProposal {
-                txs: vec![marker.into()],
-                proposer_address: HEXUPPER
-                    .decode(
-                        wallet::defaults::validator_keypair()
-                            .to_public()
-                            .tm_raw_hash()
-                            .as_bytes(),
-                    )
-                    .unwrap()
-                    .into(),
-                time: Some(Timestamp {
-                    seconds: time.0.timestamp(),
-                    nanos: time.0.timestamp_subsec_nanos() as i32,
-                }),
-                ..Default::default()
-            });
+            shell.shell.process_proposal(proposal_request(vec![marker]));
 
         assert_eq!(
             response,
@@ -2111,7 +2117,6 @@ mod test_process_proposal {
     /// Check that a proposal carrying a consensus version marker with
     /// a version incompatible with the node's own is rejected.
     #[test]
-    #[allow(clippy::cast_possible_wrap)]
     fn test_reject_incompatible_consensus_version() {
         let (shell, _recv, _, _) = test_utils::setup();
 
@@ -2121,26 +2126,8 @@ mod test_process_proposal {
         )
         .to_bytes();
 
-        #[allow(clippy::disallowed_methods)]
-        let time = DateTimeUtc::now();
         let (response, tx_results) =
-            shell.shell.process_proposal(RequestProcessProposal {
-                txs: vec![marker.into()],
-                proposer_address: HEXUPPER
-                    .decode(
-                        wallet::defaults::validator_keypair()
-                            .to_public()
-                            .tm_raw_hash()
-                            .as_bytes(),
-                    )
-                    .unwrap()
-                    .into(),
-                time: Some(Timestamp {
-                    seconds: time.0.timestamp(),
-                    nanos: time.0.timestamp_subsec_nanos() as i32,
-                }),
-                ..Default::default()
-            });
+            shell.shell.process_proposal(proposal_request(vec![marker]));
 
         assert_eq!(
             response,
@@ -2150,5 +2137,75 @@ mod test_process_proposal {
             panic!("Expected exactly one tx result")
         };
         assert_eq!(result.code, u32::from(ResultCode::IncompatibleVersion));
+    }
+
+    /// Check that a proposal without a consensus version marker is
+    /// rejected.
+    #[test]
+    fn test_reject_missing_version_marker() {
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let (response, _tx_results) =
+            shell.shell.process_proposal(proposal_request(vec![]));
+
+        assert_eq!(
+            response,
+            crate::shims::abcipp_shim_types::shim::response::ProcessProposal::Reject
+        );
+    }
+
+    /// Check that a proposal whose consensus version marker cannot be
+    /// deserialized is rejected.
+    #[test]
+    fn test_reject_malformed_version_marker() {
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let mut marker = version_compat::build_version_marker_tx(
+            namada_sdk::consensus_version(),
+            shell.chain_id.clone(),
+        );
+        // A single byte cannot be deserialized as a `u64` consensus
+        // version
+        marker.set_data(Data::new(vec![0xFF]));
+
+        let (response, tx_results) = shell
+            .shell
+            .process_proposal(proposal_request(vec![marker.to_bytes()]));
+
+        assert_eq!(
+            response,
+            crate::shims::abcipp_shim_types::shim::response::ProcessProposal::Reject
+        );
+        let [result] = tx_results.as_slice() else {
+            panic!("Expected exactly one tx result")
+        };
+        assert_eq!(result.code, u32::from(ResultCode::InvalidTx));
+    }
+
+    /// Check that a proposal with a second consensus version marker is
+    /// rejected: only the first tx of the proposal may be a marker.
+    #[test]
+    fn test_reject_duplicate_version_marker() {
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let marker = version_compat::build_version_marker_tx(
+            namada_sdk::consensus_version(),
+            shell.chain_id.clone(),
+        )
+        .to_bytes();
+
+        let (response, tx_results) = shell
+            .shell
+            .process_proposal(proposal_request(vec![marker.clone(), marker]));
+
+        assert_eq!(
+            response,
+            crate::shims::abcipp_shim_types::shim::response::ProcessProposal::Reject
+        );
+        let [first, second] = tx_results.as_slice() else {
+            panic!("Expected exactly two tx results")
+        };
+        assert_eq!(first.code, u32::from(ResultCode::Ok));
+        assert_eq!(second.code, u32::from(ResultCode::InvalidTx));
     }
 }

@@ -11,8 +11,8 @@
 use namada_sdk::borsh::BorshSerializeExt;
 use namada_sdk::chain::ChainId;
 use namada_sdk::key::common;
-use namada_sdk::tx::data::protocol::{ProtocolTx, ProtocolTxType};
 use namada_sdk::tx::data::TxType;
+use namada_sdk::tx::data::protocol::{ProtocolTx, ProtocolTxType};
 use namada_sdk::tx::{Data, Tx};
 use namada_vote_ext::{ConsensusVersion, protocol_tx_data_variants};
 
@@ -43,9 +43,7 @@ pub fn build_version_marker_tx(version: u64, chain_id: ChainId) -> Tx {
         tx: ProtocolTxType::ConsensusVersionMarker,
     })));
     tx.header.chain_id = chain_id;
-    tx.set_data(Data::new(
-        ConsensusVersion(version).serialize_to_vec(),
-    ));
+    tx.set_data(Data::new(ConsensusVersion(version).serialize_to_vec()));
     tx
 }
 
@@ -56,10 +54,7 @@ pub fn extract_marker_version(tx: &Tx) -> Option<ConsensusVersion> {
     let TxType::Protocol(protocol_tx) = &tx.header().tx_type else {
         return None;
     };
-    if !matches!(
-        protocol_tx.tx,
-        ProtocolTxType::ConsensusVersionMarker
-    ) {
+    if !matches!(protocol_tx.tx, ProtocolTxType::ConsensusVersionMarker) {
         return None;
     }
     protocol_tx_data_variants::ConsensusVersionMarker::try_from(tx).ok()

@@ -162,6 +162,7 @@ impl BlockAllocator<states::BuildingProtocolTxBatch<WithNormalTxs>> {
             normal_txs: NormalTxsBins::new(max_block_gas),
         }
     }
+
     /// Reserve block space for the consensus version marker tx, which
     /// is injected at the front of the proposal outside of the
     /// [`BlockAllocator`] state machine. All subsequent space accounting

@@ -8,8 +8,7 @@ use namada_sdk::tx::data::protocol::ProtocolTxType;
 use namada_vote_ext::{ConsensusVersion, protocol_tx_data_variants};
 
 use super::block_alloc::{BlockGas, BlockSpace};
-use super::version_compat;
-use super::*;
+use super::{version_compat, *};
 use crate::shell::block_alloc::{AllocFailure, TxBin};
 use crate::shims::abcipp_shim_types::shim::TxBytes;
 use crate::shims::abcipp_shim_types::shim::response::ProcessProposal;
@@ -465,8 +464,8 @@ where
                             None => TxResult {
                                 code: ResultCode::InvalidTx.into(),
                                 info: "Process proposal rejected this \
-                                       proposal because the consensus \
-                                       version marker was not deserializable"
+                                       proposal because the consensus version \
+                                       marker was not deserializable"
                                     .into(),
                             },
                         }

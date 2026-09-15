@@ -22,8 +22,8 @@ mod stats;
 #[cfg(any(test, feature = "testing"))]
 #[allow(dead_code)]
 pub mod testing;
-mod vote_extensions;
 pub mod version_compat;
+mod vote_extensions;
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;

@@ -486,10 +486,7 @@ mod test_prepare_proposal {
 
     /// Strip the consensus version marker tx from a proposal response,
     /// for tests that only care about the remaining txs.
-    fn strip_version_marker(
-        shell: &TestShell,
-        mut txs: Vec<TxBytes>,
-    ) -> Vec<TxBytes> {
+    fn strip_version_marker(mut txs: Vec<TxBytes>) -> Vec<TxBytes> {
         let marker = txs.remove(0);
         let marker_tx = Tx::try_from_bytes(&marker[..]).unwrap();
         assert_eq!(
@@ -519,7 +516,7 @@ mod test_prepare_proposal {
         };
         let txs = shell.prepare_proposal(req).txs;
         assert_eq!(txs.len(), 1);
-        strip_version_marker(&shell, txs);
+        strip_version_marker(txs);
     }
 
     /// Test that if an error is encountered while
@@ -552,7 +549,7 @@ mod test_prepare_proposal {
         };
         let txs = shell.prepare_proposal(req).txs;
         assert_eq!(txs.len(), 1);
-        strip_version_marker(&shell, txs);
+        strip_version_marker(txs);
     }
 
     /// Test if we are filtering out Ethereum events with bad
@@ -794,7 +791,7 @@ mod test_prepare_proposal {
         });
         assert_eq!(rsp.txs.len(), 2);
 
-        let tx_bytes = strip_version_marker(&shell, rsp.txs).remove(0);
+        let tx_bytes = strip_version_marker(rsp.txs).remove(0);
         let got = Tx::try_from_bytes(&tx_bytes[..]).unwrap();
         let eth_tx_data = (&got).try_into().expect("Test failed");
         let rsp_ext = match eth_tx_data {
@@ -840,7 +837,7 @@ mod test_prepare_proposal {
         };
 
         let received_txs =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+            strip_version_marker(shell.prepare_proposal(req).txs);
         assert_eq!(received_txs.len(), 0);
     }
 
@@ -870,7 +867,7 @@ mod test_prepare_proposal {
             ..Default::default()
         };
         let received_txs =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+            strip_version_marker(shell.prepare_proposal(req).txs);
         assert_eq!(received_txs.len(), 1);
     }
 
@@ -911,7 +908,7 @@ mod test_prepare_proposal {
         };
 
         let received_txs =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+            strip_version_marker(shell.prepare_proposal(req).txs);
         assert_eq!(received_txs.len(), 0);
     }
 
@@ -955,7 +952,7 @@ mod test_prepare_proposal {
             ..Default::default()
         };
         let received_txs =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+            strip_version_marker(shell.prepare_proposal(req).txs);
         assert_eq!(received_txs.len(), 2);
     }
 
@@ -993,8 +990,7 @@ mod test_prepare_proposal {
             time: Some(block_time),
             ..Default::default()
         };
-        let result =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        let result = strip_version_marker(shell.prepare_proposal(req).txs);
         assert_eq!(result.len(), 0);
     }
 
@@ -1029,8 +1025,7 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        let result = strip_version_marker(shell.prepare_proposal(req).txs);
         assert!(result.is_empty());
     }
 
@@ -1072,8 +1067,7 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        let result = strip_version_marker(shell.prepare_proposal(req).txs);
         assert_eq!(result.len(), 1);
     }
 
@@ -1106,8 +1100,7 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        let result = strip_version_marker(shell.prepare_proposal(req).txs);
         assert!(result.is_empty());
     }
 
@@ -1160,8 +1153,7 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        let result = strip_version_marker(shell.prepare_proposal(req).txs);
         assert!(result.is_empty());
     }
 
@@ -1201,8 +1193,7 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        let result = strip_version_marker(shell.prepare_proposal(req).txs);
         assert!(result.is_empty());
     }
 
@@ -1267,8 +1258,7 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        let result = strip_version_marker(shell.prepare_proposal(req).txs);
         assert_eq!(result.first().unwrap(), &wrapper_tx.to_bytes());
     }
 
@@ -1313,8 +1303,7 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        let result = strip_version_marker(shell.prepare_proposal(req).txs);
         assert!(result.is_empty());
     }
 
@@ -1346,8 +1335,7 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        let result = strip_version_marker(shell.prepare_proposal(req).txs);
         assert!(result.is_empty());
     }
 
@@ -1380,8 +1368,7 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        let result = strip_version_marker(shell.prepare_proposal(req).txs);
         assert!(result.is_empty());
     }
 
@@ -1414,8 +1401,7 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result =
-            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        let result = strip_version_marker(shell.prepare_proposal(req).txs);
         assert!(result.is_empty());
     }
 

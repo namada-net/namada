@@ -25,8 +25,8 @@ use namada_migrations::*;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::data::{Fee, GasLimit, TxType, WrapperTx};
 use crate::data::protocol::ProtocolTxType;
+use crate::data::{Fee, GasLimit, TxType, WrapperTx};
 use crate::sign::{SignatureIndex, VerifySigError};
 use crate::{
     Authorization, Code, Data, Header, MaspBuilder, Section, Signer,

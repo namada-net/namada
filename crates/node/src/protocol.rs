@@ -41,7 +41,7 @@ use namada_sdk::{governance, parameters, state, storage, token};
 pub use namada_vm::wasm::run::GasMeterKind;
 use namada_vm::wasm::{TxCache, VpCache};
 use namada_vm::{self, WasmCacheAccess, wasm};
-use namada_vote_ext::EthereumTxData;
+use namada_vote_ext::ProtocolTxData;
 use namada_vp::native_vp::NativeVp;
 use namada_vp::state::ReadConversionState;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -1113,7 +1113,7 @@ where
             "Protocol tx data must be present"
         )));
     };
-    let ethereum_tx_data = EthereumTxData::deserialize(&tx, &data)
+    let protocol_tx_data = ProtocolTxData::deserialize(&tx, &data)
         .wrap_err_with(|| {
             format!(
                 "Attempt made to apply an unsupported protocol transaction! - \
@@ -1122,8 +1122,8 @@ where
         })
         .map_err(Error::ProtocolTxError)?;
 
-    match ethereum_tx_data {
-        EthereumTxData::EthEventsVext(
+    match protocol_tx_data {
+        ProtocolTxData::EthEventsVext(
             namada_vote_ext::ethereum_events::SignedVext(ext),
         ) => {
             let ethereum_events::VextDigest { events, .. } =
@@ -1135,7 +1135,7 @@ where
             >(state, events)
             .map_err(Error::ProtocolTxError)
         }
-        EthereumTxData::BridgePoolVext(ext) => {
+        ProtocolTxData::BridgePoolVext(ext) => {
             transactions::bridge_pool_roots::apply_derived_tx::<
                 _,
                 _,
@@ -1143,7 +1143,7 @@ where
             >(state, ext.into())
             .map_err(Error::ProtocolTxError)
         }
-        EthereumTxData::ValSetUpdateVext(ext) => {
+        ProtocolTxData::ValSetUpdateVext(ext) => {
             // NOTE(feature = "abcipp"): with ABCI++, we can write the
             // complete proof to storage in one go. the decided vote extension
             // digest must already have >2/3 of the voting power behind it.
@@ -1161,9 +1161,9 @@ where
             )
             .map_err(Error::ProtocolTxError)
         }
-        EthereumTxData::EthereumEvents(_)
-        | EthereumTxData::BridgePool(_)
-        | EthereumTxData::ValidatorSetUpdate(_) => {
+        ProtocolTxData::EthereumEvents(_)
+        | ProtocolTxData::BridgePool(_)
+        | ProtocolTxData::ValidatorSetUpdate(_) => {
             // TODO(namada#198): implement this
             tracing::warn!(
                 "Attempt made to apply an unimplemented protocol transaction, \
@@ -1569,7 +1569,7 @@ mod tests {
     use super::*;
 
     fn apply_eth_tx<D, H>(
-        tx: EthereumTxData,
+        tx: ProtocolTxData,
         state: &mut WlState<D, H>,
     ) -> Result<BatchedTxResult>
     where
@@ -1612,7 +1612,7 @@ mod tests {
         };
         let signing_key = key::testing::keypair_1();
         let signed = vext.sign(&signing_key);
-        let tx = EthereumTxData::EthEventsVext(
+        let tx = ProtocolTxData::EthEventsVext(
             namada_vote_ext::ethereum_events::SignedVext(signed),
         );
 
@@ -1671,7 +1671,7 @@ mod tests {
             sig,
         }
         .sign(&signing_key);
-        let tx = EthereumTxData::BridgePoolVext(vext);
+        let tx = ProtocolTxData::BridgePoolVext(vext);
         apply_eth_tx(tx.clone(), &mut state)?;
         apply_eth_tx(tx, &mut state)?;
 

@@ -54,7 +54,7 @@ pub struct VoteExtension {
     pub validator_set_update: Option<validator_set_update::SignedVext>,
 }
 
-macro_rules! ethereum_tx_data_deserialize_inner {
+macro_rules! protocol_tx_data_deserialize_inner {
     ($variant:ty) => {
         impl TryFrom<&Tx> for $variant {
             type Error = TxError;
@@ -78,7 +78,7 @@ macro_rules! ethereum_tx_data_deserialize_inner {
     };
 }
 
-macro_rules! ethereum_tx_data_declare {
+macro_rules! protocol_tx_data_declare {
         (
             $( #[$outer_attrs:meta] )*
             {
@@ -89,38 +89,38 @@ macro_rules! ethereum_tx_data_declare {
             }
         ) => {
             $( #[$outer_attrs] )*
-            pub enum EthereumTxData {
+            pub enum ProtocolTxData {
                 $(
                     $(#[$inner_attrs])*
                     $variant ( $inner_ty )
                 ),*
             }
 
-            /// All the variants of [`EthereumTxData`], stored
+            /// All the variants of [`ProtocolTxData`], stored
             /// in a trait.
             #[allow(missing_docs)]
-            pub trait EthereumTxDataVariants {
+            pub trait ProtocolTxDataVariants {
                 $( type $variant; )*
             }
 
-            impl EthereumTxDataVariants for EthereumTxData {
+            impl ProtocolTxDataVariants for ProtocolTxData {
                 $( type $variant = $inner_ty; )*
             }
 
             #[allow(missing_docs)]
-            pub mod ethereum_tx_data_variants {
-                //! All the variants of [`EthereumTxData`], stored
+            pub mod protocol_tx_data_variants {
+                //! All the variants of [`ProtocolTxData`], stored
                 //! in a module.
                 use super::*;
 
                 $( pub type $variant = $inner_ty; )*
             }
 
-            $( ethereum_tx_data_deserialize_inner!($inner_ty); )*
+            $( protocol_tx_data_deserialize_inner!($inner_ty); )*
         };
     }
 
-ethereum_tx_data_declare! {
+protocol_tx_data_declare! {
     /// Data associated with Ethereum protocol transactions.
     #[derive(Clone, Debug, BorshSerialize, BorshDeserialize, BorshDeserializer, BorshSchema)]
     {
@@ -141,7 +141,7 @@ ethereum_tx_data_declare! {
     }
 }
 
-impl TryFrom<&Tx> for EthereumTxData {
+impl TryFrom<&Tx> for ProtocolTxData {
     type Error = TxError;
 
     fn try_from(tx: &Tx) -> Result<Self, TxError> {
@@ -165,7 +165,7 @@ impl TryFrom<&Tx> for EthereumTxData {
     }
 }
 
-impl EthereumTxData {
+impl ProtocolTxData {
     /// Sign transaction Ethereum data and wrap it in a [`Tx`].
     pub fn sign(
         &self,
@@ -195,7 +195,7 @@ impl EthereumTxData {
         macro_rules! match_of_type {
                 ( $( $type:ident ),* $(,)?) => {
                     match self {
-                        $( EthereumTxData::$type(x) =>
+                        $( ProtocolTxData::$type(x) =>
                            (x.serialize_to_vec(), ProtocolTxType::$type)),*
                     }
                 }
@@ -218,27 +218,27 @@ impl EthereumTxData {
         let deserialize: fn(&[u8]) -> _ = match tx_type {
             ProtocolTxType::EthereumEvents => |data| {
                 BorshDeserialize::try_from_slice(data)
-                    .map(EthereumTxData::EthereumEvents)
+                    .map(ProtocolTxData::EthereumEvents)
             },
             ProtocolTxType::BridgePool => |data| {
                 BorshDeserialize::try_from_slice(data)
-                    .map(EthereumTxData::BridgePool)
+                    .map(ProtocolTxData::BridgePool)
             },
             ProtocolTxType::ValidatorSetUpdate => |data| {
                 BorshDeserialize::try_from_slice(data)
-                    .map(EthereumTxData::ValidatorSetUpdate)
+                    .map(ProtocolTxData::ValidatorSetUpdate)
             },
             ProtocolTxType::EthEventsVext => |data| {
                 BorshDeserialize::try_from_slice(data)
-                    .map(EthereumTxData::EthEventsVext)
+                    .map(ProtocolTxData::EthEventsVext)
             },
             ProtocolTxType::BridgePoolVext => |data| {
                 BorshDeserialize::try_from_slice(data)
-                    .map(EthereumTxData::BridgePoolVext)
+                    .map(ProtocolTxData::BridgePoolVext)
             },
             ProtocolTxType::ValSetUpdateVext => |data| {
                 BorshDeserialize::try_from_slice(data)
-                    .map(EthereumTxData::ValSetUpdateVext)
+                    .map(ProtocolTxData::ValSetUpdateVext)
             },
         };
         deserialize(data)

@@ -5,7 +5,7 @@ use data_encoding::HEXUPPER;
 use namada_sdk::parameters;
 use namada_sdk::proof_of_stake::storage::find_validator_by_raw_hash;
 use namada_sdk::tx::data::protocol::ProtocolTxType;
-use namada_vote_ext::ethereum_tx_data_variants;
+use namada_vote_ext::protocol_tx_data_variants;
 
 use super::block_alloc::{BlockGas, BlockSpace};
 use super::*;
@@ -303,7 +303,7 @@ where
 
                 match protocol_tx.tx {
                     ProtocolTxType::EthEventsVext => {
-                        ethereum_tx_data_variants::EthEventsVext::try_from(&tx)
+                        protocol_tx_data_variants::EthEventsVext::try_from(&tx)
                             .map_err(|err| err.to_string())
                             .and_then(|ext| {
                                 validate_eth_events_vext::<
@@ -333,7 +333,7 @@ where
                             })
                     }
                     ProtocolTxType::BridgePoolVext => {
-                        ethereum_tx_data_variants::BridgePoolVext::try_from(&tx)
+                        protocol_tx_data_variants::BridgePoolVext::try_from(&tx)
                             .map_err(|err| err.to_string())
                             .and_then(|ext| {
                                 validate_bp_roots_vext::<
@@ -363,7 +363,7 @@ where
                             })
                     }
                     ProtocolTxType::ValSetUpdateVext => {
-                        ethereum_tx_data_variants::ValSetUpdateVext::try_from(
+                        protocol_tx_data_variants::ValSetUpdateVext::try_from(
                             &tx,
                         )
                         .map_err(|err| err.to_string())
@@ -670,7 +670,7 @@ mod test_process_proposal {
         let request = {
             let protocol_key =
                 shell.mode.get_protocol_key().expect("Test failed");
-            let tx = EthereumTxData::ValSetUpdateVext(ext)
+            let tx = ProtocolTxData::ValSetUpdateVext(ext)
                 .sign(protocol_key, shell.chain_id.clone())
                 .to_bytes();
             ProcessProposal { txs: vec![tx] }
@@ -710,7 +710,7 @@ mod test_process_proposal {
             ethereum_events: vec![event],
         }
         .sign(protocol_key);
-        let tx = EthereumTxData::EthEventsVext(ext.into())
+        let tx = ProtocolTxData::EthEventsVext(ext.into())
             .sign(protocol_key, shell.chain_id.clone())
             .to_bytes();
         let request = ProcessProposal { txs: vec![tx] };
@@ -763,7 +763,7 @@ mod test_process_proposal {
             sig,
         }
         .sign(shell.mode.get_protocol_key().expect("Test failed"));
-        let tx = EthereumTxData::BridgePoolVext(vote_ext)
+        let tx = ProtocolTxData::BridgePoolVext(vote_ext)
             .sign(protocol_key, shell.chain_id.clone())
             .to_bytes();
         let request = ProcessProposal { txs: vec![tx] };
@@ -800,7 +800,7 @@ mod test_process_proposal {
         vote_extension: ethereum_events::SignedVext,
         protocol_key: common::SecretKey,
     ) {
-        let tx = EthereumTxData::EthEventsVext(vote_extension)
+        let tx = ProtocolTxData::EthEventsVext(vote_extension)
             .sign(&protocol_key, shell.chain_id.clone())
             .to_bytes();
         let request = ProcessProposal { txs: vec![tx] };
@@ -1383,7 +1383,7 @@ mod test_process_proposal {
         wrapper.sign_wrapper(keypair);
 
         let protocol_key = shell.mode.get_protocol_key().expect("Test failed");
-        let protocol_tx = EthereumTxData::EthEventsVext({
+        let protocol_tx = ProtocolTxData::EthEventsVext({
             let bertha_key = wallet::defaults::bertha_keypair();
             let bertha_addr = wallet::defaults::bertha_address();
             ethereum_events::Vext::empty(1234_u64.into(), bertha_addr)
@@ -1892,7 +1892,7 @@ mod test_process_proposal {
                 assert!(ext.verify(&protocol_key.ref_to()).is_ok());
                 ext
             };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
+            let tx = ProtocolTxData::EthEventsVext(ext.into())
                 .sign(&protocol_key, shell.chain_id.clone())
                 .to_bytes();
             let req = ProcessProposal { txs: vec![tx] };
@@ -1920,7 +1920,7 @@ mod test_process_proposal {
                 assert!(ext.verify(&protocol_key.ref_to()).is_ok());
                 ext
             };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
+            let tx = ProtocolTxData::EthEventsVext(ext.into())
                 .sign(&protocol_key, shell.chain_id.clone())
                 .to_bytes();
             let req = ProcessProposal { txs: vec![tx] };

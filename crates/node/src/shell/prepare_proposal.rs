@@ -440,10 +440,10 @@ mod test_prepare_proposal {
     use namada_sdk::tx::data::{Fee, TxType};
     use namada_sdk::tx::{Code, Data, Signed};
     use namada_sdk::{address, governance, token};
-    use namada_vote_ext::{ethereum_events, ethereum_tx_data_variants};
+    use namada_vote_ext::{ethereum_events, protocol_tx_data_variants};
 
     use super::*;
-    use crate::shell::EthereumTxData;
+    use crate::shell::ProtocolTxData;
     use crate::shell::test_utils::{
         self, TestShell, gen_keypair, get_pkh_from_address,
     };
@@ -454,7 +454,7 @@ mod test_prepare_proposal {
         shell: &TestShell,
         vext: Signed<ethereum_events::Vext>,
     ) {
-        let tx = EthereumTxData::EthEventsVext(vext.into())
+        let tx = ProtocolTxData::EthEventsVext(vext.into())
             .sign(
                 shell.mode.get_protocol_key().expect("Test failed"),
                 shell.chain_id.clone(),
@@ -741,7 +741,7 @@ mod test_prepare_proposal {
             ext
         };
 
-        let vote = EthereumTxData::EthEventsVext(
+        let vote = ProtocolTxData::EthEventsVext(
             signed_eth_ev_vote_extension.clone().into(),
         )
         .sign(&protocol_key, shell.chain_id.clone())
@@ -756,7 +756,7 @@ mod test_prepare_proposal {
         let got = Tx::try_from_bytes(&tx_bytes[..]).unwrap();
         let eth_tx_data = (&got).try_into().expect("Test failed");
         let rsp_ext = match eth_tx_data {
-            EthereumTxData::EthEventsVext(ext) => ext,
+            ProtocolTxData::EthEventsVext(ext) => ext,
             _ => panic!("Test failed"),
         };
 
@@ -1397,7 +1397,7 @@ mod test_prepare_proposal {
                 assert!(ext.verify(&protocol_key.ref_to()).is_ok());
                 ext
             };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
+            let tx = ProtocolTxData::EthEventsVext(ext.into())
                 .sign(&protocol_key, shell.chain_id.clone())
                 .to_bytes();
             let req = RequestPrepareProposal {
@@ -1411,7 +1411,7 @@ mod test_prepare_proposal {
             // since no events with valid nonces are contained in the vote
             // extension, we drop it from the proposal
             for tx in proposed_txs {
-                if ethereum_tx_data_variants::EthEventsVext::try_from(&tx)
+                if protocol_tx_data_variants::EthEventsVext::try_from(&tx)
                     .is_ok()
                 {
                     panic!(
@@ -1445,7 +1445,7 @@ mod test_prepare_proposal {
                 assert!(ext.verify(&protocol_key.ref_to()).is_ok());
                 ext
             };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
+            let tx = ProtocolTxData::EthEventsVext(ext.into())
                 .sign(&protocol_key, shell.chain_id.clone())
                 .to_bytes();
             let req = RequestPrepareProposal {
@@ -1460,7 +1460,7 @@ mod test_prepare_proposal {
             let mut ext = 'ext: {
                 for tx in proposed_txs {
                     if let Ok(ext) =
-                        ethereum_tx_data_variants::EthEventsVext::try_from(&tx)
+                        protocol_tx_data_variants::EthEventsVext::try_from(&tx)
                     {
                         break 'ext ext;
                     }

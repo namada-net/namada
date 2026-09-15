@@ -136,8 +136,8 @@ where
                 }
             };
             match (&tx).try_into().ok() {
-                Some(EthereumTxData::BridgePoolVext(_)) => true,
-                Some(EthereumTxData::EthEventsVext(ext)) => {
+                Some(ProtocolTxData::BridgePoolVext(_)) => true,
+                Some(ProtocolTxData::EthEventsVext(ext)) => {
                     // NB: only propose events with at least
                     // one valid nonce
                     ext.data.ethereum_events.iter().any(|event| {
@@ -146,7 +146,7 @@ where
                             .validate_eth_event_nonce(event)
                     })
                 }
-                Some(EthereumTxData::ValSetUpdateVext(ext)) => {
+                Some(ProtocolTxData::ValSetUpdateVext(ext)) => {
                     // only include non-stale validator set updates
                     // in block proposals. it might be sitting long
                     // enough in the mempool for it to no longer be
@@ -172,7 +172,7 @@ where
 /// in a [`VoteExtension`].
 pub fn iter_protocol_txs(
     ext: VoteExtension,
-) -> impl Iterator<Item = EthereumTxData> {
+) -> impl Iterator<Item = ProtocolTxData> {
     let VoteExtension {
         ethereum_events,
         bridge_pool_root,
@@ -180,10 +180,10 @@ pub fn iter_protocol_txs(
     } = ext;
     [
         ethereum_events.map(|e| {
-            EthereumTxData::EthEventsVext(ethereum_events::SignedVext(e))
+            ProtocolTxData::EthEventsVext(ethereum_events::SignedVext(e))
         }),
-        bridge_pool_root.map(EthereumTxData::BridgePoolVext),
-        validator_set_update.map(EthereumTxData::ValSetUpdateVext),
+        bridge_pool_root.map(ProtocolTxData::BridgePoolVext),
+        validator_set_update.map(ProtocolTxData::ValSetUpdateVext),
     ]
     .into_iter()
     .flatten()

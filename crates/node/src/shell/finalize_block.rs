@@ -25,7 +25,7 @@ use namada_sdk::tx::event::{Batch, Code};
 use namada_sdk::tx::new_tx_event;
 use namada_sdk::{ibc, proof_of_stake};
 use namada_vote_ext::ethereum_events::MultiSignedEthEvent;
-use namada_vote_ext::ethereum_tx_data_variants;
+use namada_vote_ext::protocol_tx_data_variants;
 use tendermint::abci::types::Misbehavior;
 
 use super::*;
@@ -732,7 +732,7 @@ where
 
                         ProtocolTxType::EthEventsVext => {
                             let ext =
-                        ethereum_tx_data_variants::EthEventsVext::try_from(&tx)
+                        protocol_tx_data_variants::EthEventsVext::try_from(&tx)
                             .unwrap();
                             if self
                                 .mode
@@ -749,7 +749,7 @@ where
                         }
                         ProtocolTxType::EthereumEvents => {
                             let digest =
-                        ethereum_tx_data_variants::EthereumEvents::try_from(
+                        protocol_tx_data_variants::EthereumEvents::try_from(
                             &tx,
                         )
                         .unwrap();
@@ -1531,7 +1531,7 @@ mod test_finalize_block {
         let protocol_key =
             shell.mode.get_protocol_key().expect("Test failed").clone();
 
-        let tx = EthereumTxData::EthereumEvents(ethereum_events::VextDigest {
+        let tx = ProtocolTxData::EthereumEvents(ethereum_events::VextDigest {
             signatures: Default::default(),
             events: vec![],
         })
@@ -1607,7 +1607,7 @@ mod test_finalize_block {
                 events: vec![signed],
             };
             ProcessedTx {
-                tx: EthereumTxData::EthereumEvents(digest)
+                tx: ProtocolTxData::EthereumEvents(digest)
                     .sign(&protocol_key, shell.chain_id.clone())
                     .to_bytes()
                     .into(),
@@ -1667,7 +1667,7 @@ mod test_finalize_block {
         }
         .sign(&protocol_key);
         let processed_tx = ProcessedTx {
-            tx: EthereumTxData::EthEventsVext(ext.into())
+            tx: ProtocolTxData::EthEventsVext(ext.into())
                 .sign(&protocol_key, shell.chain_id.clone())
                 .to_bytes()
                 .into(),
@@ -1846,7 +1846,7 @@ mod test_finalize_block {
                 assert!(ext.verify(&protocol_key.ref_to()).is_ok());
                 ext
             };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
+            let tx = ProtocolTxData::EthEventsVext(ext.into())
                 .sign(&protocol_key, shell.chain_id.clone());
             (tx, TestBpAction::CheckNonceIncremented)
         });
@@ -1858,7 +1858,7 @@ mod test_finalize_block {
     fn test_bp_roots_protocol_tx() {
         test_bp(|shell: &mut TestShell| {
             let vext = shell.extend_vote_with_bp_roots().expect("Test failed");
-            let tx = EthereumTxData::BridgePoolVext(vext.into()).sign(
+            let tx = ProtocolTxData::BridgePoolVext(vext.into()).sign(
                 shell.mode.get_protocol_key().expect("Test failed"),
                 shell.chain_id.clone(),
             );

@@ -51,7 +51,7 @@ use crate::ethereum_oracle::{
 };
 use crate::shell::testing::utils::TestDir;
 use crate::shell::token::MaspEpoch;
-use crate::shell::{EthereumOracleChannels, Shell};
+use crate::shell::{EthereumOracleChannels, Shell, version_compat};
 use crate::shims::abcipp_shim_types::shim::request::{
     FinalizeBlock, ProcessedTx,
 };
@@ -613,8 +613,25 @@ impl MockNode {
 
         #[allow(clippy::disallowed_methods)]
         let time = DateTimeUtc::now();
+        let height = self.last_block_height().next_height();
+        let mut locked = self.shell.lock().unwrap();
+
+        // Prepend the consensus version marker tx, as a real proposer
+        // would
+        let version_marker = version_compat::build_version_marker_tx(
+            namada_sdk::consensus_version(),
+            locked.chain_id.clone(),
+        )
+        .to_bytes();
+        let mut proposal_txs = vec![version_marker];
+        proposal_txs.extend(txs.iter().cloned());
+
         let req = RequestProcessProposal {
-            txs: txs.clone().into_iter().map(|tx| tx.into()).collect(),
+            txs: proposal_txs
+                .clone()
+                .into_iter()
+                .map(|tx| tx.into())
+                .collect(),
             proposer_address: proposer_address.clone().into(),
             time: Some(Timestamp {
                 seconds: time.0.timestamp(),
@@ -622,12 +639,11 @@ impl MockNode {
             }),
             ..Default::default()
         };
-        let height = self.last_block_height().next_height();
-        let mut locked = self.shell.lock().unwrap();
         let (result, tx_results) = locked.process_proposal(req);
 
         let mut errors: Vec<_> = tx_results
             .iter()
+            .skip(1)
             .map(|e| {
                 if e.code == 0 {
                     NodeResults::Ok
@@ -642,6 +658,11 @@ impl MockNode {
         }
 
         // process proposal succeeded, now run finalize block
+
+        // Keep the full proposal txs, including the consensus version
+        // marker, so that the cached block matches the tx indices in
+        // the events emitted by `finalize_block`
+        let block_txs = proposal_txs.clone();
 
         let time = {
             #[allow(clippy::disallowed_methods)]
@@ -660,8 +681,7 @@ impl MockNode {
             },
             block_hash: Hash([0; 32]),
             byzantine_validators: vec![],
-            txs: txs
-                .clone()
+            txs: proposal_txs
                 .into_iter()
                 .zip(tx_results)
                 .map(|(tx, result)| ProcessedTx {
@@ -738,7 +758,7 @@ impl MockNode {
                             [0u8; 20],
                         ),
                     },
-                    txs,
+                    block_txs,
                     tendermint::evidence::List::default(),
                     None,
                 ),

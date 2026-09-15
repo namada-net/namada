@@ -730,8 +730,19 @@ where
                         | ProtocolTxType::ValSetUpdateVext
                         | ProtocolTxType::ValidatorSetUpdate => (),
 
-                        // The consensus version marker is non-executable
-                        ProtocolTxType::ConsensusVersionMarker => (),
+                        // NB: The consensus version marker is a
+                        // non-executable protocol tx that must appear at
+                        // index 0 of every proposal. It is validated in
+                        // process_proposal and carries no state changes, so
+                        // skip dispatch and event emission entirely.
+                        ProtocolTxType::ConsensusVersionMarker => {
+                            debug_assert_eq!(
+                                tx_index, 0,
+                                "Consensus version marker must be the first \
+                                 tx in the block"
+                            );
+                            continue;
+                        }
 
                         ProtocolTxType::EthEventsVext => {
                             let ext =

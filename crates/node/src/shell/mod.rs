@@ -23,6 +23,7 @@ mod stats;
 #[allow(dead_code)]
 pub mod testing;
 mod vote_extensions;
+pub mod version_compat;
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -1796,11 +1797,17 @@ pub mod test_utils {
         ) -> std::result::Result<Vec<ProcessedTx>, TestError> {
             #[allow(clippy::disallowed_methods)]
             let time = DateTimeUtc::now();
+            // Prepend the consensus version marker tx, as a real
+            // proposer would
+            let version_marker = version_compat::build_version_marker_tx(
+                namada_sdk::consensus_version(),
+                self.shell.chain_id.clone(),
+            );
+            let mut txs = vec![version_marker.to_bytes()];
+            txs.extend(req.txs.iter().cloned());
             let (resp, tx_results) =
                 self.shell.process_proposal(RequestProcessProposal {
-                    txs: req
-                        .txs
-                        .clone()
+                    txs: txs
                         .into_iter()
                         .map(prost::bytes::Bytes::from)
                         .collect(),
@@ -1820,6 +1827,14 @@ pub mod test_utils {
 
                     ..Default::default()
                 });
+            // Discard the result of the consensus version marker, so
+            // that the remaining results are aligned with `req.txs`
+            let mut tx_results = tx_results;
+            assert_eq!(
+                ResultCode::from_u32(tx_results.remove(0).code),
+                Some(ResultCode::Ok),
+                "Consensus version marker must be valid"
+            );
             let results = tx_results
                 .into_iter()
                 .zip(req.txs)
@@ -2362,6 +2377,22 @@ mod shell_tests {
                 "{err_msg}"
             );
         }
+    }
+
+    /// The consensus version marker must never transit the mempool:
+    /// it is only ever injected directly into a proposal by the block
+    /// proposer.
+    #[test]
+    fn test_mempool_rejects_version_marker() {
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let tx = version_compat::build_version_marker_tx(
+            namada_sdk::consensus_version(),
+            shell.chain_id.clone(),
+        )
+        .to_bytes();
+        let rsp = shell.mempool_validate(&tx, Default::default());
+        assert_eq!(rsp.code, ResultCode::InvalidTx.into());
     }
 
     /// Test if Ethereum events validation behaves as expected,

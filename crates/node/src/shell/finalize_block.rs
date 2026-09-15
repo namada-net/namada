@@ -730,6 +730,9 @@ where
                         | ProtocolTxType::ValSetUpdateVext
                         | ProtocolTxType::ValidatorSetUpdate => (),
 
+                        // The consensus version marker is non-executable
+                        ProtocolTxType::ConsensusVersionMarker => (),
+
                         ProtocolTxType::EthEventsVext => {
                             let ext =
                         protocol_tx_data_variants::EthEventsVext::try_from(&tx)

@@ -1108,6 +1108,13 @@ where
     use namada_sdk::eth_bridge::protocol::transactions;
     use namada_vote_ext::{ethereum_events, validator_set_update};
 
+    // The consensus version marker is non-executable: it carries the
+    // proposer's software version for ProcessProposal-time rejection of
+    // incompatible proposals and never touches storage.
+    if let ProtocolTxType::ConsensusVersionMarker = tx {
+        return Ok(BatchedTxResult::default());
+    }
+
     let Some(data) = data else {
         return Err(Error::ProtocolTxError(eyre!(
             "Protocol tx data must be present"
@@ -1169,6 +1176,11 @@ where
                 "Attempt made to apply an unimplemented protocol transaction, \
                  no actions will be taken"
             );
+            Ok(BatchedTxResult::default())
+        }
+        ProtocolTxData::ConsensusVersionMarker(_) => {
+            // Unreachable: consensus version markers are non-executable
+            // and are short-circuited above
             Ok(BatchedTxResult::default())
         }
     }

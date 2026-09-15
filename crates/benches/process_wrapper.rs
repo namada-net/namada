@@ -96,7 +96,8 @@ fn process_tx(c: &mut Criterion) {
                             datetime,
                             vp_wasm_cache,
                             tx_wasm_cache,
-                            block_proposer
+                            block_proposer,
+                            &mut None,
                         )
                         .code,
                     0

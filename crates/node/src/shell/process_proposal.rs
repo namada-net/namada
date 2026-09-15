@@ -5,9 +5,10 @@ use data_encoding::HEXUPPER;
 use namada_sdk::parameters;
 use namada_sdk::proof_of_stake::storage::find_validator_by_raw_hash;
 use namada_sdk::tx::data::protocol::ProtocolTxType;
-use namada_vote_ext::protocol_tx_data_variants;
+use namada_vote_ext::{ConsensusVersion, protocol_tx_data_variants};
 
 use super::block_alloc::{BlockGas, BlockSpace};
+use super::version_compat;
 use super::*;
 use crate::shell::block_alloc::{AllocFailure, TxBin};
 use crate::shims::abcipp_shim_types::shim::TxBytes;
@@ -79,6 +80,7 @@ where
                 )
         };
 
+        let mut marker_version = None;
         let tx_results = self.process_txs(
             &req.txs,
             req.time
@@ -86,7 +88,21 @@ where
                 .try_into()
                 .expect("Failed conversion of Comet timestamp"),
             &native_block_proposer_address,
+            &mut marker_version,
         );
+
+        // Every proposal must carry a consensus version marker tx. A
+        // proposal without one was not built by a node running a
+        // compatible version and may cause state divergence.
+        let Some(marker_version) = marker_version else {
+            tracing::warn!(
+                proposer = ?HEXUPPER.encode(&req.proposer_address),
+                height = req.height,
+                hash = ?HEXUPPER.encode(&req.hash),
+                "Proposal has no consensus version marker, it will be rejected"
+            );
+            return (ProcessProposal::Reject, tx_results);
+        };
 
         // Erroneous transactions were detected when processing
         // the leader's proposal. We allow txs that are invalid at runtime
@@ -105,6 +121,11 @@ where
                 "Found invalid transactions, proposed block will be rejected"
             );
         }
+        tracing::info!(
+            proposer_version = %marker_version.0,
+            this_version = namada_sdk::consensus_version(),
+            "Accepted consensus version marker in proposal"
+        );
         (
             if invalid_txs {
                 ProcessProposal::Reject
@@ -126,6 +147,7 @@ where
         txs: &[TxBytes],
         block_time: DateTimeUtc,
         block_proposer: &Address,
+        marker_version: &mut Option<ConsensusVersion>,
     ) -> Vec<TxResult> {
         // This is safe as neither the inner `db` nor `in_mem` are
         // actually mutable, only the `write_log` which is owned by
@@ -149,6 +171,7 @@ where
                     &mut vp_wasm_cache,
                     &mut tx_wasm_cache,
                     block_proposer,
+                    marker_version,
                 );
                 let error_code = ResultCode::from_u32(result.code).unwrap();
                 if let ResultCode::Ok = error_code {
@@ -187,6 +210,7 @@ where
     ///   10. An error in the vote extensions included in the proposal
     ///   11. Not enough block space was available for some tx
     ///   12. Tx wasm code is not allowlisted
+    ///   13. Proposal carries an incompatible software version
     ///
     /// INVARIANT: This function should not, under any circumstances, modify the
     /// state since the proposal could be rejected.
@@ -201,6 +225,7 @@ where
         vp_wasm_cache: &mut VpCache<CA>,
         tx_wasm_cache: &mut TxCache<CA>,
         block_proposer: &Address,
+        marker_version: &mut Option<ConsensusVersion>,
     ) -> TxResult
     where
         CA: 'static + WasmCacheAccess + Sync,
@@ -408,6 +433,44 @@ where
                                in Namada"
                             .to_string(),
                     },
+                    ProtocolTxType::ConsensusVersionMarker => {
+                        match version_compat::extract_marker_version(&tx) {
+                            Some(version) => {
+                                if version_compat::is_version_compatible(
+                                    namada_sdk::consensus_version(),
+                                    &version,
+                                ) {
+                                    *marker_version = Some(version);
+                                    TxResult {
+                                        code: ResultCode::Ok.into(),
+                                        info: "Process proposal accepted the \
+                                               consensus version marker"
+                                            .into(),
+                                    }
+                                } else {
+                                    TxResult {
+                                        code: ResultCode::IncompatibleVersion
+                                            .into(),
+                                        info: format!(
+                                            "Process proposal rejected this \
+                                             proposal because it carries an \
+                                             incompatible software version: \
+                                             expected {}, found {}",
+                                            namada_sdk::consensus_version(),
+                                            version.0
+                                        ),
+                                    }
+                                }
+                            }
+                            None => TxResult {
+                                code: ResultCode::InvalidTx.into(),
+                                info: "Process proposal rejected this \
+                                       proposal because the consensus \
+                                       version marker was not deserializable"
+                                    .into(),
+                            },
+                        }
+                    }
                 }
             }
             TxType::Wrapper(wrapper) => {

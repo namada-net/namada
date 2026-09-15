@@ -20,6 +20,7 @@ use super::block_alloc::states::{
     WithNormalTxs, WithoutNormalTxs,
 };
 use super::block_alloc::{AllocFailure, BlockAllocator, BlockResources};
+use super::version_compat;
 use crate::config::ValidatorLocalConfig;
 use crate::protocol::{self, ShellParams};
 use crate::shell::ShellMode;
@@ -50,8 +51,24 @@ where
             ..
         } = self.mode
         {
+            // The consensus version marker tx is injected at the front of
+            // every proposal. Peers reject the proposal in
+            // `ProcessProposal` if its version is incompatible with
+            // theirs, before executing any tx.
+            let version_marker = version_compat::build_version_marker_tx(
+                namada_sdk::consensus_version(),
+                self.chain_id.clone(),
+            );
+            let version_marker_bytes: TxBytes =
+                version_marker.to_bytes().into();
+
             // start counting allotted space for txs
-            let alloc = self.get_protocol_txs_allocator();
+            let mut alloc = self.get_protocol_txs_allocator();
+            // reserve space at the front of the proposal for the version
+            // marker tx, which is not allocated via the state machine
+            alloc.reserve_version_marker_space(
+                version_marker_bytes.len() as u64,
+            );
             // add initial protocol txs
             let (alloc, mut txs) =
                 self.build_protocol_tx_with_normal_txs(alloc, &mut req.txs);
@@ -77,6 +94,9 @@ where
             let mut remaining_txs =
                 self.build_protocol_tx_without_normal_txs(alloc, &mut req.txs);
             txs.append(&mut remaining_txs);
+            // prepend the version marker outside of the allocator state
+            // machine
+            txs.insert(0, version_marker_bytes);
             txs
         } else {
             vec![]
@@ -464,6 +484,24 @@ mod test_prepare_proposal {
         assert!(rsp.code != 0.into(), "{}", rsp.log);
     }
 
+    /// Strip the consensus version marker tx from a proposal response,
+    /// for tests that only care about the remaining txs.
+    fn strip_version_marker(
+        shell: &TestShell,
+        mut txs: Vec<TxBytes>,
+    ) -> Vec<TxBytes> {
+        let marker = txs.remove(0);
+        let marker_tx = Tx::try_from_bytes(&marker[..]).unwrap();
+        assert_eq!(
+            version_compat::extract_marker_version(&marker_tx)
+                .expect("Proposal must carry a consensus version marker")
+                .0,
+            namada_sdk::consensus_version(),
+            "Proposal carries an unexpected consensus version"
+        );
+        txs
+    }
+
     const GAS_LIMIT: u64 = 50_000;
 
     /// Test that if a tx from the mempool is not a
@@ -479,7 +517,9 @@ mod test_prepare_proposal {
             txs: vec![tx.to_bytes().into()],
             ..Default::default()
         };
-        assert!(shell.prepare_proposal(req).txs.is_empty());
+        let txs = shell.prepare_proposal(req).txs;
+        assert_eq!(txs.len(), 1);
+        strip_version_marker(&shell, txs);
     }
 
     /// Test that if an error is encountered while
@@ -510,7 +550,9 @@ mod test_prepare_proposal {
             txs: vec![wrapper.clone().into()],
             ..Default::default()
         };
-        assert!(shell.prepare_proposal(req).txs.is_empty());
+        let txs = shell.prepare_proposal(req).txs;
+        assert_eq!(txs.len(), 1);
+        strip_version_marker(&shell, txs);
     }
 
     /// Test if we are filtering out Ethereum events with bad
@@ -746,13 +788,13 @@ mod test_prepare_proposal {
         )
         .sign(&protocol_key, shell.chain_id.clone())
         .to_bytes();
-        let mut rsp = shell.prepare_proposal(RequestPrepareProposal {
+        let rsp = shell.prepare_proposal(RequestPrepareProposal {
             txs: vec![vote.into()],
             ..Default::default()
         });
-        assert_eq!(rsp.txs.len(), 1);
+        assert_eq!(rsp.txs.len(), 2);
 
-        let tx_bytes = rsp.txs.remove(0);
+        let tx_bytes = strip_version_marker(&shell, rsp.txs).remove(0);
         let got = Tx::try_from_bytes(&tx_bytes[..]).unwrap();
         let eth_tx_data = (&got).try_into().expect("Test failed");
         let rsp_ext = match eth_tx_data {
@@ -797,7 +839,8 @@ mod test_prepare_proposal {
             ..Default::default()
         };
 
-        let received_txs = shell.prepare_proposal(req).txs;
+        let received_txs =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
         assert_eq!(received_txs.len(), 0);
     }
 
@@ -826,7 +869,8 @@ mod test_prepare_proposal {
             txs: vec![wrapper.to_bytes().into(); 2],
             ..Default::default()
         };
-        let received_txs = shell.prepare_proposal(req).txs;
+        let received_txs =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
         assert_eq!(received_txs.len(), 1);
     }
 
@@ -866,7 +910,8 @@ mod test_prepare_proposal {
             ..Default::default()
         };
 
-        let received_txs = shell.prepare_proposal(req).txs;
+        let received_txs =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
         assert_eq!(received_txs.len(), 0);
     }
 
@@ -909,7 +954,8 @@ mod test_prepare_proposal {
             txs: vec![wrapper.to_bytes().into(), new_wrapper.to_bytes().into()],
             ..Default::default()
         };
-        let received_txs = shell.prepare_proposal(req).txs;
+        let received_txs =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
         assert_eq!(received_txs.len(), 2);
     }
 
@@ -947,8 +993,9 @@ mod test_prepare_proposal {
             time: Some(block_time),
             ..Default::default()
         };
-        let result = shell.prepare_proposal(req);
-        assert_eq!(result.txs.len(), 0);
+        let result =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        assert_eq!(result.len(), 0);
     }
 
     /// Check that a tx requiring more gas than the block limit is not included
@@ -982,8 +1029,9 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result = shell.prepare_proposal(req);
-        assert!(result.txs.is_empty());
+        let result =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        assert!(result.is_empty());
     }
 
     /// Check that a tx requiring more gas than available in the block is not
@@ -1024,8 +1072,9 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result = shell.prepare_proposal(req);
-        assert_eq!(result.txs.len(), 1);
+        let result =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        assert_eq!(result.len(), 1);
     }
 
     // Check that a wrapper requiring more gas than its limit is not included in
@@ -1057,8 +1106,9 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result = shell.prepare_proposal(req);
-        assert!(result.txs.is_empty());
+        let result =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        assert!(result.is_empty());
     }
 
     // Check that a wrapper using a token not accepted by the validator for fee
@@ -1110,8 +1160,9 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result = shell.prepare_proposal(req);
-        assert!(result.txs.is_empty());
+        let result =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        assert!(result.is_empty());
     }
 
     // Check that a wrapper using a non-whitelisted token for fee payment is not
@@ -1150,8 +1201,9 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result = shell.prepare_proposal(req);
-        assert!(result.txs.is_empty());
+        let result =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        assert!(result.is_empty());
     }
 
     // Check that a wrapper using a whitelisted non-native token for fee payment
@@ -1215,8 +1267,9 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result = shell.prepare_proposal(req);
-        assert_eq!(result.txs.first().unwrap(), &wrapper_tx.to_bytes());
+        let result =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        assert_eq!(result.first().unwrap(), &wrapper_tx.to_bytes());
     }
 
     // Check that a wrapper setting a fee amount lower than the minimum accepted
@@ -1260,8 +1313,9 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result = shell.prepare_proposal(req);
-        assert!(result.txs.is_empty());
+        let result =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        assert!(result.is_empty());
     }
 
     // Check that a wrapper setting a fee amount lower than the minimum allowed
@@ -1292,8 +1346,9 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result = shell.prepare_proposal(req);
-        assert!(result.txs.is_empty());
+        let result =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        assert!(result.is_empty());
     }
 
     // Check that a wrapper transactions whose fees cannot be paid is rejected
@@ -1325,8 +1380,9 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result = shell.prepare_proposal(req);
-        assert!(result.txs.is_empty());
+        let result =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        assert!(result.is_empty());
     }
 
     // Check that a fee overflow in the wrapper transaction is rejected
@@ -1358,8 +1414,9 @@ mod test_prepare_proposal {
             time: None,
             ..Default::default()
         };
-        let result = shell.prepare_proposal(req);
-        assert!(result.txs.is_empty());
+        let result =
+            strip_version_marker(&shell, shell.prepare_proposal(req).txs);
+        assert!(result.is_empty());
     }
 
     /// Test that Ethereum events with outdated nonces are

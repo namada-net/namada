@@ -54,6 +54,26 @@ pub struct VoteExtension {
     pub validator_set_update: Option<validator_set_update::SignedVext>,
 }
 
+/// The consensus version of the node that crafted a protocol
+/// transaction, as declared in the `CONSENSUS_VERSION` file and made
+/// available by `namada_core::consensus_version`. Nodes running
+/// different consensus versions must not agree on the same blocks.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    BorshSerialize,
+    BorshDeserialize,
+    BorshDeserializer,
+    BorshSchema,
+)]
+pub struct ConsensusVersion(pub u64);
+
 macro_rules! protocol_tx_data_deserialize_inner {
     ($variant:ty) => {
         impl TryFrom<&Tx> for $variant {
@@ -138,6 +158,8 @@ protocol_tx_data_declare! {
         BridgePoolVext(bridge_pool_roots::SignedVext),
         /// Validator set update signed by some validator
         ValSetUpdateVext(validator_set_update::SignedVext),
+        /// Software version of the node that proposed the block
+        ConsensusVersionMarker(ConsensusVersion),
     }
 }
 
@@ -207,6 +229,7 @@ impl ProtocolTxData {
             EthEventsVext,
             BridgePoolVext,
             ValSetUpdateVext,
+            ConsensusVersionMarker,
         }
     }
 
@@ -239,6 +262,10 @@ impl ProtocolTxData {
             ProtocolTxType::ValSetUpdateVext => |data| {
                 BorshDeserialize::try_from_slice(data)
                     .map(ProtocolTxData::ValSetUpdateVext)
+            },
+            ProtocolTxType::ConsensusVersionMarker => |data| {
+                BorshDeserialize::try_from_slice(data)
+                    .map(ProtocolTxData::ConsensusVersionMarker)
             },
         };
         deserialize(data)

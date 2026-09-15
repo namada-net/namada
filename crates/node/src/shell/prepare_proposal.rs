@@ -62,6 +62,7 @@ where
             );
             let version_marker_bytes: TxBytes =
                 version_marker.to_bytes().into();
+            let mut txs = vec![version_marker_bytes.clone()];
 
             // start counting allotted space for txs
             let mut alloc = self.get_protocol_txs_allocator();
@@ -78,8 +79,9 @@ where
                 );
             }
             // add initial protocol txs
-            let (alloc, mut txs) =
+            let (alloc, mut protocol_txs) =
                 self.build_protocol_tx_with_normal_txs(alloc, &mut req.txs);
+            txs.append(&mut protocol_txs);
 
             // add wrapper txs
             let tm_raw_hash_string =
@@ -97,14 +99,14 @@ where
                 req.time,
                 &block_proposer,
                 validator_local_config.as_ref(),
+                // The wrappers are appended after the txs collected
+                // thus far
+                txs.len(),
             );
             txs.append(&mut normal_txs);
             let mut remaining_txs =
                 self.build_protocol_tx_without_normal_txs(alloc, &mut req.txs);
             txs.append(&mut remaining_txs);
-            // prepend the version marker outside of the allocator state
-            // machine
-            txs.insert(0, version_marker_bytes);
             txs
         } else {
             vec![]
@@ -137,6 +139,7 @@ where
         block_time: Option<Timestamp>,
         block_proposer: &Address,
         proposer_local_config: Option<&ValidatorLocalConfig>,
+        tx_index_offset: usize,
     ) -> (
         Vec<TxBytes>,
         BlockAllocator<BuildingProtocolTxBatch<WithoutNormalTxs>>,
@@ -154,13 +157,16 @@ where
         let mut vp_wasm_cache = self.vp_wasm_cache.clone();
         let mut tx_wasm_cache = self.tx_wasm_cache.clone();
 
-        let txs = txs
-            .iter()
-            .enumerate()
+        let txs = (tx_index_offset..)
+            .zip(txs.iter())
             .filter_map(|(tx_index, tx_bytes)| {
+                // The wrappers are validated with the index they will
+                // occupy in the proposal, which follows the consensus
+                // version marker and any preceding protocol txs
+                let tx_index = TxIndex::must_from_usize(tx_index);
                 let result = validate_wrapper_bytes(
                     tx_bytes,
-                    &TxIndex::must_from_usize(tx_index),
+                    &tx_index,
                     block_time,
                     block_proposer,
                     proposer_local_config,

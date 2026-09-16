@@ -904,8 +904,9 @@ mod tests {
         );
     }
 
-    /// Check that native token can be sent to the protocol-owned accounts
-    /// without any protocol action when the native token is transferable.
+    /// Check that the native token can be sent to the protocol-owned
+    /// accounts without any protocol action when the native token is
+    /// transferable.
     #[test]
     fn test_native_token_inflow_to_protocol_without_action() {
         for dest in [POS, GOV] {
@@ -952,7 +953,7 @@ mod tests {
         }
     }
 
-    /// Check that native token can't be debited from the protocol-owned
+    /// Check that the native token can't be debited from the protocol-owned
     /// accounts without any protocol action, even when the native token is
     /// transferable.
     #[test]
@@ -989,14 +990,19 @@ mod tests {
                 GasMeterKind::MutGlobal,
             );
 
-            assert_matches!(
-                MultitokenVp::validate_tx(
-                    &ctx,
-                    &tx.batch_ref_tx(&cmt),
-                    &keys_changed,
-                    &verifiers
-                ),
-                Err(_)
+            let err = MultitokenVp::validate_tx(
+                &ctx,
+                &tx.batch_ref_tx(&cmt),
+                &keys_changed,
+                &verifiers,
+            )
+            .expect_err(
+                "Native token outflow from a protocol-owned account without a \
+                 matching action must be rejected",
+            );
+            assert!(
+                err.to_string().contains("isn't allowed"),
+                "unexpected rejection reason: {err}"
             );
         }
     }

@@ -60,9 +60,10 @@ where
             Params::is_native_token_transferable(&ctx.pre())?;
         let actions = ctx.read_actions()?;
         // The native token can be transferred to and out of the `PoS` and `Gov`
-        // accounts, even if `is_native_token_transferable` is false. Balance
-        // changes on these protocol-owned accounts always have to be backed
-        // by a matching action, regardless of the transferability setting.
+        // accounts, even if `is_native_token_transferable` is false. Debits
+        // of these protocol-owned accounts always have to be backed by a
+        // matching action, regardless of the transferability setting, while
+        // credits are allowed whenever the native token is transferable.
         fn is_protocol_owner(bal_owner: &Address) -> bool {
             *bal_owner == POS || *bal_owner == GOV
         }
@@ -75,8 +76,7 @@ where
         }
         let is_allowed_inc = |token: &Address, bal_owner: &Address| -> bool {
             *token != native_token
-                || (is_native_token_transferable
-                    && !is_protocol_owner(bal_owner))
+                || is_native_token_transferable
                 || (!actions.is_empty()
                     && actions.iter().all(|action| {
                         has_bal_inc_protocol_action(
@@ -902,6 +902,103 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// Check that native token can be sent to the protocol-owned accounts
+    /// without any protocol action when the native token is transferable.
+    #[test]
+    fn test_native_token_inflow_to_protocol_without_action() {
+        for dest in [POS, GOV] {
+            let mut state = init_state();
+            let src = established_address_1();
+            let keys_changed = transfer(&mut state, &src, &dest);
+
+            let key = get_native_token_transferable_key();
+            state.write(&key, true).unwrap();
+
+            let tx_index = TxIndex::default();
+            let BatchedTx { tx, cmt } = dummy_tx(&state);
+            let gas_meter =
+                RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
+                    u64::MAX,
+                    namada_parameters::get_gas_scale(&state).unwrap(),
+                )));
+            let (vp_vp_cache, _vp_cache_dir) = vp_cache();
+            let mut verifiers = BTreeSet::new();
+            verifiers.insert(src);
+            verifiers.insert(dest);
+            let ctx = Ctx::new(
+                &ADDRESS,
+                &state,
+                &tx,
+                &cmt,
+                &tx_index,
+                &gas_meter,
+                &keys_changed,
+                &verifiers,
+                vp_vp_cache,
+                GasMeterKind::MutGlobal,
+            );
+
+            assert_matches!(
+                MultitokenVp::validate_tx(
+                    &ctx,
+                    &tx.batch_ref_tx(&cmt),
+                    &keys_changed,
+                    &verifiers
+                ),
+                Ok(_)
+            );
+        }
+    }
+
+    /// Check that native token can't be debited from the protocol-owned
+    /// accounts without any protocol action, even when the native token is
+    /// transferable.
+    #[test]
+    fn test_native_token_outflow_from_protocol_without_action() {
+        for src in [POS, GOV] {
+            let mut state = init_state();
+            let dest = established_address_1();
+            let keys_changed = transfer(&mut state, &src, &dest);
+
+            let key = get_native_token_transferable_key();
+            state.write(&key, true).unwrap();
+
+            let tx_index = TxIndex::default();
+            let BatchedTx { tx, cmt } = dummy_tx(&state);
+            let gas_meter =
+                RefCell::new(VpGasMeter::new_from_tx_meter(&TxGasMeter::new(
+                    u64::MAX,
+                    namada_parameters::get_gas_scale(&state).unwrap(),
+                )));
+            let (vp_vp_cache, _vp_cache_dir) = vp_cache();
+            let mut verifiers = BTreeSet::new();
+            verifiers.insert(src);
+            verifiers.insert(dest);
+            let ctx = Ctx::new(
+                &ADDRESS,
+                &state,
+                &tx,
+                &cmt,
+                &tx_index,
+                &gas_meter,
+                &keys_changed,
+                &verifiers,
+                vp_vp_cache,
+                GasMeterKind::MutGlobal,
+            );
+
+            assert_matches!(
+                MultitokenVp::validate_tx(
+                    &ctx,
+                    &tx.batch_ref_tx(&cmt),
+                    &keys_changed,
+                    &verifiers
+                ),
+                Err(_)
+            );
+        }
     }
 
     #[test]

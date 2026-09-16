@@ -136,7 +136,7 @@ where
                                 "Native token withdraw isn't allowed"
                             );
                             return Err(Error::new_const(
-                                "Native token deposit isn't allowed",
+                                "Native token withdraw isn't allowed",
                             ));
                         }
                         let diff = pre

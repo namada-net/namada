@@ -10,6 +10,10 @@
 //!   zero-amount packet. The IBC VP must reject any escrow balance change that
 //!   isn't reproduced by the protocol's pseudo-execution of the IBC message.
 //!
+//! Conversely, native token inflows into the protocol-owned accounts must
+//! remain allowed for plain transfers whenever the native token is
+//! transferable (`test_pos_escrow_inflow_allowed`).
+//!
 //! These tests run the real wasm transactions through the wasm engine where
 //! possible, so they keep passing (and keep proving coverage) even after the
 //! wasm-level guards are removed and the VP-level defenses remain.
@@ -197,6 +201,113 @@ mod escrow_drain_tests {
                 .contains("PoS balance decreased without any Withdraw or"),
             "unexpected rejection reason: {err}"
         );
+    }
+
+    /// Run a plain transparent transfer crediting the PoS internal account
+    /// through the real `tx_transfer.wasm` and check that both the
+    /// Multitoken VP and the PoS VP accept it: native token inflows into
+    /// protocol-owned accounts are allowed whenever the native token is
+    /// transferable, without any protocol action.
+    #[test]
+    fn test_pos_escrow_inflow_allowed() {
+        let native_token = address::testing::nam();
+        let sender = established_address_1();
+        let pos = Address::Internal(InternalAddress::PoS);
+        let amount = Amount::native_whole(1_000);
+
+        let mut tx_env = TestTxEnv::default();
+        namada_sdk::parameters::init_test_storage(&mut tx_env.state).unwrap();
+        token::write_denom(
+            &mut tx_env.state,
+            &native_token,
+            token::NATIVE_MAX_DECIMAL_PLACES.into(),
+        )
+        .unwrap();
+        // Initialize PoS genesis so that the PoS VP can run over the state
+        tx_env.state.in_mem_mut().block.epoch = Epoch(1);
+        namada_sdk::proof_of_stake::test_utils::test_init_genesis::<
+            _,
+            namada_sdk::parameters::Store<_>,
+            namada_sdk::governance::Store<_>,
+            namada_sdk::token::Store<_>,
+        >(
+            &mut tx_env.state,
+            OwnedPosParams::default(),
+            std::iter::once(get_dummy_genesis_validator()),
+            Epoch(1),
+        )
+        .unwrap();
+        tx_env.state.commit_tx_batch();
+        tx_env.state.commit_block().unwrap();
+        tx_env.spawn_accounts([&sender]);
+        tx_env.credit_tokens(&sender, &native_token, amount);
+
+        // Build the tx: a single allowlisted `tx_transfer` with
+        // `targets = {(#PoS, NAM): X}` signed only by the sender
+        let transfer = Transfer {
+            sources: BTreeMap::from([(
+                token::Account {
+                    owner: sender.clone(),
+                    token: native_token.clone(),
+                },
+                amount.native_denominated(),
+            )]),
+            targets: BTreeMap::from([(
+                token::Account {
+                    owner: pos.clone(),
+                    token: native_token.clone(),
+                },
+                amount.native_denominated(),
+            )]),
+            shielded_section_hash: None,
+        };
+        let wasm_code =
+            wasm_loader::read_wasm_or_exit(wasm_dir(), TX_TRANSFER_WASM);
+        let mut tx = Tx::new(ChainId::default(), None);
+        tx.add_code(wasm_code, None).add_data(transfer);
+        sign_tx(&mut tx);
+        tx_env.batched_tx = tx.batch_first_tx();
+
+        // The wasm tx itself must succeed: crediting a protocol-owned
+        // account with the native token is a valid transfer
+        tx_env
+            .execute_tx()
+            .expect("wasm tx execution should succeed");
+
+        // The Multitoken VP must accept: credits into protocol-owned
+        // accounts don't require any action when the native token is
+        // transferable
+        let gas_meter = RefCell::new(VpGasMeter::new_from_meter(
+            &*tx_env.gas_meter.borrow(),
+        ));
+        let vp_env = TestNativeVpEnv::from_tx_env(
+            tx_env,
+            Address::Internal(InternalAddress::Multitoken),
+        );
+        let ctx = vp_env.ctx(&gas_meter);
+        MultitokenVp::validate_tx(
+            &ctx,
+            &vp_env.tx_env.batched_tx.to_ref(),
+            ctx.keys_changed,
+            ctx.verifiers,
+        )
+        .expect("Multitoken VP must allow the inflow into the PoS escrow");
+
+        // The PoS VP must also accept: its escrow guard only rejects
+        // unauthorized debits, credits are unaffected
+        let tx_env = vp_env.tx_env;
+        let gas_meter = RefCell::new(VpGasMeter::new_from_meter(
+            &*tx_env.gas_meter.borrow(),
+        ));
+        let vp_env = TestNativeVpEnv::from_tx_env(tx_env, pos);
+        let ctx = vp_env.ctx(&gas_meter);
+        PosVp::validate_tx(
+            &ctx,
+            &vp_env.tx_env.batched_tx.to_ref(),
+            ctx.keys_changed,
+            ctx.verifiers,
+        )
+        .expect("PoS VP must allow the inflow into the PoS escrow");
     }
 
     /// Set up the IBC state (client, connection, channel) with a funded

@@ -8435,7 +8435,7 @@ fn speculative_context() -> Result<()> {
     let first_aa_history_entry = aa_history
         .get(&IndexedTx {
             block_height: 11.into(),
-            block_index: 0.into(),
+            block_index: 1.into(),
             batch_index: 0.into(),
         })
         .unwrap();
@@ -8448,7 +8448,7 @@ fn speculative_context() -> Result<()> {
     let second_aa_history_entry = aa_history
         .get(&IndexedTx {
             block_height: 13.into(),
-            block_index: 0.into(),
+            block_index: 1.into(),
             batch_index: 0.into(),
         })
         .unwrap();
@@ -8680,7 +8680,7 @@ fn speculative_context() -> Result<()> {
     let third_aa_history_entry = aa_history
         .get(&IndexedTx {
             block_height: 15.into(),
-            block_index: 0.into(),
+            block_index: 1.into(),
             batch_index: 0.into(),
         })
         .unwrap();
@@ -8697,7 +8697,7 @@ fn speculative_context() -> Result<()> {
     let fourth_aa_history_entry = aa_history
         .get(&IndexedTx {
             block_height: 19.into(),
-            block_index: 0.into(),
+            block_index: 1.into(),
             batch_index: 0.into(),
         })
         .unwrap();
@@ -8716,7 +8716,7 @@ fn speculative_context() -> Result<()> {
     let first_ab_history_entry = ab_history
         .get(&IndexedTx {
             block_height: 15.into(),
-            block_index: 0.into(),
+            block_index: 1.into(),
             batch_index: 0.into(),
         })
         .unwrap();
@@ -8729,7 +8729,7 @@ fn speculative_context() -> Result<()> {
     let second_ab_history_entry = ab_history
         .get(&IndexedTx {
             block_height: 19.into(),
-            block_index: 0.into(),
+            block_index: 1.into(),
             batch_index: 0.into(),
         })
         .unwrap();
@@ -9755,7 +9755,7 @@ fn history() -> Result<()> {
     let nam_aa_history_entry = aa_history
         .get(&IndexedTx {
             block_height: 11.into(),
-            block_index: 0.into(),
+            block_index: 1.into(),
             batch_index: 0.into(),
         })
         .unwrap();
@@ -9769,7 +9769,7 @@ fn history() -> Result<()> {
     let btc_aa_history_entry = aa_history
         .get(&IndexedTx {
             block_height: 13.into(),
-            block_index: 0.into(),
+            block_index: 1.into(),
             batch_index: 0.into(),
         })
         .unwrap();
@@ -9908,7 +9908,7 @@ fn history() -> Result<()> {
     let nam_aa_history_entry = aa_history
         .get(&IndexedTx {
             block_height: 15.into(),
-            block_index: 0.into(),
+            block_index: 1.into(),
             batch_index: 0.into(),
         })
         .unwrap();
@@ -9927,7 +9927,7 @@ fn history() -> Result<()> {
     let nam_ab_history_entry = ab_history
         .get(&IndexedTx {
             block_height: 15.into(),
-            block_index: 0.into(),
+            block_index: 1.into(),
             batch_index: 0.into(),
         })
         .unwrap();
@@ -10060,7 +10060,7 @@ fn history_with_conversions() -> Result<()> {
     let btc_aa_history_entry = aa_history
         .get(&IndexedTx {
             block_height: 27.into(),
-            block_index: 0.into(),
+            block_index: 1.into(),
             batch_index: 0.into(),
         })
         .unwrap();
@@ -10208,7 +10208,7 @@ fn history_with_conversions() -> Result<()> {
     let btc_aa_history_entry = aa_history
         .get(&IndexedTx {
             block_height: 37.into(),
-            block_index: 0.into(),
+            block_index: 1.into(),
             batch_index: 0.into(),
         })
         .unwrap();
@@ -10229,7 +10229,7 @@ fn history_with_conversions() -> Result<()> {
     let btc_ab_history_entry = ab_history
         .get(&IndexedTx {
             block_height: 37.into(),
-            block_index: 0.into(),
+            block_index: 1.into(),
             batch_index: 0.into(),
         })
         .unwrap();

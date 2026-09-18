@@ -162,6 +162,24 @@ impl BlockAllocator<states::BuildingProtocolTxBatch<WithNormalTxs>> {
             normal_txs: NormalTxsBins::new(max_block_gas),
         }
     }
+
+    /// Reserve block space for the consensus version marker tx, which
+    /// is injected at the front of the proposal outside of the
+    /// [`BlockAllocator`] state machine. All subsequent space accounting
+    /// is bounded by the total block space minus this reserve.
+    ///
+    /// Returns `false` if the configured block space cannot contain the
+    /// marker, in which case a proposal must not be constructed.
+    #[inline]
+    pub fn reserve_version_marker_space(&mut self, bytes: u64) -> bool {
+        match self.block.allotted.checked_sub(bytes) {
+            Some(rest) => {
+                self.block.allotted = rest;
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 impl BlockAllocator<states::BuildingNormalTxBatch> {

@@ -22,6 +22,7 @@ mod stats;
 #[cfg(any(test, feature = "testing"))]
 #[allow(dead_code)]
 pub mod testing;
+pub mod version_compat;
 mod vote_extensions;
 
 use std::cell::RefCell;
@@ -68,7 +69,7 @@ use namada_sdk::{
 };
 use namada_vm::wasm::{TxCache, VpCache};
 use namada_vm::{WasmCacheAccess, WasmCacheRwAccess};
-use namada_vote_ext::EthereumTxData;
+use namada_vote_ext::ProtocolTxData;
 use thiserror::Error;
 use tokio::sync::mpsc::{Receiver, UnboundedSender};
 
@@ -952,7 +953,7 @@ where
                 .get_protocol_key()
                 .expect("Validators should have protocol keys");
 
-            let signed_tx = EthereumTxData::EthEventsVext(
+            let signed_tx = ProtocolTxData::EthEventsVext(
                 namada_vote_ext::ethereum_events::SignedVext(vote_extension),
             )
             .sign(protocol_key, self.chain_id.clone())
@@ -1075,7 +1076,7 @@ where
         r#_type: MempoolTxType,
     ) -> response::CheckTx {
         use namada_sdk::tx::data::protocol::ProtocolTxType;
-        use namada_vote_ext::ethereum_tx_data_variants;
+        use namada_vote_ext::protocol_tx_data_variants;
 
         let mut response = response::CheckTx::default();
 
@@ -1178,7 +1179,7 @@ where
                     let ext = try_vote_extension!(
                         "Ethereum events",
                         response,
-                        ethereum_tx_data_variants::EthEventsVext::try_from(&tx),
+                        protocol_tx_data_variants::EthEventsVext::try_from(&tx),
                     );
                     if let Err(err) =
                         validate_eth_events_vext::<_, _, governance::Store<_>>(
@@ -1200,7 +1201,7 @@ where
                     let ext = try_vote_extension!(
                         "Bridge pool roots",
                         response,
-                        ethereum_tx_data_variants::BridgePoolVext::try_from(
+                        protocol_tx_data_variants::BridgePoolVext::try_from(
                             &tx
                         ),
                     );
@@ -1224,7 +1225,7 @@ where
                     let ext = try_vote_extension!(
                         "validator set update",
                         response,
-                        ethereum_tx_data_variants::ValSetUpdateVext::try_from(
+                        protocol_tx_data_variants::ValSetUpdateVext::try_from(
                             &tx
                         ),
                     );
@@ -1796,11 +1797,17 @@ pub mod test_utils {
         ) -> std::result::Result<Vec<ProcessedTx>, TestError> {
             #[allow(clippy::disallowed_methods)]
             let time = DateTimeUtc::now();
+            // Prepend the consensus version marker tx, as a real
+            // proposer would
+            let version_marker = version_compat::build_version_marker_tx(
+                namada_sdk::consensus_version(),
+                self.shell.chain_id.clone(),
+            );
+            let mut txs = vec![version_marker.to_bytes()];
+            txs.extend(req.txs.iter().cloned());
             let (resp, tx_results) =
                 self.shell.process_proposal(RequestProcessProposal {
-                    txs: req
-                        .txs
-                        .clone()
+                    txs: txs
                         .into_iter()
                         .map(prost::bytes::Bytes::from)
                         .collect(),
@@ -1820,6 +1827,14 @@ pub mod test_utils {
 
                     ..Default::default()
                 });
+            // Discard the result of the consensus version marker, so
+            // that the remaining results are aligned with `req.txs`
+            let mut tx_results = tx_results;
+            assert_eq!(
+                ResultCode::from_u32(tx_results.remove(0).code),
+                Some(ResultCode::Ok),
+                "Consensus version marker must be valid"
+            );
             let results = tx_results
                 .into_iter()
                 .zip(req.txs)
@@ -2122,7 +2137,7 @@ mod shell_tests {
     use namada_sdk::tx::data::protocol::{ProtocolTx, ProtocolTxType};
     use namada_sdk::tx::{Code, Data, Signed};
     use namada_vote_ext::{
-        bridge_pool_roots, ethereum_events, ethereum_tx_data_variants,
+        bridge_pool_roots, ethereum_events, protocol_tx_data_variants,
     };
     use tempfile::tempdir;
     use {namada_replay_protection as replay_protection, wallet};
@@ -2169,7 +2184,7 @@ mod shell_tests {
             .unwrap();
             let tx = Tx::try_from_bytes(&serialized_tx[..]).unwrap();
 
-            match ethereum_tx_data_variants::ValSetUpdateVext::try_from(&tx) {
+            match protocol_tx_data_variants::ValSetUpdateVext::try_from(&tx) {
                 Ok(signed_valset_upd) => break signed_valset_upd,
                 Err(_) => continue,
             }
@@ -2221,7 +2236,7 @@ mod shell_tests {
 
         // check data inside tx
         let vote_extension =
-            ethereum_tx_data_variants::EthEventsVext::try_from(&tx).unwrap();
+            protocol_tx_data_variants::EthEventsVext::try_from(&tx).unwrap();
         assert_eq!(
             vote_extension.data.ethereum_events,
             vec![ethereum_event_0, ethereum_event_1]
@@ -2268,7 +2283,7 @@ mod shell_tests {
                 assert!(ext.verify(&protocol_key.ref_to()).is_ok());
                 ext
             };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
+            let tx = ProtocolTxData::EthEventsVext(ext.into())
                 .sign(&protocol_key, shell.chain_id.clone())
                 .to_bytes();
             let rsp = shell.mempool_validate(&tx, Default::default());
@@ -2298,7 +2313,7 @@ mod shell_tests {
                 assert!(ext.verify(&protocol_key.ref_to()).is_ok());
                 ext
             };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
+            let tx = ProtocolTxData::EthEventsVext(ext.into())
                 .sign(&protocol_key, shell.chain_id.clone())
                 .to_bytes();
             let rsp = shell.mempool_validate(&tx, Default::default());
@@ -2326,7 +2341,7 @@ mod shell_tests {
             nonce: 0u64.into(),
             transfers: vec![],
         };
-        let eth_vext = EthereumTxData::EthEventsVext(
+        let eth_vext = ProtocolTxData::EthEventsVext(
             ethereum_events::Vext {
                 validator_addr: address.clone(),
                 block_height: shell.state.in_mem().get_last_block_height(),
@@ -2341,7 +2356,7 @@ mod shell_tests {
         let to_sign = test_utils::get_bp_bytes_to_sign();
         let hot_key = shell.mode.get_eth_bridge_keypair().expect("Test failed");
         let sig = Signed::<_, SignableEthMessage>::new(hot_key, to_sign).sig;
-        let bp_vext = EthereumTxData::BridgePoolVext(
+        let bp_vext = ProtocolTxData::BridgePoolVext(
             bridge_pool_roots::Vext {
                 block_height: shell.state.in_mem().get_last_block_height(),
                 validator_addr: address,
@@ -2362,6 +2377,22 @@ mod shell_tests {
                 "{err_msg}"
             );
         }
+    }
+
+    /// The consensus version marker must never transit the mempool:
+    /// it is only ever injected directly into a proposal by the block
+    /// proposer.
+    #[test]
+    fn test_mempool_rejects_version_marker() {
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let tx = version_compat::build_version_marker_tx(
+            namada_sdk::consensus_version(),
+            shell.chain_id.clone(),
+        )
+        .to_bytes();
+        let rsp = shell.mempool_validate(&tx, Default::default());
+        assert_eq!(rsp.code, ResultCode::InvalidTx.into());
     }
 
     /// Test if Ethereum events validation behaves as expected,
@@ -2395,7 +2426,7 @@ mod shell_tests {
             assert!(ext.verify(&protocol_key.ref_to()).is_ok());
             ext
         };
-        let tx = EthereumTxData::EthEventsVext(ext.into())
+        let tx = ProtocolTxData::EthEventsVext(ext.into())
             .sign(&protocol_key, shell.chain_id.clone())
             .to_bytes();
         let rsp = shell.mempool_validate(&tx, Default::default());

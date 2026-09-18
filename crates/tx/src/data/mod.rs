@@ -87,6 +87,8 @@ pub enum ResultCode {
     TooLarge = 11,
     /// Tx code is not allowlisted
     TxNotAllowlisted = 12,
+    /// Incompatible consensus version
+    IncompatibleVersion = 13,
     // =========================================================================
     // WARN: These codes shouldn't be changed between version!
 }
@@ -102,7 +104,8 @@ impl ResultCode {
             Ok | WasmRuntimeError => true,
             InvalidTx | InvalidSig | AllocationError | ReplayTx
             | InvalidChainId | ExpiredTx | TxGasLimit | FeeError
-            | InvalidVoteExtension | TooLarge | TxNotAllowlisted => false,
+            | InvalidVoteExtension | TooLarge | TxNotAllowlisted
+            | IncompatibleVersion => false,
         }
     }
 

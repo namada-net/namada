@@ -157,6 +157,23 @@ pub fn open(
 
     db_opts.set_bytes_per_sync(1048576);
     set_max_open_files(&mut db_opts);
+    
+    // Memory usage and performance optimization
+    db_opts.set_max_background_jobs(compaction_threads);
+    db_opts.set_max_subcompactions(std::cmp::max(1, compaction_threads / 2));
+    db_opts.set_allow_concurrent_memtable_write(true);
+    db_opts.set_enable_write_thread_adaptive_yield(true);
+    db_opts.set_advise_random_on_open(true);
+    
+    // Optimization to reduce write latency
+    db_opts.set_max_write_buffer_number(4);
+    db_opts.set_min_write_buffer_number_to_merge(2);
+    
+    // Optimization to reduce compaction latency
+    db_opts.set_level0_file_num_compaction_trigger(4);
+    db_opts.set_level0_slowdown_writes_trigger(20);
+    db_opts.set_level0_stop_writes_trigger(36);
+    db_opts.set_max_background_flushes(1);
 
     // TODO the recommended default `options.compaction_pri =
     // kMinOverlappingRatio` doesn't seem to be available in Rust
@@ -175,7 +192,15 @@ pub fn open(
     }
     // latest format versions https://github.com/facebook/rocksdb/blob/d1c510baecc1aef758f91f786c4fbee3bc847a63/include/rocksdb/table.h#L394
     table_opts.set_format_version(5);
-
+    
+    // Adding bloom filter with memory optimization
+    table_opts.set_bloom_filter(10.0, false);
+    table_opts.set_optimize_filters_for_memory(true);
+    table_opts.set_whole_key_filtering(true);
+    
+    // Optimizing index and filter caching
+    table_opts.set_cache_index_and_filter_blocks_with_high_priority(true);
+    
     // for subspace (read/update-intensive)
     let mut subspace_cf_opts = Options::default();
     subspace_cf_opts.set_compression_type(DBCompressionType::Zstd);
@@ -184,6 +209,23 @@ pub fn open(
     subspace_cf_opts.set_level_compaction_dynamic_level_bytes(true);
     subspace_cf_opts.set_compaction_style(DBCompactionStyle::Level);
     subspace_cf_opts.set_block_based_table_factory(&table_opts);
+    // Optimization for frequent read operations
+    subspace_cf_opts.set_target_file_size_base(64 * 1024 * 1024); // 64MB
+    subspace_cf_opts.set_max_write_buffer_number(4);
+    subspace_cf_opts.set_write_buffer_size(64 * 1024 * 1024); // 64MB
+    
+    // Setting compression by levels for optimal size-to-speed ratio
+    let compression_per_level = vec![
+        DBCompressionType::None,        // L0, no compression for fast writes
+        DBCompressionType::None,        // L1, no compression for fast access
+        DBCompressionType::Lz4,         // L2, light compression
+        DBCompressionType::Lz4,         // L3, light compression
+        DBCompressionType::Zstd,        // L4, strong compression
+        DBCompressionType::Zstd,        // L5, strong compression
+        DBCompressionType::Zstd,        // L6, strong compression
+    ];
+    subspace_cf_opts.set_compression_per_level(&compression_per_level);
+    
     cfs.push(ColumnFamilyDescriptor::new(SUBSPACE_CF, subspace_cf_opts));
 
     // for diffs (insert-intensive)
@@ -192,6 +234,24 @@ pub fn open(
     diffs_cf_opts.set_compression_options(0, 0, 0, 1024 * 1024);
     diffs_cf_opts.set_compaction_style(DBCompactionStyle::Level);
     diffs_cf_opts.set_block_based_table_factory(&table_opts);
+    // Optimization for frequent write operations
+    diffs_cf_opts.set_write_buffer_size(128 * 1024 * 1024); // 128MB for large write batches
+    diffs_cf_opts.set_max_write_buffer_number(6);
+    diffs_cf_opts.set_min_write_buffer_number_to_merge(2);
+    
+    // Compaction optimization for universal style
+    let mut universal_opts = rocksdb::UniversalCompactionOptions::new();
+    universal_opts.set_size_ratio(10);
+    universal_opts.set_min_merge_width(2);
+    universal_opts.set_max_merge_width(6);
+    universal_opts.set_stop_style(rocksdb::UniversalCompactionStopStyle::Total);
+    diffs_cf_opts.set_universal_compaction_options(&universal_opts);
+    
+    // File size optimization
+    diffs_cf_opts.set_target_file_size_base(64 * 1024 * 1024); // 64MB
+    diffs_cf_opts.set_max_bytes_for_level_base(512 * 1024 * 1024); // 512MB
+    diffs_cf_opts.set_max_bytes_for_level_multiplier(10.0);
+    
     cfs.push(ColumnFamilyDescriptor::new(DIFFS_CF, diffs_cf_opts));
 
     // for non-persisted diffs for rollback (read/update-intensive)
@@ -200,6 +260,21 @@ pub fn open(
     rollback_cf_opts.set_compression_options(0, 0, 0, 1024 * 1024);
     rollback_cf_opts.set_compaction_style(DBCompactionStyle::Level);
     rollback_cf_opts.set_block_based_table_factory(&table_opts);
+    
+    // Optimization for fast access to rollback data
+    rollback_cf_opts.set_write_buffer_size(32 * 1024 * 1024); // 32MB
+    rollback_cf_opts.set_max_write_buffer_number(4);
+    rollback_cf_opts.set_min_write_buffer_number_to_merge(1);
+    rollback_cf_opts.set_level0_file_num_compaction_trigger(2);
+    
+    // File size optimization for level compaction
+    rollback_cf_opts.set_target_file_size_base(32 * 1024 * 1024); // 32MB
+    rollback_cf_opts.set_max_bytes_for_level_base(256 * 1024 * 1024); // 256MB
+    rollback_cf_opts.set_max_bytes_for_level_multiplier(10.0);
+    
+    // Compaction priority to minimize overlap
+    rollback_cf_opts.set_compaction_pri(rocksdb::CompactionPri::MinOverlappingRatio);
+    
     cfs.push(ColumnFamilyDescriptor::new(ROLLBACK_CF, rollback_cf_opts));
 
     // for the ledger state (update-intensive)
@@ -226,6 +301,25 @@ pub fn open(
     // Prioritize minimizing read amplification
     replay_protection_cf_opts.set_compaction_style(DBCompactionStyle::Level);
     replay_protection_cf_opts.set_block_based_table_factory(&table_opts);
+    
+    // Optimization for frequent point lookups
+    replay_protection_cf_opts.set_memtable_prefix_bloom_size_ratio(0.1);
+    replay_protection_cf_opts.set_memtable_whole_key_filtering(true);
+    
+    // Optimization for fast access and writes
+    replay_protection_cf_opts.set_write_buffer_size(64 * 1024 * 1024); // 64MB
+    replay_protection_cf_opts.set_max_write_buffer_number(4);
+    replay_protection_cf_opts.set_min_write_buffer_number_to_merge(1);
+    replay_protection_cf_opts.set_level0_file_num_compaction_trigger(4);
+    
+    // File size optimization for level compaction
+    replay_protection_cf_opts.set_target_file_size_base(32 * 1024 * 1024); // 32MB
+    replay_protection_cf_opts.set_max_bytes_for_level_base(256 * 1024 * 1024); // 256MB
+    replay_protection_cf_opts.set_max_bytes_for_level_multiplier(10.0);
+    
+    // Compaction priority to minimize read amplification
+    replay_protection_cf_opts.set_compaction_pri(rocksdb::CompactionPri::MinOverlappingRatio);
+    
     cfs.push(ColumnFamilyDescriptor::new(
         REPLAY_PROTECTION_CF,
         replay_protection_cf_opts,

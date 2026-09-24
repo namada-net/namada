@@ -2845,6 +2845,7 @@ pub fn claim_reward_tokens<S, Gov, Token>(
     storage: &mut S,
     source: Option<&Address>,
     validator: &Address,
+    receiver: Option<&Address>,
     current_epoch: Epoch,
 ) -> Result<token::Amount>
 where
@@ -2854,8 +2855,14 @@ where
 {
     tracing::debug!("Claiming rewards in epoch {current_epoch}");
 
-    let source = source.cloned().unwrap_or_else(|| validator.clone());
-    tracing::debug!("Source {} --> Validator {}", source, validator);
+    let source = source.unwrap_or(validator).clone();
+    let receiver = receiver.unwrap_or(&source).clone();
+    tracing::debug!(
+        "Source {} --> Validator {}, Receiver {}",
+        source,
+        validator,
+        receiver
+    );
 
     let mut reward_tokens = compute_current_rewards_from_bonds::<S, Gov>(
         storage,
@@ -2872,9 +2879,15 @@ where
     // Update the last claim epoch in storage
     write_last_reward_claim_epoch(storage, &source, validator, current_epoch)?;
 
-    // Transfer the bonded tokens from PoS to the source
+    // Transfer the bonded tokens from PoS to the receiver
     let staking_token = staking_token_address(storage);
-    Token::transfer(storage, &staking_token, &ADDRESS, &source, reward_tokens)?;
+    Token::transfer(
+        storage,
+        &staking_token,
+        &ADDRESS,
+        &receiver,
+        reward_tokens,
+    )?;
     Token::emit_transfer_event(
         storage,
         CLAIM_REWARDS_EVENT_DESC.into(),
@@ -2882,7 +2895,7 @@ where
         &staking_token,
         reward_tokens,
         trans_token::UserAccount::Internal(ADDRESS),
-        trans_token::UserAccount::Internal(source),
+        trans_token::UserAccount::Internal(receiver),
     )?;
 
     Ok(reward_tokens)

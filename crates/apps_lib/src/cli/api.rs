@@ -33,6 +33,7 @@ impl CliClient for HttpClient {
     }
 }
 
+#[derive(Copy, Clone)]
 pub struct CliIo;
 
 #[async_trait::async_trait(?Send)]

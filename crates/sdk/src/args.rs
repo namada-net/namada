@@ -1866,6 +1866,10 @@ pub struct ClaimRewards<C: NamadaTypes = SdkTypes> {
     /// Source address for claiming rewards due to bonds. For self-bonds, the
     /// validator is also the source
     pub source: Option<C::Address>,
+    /// An optional receiver address. If not given, the rewards will be
+    /// received by the owner (i.e. the source of a delegation or the
+    /// validator of a self-bond).
+    pub receiver: Option<C::Address>,
     /// Path to the TX WASM code file
     pub tx_code_path: PathBuf,
 }

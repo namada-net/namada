@@ -68,10 +68,10 @@ where
         _ => {
             // Check allowlist as the wasm vm `fn check_tx_allowed` is only
             // enforced for wrappers
-            let sections = tx.section_index();
+            let code_sections = tx.code_sections();
             for cmt in tx.commitments() {
-                let (_, code_hash) = sections
-                    .code(cmt.code_sechash())
+                let (_, code_hash) = code_sections
+                    .get(cmt.code_sechash())
                     .ok_or_else(|| Error::new_const("Missing tx code"))?;
                 if !parameters::is_tx_allowed(&state, &code_hash)? {
                     return Err(Error::new_alloc(format!(

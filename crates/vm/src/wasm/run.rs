@@ -20,9 +20,7 @@ use namada_gas::{GasMetering, TxGasMeter, VpGasMeter, WASM_MEMORY_PAGE_GAS};
 use namada_state::prefix_iter::PrefixIterators;
 use namada_state::{DB, DBIter, State, StateRead, StorageHasher, StorageRead};
 use namada_tx::data::{TxSentinel, TxType};
-use namada_tx::{
-    BatchedTxRef, Commitment, Section, SectionIndex, Tx, TxCommitments,
-};
+use namada_tx::{BatchedTxRef, CodeSections, Commitment, Tx, TxCommitments};
 use namada_vp::vp_host_fns;
 use parity_wasm::elements::Instruction::*;
 use parity_wasm::elements::{self, SignExtInstruction};
@@ -121,74 +119,52 @@ pub enum Error {
 /// Result for functions that may fail
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Returns [`Error::DisallowedTx`] when the given tx is a user tx and its code
-/// `Hash` is not included in the `tx_allowlist` parameter.
-pub fn check_tx_allowed<S>(
-    batched_tx: &BatchedTxRef<'_>,
-    storage: &S,
-) -> Result<()>
-where
-    S: StorageRead,
-{
-    let BatchedTxRef { tx, cmt } = batched_tx;
-    let code_hash = tx
-        .get_section(cmt.code_sechash())
-        .and_then(|x| Section::code_sec(&x))
-        .map(|code_sec| code_sec.code.hash());
-    check_tx_code_allowed(tx, code_hash.as_ref(), storage)
-}
-
 /// Returns [`Error::DisallowedTx`] when the given tx is a user tx and the code
 /// of any of its inner txs is not included in the `tx_allowlist` parameter.
 ///
-/// This is equivalent to calling [`check_tx_allowed`] on every inner tx of the
-/// batch, in order, but the code sections are looked up from the given index
-/// and each distinct code section is only checked once, so the cost is linear
-/// in the size of the tx rather than quadratic in the number of inner txs.
-pub fn check_batch_allowed<S>(
+/// Inner txs are checked in order, each distinct code section only once.
+pub fn check_tx_allowed<S>(
     tx: &Tx,
-    sections: &SectionIndex<'_>,
+    code_sections: &CodeSections<'_>,
     storage: &S,
 ) -> Result<()>
 where
     S: StorageRead,
 {
-    if !matches!(tx.header.tx_type, TxType::Wrapper(_)) {
+    if !is_user_tx(tx) {
         return Ok(());
     }
     let mut checked = HashSet::new();
     for cmt in tx.commitments() {
         let code_sechash = cmt.code_sechash();
         if checked.insert(code_sechash) {
-            let code_hash = sections.code(code_sechash).map(|(_, hash)| hash);
-            check_tx_code_allowed(tx, code_hash.as_ref(), storage)?;
+            let (_, code_hash) =
+                code_sections.get(code_sechash).ok_or(Error::DisallowedTx)?;
+            check_code_allowed(&code_hash, storage)?;
         }
     }
     Ok(())
 }
 
-/// Returns [`Error::DisallowedTx`] when the given tx is a user tx and the given
-/// code hash (if any was found for the inner tx) is not included in the
-/// `tx_allowlist` parameter.
-fn check_tx_code_allowed<S>(
-    tx: &Tx,
-    code_hash: Option<&Hash>,
-    storage: &S,
-) -> Result<()>
+/// Whether the given tx is a user tx, i.e. a wrapper, which is subject to the
+/// `tx_allowlist` parameter
+fn is_user_tx(tx: &Tx) -> bool {
+    matches!(tx.header.tx_type, TxType::Wrapper(_))
+}
+
+/// Returns [`Error::DisallowedTx`] when the given code hash is not included in
+/// the `tx_allowlist` parameter.
+fn check_code_allowed<S>(code_hash: &Hash, storage: &S) -> Result<()>
 where
     S: StorageRead,
 {
-    if let TxType::Wrapper(_) = tx.header.tx_type {
-        if let Some(code_hash) = code_hash {
-            if namada_parameters::is_tx_allowed(storage, code_hash)
-                .map_err(|e| Error::Error(e.to_string()))?
-            {
-                return Ok(());
-            }
-        }
-        return Err(Error::DisallowedTx);
+    if namada_parameters::is_tx_allowed(storage, code_hash)
+        .map_err(|e| Error::Error(e.to_string()))?
+    {
+        Ok(())
+    } else {
+        Err(Error::DisallowedTx)
     }
-    Ok(())
 }
 
 /// Execute a transaction code. Returns the set verifiers addresses requested by
@@ -201,7 +177,7 @@ pub fn tx<S, CA>(
     tx_index: &TxIndex,
     tx: &Tx,
     cmt: &TxCommitments,
-    sections: &SectionIndex<'_>,
+    code_sections: &CodeSections<'_>,
     vp_wasm_cache: &mut VpCache<CA>,
     tx_wasm_cache: &mut TxCache<CA>,
     gas_meter_kind: GasMeterKind,
@@ -211,15 +187,16 @@ where
     S: StateRead + State + StorageRead,
     CA: 'static + WasmCacheAccess,
 {
-    let (tx_code, tx_code_hash) = sections
-        .code(cmt.code_sechash())
+    let (tx_code, tx_code_hash) = code_sections
+        .get(cmt.code_sechash())
         .ok_or(Error::MissingSection(cmt.code_sechash().to_string()))?;
 
     // Check if the tx code is allowed (to be done after the check on the code
     // section commitment to let the replay protection mechanism run some
     // optimizations)
-    let batched_tx = tx.batch_ref_tx(cmt);
-    check_tx_code_allowed(tx, Some(&tx_code_hash), state)?;
+    if is_user_tx(tx) {
+        check_code_allowed(&tx_code_hash, state)?;
+    }
 
     // If the transaction code has a tag, ensure that the tag hash equals the
     // transaction code's hash.
@@ -354,7 +331,7 @@ where
             &instance,
             &mut *store,
             guest_memory,
-            &batched_tx,
+            &tx.batch_ref_tx(cmt),
         )
         .map_err(Error::MemoryError)?
     };
@@ -1652,7 +1629,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.section_index(),
+            &batched_tx.tx.code_sections(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -1674,7 +1651,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.section_index(),
+            &batched_tx.tx.code_sections(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -1908,7 +1885,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.section_index(),
+            &batched_tx.tx.code_sections(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2030,7 +2007,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.section_index(),
+            &batched_tx.tx.code_sections(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2209,7 +2186,6 @@ mod tests {
         wrapper_tx.add_serialized_data(vec![]);
         let mut raw_tx = wrapper_tx.clone();
         raw_tx.update_header(TxType::Raw);
-        let batched_tx = wrapper_tx.batch_ref_first_tx().unwrap();
 
         // Check that using a disallowed wrapper tx leads to an error, but a raw
         // tx is ok even if not allowlisted
@@ -2221,10 +2197,14 @@ mod tests {
             .unwrap();
             state.commit_tx_batch();
 
-            let result = check_tx_allowed(&batched_tx, &state);
+            let result = check_tx_allowed(
+                &wrapper_tx,
+                &wrapper_tx.code_sections(),
+                &state,
+            );
             assert_matches!(result.unwrap_err(), Error::DisallowedTx);
-            let batched_raw_tx = raw_tx.batch_ref_first_tx().unwrap();
-            let result = check_tx_allowed(&batched_raw_tx, &state);
+            let result =
+                check_tx_allowed(&raw_tx, &raw_tx.code_sections(), &state);
             if let Err(result) = result {
                 assert!(!matches!(result, Error::DisallowedTx));
             }
@@ -2240,7 +2220,11 @@ mod tests {
             .unwrap();
             state.commit_tx_batch();
 
-            let result = check_tx_allowed(&batched_tx, &state);
+            let result = check_tx_allowed(
+                &wrapper_tx,
+                &wrapper_tx.code_sections(),
+                &state,
+            );
             if let Err(result) = result {
                 assert!(!matches!(result, Error::DisallowedTx));
             }
@@ -2281,7 +2265,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.section_index(),
+            &batched_tx.tx.code_sections(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2325,7 +2309,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.section_index(),
+            &batched_tx.tx.code_sections(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2642,7 +2626,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.section_index(),
+            &batched_tx.tx.code_sections(),
             vp_cache,
             tx_cache,
             GasMeterKind::MutGlobal,
@@ -2699,7 +2683,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.section_index(),
+            &batched_tx.tx.code_sections(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,

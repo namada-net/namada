@@ -11,7 +11,7 @@ mod init_chain;
 pub use init_chain::InitChainValidation;
 use namada_apps_lib::config::NodeLocalConfig;
 use namada_sdk::state::StateRead;
-use namada_vm::wasm::run::check_batch_allowed;
+use namada_vm::wasm::run::check_tx_allowed;
 pub mod prepare_proposal;
 use namada_sdk::ibc;
 use namada_sdk::state::State;
@@ -1354,7 +1354,7 @@ where
                 }
                 // Tx allowlist
                 if let Err(err) =
-                    check_batch_allowed(&tx, &tx.section_index(), &self.state)
+                    check_tx_allowed(&tx, &tx.code_sections(), &self.state)
                 {
                     response.code = ResultCode::TxNotAllowlisted.into();
                     response.log = format!(

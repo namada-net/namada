@@ -39,8 +39,8 @@ pub use sign::{
     verify_standalone_sig,
 };
 pub use types::{
-    BatchedTx, BatchedTxRef, DecodeError, IndexedTx, IndexedTxRange,
-    SectionIndex, Tx, TxError,
+    BatchedTx, BatchedTxRef, CodeSections, DecodeError, IndexedTx,
+    IndexedTxRange, Tx, TxError,
 };
 
 /// Length of the transaction sections salt

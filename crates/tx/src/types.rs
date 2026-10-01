@@ -283,6 +283,27 @@ impl Tx {
         None
     }
 
+    /// Build an index of this transaction's sections by hash. Unlike
+    /// [`Tx::get_section`], lookups through the index don't rehash the
+    /// transaction, so it should be preferred whenever sections are looked up
+    /// for each of the inner transactions of a batch.
+    ///
+    /// The index does not contain the header section.
+    pub fn section_index(&self) -> SectionIndex<'_> {
+        let mut sections = HashMap::with_capacity(self.sections.len());
+        for section in &self.sections {
+            // Keep the first section with a given hash, consistently with the
+            // lookup order of `get_section`
+            sections.entry(section.get_hash()).or_insert_with(|| {
+                IndexedSection {
+                    section,
+                    code_hash: section.code_sec_ref().map(|c| c.code.hash()),
+                }
+            });
+        }
+        SectionIndex { sections }
+    }
+
     /// Get the transaction section with the given hash
     pub fn get_masp_section(&self, hash: &MaspTxId) -> Option<&Transaction> {
         for section in &self.sections {
@@ -1124,6 +1145,35 @@ impl RangeBounds<IndexedTx> for IndexedTxRange {
     }
 }
 
+/// A section of a transaction together with the precomputed hash of its code,
+/// if it is a code section
+#[derive(Debug, Clone, Copy)]
+struct IndexedSection<'tx> {
+    section: &'tx Section,
+    code_hash: Option<namada_core::hash::Hash>,
+}
+
+/// An index of the sections of a transaction by their hash, built with
+/// [`Tx::section_index`]. Section hashes and code hashes are computed once
+/// when the index is built, so looking up the sections of all the inner
+/// transactions of a batch is linear in the size of the transaction.
+#[derive(Debug, Clone)]
+pub struct SectionIndex<'tx> {
+    sections: HashMap<namada_core::hash::Hash, IndexedSection<'tx>>,
+}
+
+impl<'tx> SectionIndex<'tx> {
+    /// Get the code section with the given hash together with the hash of its
+    /// code
+    pub fn code(
+        &self,
+        hash: &namada_core::hash::Hash,
+    ) -> Option<(&'tx Code, namada_core::hash::Hash)> {
+        let indexed = self.sections.get(hash)?;
+        Some((indexed.section.code_sec_ref()?, indexed.code_hash?))
+    }
+}
+
 /// A reference to a transaction with the commitment to a specific inner
 /// transaction of the batch
 #[derive(Debug, BorshSerialize)]
@@ -1853,5 +1903,49 @@ mod test {
                 .count(),
             2
         );
+    }
+
+    /// Check that looking up code sections through a [`SectionIndex`] is
+    /// equivalent to looking them up with [`Tx::get_section`]
+    #[test]
+    fn test_section_index_matches_get_section() {
+        let mut tx = Tx::from_type(TxType::Raw);
+        tx.set_code(Code::new(b"code by id".to_vec(), Some("tag".into())));
+        tx.set_data(Data::new(b"data 1".to_vec()));
+        tx.add_memo(b"memo");
+        tx.push_default_inner_tx();
+        tx.set_code(Code::from_hash(
+            namada_core::hash::Hash::sha256(b"code by hash"),
+            None,
+        ));
+        tx.set_data(Data::new(b"data 2".to_vec()));
+        // A duplicated section must resolve to the first occurrence
+        tx.add_section(Section::Code(Code::new(
+            b"code by id".to_vec(),
+            Some("tag".into()),
+        )));
+        // A header section with the same contents as the tx header
+        tx.add_section(Section::Header(tx.header()));
+
+        let sections = tx.section_index();
+        let mut hashes = tx.sechashes();
+        hashes.push(tx.raw_header_hash());
+        hashes.push(namada_core::hash::Hash::sha256(b"missing"));
+        for cmt in tx.commitments() {
+            hashes.extend([cmt.code_hash, cmt.data_hash, cmt.memo_hash]);
+        }
+        let mut found_code = 0;
+        for hash in hashes {
+            let expected = tx
+                .get_section(&hash)
+                .and_then(|section| section.code_sec())
+                .map(|code| (code.clone(), code.code.hash()));
+            let actual = sections
+                .code(&hash)
+                .map(|(code, code_hash)| (code.clone(), code_hash));
+            assert_eq!(actual, expected);
+            found_code += usize::from(actual.is_some());
+        }
+        assert!(found_code > 0);
     }
 }

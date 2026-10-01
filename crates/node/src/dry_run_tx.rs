@@ -9,8 +9,8 @@ use namada_sdk::queries::{EncodedResponseQuery, RequestQuery};
 use namada_sdk::state::{
     DB, DBIter, Error, Result, ResultExt, StorageHasher, TxIndex,
 };
+use namada_sdk::tx::Tx;
 use namada_sdk::tx::data::{DryRunResult, GasLimit, TxResult, TxType};
-use namada_sdk::tx::{self, Tx};
 use namada_vm::WasmCacheAccess;
 use namada_vm::wasm::{TxCache, VpCache};
 
@@ -68,12 +68,11 @@ where
         _ => {
             // Check allowlist as the wasm vm `fn check_tx_allowed` is only
             // enforced for wrappers
+            let sections = tx.section_index();
             for cmt in tx.commitments() {
-                let code_sec = tx
-                    .get_section(cmt.code_sechash())
-                    .and_then(|x| tx::Section::code_sec(&x))
+                let (_, code_hash) = sections
+                    .code(cmt.code_sechash())
                     .ok_or_else(|| Error::new_const("Missing tx code"))?;
-                let code_hash = code_sec.code.hash();
                 if !parameters::is_tx_allowed(&state, &code_hash)? {
                     return Err(Error::new_alloc(format!(
                         "Tx code with hash {} is disallowed",

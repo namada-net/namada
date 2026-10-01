@@ -287,6 +287,7 @@ impl BenchShellInner {
             &TxIndex(0),
             batched_tx.tx,
             batched_tx.cmt,
+            &batched_tx.tx.section_index(),
             &mut self.inner.vp_wasm_cache,
             &mut self.inner.tx_wasm_cache,
             run::GasMeterKind::MutGlobal,

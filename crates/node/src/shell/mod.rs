@@ -11,7 +11,7 @@ mod init_chain;
 pub use init_chain::InitChainValidation;
 use namada_apps_lib::config::NodeLocalConfig;
 use namada_sdk::state::StateRead;
-use namada_vm::wasm::run::check_tx_allowed;
+use namada_vm::wasm::run::check_batch_allowed;
 pub mod prepare_proposal;
 use namada_sdk::ibc;
 use namada_sdk::state::State;
@@ -59,9 +59,9 @@ use namada_sdk::state::{
 use namada_sdk::storage::{Key, TxIndex};
 use namada_sdk::tendermint::AppHash;
 use namada_sdk::time::DateTimeUtc;
+use namada_sdk::tx::Tx;
 pub use namada_sdk::tx::data::ResultCode;
 use namada_sdk::tx::data::{TxType, WrapperTx};
-use namada_sdk::tx::{Section, Tx};
 use namada_sdk::{
     eth_bridge, governance, hints, migrations, parameters, proof_of_stake,
     token,
@@ -1352,19 +1352,17 @@ where
                     response.log = format!("{INVALID_MSG}: {err}");
                     return response;
                 }
-                for cmt in tx.commitments() {
-                    // Tx allowlist
-                    if let Err(err) =
-                        check_tx_allowed(&tx.batch_ref_tx(cmt), &self.state)
-                    {
-                        response.code = ResultCode::TxNotAllowlisted.into();
-                        response.log = format!(
-                            "{INVALID_MSG}: Wrapper transaction code didn't \
-                             pass the allowlist checks {}",
-                            err
-                        );
-                        return response;
-                    }
+                // Tx allowlist
+                if let Err(err) =
+                    check_batch_allowed(&tx, &tx.section_index(), &self.state)
+                {
+                    response.code = ResultCode::TxNotAllowlisted.into();
+                    response.log = format!(
+                        "{INVALID_MSG}: Wrapper transaction code didn't pass \
+                         the allowlist checks {}",
+                        err
+                    );
+                    return response;
                 }
 
                 // This is safe as neither the inner `db` nor `in_mem` are

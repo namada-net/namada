@@ -20,7 +20,9 @@ use namada_gas::{GasMetering, TxGasMeter, VpGasMeter, WASM_MEMORY_PAGE_GAS};
 use namada_state::prefix_iter::PrefixIterators;
 use namada_state::{DB, DBIter, State, StateRead, StorageHasher, StorageRead};
 use namada_tx::data::{TxSentinel, TxType};
-use namada_tx::{BatchedTxRef, CodeSections, Commitment, Tx, TxCommitments};
+use namada_tx::{
+    BatchedTxRef, CodeSections, Commitment, InnerTxSections, Tx, TxCommitments,
+};
 use namada_vp::vp_host_fns;
 use parity_wasm::elements::Instruction::*;
 use parity_wasm::elements::{self, SignExtInstruction};
@@ -168,7 +170,7 @@ where
 }
 
 /// Execute a transaction code. Returns the set verifiers addresses requested by
-/// the transaction.
+/// the transaction. The `sections` must have been looked up for `cmt`.
 #[allow(clippy::too_many_arguments)]
 pub fn tx<S, CA>(
     state: &mut S,
@@ -177,7 +179,7 @@ pub fn tx<S, CA>(
     tx_index: &TxIndex,
     tx: &Tx,
     cmt: &TxCommitments,
-    code_sections: &CodeSections<'_>,
+    sections: InnerTxSections<'_>,
     vp_wasm_cache: &mut VpCache<CA>,
     tx_wasm_cache: &mut TxCache<CA>,
     gas_meter_kind: GasMeterKind,
@@ -187,8 +189,8 @@ where
     S: StateRead + State + StorageRead,
     CA: 'static + WasmCacheAccess,
 {
-    let (tx_code, tx_code_hash) = code_sections
-        .get(cmt.code_sechash())
+    let (tx_code, tx_code_hash) = sections
+        .code
         .ok_or(Error::MissingSection(cmt.code_sechash().to_string()))?;
 
     // Check if the tx code is allowed (to be done after the check on the code
@@ -1650,7 +1652,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.code_sections(),
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -1672,7 +1674,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.code_sections(),
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -1906,7 +1908,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.code_sections(),
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2028,7 +2030,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.code_sections(),
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2286,7 +2288,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.code_sections(),
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2330,7 +2332,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.code_sections(),
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2647,7 +2649,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.code_sections(),
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             vp_cache,
             tx_cache,
             GasMeterKind::MutGlobal,
@@ -2704,7 +2706,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
-            &batched_tx.tx.code_sections(),
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,

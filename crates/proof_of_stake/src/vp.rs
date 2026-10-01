@@ -62,9 +62,8 @@ where
         tracing::debug!("\nValidating PoS Tx\n");
 
         // Check if this is a governance proposal first
-        if batched_tx
-            .tx
-            .data(batched_tx.cmt)
+        if ctx
+            .get_tx_data(batched_tx)
             .map(|tx_data| Gov::is_proposal_accepted(&ctx.pre(), &tx_data))
             .transpose()?
             .unwrap_or(false)

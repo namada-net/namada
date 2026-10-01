@@ -246,6 +246,7 @@ impl TestTxEnv {
             &self.tx_index,
             &self.batched_tx.tx,
             &self.batched_tx.cmt,
+            &self.batched_tx.tx.section_index(),
             &mut self.vp_wasm_cache,
             &mut self.tx_wasm_cache,
             wasm::run::GasMeterKind::MutGlobal,

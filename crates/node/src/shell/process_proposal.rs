@@ -520,19 +520,17 @@ where
                         info: err,
                     };
                 }
-                for cmt in tx.commitments() {
-                    // Tx allowlist
-                    if let Err(err) =
-                        check_tx_allowed(&tx.batch_ref_tx(cmt), &self.state)
-                    {
-                        return TxResult {
-                            code: ResultCode::TxNotAllowlisted.into(),
-                            info: format!(
-                                "Tx code didn't pass the allowlist check: {}",
-                                err
-                            ),
-                        };
-                    }
+                // Tx allowlist
+                if let Err(err) =
+                    check_batch_allowed(&tx, &tx.section_index(), &self.state)
+                {
+                    return TxResult {
+                        code: ResultCode::TxNotAllowlisted.into(),
+                        info: format!(
+                            "Tx code didn't pass the allowlist check: {}",
+                            err
+                        ),
+                    };
                 }
 
                 // Check that the fee payer has sufficient balance.

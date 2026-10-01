@@ -31,7 +31,9 @@ use namada_sdk::tx::data::{
     compute_inner_tx_hash,
 };
 use namada_sdk::tx::event::{MaspEvent, MaspEventKind, MaspTxRef};
-use namada_sdk::tx::{BatchedTxRef, IndexedTx, Tx, TxCommitments};
+use namada_sdk::tx::{
+    BatchedTxRef, IndexedTx, SectionIndex, Tx, TxCommitments,
+};
 use namada_sdk::validation::{
     EthBridgeNutVp, EthBridgePoolVp, EthBridgeVp, GovernanceVp, IbcVp, MaspVp,
     MultitokenVp, NativeVpCtx, ParametersVp, PgfVp, PosVp,
@@ -263,6 +265,7 @@ where
                 let batched_tx_result = apply_wasm_tx(
                     wrapper_hash,
                     &tx.batch_ref_tx(cmt),
+                    &tx.section_index(),
                     &tx_index,
                     ShellParams {
                         tx_gas_meter,
@@ -376,10 +379,13 @@ where
         .collect::<HashSet<_>>()
         .into_iter();
 
+    // Index the sections once for all the inner txs of the batch
+    let sections = tx.section_index();
     for cmt in inner_txs {
         match apply_wasm_tx(
             wrapper_hash,
             &tx.batch_ref_tx(cmt),
+            &sections,
             &tx_index,
             ShellParams {
                 tx_gas_meter,
@@ -832,6 +838,7 @@ where
         match apply_wasm_tx(
             Some(&tx.header_hash()),
             &first_tx,
+            &tx.section_index(),
             tx_index,
             ShellParams {
                 tx_gas_meter: &masp_gas_meter,
@@ -1037,6 +1044,7 @@ where
 fn apply_wasm_tx<S, D, H, CA>(
     wrapper_hash: Option<&Hash>,
     batched_tx: &BatchedTxRef<'_>,
+    sections: &SectionIndex<'_>,
     tx_index: &TxIndex,
     shell_params: ShellParams<'_, S, D, H, CA>,
     gas_meter_kind: GasMeterKind,
@@ -1058,6 +1066,7 @@ where
     let verifiers = execute_tx(
         wrapper_hash,
         batched_tx,
+        sections,
         tx_index,
         state,
         tx_gas_meter,
@@ -1179,6 +1188,7 @@ where
 fn execute_tx<S, D, H, CA>(
     wrapper_hash: Option<&Hash>,
     batched_tx: &BatchedTxRef<'_>,
+    sections: &SectionIndex<'_>,
     tx_index: &TxIndex,
     state: &mut S,
     tx_gas_meter: &RefCell<TxGasMeter>,
@@ -1200,6 +1210,7 @@ where
         tx_index,
         batched_tx.tx,
         batched_tx.cmt,
+        sections,
         vp_wasm_cache,
         tx_wasm_cache,
         gas_meter_kind,

@@ -10,6 +10,7 @@ use std::rc::Rc;
 
 use borsh::BorshDeserialize;
 use namada_core::address::Address;
+use namada_core::collections::HashSet;
 use namada_core::hash::{Error as TxHashError, Hash};
 use namada_core::internal::HostEnvResult;
 use namada_core::storage::{Key, TxIndex};
@@ -19,7 +20,9 @@ use namada_gas::{GasMetering, TxGasMeter, VpGasMeter, WASM_MEMORY_PAGE_GAS};
 use namada_state::prefix_iter::PrefixIterators;
 use namada_state::{DB, DBIter, State, StateRead, StorageHasher, StorageRead};
 use namada_tx::data::{TxSentinel, TxType};
-use namada_tx::{BatchedTxRef, Commitment, Section, Tx, TxCommitments};
+use namada_tx::{
+    BatchedTxRef, Commitment, Section, SectionIndex, Tx, TxCommitments,
+};
 use namada_vp::vp_host_fns;
 use parity_wasm::elements::Instruction::*;
 use parity_wasm::elements::{self, SignExtInstruction};
@@ -128,12 +131,56 @@ where
     S: StorageRead,
 {
     let BatchedTxRef { tx, cmt } = batched_tx;
-    if let TxType::Wrapper(_) = tx.header().tx_type {
-        if let Some(code_sec) = tx
-            .get_section(cmt.code_sechash())
-            .and_then(|x| Section::code_sec(&x))
-        {
-            if namada_parameters::is_tx_allowed(storage, &code_sec.code.hash())
+    let code_hash = tx
+        .get_section(cmt.code_sechash())
+        .and_then(|x| Section::code_sec(&x))
+        .map(|code_sec| code_sec.code.hash());
+    check_tx_code_allowed(tx, code_hash.as_ref(), storage)
+}
+
+/// Returns [`Error::DisallowedTx`] when the given tx is a user tx and the code
+/// of any of its inner txs is not included in the `tx_allowlist` parameter.
+///
+/// This is equivalent to calling [`check_tx_allowed`] on every inner tx of the
+/// batch, in order, but the code sections are looked up from the given index
+/// and each distinct code section is only checked once, so the cost is linear
+/// in the size of the tx rather than quadratic in the number of inner txs.
+pub fn check_batch_allowed<S>(
+    tx: &Tx,
+    sections: &SectionIndex<'_>,
+    storage: &S,
+) -> Result<()>
+where
+    S: StorageRead,
+{
+    if !matches!(tx.header.tx_type, TxType::Wrapper(_)) {
+        return Ok(());
+    }
+    let mut checked = HashSet::new();
+    for cmt in tx.commitments() {
+        let code_sechash = cmt.code_sechash();
+        if checked.insert(code_sechash) {
+            let code_hash = sections.code(code_sechash).map(|(_, hash)| hash);
+            check_tx_code_allowed(tx, code_hash.as_ref(), storage)?;
+        }
+    }
+    Ok(())
+}
+
+/// Returns [`Error::DisallowedTx`] when the given tx is a user tx and the given
+/// code hash (if any was found for the inner tx) is not included in the
+/// `tx_allowlist` parameter.
+fn check_tx_code_allowed<S>(
+    tx: &Tx,
+    code_hash: Option<&Hash>,
+    storage: &S,
+) -> Result<()>
+where
+    S: StorageRead,
+{
+    if let TxType::Wrapper(_) = tx.header.tx_type {
+        if let Some(code_hash) = code_hash {
+            if namada_parameters::is_tx_allowed(storage, code_hash)
                 .map_err(|e| Error::Error(e.to_string()))?
             {
                 return Ok(());
@@ -154,6 +201,7 @@ pub fn tx<S, CA>(
     tx_index: &TxIndex,
     tx: &Tx,
     cmt: &TxCommitments,
+    sections: &SectionIndex<'_>,
     vp_wasm_cache: &mut VpCache<CA>,
     tx_wasm_cache: &mut TxCache<CA>,
     gas_meter_kind: GasMeterKind,
@@ -163,16 +211,15 @@ where
     S: StateRead + State + StorageRead,
     CA: 'static + WasmCacheAccess,
 {
-    let tx_code = tx
-        .get_section(cmt.code_sechash())
-        .and_then(|x| Section::code_sec(x.as_ref()))
+    let (tx_code, tx_code_hash) = sections
+        .code(cmt.code_sechash())
         .ok_or(Error::MissingSection(cmt.code_sechash().to_string()))?;
 
     // Check if the tx code is allowed (to be done after the check on the code
     // section commitment to let the replay protection mechanism run some
     // optimizations)
     let batched_tx = tx.batch_ref_tx(cmt);
-    check_tx_allowed(&batched_tx, state)?;
+    check_tx_code_allowed(tx, Some(&tx_code_hash), state)?;
 
     // If the transaction code has a tag, ensure that the tag hash equals the
     // transaction code's hash.
@@ -194,7 +241,6 @@ where
                 ))
             })?;
         // Ensure that the queried code hash equals the transaction's code hash
-        let tx_code_hash = tx_code.code.hash();
         if tx_code_hash != hash_value {
             return Err(Error::LoadWasmCode(format!(
                 "Transaction code hash does not correspond to tag: tx hash \
@@ -1606,6 +1652,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            &batched_tx.tx.section_index(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -1627,6 +1674,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            &batched_tx.tx.section_index(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -1860,6 +1908,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            &batched_tx.tx.section_index(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -1981,6 +2030,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            &batched_tx.tx.section_index(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2231,6 +2281,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            &batched_tx.tx.section_index(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2274,6 +2325,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            &batched_tx.tx.section_index(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2590,6 +2642,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            &batched_tx.tx.section_index(),
             vp_cache,
             tx_cache,
             GasMeterKind::MutGlobal,
@@ -2646,6 +2699,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            &batched_tx.tx.section_index(),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,

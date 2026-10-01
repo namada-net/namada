@@ -693,10 +693,10 @@ where
                             }
                         };
                     let tx_gas_meter = TxGasMeter::new(gas_limit, gas_scale);
-                    let sections = tx.section_index();
+                    let code_sections = tx.code_sections();
                     for cmt in tx.commitments() {
                         if let Some((_, code_hash)) =
-                            sections.code(cmt.code_sechash())
+                            code_sections.get(cmt.code_sechash())
                         {
                             stats.increment_tx_type(code_hash.to_string());
                         }

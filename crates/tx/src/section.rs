@@ -209,15 +209,6 @@ impl Section {
         }
     }
 
-    /// Get a reference to the code of this section if possible
-    pub fn code_sec_ref(&self) -> Option<&Code> {
-        if let Self::Code(data) = self {
-            Some(data)
-        } else {
-            None
-        }
-    }
-
     /// Extract the code from this section is possible
     pub fn code(&self) -> Option<Vec<u8>> {
         if let Self::Code(data) = self {

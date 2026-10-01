@@ -522,7 +522,7 @@ where
                 }
                 // Tx allowlist
                 if let Err(err) =
-                    check_batch_allowed(&tx, &tx.section_index(), &self.state)
+                    check_tx_allowed(&tx, &tx.code_sections(), &self.state)
                 {
                     return TxResult {
                         code: ResultCode::TxNotAllowlisted.into(),

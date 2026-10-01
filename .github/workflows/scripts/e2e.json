@@ -3,6 +3,7 @@
     "e2e::ibc_tests::frontend_sus_fee": 350,
     "e2e::ibc_tests::ibc_transfers": 414,
     "e2e::ibc_tests::ibc_nft_transfers": 224,
+    "e2e::ibc_tests::ibc_permissioned_channels": 485,
     "e2e::ibc_tests::pgf_over_ibc": 415,
     "e2e::ibc_tests::fee_payment_with_ibc_token": 357,
     "e2e::ibc_tests::ibc_token_inflation": 970,

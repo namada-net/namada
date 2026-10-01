@@ -446,6 +446,11 @@ where
     }
 
     fn get_tx_code_hash(&self) -> Result<Option<Hash>> {
+        if let Some(sections) = self.inner_tx_sections {
+            vp_host_fns::charge_tx_code_hash_gas(self.gas_meter)
+                .into_storage_result()?;
+            return Ok(sections.code_hash());
+        }
         vp_host_fns::get_tx_code_hash(
             self.gas_meter,
             &self.tx.batch_ref_tx(self.cmt),

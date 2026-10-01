@@ -246,19 +246,27 @@ pub fn get_tx_code_hash(
     gas_meter: &RefCell<impl GasMetering>,
     batched_tx: &BatchedTxRef<'_>,
 ) -> Result<Option<Hash>> {
-    add_gas(
-        gas_meter,
-        (HASH_LENGTH as u64)
-            .checked_mul(MEMORY_ACCESS_GAS_PER_BYTE)
-            .expect("Consts mul that cannot overflow")
-            .into(),
-    )?;
+    charge_tx_code_hash_gas(gas_meter)?;
     let hash = batched_tx
         .tx
         .get_section(batched_tx.cmt.code_sechash())
         .and_then(|x| Section::code_sec(x.as_ref()))
         .map(|x| x.code.hash());
     Ok(hash)
+}
+
+/// Charge the gas cost of getting the tx code hash. This is split from
+/// [`get_tx_code_hash`] for callers that have already looked up the hash.
+pub fn charge_tx_code_hash_gas(
+    gas_meter: &RefCell<impl GasMetering>,
+) -> Result<()> {
+    add_gas(
+        gas_meter,
+        (HASH_LENGTH as u64)
+            .checked_mul(MEMORY_ACCESS_GAS_PER_BYTE)
+            .expect("Consts mul that cannot overflow")
+            .into(),
+    )
 }
 
 /// Getting the block epoch. The epoch is that of the block to which the

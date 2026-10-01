@@ -1325,6 +1325,7 @@ where
                         wasm::run::vp(
                             vp_code_hash,
                             batched_tx,
+                            sections,
                             tx_index,
                             addr,
                             state,
@@ -1834,6 +1835,7 @@ mod tests {
                         wasm::run::vp(
                             code_hash,
                             &batched_tx,
+                            tx.inner_tx_sections(cmt),
                             &TxIndex::default(),
                             &addr,
                             &state,
@@ -1865,6 +1867,7 @@ mod tests {
                     wasm::run::vp(
                         code_hash,
                         &batched_tx,
+                        tx.inner_tx_sections(cmt),
                         &TxIndex::default(),
                         &addr,
                         &state,

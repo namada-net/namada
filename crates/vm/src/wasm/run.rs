@@ -403,11 +403,13 @@ where
 
 /// Execute a validity predicate code. Returns whether the validity
 /// predicate accepted storage modifications performed by the transaction
-/// that triggered the execution.
+/// that triggered the execution. The `sections` must have been looked up for
+/// the inner tx of `batched_tx`.
 #[allow(clippy::too_many_arguments)]
 pub fn vp<S, CA>(
     vp_code_hash: Hash,
     batched_tx: &BatchedTxRef<'_>,
+    sections: InnerTxSections<'_>,
     tx_index: &TxIndex,
     address: &Address,
     state: &S,
@@ -443,6 +445,7 @@ where
             cache_access: PhantomData,
         };
     let BatchedTxRef { tx, cmt } = batched_tx;
+    let tx_code_hash = sections.code_hash();
 
     let wasm_gas_meter = RefCell::new(GasMeter::new(
         gas_meter_kind,
@@ -460,6 +463,7 @@ where
         &wasm_gas_meter,
         tx,
         cmt,
+        &tx_code_hash,
         tx_index,
         &mut iterators,
         verifiers,
@@ -706,6 +710,10 @@ where
         let mut result_buffer: Option<Vec<u8>> = None;
         let mut yielded_value: Option<Vec<u8>> = None;
         let mut vp_wasm_cache = native_ctx.vp_wasm_cache.clone();
+        let tx_code_hash = native_ctx
+            .inner_tx_sections
+            .unwrap_or_else(|| native_ctx.tx.inner_tx_sections(native_ctx.cmt))
+            .code_hash();
 
         let wasm_gas_meter = RefCell::new(GasMeter::new(
             GasMeterKind::MutGlobal,
@@ -721,6 +729,7 @@ where
             &wasm_gas_meter,
             native_ctx.tx,
             native_ctx.cmt,
+            &tx_code_hash,
             native_ctx.tx_index,
             &mut iterators,
             native_ctx.verifiers,
@@ -1723,6 +1732,8 @@ mod tests {
             vp(
                 code_hash,
                 &outer_tx.batch_ref_first_tx().unwrap(),
+                outer_tx
+                    .inner_tx_sections(outer_tx.first_commitments().unwrap(),),
                 &tx_index,
                 &addr,
                 &state,
@@ -1757,6 +1768,8 @@ mod tests {
             vp(
                 code_hash,
                 &outer_tx.batch_ref_first_tx().unwrap(),
+                outer_tx
+                    .inner_tx_sections(outer_tx.first_commitments().unwrap(),),
                 &tx_index,
                 &addr,
                 &state,
@@ -1809,6 +1822,7 @@ mod tests {
         let result = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,
@@ -1830,6 +1844,7 @@ mod tests {
         let error = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,
@@ -1941,6 +1956,7 @@ mod tests {
         let result = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,
@@ -2064,6 +2080,7 @@ mod tests {
         let error = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,
@@ -2143,6 +2160,8 @@ mod tests {
             vp(
                 code_hash,
                 &outer_tx.batch_ref_first_tx().unwrap(),
+                outer_tx
+                    .inner_tx_sections(outer_tx.first_commitments().unwrap(),),
                 &tx_index,
                 &addr,
                 &state,
@@ -2352,6 +2371,7 @@ mod tests {
         let result = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,
@@ -2398,6 +2418,7 @@ mod tests {
         let result = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,
@@ -2575,6 +2596,7 @@ mod tests {
         vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,

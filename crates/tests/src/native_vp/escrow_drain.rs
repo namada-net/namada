@@ -36,6 +36,8 @@ mod escrow_drain_tests {
     use namada_sdk::ibc::core::channel::types::timeout::{
         TimeoutHeight, TimeoutTimestamp,
     };
+    use namada_core::ibc::primitives::ToProto;
+    use namada_sdk::ibc::core::host::types::identifiers::PortId;
     use namada_sdk::ibc::primitives::Timestamp;
     use namada_sdk::ibc::{IBC_ESCROW_ADDRESS, MsgTransfer};
     use namada_sdk::key::{self, RefTo};
@@ -46,6 +48,7 @@ mod escrow_drain_tests {
     use namada_sdk::tx::{TX_IBC_WASM, TX_TRANSFER_WASM, Tx};
     use namada_sdk::validation::{MultitokenVp, PosVp};
     use namada_tx_prelude::BorshSerializeExt;
+    use prost::Message;
 
     use crate::native_vp::TestNativeVpEnv;
     use crate::tx::{TestTxEnv, tx_host_env};
@@ -471,5 +474,52 @@ mod escrow_drain_tests {
                 // is blocked before any state change is applied
             }
         }
+    }
+
+    /// The forged-voucher escrow drain attack requires a permissionless
+    /// channel: an attacker opens their own channel to Namada and relays a
+    /// voucher whose denom trace points at the pooled escrow. The IBC VP
+    /// must reject a `ChanOpenInit` submitted by a regular (non-governance)
+    /// tx, so that no new channel can be opened to mount the attack.
+    #[test]
+    fn test_ibc_permissionless_channel_creation_blocked_by_vp() {
+        tx_host_env::init();
+
+        let (_token, _account) = ibc::init_storage();
+        let (client_id, _client_state, mut writes) = ibc::prepare_client();
+        let (conn_id, conn_writes) = ibc::prepare_opened_connection(&client_id);
+        writes.extend(conn_writes);
+        writes.into_iter().for_each(|(key, val)| {
+            tx_host_env::with(|env| {
+                env.state.db_write(&key, val.clone()).expect("write error");
+            });
+        });
+
+        let msg = ibc::msg_channel_open_init(PortId::transfer(), conn_id);
+        let tx_data = msg.to_any().encode_to_vec();
+
+        let mut tx = Tx::new(ChainId::default(), None);
+        tx.add_code(vec![], None).add_serialized_data(tx_data.clone());
+        sign_tx(&mut tx);
+        let batched_tx = tx.batch_first_tx();
+        tx_host_env::with(|env| {
+            env.batched_tx = batched_tx.clone();
+        });
+
+        // 1. Run the IBC handler (what `tx_ibc.wasm` does): the channel
+        //    open executes and writes the channel state
+        tx_host_env::ibc::ibc_actions(tx_host_env::ctx())
+            .execute::<token::Transfer>(&tx_data)
+            .expect("IBC handler should execute the channel open");
+
+        // 2. The IBC VP must reject the permissionless channel creation
+        let env = tx_host_env::take();
+        let result =
+            ibc::validate_ibc_vp_from_tx(&env, &env.batched_tx.to_ref());
+        assert!(
+            result.is_err(),
+            "IBC VP must reject the permissionless channel creation, got: \
+             {result:?}"
+        );
     }
 }

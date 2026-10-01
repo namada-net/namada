@@ -1487,6 +1487,234 @@ fn ibc_unlimited_channel() -> Result<()> {
     Ok(())
 }
 
+/// Permissioned IBC channel creation test:
+/// 1. Opening a channel with a regular (non-governance) transaction must be
+///    rejected by the IBC VP. This prevents permissionless channels from
+///    being opened to mount the forged-voucher escrow drain attack.
+/// 2. A governance proposal can initiate the channel handshake
+///    (`ChanOpenInit`) over a permissionlessly created connection.
+/// 3. The remaining handshake steps are permissionless.
+/// 4. Transfers work over the governance-created channel.
+#[test]
+fn ibc_permissioned_channels() -> Result<()> {
+    const PIPELINE_LEN: u64 = 5;
+    let update_genesis =
+        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
+            genesis.parameters.parameters.epochs_per_year =
+                epochs_per_year_from_min_duration(20);
+            // for the trusting period of IBC client
+            genesis.parameters.pos_params.pipeline_len = PIPELINE_LEN;
+            genesis.parameters.gov_params.min_proposal_grace_epochs = 3;
+            // The proposal wasm embeds the IBC machinery and exceeds the
+            // default limit
+            genesis.parameters.gov_params.max_proposal_code_size = 3_000_000;
+            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+        };
+    let (ledger, gaia, test, test_gaia) =
+        run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
+    let _bg_ledger = ledger.background();
+    let _bg_gaia = gaia.background();
+
+    let hermes_dir = setup_hermes(&test, &test_gaia)?;
+    let port_id_namada: PortId = FT_PORT_ID.parse().unwrap();
+    let port_id_gaia: PortId = FT_PORT_ID.parse().unwrap();
+
+    // Create a client and a connection. Client and connection creation
+    // is not permissioned.
+    let args = [
+        "create",
+        "connection",
+        "--a-chain",
+        test.net.chain_id.as_str(),
+        "--b-chain",
+        test_gaia.net.chain_id.as_str(),
+        "--yes",
+    ];
+    let mut hermes = run_hermes_cmd(&hermes_dir, args, Some(240))?;
+    hermes.assert_success();
+
+    // Opening a channel with a regular tx must be rejected
+    let args = [
+        "tx",
+        "chan-open-init",
+        "--src-chain",
+        test.net.chain_id.as_str(),
+        "--dst-chain",
+        test_gaia.net.chain_id.as_str(),
+        "--dst-connection",
+        "connection-0",
+        "--src-port",
+        port_id_namada.as_str(),
+        "--dst-port",
+        port_id_gaia.as_str(),
+    ];
+    let mut hermes = run_hermes_cmd(&hermes_dir, args, Some(240))?;
+    hermes.assert_failure();
+
+    // Submit a governance proposal whose wasm executes `ChanOpenInit` over
+    // connection-0
+    delegate_token(&test)?;
+    let rpc = get_actor_rpc(&test, Who::Validator(0));
+    let mut epoch = get_epoch(&test, &rpc).unwrap();
+    let delegated = epoch + PIPELINE_LEN;
+    while epoch < delegated {
+        epoch = epoch_sleep(&test, &rpc, 120)?;
+    }
+    let start_epoch = propose_channel_init(&test)?;
+    let mut epoch = get_epoch(&test, &rpc).unwrap();
+    // Vote
+    while epoch < start_epoch {
+        epoch = epoch_sleep(&test, &rpc, 120)?;
+    }
+    submit_votes(&test)?;
+
+    // wait for the activation epoch, when the proposal is executed and the
+    // channel enters the INIT state
+    let activation_epoch = start_epoch + 6u64;
+    while epoch < activation_epoch {
+        epoch = epoch_sleep(&test, &rpc, 120)?;
+    }
+
+    // Relay the rest of the handshake. The channel opened by the proposal
+    // is channel-0 on Namada; the counterparty channel on Gaia is also
+    // channel-0 (the first channel on a fresh chain).
+    let channel_id_namada: ChannelId = "channel-0".parse().unwrap();
+    let channel_id_gaia: ChannelId = "channel-0".parse().unwrap();
+
+    let args = [
+        "tx",
+        "chan-open-try",
+        "--src-chain",
+        test.net.chain_id.as_str(),
+        "--dst-chain",
+        test_gaia.net.chain_id.as_str(),
+        "--dst-connection",
+        "connection-0",
+        "--src-port",
+        port_id_namada.as_str(),
+        "--dst-port",
+        port_id_gaia.as_str(),
+        "--src-channel",
+        channel_id_namada.as_str(),
+    ];
+    let mut hermes = run_hermes_cmd(&hermes_dir, args, Some(240))?;
+    hermes.assert_success();
+
+    let args = [
+        "tx",
+        "chan-open-ack",
+        "--src-chain",
+        test.net.chain_id.as_str(),
+        "--dst-chain",
+        test_gaia.net.chain_id.as_str(),
+        "--dst-connection",
+        "connection-0",
+        "--src-port",
+        port_id_namada.as_str(),
+        "--dst-port",
+        port_id_gaia.as_str(),
+        "--src-channel",
+        channel_id_namada.as_str(),
+        "--dst-channel",
+        channel_id_gaia.as_str(),
+    ];
+    let mut hermes = run_hermes_cmd(&hermes_dir, args, Some(240))?;
+    hermes.assert_success();
+
+    let args = [
+        "tx",
+        "chan-open-confirm",
+        "--src-chain",
+        test.net.chain_id.as_str(),
+        "--dst-chain",
+        test_gaia.net.chain_id.as_str(),
+        "--dst-connection",
+        "connection-0",
+        "--src-port",
+        port_id_namada.as_str(),
+        "--dst-port",
+        port_id_gaia.as_str(),
+        "--src-channel",
+        channel_id_namada.as_str(),
+        "--dst-channel",
+        channel_id_gaia.as_str(),
+    ];
+    let mut hermes = run_hermes_cmd(&hermes_dir, args, Some(240))?;
+    hermes.assert_success();
+
+    // Start relaying
+    let hermes = run_hermes(&hermes_dir)?;
+    let bg_hermes = hermes.background();
+
+    // Transfer 2 APFEL from Namada to Gaia over the governance-created
+    // channel
+    let gaia_receiver = find_cosmos_address(&test_gaia, COSMOS_USER)?;
+    transfer(
+        &test,
+        ALBERT,
+        &gaia_receiver,
+        APFEL,
+        2,
+        Some(ALBERT_KEY),
+        &port_id_namada,
+        &channel_id_namada,
+        None,
+        None,
+        None,
+        None,
+        false,
+        None,
+        None,
+    )?;
+    wait_for_packet_relay(
+        &hermes_dir,
+        &port_id_namada,
+        &channel_id_namada,
+        &test,
+    )?;
+
+    check_balance(&test, ALBERT, APFEL, 999_998)?;
+    let token_addr = find_address(&test, APFEL)?;
+    let ibc_denom_on_gaia =
+        format!("{port_id_gaia}/{channel_id_gaia}/{token_addr}");
+    check_cosmos_balance(
+        &test_gaia,
+        COSMOS_USER,
+        &ibc_denom_on_gaia,
+        2_000_000,
+    )?;
+
+    // Transfer 1 APFEL back from Gaia to Namada. The voucher returns on the
+    // same channel and is unescrowed.
+    let namada_receiver = find_address(&test, ALBERT)?.to_string();
+    transfer_from_cosmos(
+        &test_gaia,
+        COSMOS_USER,
+        &namada_receiver,
+        get_gaia_denom_hash(&ibc_denom_on_gaia),
+        1_000_000,
+        &port_id_gaia,
+        &channel_id_gaia,
+        None,
+        None,
+    )?;
+    wait_for_packet_relay(&hermes_dir, &port_id_gaia, &channel_id_gaia, &test)?;
+
+    check_balance(&test, ALBERT, APFEL, 999_999)?;
+    check_cosmos_balance(
+        &test_gaia,
+        COSMOS_USER,
+        &ibc_denom_on_gaia,
+        1_000_000,
+    )?;
+
+    // Stop Hermes
+    let mut hermes = bg_hermes.foreground();
+    hermes.interrupt()?;
+
+    Ok(())
+}
+
 /// Create a packet forward memo and serialize it
 fn packet_forward_memo(
     receiver: Signer,
@@ -3220,6 +3448,52 @@ fn propose_unlimited_channel(test: &Test) -> Result<Epoch> {
         proposal_json_path.to_str().unwrap(),
         "--gas-limit",
         "3000000",
+        "--node",
+        &rpc,
+    ]);
+    let mut client = run!(test, Bin::Client, submit_proposal_args, Some(100))?;
+    client.exp_string(TX_APPLIED_SUCCESS)?;
+    client.assert_success();
+    Ok(start_epoch.into())
+}
+
+/// Submit a governance proposal whose wasm executes `ChanOpenInit` to open
+/// a channel over connection-0 (see `tx_proposal_ibc_channel_init.wasm`)
+fn propose_channel_init(test: &Test) -> Result<Epoch> {
+    let albert = find_address(test, ALBERT)?;
+    let rpc = get_actor_rpc(test, Who::Validator(0));
+    let epoch = get_epoch(test, &rpc)?;
+    let start_epoch = (epoch.0 + 3) / 3 * 3;
+    let proposal_json = serde_json::json!({
+        "proposal": {
+            "content": {
+                "title": "IBC channel init",
+                "authors": "test@test.com",
+                "discussions-to": "www.github.com/anoma/aip/1",
+                "created": "2022-03-10T08:54:37Z",
+                "license": "MIT",
+                "abstract": "IBC channel init",
+                "motivation": "IBC channel init",
+                "details": "IBC channel init",
+                "requires": "2"
+            },
+            "author": albert,
+            "voting_start_epoch": start_epoch,
+            "voting_end_epoch": start_epoch + 3_u64,
+            "activation_epoch": start_epoch + 6_u64,
+        },
+        "data": TestWasms::TxProposalIbcChannelInit.read_bytes()
+    });
+
+    let proposal_json_path = test.test_dir.path().join("proposal.json");
+    write_json_file(proposal_json_path.as_path(), proposal_json);
+
+    let submit_proposal_args = apply_use_device(vec![
+        "init-proposal",
+        "--data-path",
+        proposal_json_path.to_str().unwrap(),
+        "--gas-limit",
+        "10000000",
         "--node",
         &rpc,
     ]);

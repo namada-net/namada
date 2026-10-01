@@ -11,8 +11,7 @@ use ibc::apps::nft_transfer::module::{
     on_chan_close_init_execute, on_chan_close_init_validate,
     on_chan_open_ack_execute, on_chan_open_ack_validate,
     on_chan_open_confirm_execute, on_chan_open_confirm_validate,
-    on_chan_open_init_execute, on_chan_open_init_validate,
-    on_chan_open_try_execute, on_chan_open_try_validate,
+    on_chan_open_init_execute, on_chan_open_try_execute,
     on_recv_packet_execute, on_timeout_packet_execute,
     on_timeout_packet_validate,
 };
@@ -86,24 +85,24 @@ where
     #[allow(clippy::too_many_arguments)]
     fn on_chan_open_init_validate(
         &self,
-        order: Order,
-        connection_hops: &[ConnectionId],
-        port_id: &PortId,
-        channel_id: &ChannelId,
-        counterparty: &Counterparty,
-        version: &Version,
+        _order: Order,
+        _connection_hops: &[ConnectionId],
+        _port_id: &PortId,
+        _channel_id: &ChannelId,
+        _counterparty: &Counterparty,
+        _version: &Version,
     ) -> Result<Version, ChannelError> {
-        on_chan_open_init_validate(
-            &self.ctx,
-            order,
-            connection_hops,
-            port_id,
-            channel_id,
-            counterparty,
-            version,
-        )
-        .map_err(into_channel_error)?;
-        Ok(version.clone())
+        // Channel creation is permissioned: the handshake must be initiated
+        // by an accepted governance proposal, which is validated before the
+        // module callbacks are reached (see the IBC VP's governance bypass).
+        // Non-governance `ChanOpenInit` is rejected here. This prevents
+        // permissionless channels from being opened to forge vouchers
+        // draining the pooled IBC escrow.
+        Err(ChannelError::AppSpecific {
+            description:
+                "IBC channel creation requires a governance proposal"
+                    .to_string(),
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -131,24 +130,23 @@ where
     #[allow(clippy::too_many_arguments)]
     fn on_chan_open_try_validate(
         &self,
-        order: Order,
-        connection_hops: &[ConnectionId],
-        port_id: &PortId,
-        channel_id: &ChannelId,
-        counterparty: &Counterparty,
-        counterparty_version: &Version,
+        _order: Order,
+        _connection_hops: &[ConnectionId],
+        _port_id: &PortId,
+        _channel_id: &ChannelId,
+        _counterparty: &Counterparty,
+        _counterparty_version: &Version,
     ) -> Result<Version, ChannelError> {
-        on_chan_open_try_validate(
-            &self.ctx,
-            order,
-            connection_hops,
-            port_id,
-            channel_id,
-            counterparty,
-            counterparty_version,
-        )
-        .map_err(into_channel_error)?;
-        Ok(counterparty_version.clone())
+        // Counterparty-initiated channels are rejected outright. Channels may
+        // only be opened with Namada as the initiator (via a governance
+        // proposal executing `ChanOpenInit`), in which case Namada never
+        // processes a `ChanOpenTry`. See `on_chan_open_init_validate` above.
+        Err(ChannelError::AppSpecific {
+            description:
+                "IBC channel creation is not permitted from the counterparty \
+                 side"
+                    .to_string(),
+        })
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -61,6 +61,8 @@ pub enum VpError {
     IbcEvent(String),
     #[error("IBC rate limit: {0}")]
     RateLimit(String),
+    #[error("IBC VP error: Transfer from internal address {0} is not allowed")]
+    InternalSender(Address),
 }
 
 /// IBC functions result
@@ -168,6 +170,11 @@ where
             .data(batched_tx.cmt)
             .ok_or(VpError::NoTxData)?;
 
+        let message = crate::decode_message::<Transfer>(&tx_data)?;
+
+        // Reject transfers sent from an internal address
+        validate_sender(&message)?;
+
         // Pseudo execution and compare them
         self.validate_state(&tx_data, keys_changed)?;
 
@@ -178,7 +185,7 @@ where
         self.validate_trace(keys_changed)?;
 
         // Check the limits
-        self.check_limits(&tx_data, keys_changed)?;
+        self.check_limits(&message, keys_changed)?;
 
         Ok(())
     }
@@ -417,12 +424,11 @@ where
 
     fn check_limits(
         &self,
-        tx_data: &[u8],
+        message: &IbcMessage<Transfer>,
         keys_changed: &BTreeSet<Key>,
     ) -> Result<bool> {
         // Check the unlimited channels
-        let message = crate::decode_message::<Transfer>(tx_data)?;
-        let transfer_channel = match &message {
+        let transfer_channel = match message {
             IbcMessage::Transfer(msg_transfer) => {
                 Some(&msg_transfer.message.chan_id_on_a)
             }
@@ -502,6 +508,26 @@ where
                 .expect("deposit should be bigger than withdraw")
         };
         Ok(throughput)
+    }
+}
+
+/// Reject (NFT) transfers whose sender is an internal address, since no tx can
+/// authorize a transfer on their behalf. In particular, a transfer sent from
+/// the IBC escrow itself is a no-op transfer from the escrow to itself which
+/// still commits the packet, and a transfer burning vouchers held in escrow
+/// releases their origin tokens on the counterparty chain.
+fn validate_sender<Transfer>(message: &IbcMessage<Transfer>) -> VpResult<()> {
+    let sender = match message {
+        IbcMessage::Transfer(msg) => &msg.message.packet_data.sender,
+        IbcMessage::NftTransfer(msg) => &msg.message.packet_data.sender,
+        IbcMessage::Envelope(_) => return Ok(()),
+    };
+    // A sender that isn't a valid address is rejected by the transfer itself
+    match Address::decode(sender.as_ref()) {
+        Ok(sender) if sender.is_internal() => {
+            Err(VpError::InternalSender(sender))
+        }
+        _ => Ok(()),
     }
 }
 

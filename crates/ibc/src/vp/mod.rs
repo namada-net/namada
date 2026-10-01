@@ -2014,10 +2014,149 @@ mod tests {
             GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
-        assert_matches!(
-            ibc.validate_tx(&batched_tx, &keys_changed, &verifiers),
-            Ok(_)
+        // Channel creation requires a governance proposal: the VP must
+        // reject the non-governance `ChanOpenInit`
+        let result = ibc
+            .validate_tx(&batched_tx, &keys_changed, &verifiers)
+            .unwrap_err();
+        assert!(
+            result.to_string().contains("governance proposal"),
+            "Unexpected error: {result}"
         );
+    }
+
+    #[test]
+    fn test_governance_init_channel() {
+        let mut keys_changed = BTreeSet::new();
+        let mut state = init_storage();
+        insert_init_client(&mut state);
+
+        // insert an opened connection
+        let conn_id = get_connection_id();
+        let conn_key = connection_key(&conn_id);
+        let conn = get_connection(ConnState::Open);
+        let bytes = conn.encode_vec();
+        let _ = state
+            .write_log_mut()
+            .write(&conn_key, bytes)
+            .expect("write failed");
+        // The proposal execution key is present in the committed state while
+        // the governance proposal is being executed (see
+        // `execute_default_proposal` in namada_governance)
+        const PROPOSAL_ID: u64 = 1;
+        let proposal_execution_key = namada_governance::storage::keys::get_proposal_execution_key(PROPOSAL_ID);
+        state
+            .write_log_mut()
+            .write(&proposal_execution_key, Vec::new())
+            .expect("write failed");
+        state.write_log_mut().commit_batch_and_current_tx();
+        state.commit_block().expect("commit failed");
+        // for next block
+        state
+            .in_mem_mut()
+            .set_header(get_dummy_header())
+            .expect("Setting a dummy header shouldn't fail");
+        state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
+
+        // prepare data
+        let msg = MsgChannelOpenInit {
+            port_id_on_a: get_port_id(),
+            connection_hops_on_a: vec![conn_id.clone()],
+            port_id_on_b: get_port_id(),
+            ordering: Order::Unordered,
+            signer: "account0".to_string().into(),
+            version_proposal: ChanVersion::new(VERSION.to_string()),
+        };
+
+        // insert an Init channel
+        let channel_key = channel_key(&get_port_id(), &get_channel_id());
+        let mut counterparty = get_channel_counterparty();
+        counterparty.channel_id = None;
+        let channel = ChannelEnd::new(
+            ChanState::Init,
+            msg.ordering,
+            counterparty.clone(),
+            msg.connection_hops_on_a.clone(),
+            msg.version_proposal.clone(),
+        )
+        .unwrap();
+        let bytes = channel.encode_vec();
+        let _ = state
+            .write_log_mut()
+            .write(&channel_key, bytes)
+            .expect("write failed");
+        keys_changed.insert(channel_key);
+        // channel counter
+        let chan_counter_key = channel_counter_key();
+        increment_counter(&mut state, &chan_counter_key);
+        keys_changed.insert(chan_counter_key);
+        // sequences
+        let channel_id = get_channel_id();
+        let port_id = msg.port_id_on_a.clone();
+        let send_key = next_sequence_send_key(&port_id, &channel_id);
+        increment_sequence(&mut state, &send_key);
+        keys_changed.insert(send_key);
+        let recv_key = next_sequence_recv_key(&port_id, &channel_id);
+        increment_sequence(&mut state, &recv_key);
+        keys_changed.insert(recv_key);
+        let ack_key = next_sequence_ack_key(&port_id, &channel_id);
+        increment_sequence(&mut state, &ack_key);
+        keys_changed.insert(ack_key);
+        // event
+        let event = RawIbcEvent::OpenInitChannel(ChanOpenInit::new(
+            msg.port_id_on_a.clone(),
+            get_channel_id(),
+            counterparty.port_id().clone(),
+            conn_id,
+            msg.version_proposal.clone(),
+        ));
+        let message_event = RawIbcEvent::Message(MessageEvent::Channel);
+        state
+            .write_log_mut()
+            .emit_event::<IbcEvent>(message_event.try_into().unwrap());
+        state
+            .write_log_mut()
+            .emit_event::<IbcEvent>(event.try_into().unwrap());
+
+        // The tx is a governance proposal execution: the tx data is the
+        // proposal ID and the proposal execution key is present in storage
+        // (see `execute_default_proposal` in namada_governance)
+        let tx_index = TxIndex::default();
+        let tx_code = vec![];
+        let tx_data = PROPOSAL_ID.serialize_to_vec();
+        let mut outer_tx = Tx::from_type(TxType::Raw);
+        outer_tx.header.chain_id = state.in_mem().chain_id.clone();
+        outer_tx.set_code(Code::new(tx_code, None));
+        outer_tx.set_data(Data::new(tx_data));
+        outer_tx.add_section(Section::Authorization(Authorization::new(
+            vec![outer_tx.header_hash()],
+            [(0, keypair_1())].into_iter().collect(),
+            None,
+        )));
+        let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
+            &TxGasMeter::new(TX_GAS_LIMIT, GAS_SCALE),
+        ));
+        let (vp_wasm_cache, _vp_cache_dir) =
+            wasm::compilation_cache::common::testing::vp_cache();
+
+        let verifiers = BTreeSet::new();
+        let batched_tx = outer_tx.batch_ref_first_tx().unwrap();
+        let ctx = Ctx::new(
+            &ADDRESS,
+            &state,
+            batched_tx.tx,
+            batched_tx.cmt,
+            &tx_index,
+            &gas_meter,
+            &keys_changed,
+            &verifiers,
+            vp_wasm_cache,
+            GasMeterKind::MutGlobal,
+        );
+        let ibc = Ibc::new(ctx);
+        // The governance proposal bypasses the permissioned channel creation
+        ibc.validate_tx(&batched_tx, &keys_changed, &verifiers)
+            .expect("Governance proposal must be able to open an IBC channel");
     }
 
     #[test]
@@ -2137,9 +2276,14 @@ mod tests {
             GasMeterKind::MutGlobal,
         );
         let ibc = Ibc::new(ctx);
-        assert_matches!(
-            ibc.validate_tx(&batched_tx, &keys_changed, &verifiers),
-            Ok(_)
+        // Counterparty-initiated channels are rejected: the VP must reject
+        // the non-governance `ChanOpenTry`
+        let result = ibc
+            .validate_tx(&batched_tx, &keys_changed, &verifiers)
+            .unwrap_err();
+        assert!(
+            result.to_string().contains("counterparty"),
+            "Unexpected error: {result}"
         );
     }
 

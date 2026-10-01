@@ -2,6 +2,7 @@ pub mod escrow_drain;
 pub mod eth_bridge_pool;
 pub mod overflow_recv;
 pub mod pos;
+pub mod pos_unbacked_bond;
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
@@ -185,4 +186,32 @@ mod test_inner_tx_sections {
             assert_eq!(expected.1.len(), 3);
         }
     }
+}
+
+/// Gets the absolute path to the wasm directory
+#[cfg(test)]
+pub fn wasm_dir() -> std::path::PathBuf {
+    let mut current_path = std::env::current_dir()
+        .expect("Current directory should exist")
+        .canonicalize()
+        .expect("Current directory should exist");
+    while current_path.file_name().unwrap() != "tests" {
+        current_path.pop();
+    }
+    // Two-dirs up to root
+    current_path.pop();
+    current_path.pop();
+    current_path.join("wasm")
+}
+
+/// Sign the given tx's sections and wrapper with a test keypair
+#[cfg(test)]
+pub fn sign_tx(tx: &mut namada_sdk::tx::Tx) {
+    use namada_sdk::account::AccountPublicKeysMap;
+    use namada_sdk::key::{self, RefTo};
+
+    let keypair = key::testing::keypair_1();
+    let pks_map = AccountPublicKeysMap::from_iter([keypair.ref_to()]);
+    tx.sign_raw(vec![keypair.clone()], pks_map, None)
+        .sign_wrapper(keypair);
 }

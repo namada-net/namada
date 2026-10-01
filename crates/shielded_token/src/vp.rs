@@ -99,7 +99,7 @@ where
         // Allow any changes to be done by a governance proposal
         if Gov::is_proposal_accepted(
             &ctx.pre(),
-            tx_data.tx.data(tx_data.cmt).unwrap_or_default().as_ref(),
+            ctx.get_tx_data(tx_data).unwrap_or_default().as_ref(),
         )? {
             return Ok(());
         }
@@ -430,9 +430,8 @@ where
         )
         .map_err(Error::new_const)?;
         let conversion_state = ctx.conversion_state();
-        let tx_data = batched_tx
-            .tx
-            .data(batched_tx.cmt)
+        let tx_data = ctx
+            .get_tx_data(batched_tx)
             .ok_or_err_msg("No transaction data")?;
         let actions = ctx.read_actions()?;
         // Try to get the Transaction object from the tx first (IBC) and from

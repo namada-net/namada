@@ -32,7 +32,7 @@ use namada_sdk::tx::data::{
 };
 use namada_sdk::tx::event::{MaspEvent, MaspEventKind, MaspTxRef};
 use namada_sdk::tx::{
-    BatchedTxRef, CodeSections, IndexedTx, Tx, TxCommitments,
+    BatchedTxRef, IndexedTx, InnerTxSections, Tx, TxCommitments,
 };
 use namada_sdk::validation::{
     EthBridgeNutVp, EthBridgePoolVp, EthBridgeVp, GovernanceVp, IbcVp, MaspVp,
@@ -265,7 +265,7 @@ where
                 let batched_tx_result = apply_wasm_tx(
                     wrapper_hash,
                     &tx.batch_ref_tx(cmt),
-                    &tx.code_sections(),
+                    tx.inner_tx_sections(cmt),
                     &tx_index,
                     ShellParams {
                         tx_gas_meter,
@@ -379,13 +379,13 @@ where
         .collect::<HashSet<_>>()
         .into_iter();
 
-    // Index the code sections once for all the inner txs of the batch
-    let code_sections = tx.code_sections();
+    // Index the sections once for all the inner txs of the batch
+    let batch_sections = tx.batch_sections();
     for cmt in inner_txs {
         match apply_wasm_tx(
             wrapper_hash,
             &tx.batch_ref_tx(cmt),
-            &code_sections,
+            batch_sections.inner_tx(cmt),
             &tx_index,
             ShellParams {
                 tx_gas_meter,
@@ -838,7 +838,7 @@ where
         match apply_wasm_tx(
             Some(&tx.header_hash()),
             &first_tx,
-            &tx.code_sections(),
+            tx.inner_tx_sections(first_tx.cmt),
             tx_index,
             ShellParams {
                 tx_gas_meter: &masp_gas_meter,
@@ -1044,7 +1044,7 @@ where
 fn apply_wasm_tx<S, D, H, CA>(
     wrapper_hash: Option<&Hash>,
     batched_tx: &BatchedTxRef<'_>,
-    code_sections: &CodeSections<'_>,
+    sections: InnerTxSections<'_>,
     tx_index: &TxIndex,
     shell_params: ShellParams<'_, S, D, H, CA>,
     gas_meter_kind: GasMeterKind,
@@ -1066,7 +1066,7 @@ where
     let verifiers = execute_tx(
         wrapper_hash,
         batched_tx,
-        code_sections,
+        sections,
         tx_index,
         state,
         tx_gas_meter,
@@ -1078,6 +1078,7 @@ where
 
     let vps_result = check_vps(CheckVps {
         batched_tx,
+        sections,
         tx_index,
         state,
         tx_gas_meter: &mut tx_gas_meter.borrow_mut(),
@@ -1188,7 +1189,7 @@ where
 fn execute_tx<S, D, H, CA>(
     wrapper_hash: Option<&Hash>,
     batched_tx: &BatchedTxRef<'_>,
-    code_sections: &CodeSections<'_>,
+    sections: InnerTxSections<'_>,
     tx_index: &TxIndex,
     state: &mut S,
     tx_gas_meter: &RefCell<TxGasMeter>,
@@ -1210,7 +1211,7 @@ where
         tx_index,
         batched_tx.tx,
         batched_tx.cmt,
-        code_sections,
+        sections,
         vp_wasm_cache,
         tx_wasm_cache,
         gas_meter_kind,
@@ -1230,6 +1231,7 @@ where
     CA: 'static + WasmCacheAccess + Sync,
 {
     batched_tx: &'a BatchedTxRef<'a>,
+    sections: InnerTxSections<'a>,
     tx_index: &'a TxIndex,
     state: &'a S,
     tx_gas_meter: &'a mut TxGasMeter,
@@ -1243,6 +1245,7 @@ where
 fn check_vps<S, CA>(
     CheckVps {
         batched_tx: tx,
+        sections,
         tx_index,
         state,
         tx_gas_meter,
@@ -1264,6 +1267,7 @@ where
         verifiers,
         keys_changed,
         tx,
+        sections,
         tx_index,
         state,
         tx_gas_meter,
@@ -1286,6 +1290,7 @@ fn execute_vps<S, CA>(
     verifiers: BTreeSet<Address>,
     keys_changed: BTreeSet<storage::Key>,
     batched_tx: &BatchedTxRef<'_>,
+    sections: InnerTxSections<'_>,
     tx_index: &TxIndex,
     state: &S,
     tx_gas_meter: &TxGasMeter,
@@ -1352,7 +1357,8 @@ where
                             &verifiers,
                             vp_wasm_cache.clone(),
                             GasMeterKind::MutGlobal,
-                        );
+                        )
+                        .with_inner_tx_sections(sections);
 
                         match internal_addr {
                             InternalAddress::PoS => PosVp::validate_tx(
@@ -1781,6 +1787,7 @@ mod tests {
             verifiers,
             changed_keys,
             &batched_tx,
+            dummy_tx.inner_tx_sections(batched_tx.cmt),
             &TxIndex::default(),
             &state,
             &gas_meter,

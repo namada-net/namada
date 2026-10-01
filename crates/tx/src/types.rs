@@ -287,16 +287,60 @@ impl Tx {
     /// transaction, so it should be used whenever the code of every inner
     /// transaction of a batch is looked up.
     pub fn code_sections(&self) -> CodeSections<'_> {
-        let mut codes = HashMap::new();
+        let mut code = CodeSections::default();
         for section in &self.sections {
-            if let Section::Code(code) = section {
-                // Keep the first occurrence, like `get_section` does
-                codes
-                    .entry(section.get_hash())
-                    .or_insert_with(|| (code, code.code.hash()));
+            if let Section::Code(section_code) = section {
+                code.insert(section.get_hash(), section_code);
             }
         }
-        CodeSections { codes }
+        code
+    }
+
+    /// Index the code and data sections of this transaction by their section
+    /// hash, to look up the sections of every inner transaction of a batch.
+    /// Unlike [`Tx::inner_tx_sections`], lookups through the index don't
+    /// rehash the transaction.
+    pub fn batch_sections(&self) -> BatchSections<'_> {
+        let mut code = CodeSections::default();
+        let mut data = HashMap::new();
+        for section in &self.sections {
+            match section {
+                Section::Code(section_code) => {
+                    code.insert(section.get_hash(), section_code);
+                }
+                Section::Data(section_data) => {
+                    // Keep the first occurrence, like `get_section` does
+                    data.entry(section.get_hash())
+                        .or_insert(section_data.data.as_slice());
+                }
+                _ => {}
+            }
+        }
+        BatchSections { code, data }
+    }
+
+    /// Look up the sections of the given inner transaction. This rehashes the
+    /// transaction, so [`Tx::batch_sections`] should be used instead to look
+    /// up the sections of more than one inner transaction.
+    pub fn inner_tx_sections(
+        &self,
+        cmt: &TxCommitments,
+    ) -> InnerTxSections<'_> {
+        // The header can't be a code or data section, so only borrowed
+        // sections can match
+        let code = match self.get_section(cmt.code_sechash()) {
+            Some(Cow::Borrowed(Section::Code(code))) => {
+                Some((code, code.code.hash()))
+            }
+            _ => None,
+        };
+        let data = match self.get_section(&cmt.data_hash) {
+            Some(Cow::Borrowed(Section::Data(data))) => {
+                Some(data.data.as_slice())
+            }
+            _ => None,
+        };
+        InnerTxSections { code, data }
     }
 
     /// Get the transaction section with the given hash
@@ -1168,7 +1212,7 @@ impl RangeBounds<IndexedTx> for IndexedTxRange {
 /// This is equivalent to looking up the code with [`Tx::get_section`]: since
 /// the variant of a section is part of its hash, a code section can't share
 /// its hash with a section of any other kind (including the header).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CodeSections<'tx> {
     codes:
         HashMap<namada_core::hash::Hash, (&'tx Code, namada_core::hash::Hash)>,
@@ -1182,6 +1226,53 @@ impl<'tx> CodeSections<'tx> {
         sechash: &namada_core::hash::Hash,
     ) -> Option<(&'tx Code, namada_core::hash::Hash)> {
         self.codes.get(sechash).copied()
+    }
+
+    fn insert(&mut self, sechash: namada_core::hash::Hash, code: &'tx Code) {
+        // Keep the first occurrence, like `get_section` does
+        self.codes
+            .entry(sechash)
+            .or_insert_with(|| (code, code.code.hash()));
+    }
+}
+
+/// The code and data sections of a transaction indexed by their section hash,
+/// built with [`Tx::batch_sections`]. Section and code hashes are computed
+/// once, so looking up the sections of every inner transaction of a batch is
+/// linear in the size of the transaction.
+///
+/// Like [`CodeSections`], this is equivalent to looking up the sections with
+/// [`Tx::inner_tx_sections`].
+#[derive(Debug, Clone)]
+pub struct BatchSections<'tx> {
+    code: CodeSections<'tx>,
+    data: HashMap<namada_core::hash::Hash, &'tx [u8]>,
+}
+
+impl<'tx> BatchSections<'tx> {
+    /// Get the sections of the given inner transaction
+    pub fn inner_tx(&self, cmt: &TxCommitments) -> InnerTxSections<'tx> {
+        InnerTxSections {
+            code: self.code.get(cmt.code_sechash()),
+            data: self.data.get(&cmt.data_hash).copied(),
+        }
+    }
+}
+
+/// The sections of an inner transaction, looked up with
+/// [`Tx::inner_tx_sections`] or [`BatchSections::inner_tx`]
+#[derive(Debug, Clone, Copy)]
+pub struct InnerTxSections<'tx> {
+    /// The code section together with the hash of its code, if present
+    pub code: Option<(&'tx Code, namada_core::hash::Hash)>,
+    /// The data, if the data section is present
+    pub data: Option<&'tx [u8]>,
+}
+
+impl InnerTxSections<'_> {
+    /// The hash of the code, if the code section is present
+    pub fn code_hash(&self) -> Option<namada_core::hash::Hash> {
+        self.code.map(|(_, code_hash)| code_hash)
     }
 }
 
@@ -1958,5 +2049,75 @@ mod test {
             found_code += usize::from(actual.is_some());
         }
         assert!(found_code > 0);
+    }
+
+    /// Check that looking up the sections of the inner txs through
+    /// [`BatchSections`] is equivalent to looking them up from the tx
+    #[test]
+    fn test_batch_sections_match_inner_tx_sections() {
+        let mut tx = Tx::from_type(TxType::Raw);
+        tx.set_code(Code::new(b"code".to_vec(), Some("tag".into())));
+        tx.set_data(Data::new(b"data 1".to_vec()));
+        tx.add_memo(b"memo");
+        tx.push_default_inner_tx();
+        tx.set_code(Code::from_hash(
+            namada_core::hash::Hash::sha256(b"code by hash"),
+            None,
+        ));
+        tx.set_data(Data::new(b"data 2".to_vec()));
+        // An inner tx without code nor data sections
+        tx.push_default_inner_tx();
+        // Inner txs referencing other kinds of sections
+        let memo_hash = tx.commitments().first().unwrap().memo_hash;
+        tx.header.batch.insert(TxCommitments {
+            code_hash: memo_hash,
+            data_hash: tx.raw_header_hash(),
+            memo_hash: Default::default(),
+        });
+        tx.header.batch.insert(TxCommitments {
+            code_hash: tx.header_hash(),
+            data_hash: memo_hash,
+            memo_hash: Default::default(),
+        });
+        // Duplicated sections must resolve to the first occurrence
+        let duplicates: Vec<_> = tx
+            .sections
+            .iter()
+            .filter(|section| {
+                matches!(section, Section::Code(_) | Section::Data(_))
+            })
+            .cloned()
+            .collect();
+        for section in duplicates {
+            tx.add_section(section);
+        }
+        // A header section with the same contents as the tx header
+        tx.add_section(Section::Header(tx.header()));
+
+        let batch_sections = tx.batch_sections();
+        let (mut found_code, mut found_data) = (0, 0);
+        for cmt in tx.commitments() {
+            let expected = tx.inner_tx_sections(cmt);
+            let actual = batch_sections.inner_tx(cmt);
+            assert!(match (actual.code, expected.code) {
+                (Some((a, a_hash)), Some((e, e_hash))) =>
+                    std::ptr::eq(a, e) && a_hash == e_hash,
+                (None, None) => true,
+                _ => false,
+            });
+            assert_eq!(actual.data, expected.data);
+            // Consistent with the existing accessors
+            assert_eq!(
+                actual.code_hash(),
+                tx.get_section(cmt.code_sechash())
+                    .and_then(|section| section.code_sec())
+                    .map(|code| code.code.hash())
+            );
+            assert_eq!(actual.data.map(<[u8]>::to_vec), tx.data(cmt));
+            found_code += usize::from(actual.code.is_some());
+            found_data += usize::from(actual.data.is_some());
+        }
+        assert_eq!(found_code, 2);
+        assert_eq!(found_data, 2);
     }
 }

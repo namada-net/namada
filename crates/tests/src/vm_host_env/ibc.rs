@@ -546,6 +546,9 @@ pub fn msg_channel_open_ack(
     }
 }
 
+/// Counterparty-initiated channels are never allowed, so this helper has no
+/// caller among the tests, but is kept for completeness of the message set
+#[allow(dead_code)]
 pub fn msg_channel_open_confirm(
     port_id: PortId,
     channel_id: ChannelId,

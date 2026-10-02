@@ -476,13 +476,44 @@ where
                 }
             }
             ProposalType::PGFPayment(fundings) => {
+                // Check optional fields of CPGF targets
+                for action in fundings.iter() {
+                    match action {
+                        PGFAction::Continuous(add_remove) => match add_remove {
+                            AddRemove::Add(target) => {
+                                if target.proposal_id.is_some() {
+                                    return Err(Error::new_const(
+                                        "Continuous PGF target to add may not \
+                                         have proposal ID set",
+                                    ));
+                                }
+                            }
+                            AddRemove::Remove(target) => {
+                                if target.proposal_id.is_none() {
+                                    return Err(Error::new_const(
+                                        "Continuous PGF target to remove must \
+                                         have proposal ID set",
+                                    ));
+                                }
+                                if target.end_epoch.is_some() {
+                                    return Err(Error::new_const(
+                                        "Continuous PGF target to remove may \
+                                         not have end epoch set",
+                                    ));
+                                }
+                            }
+                        },
+                        PGFAction::Retro(_) => {}
+                    }
+                }
+
                 // collect all the funding target that we have to add and are
                 // unique
                 let are_continuous_add_targets_unique = fundings
                     .iter()
                     .filter_map(|funding| match funding {
                         PGFAction::Continuous(AddRemove::Add(target)) => {
-                            Some(target.target().to_lowercase())
+                            Some(target.target.target().to_lowercase())
                         }
                         _ => None,
                     })
@@ -494,11 +525,14 @@ where
                     .iter()
                     .filter_map(|funding| match funding {
                         PGFAction::Continuous(AddRemove::Remove(target)) => {
-                            Some(target.target().to_lowercase())
+                            Some((
+                                target.target.target().to_lowercase(),
+                                target.proposal_id,
+                            ))
                         }
                         _ => None,
                     })
-                    .collect::<BTreeSet<String>>();
+                    .collect::<BTreeSet<_>>();
 
                 let total_retro_targets = fundings
                     .iter()
@@ -531,18 +565,9 @@ where
                     ));
                 }
 
-                // can't remove and add the same target in the same proposal
-                let are_targets_unique = are_continuous_add_targets_unique
-                    .intersection(&are_continuous_remove_targets_unique)
-                    .count() as u64
-                    == 0;
+                // Should we add a check to the VP for the new data format?
 
-                are_targets_unique.ok_or_else(|| {
-                    Error::new_const(
-                        "One or more payment targets were added and removed \
-                         in the same proposal",
-                    )
-                })
+                Ok(())
             }
             // Default proposal condition are checked already for all other
             // proposals.

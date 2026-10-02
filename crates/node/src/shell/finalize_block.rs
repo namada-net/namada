@@ -693,14 +693,12 @@ where
                             }
                         };
                     let tx_gas_meter = TxGasMeter::new(gas_limit, gas_scale);
+                    let code_sections = tx.code_sections();
                     for cmt in tx.commitments() {
-                        if let Some(code_sec) = tx
-                            .get_section(cmt.code_sechash())
-                            .and_then(|x| Section::code_sec(x.as_ref()))
+                        if let Some((_, code_hash)) =
+                            code_sections.get(cmt.code_sechash())
                         {
-                            stats.increment_tx_type(
-                                code_sec.code.hash().to_string(),
-                            );
+                            stats.increment_tx_type(code_hash.to_string());
                         }
                     }
                     (
@@ -1324,7 +1322,7 @@ mod test_finalize_block {
     use namada_sdk::tx::data::Fee;
     use namada_sdk::tx::event::Code as CodeAttr;
     use namada_sdk::tx::event::types::APPLIED as APPLIED_TX;
-    use namada_sdk::tx::{Authorization, Code, Data};
+    use namada_sdk::tx::{Authorization, Code, Data, Section};
     use namada_sdk::uint::Uint;
     use namada_sdk::validation::ParametersVp;
     use namada_test_utils::TestWasms;

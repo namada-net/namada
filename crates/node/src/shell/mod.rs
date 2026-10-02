@@ -59,9 +59,9 @@ use namada_sdk::state::{
 use namada_sdk::storage::{Key, TxIndex};
 use namada_sdk::tendermint::AppHash;
 use namada_sdk::time::DateTimeUtc;
+use namada_sdk::tx::Tx;
 pub use namada_sdk::tx::data::ResultCode;
 use namada_sdk::tx::data::{TxType, WrapperTx};
-use namada_sdk::tx::{Section, Tx};
 use namada_sdk::{
     eth_bridge, governance, hints, migrations, parameters, proof_of_stake,
     token,
@@ -85,6 +85,12 @@ use crate::{protocol, storage, tendermint_node};
 
 /// A cap on a number of tx sections
 pub const MAX_TX_SECTIONS_LEN: usize = 10_000;
+
+/// A cap on the number of inner txs of a batch accepted into the mempool.
+///
+/// This is a local mempool policy only, it is deliberately not checked when
+/// validating a block proposal, so that it does not affect consensus.
+pub const MAX_MEMPOOL_BATCH_LEN: usize = 100;
 
 fn key_to_tendermint(
     pk: &common::PublicKey,
@@ -1127,6 +1133,17 @@ where
             return response;
         }
 
+        // Tx batch length check
+        #[cfg(any(test, not(feature = "benches")))]
+        if tx.commitments().len() > MAX_MEMPOOL_BATCH_LEN {
+            response.code = ResultCode::InvalidTx.into();
+            response.log = format!(
+                "{INVALID_MSG}: Tx contains more than {MAX_MEMPOOL_BATCH_LEN} \
+                 inner transactions."
+            );
+            return response;
+        }
+
         // Tx expiration
         if let Some(exp) = tx.header.expiration {
             let last_block_timestamp = self
@@ -1352,19 +1369,17 @@ where
                     response.log = format!("{INVALID_MSG}: {err}");
                     return response;
                 }
-                for cmt in tx.commitments() {
-                    // Tx allowlist
-                    if let Err(err) =
-                        check_tx_allowed(&tx.batch_ref_tx(cmt), &self.state)
-                    {
-                        response.code = ResultCode::TxNotAllowlisted.into();
-                        response.log = format!(
-                            "{INVALID_MSG}: Wrapper transaction code didn't \
-                             pass the allowlist checks {}",
-                            err
-                        );
-                        return response;
-                    }
+                // Tx allowlist
+                if let Err(err) =
+                    check_tx_allowed(&tx, &tx.code_sections(), &self.state)
+                {
+                    response.code = ResultCode::TxNotAllowlisted.into();
+                    response.log = format!(
+                        "{INVALID_MSG}: Wrapper transaction code didn't pass \
+                         the allowlist checks {}",
+                        err
+                    );
+                    return response;
                 }
 
                 // This is safe as neither the inner `db` nor `in_mem` are
@@ -3035,6 +3050,60 @@ mod shell_tests {
             MempoolTxType::NewTransaction,
         );
         assert_eq!(result.code, ResultCode::InvalidTx.into());
+    }
+
+    /// Test max batch length limit in CheckTx
+    #[test]
+    fn test_max_batch_len_check_tx() {
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let new_tx = |batch_len: usize| {
+            let keypair = super::test_utils::gen_keypair();
+            let mut wrapper =
+                Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
+                    Fee {
+                        amount_per_gas_unit: DenominatedAmount::native(
+                            100.into(),
+                        ),
+                        token: shell.state.in_mem().native_token.clone(),
+                    },
+                    keypair.ref_to(),
+                    (GAS_LIMIT * 10).into(),
+                ))));
+            wrapper.header.chain_id = shell.chain_id.clone();
+            for i in 0..batch_len {
+                wrapper.push_default_inner_tx();
+                wrapper.set_code(Code::new(
+                    "wasm_code".as_bytes().to_owned(),
+                    None,
+                ));
+                wrapper.set_data(Data::new(i.to_le_bytes().to_vec()));
+            }
+            wrapper.sign_wrapper(keypair);
+
+            assert_eq!(wrapper.commitments().len(), batch_len);
+            wrapper
+        };
+        let is_batch_len_error = |log: &str| {
+            log.contains(&format!(
+                "more than {MAX_MEMPOOL_BATCH_LEN} inner transactions"
+            ))
+        };
+
+        // test a tx on the limit of the batch length
+        let result = shell.mempool_validate(
+            new_tx(MAX_MEMPOOL_BATCH_LEN).to_bytes().as_ref(),
+            MempoolTxType::NewTransaction,
+        );
+        assert!(!is_batch_len_error(&result.log), "{}", result.log);
+
+        // test a tx exceeding the limit of the batch length
+        let result = shell.mempool_validate(
+            new_tx(MAX_MEMPOOL_BATCH_LEN + 1).to_bytes().as_ref(),
+            MempoolTxType::NewTransaction,
+        );
+        assert_eq!(result.code, ResultCode::InvalidTx.into());
+        assert!(is_batch_len_error(&result.log), "{}", result.log);
     }
 
     /// Test the that the shell can restore it's state

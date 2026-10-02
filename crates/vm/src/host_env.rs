@@ -356,6 +356,10 @@ where
     pub tx: HostRef<RoAccess, Tx>,
     /// The commitments inside the transaction
     pub cmt: HostRef<RoAccess, TxCommitments>,
+    /// The hash of the code of the inner tx at `cmt`, if the code section is
+    /// present. Looked up once rather than on every call to
+    /// [`vp_get_tx_code_hash`], as a lookup rehashes the whole tx.
+    pub tx_code_hash: HostRef<RoAccess, Option<Hash>>,
     /// The transaction index is used to identify a shielded transaction's
     /// parent
     pub tx_index: HostRef<RoAccess, TxIndex>,
@@ -427,6 +431,7 @@ where
         gas_meter: &RefCell<gas_meter::GasMeter<VpGasMeter>>,
         tx: &Tx,
         cmt: &TxCommitments,
+        tx_code_hash: &Option<Hash>,
         tx_index: &TxIndex,
         iterators: &mut PrefixIterators<'static, D>,
         verifiers: &BTreeSet<Address>,
@@ -444,6 +449,7 @@ where
             gas_meter,
             tx,
             cmt,
+            tx_code_hash,
             tx_index,
             iterators,
             verifiers,
@@ -508,6 +514,7 @@ where
         gas_meter: &RefCell<gas_meter::GasMeter<VpGasMeter>>,
         tx: &Tx,
         cmt: &TxCommitments,
+        tx_code_hash: &Option<Hash>,
         tx_index: &TxIndex,
         iterators: &mut PrefixIterators<'static, D>,
         verifiers: &BTreeSet<Address>,
@@ -523,6 +530,7 @@ where
         let in_mem = unsafe { RoHostRef::new(in_mem) };
         let tx = unsafe { RoHostRef::new(tx) };
         let cmt = unsafe { RoHostRef::new(cmt) };
+        let tx_code_hash = unsafe { RoHostRef::new(tx_code_hash) };
         let tx_index = unsafe { RoHostRef::new(tx_index) };
         let iterators = unsafe { RwHostRef::new(iterators) };
         let gas_meter = unsafe { RoHostRef::new(gas_meter) };
@@ -542,6 +550,7 @@ where
             gas_meter,
             tx,
             cmt,
+            tx_code_hash,
             tx_index,
             eval_runner,
             result_buffer,
@@ -592,6 +601,7 @@ where
             gas_meter: self.gas_meter,
             tx: self.tx,
             cmt: self.cmt,
+            tx_code_hash: self.tx_code_hash,
             tx_index: self.tx_index,
             eval_runner: self.eval_runner,
             result_buffer: self.result_buffer,
@@ -1850,10 +1860,8 @@ where
     CA: WasmCacheAccess,
 {
     let gas_meter = env.ctx.gas_meter();
-    let tx = unsafe { env.ctx.tx.get() };
-    let cmt = unsafe { env.ctx.cmt.get() };
-    let batched_tx = tx.batch_ref_tx(cmt);
-    let hash = vp_host_fns::get_tx_code_hash(gas_meter, &batched_tx)?;
+    vp_host_fns::charge_tx_code_hash_gas(gas_meter)?;
+    let hash = unsafe { env.ctx.tx_code_hash.get() };
     let mut result_bytes = vec![];
     if let Some(hash) = hash {
         result_bytes.push(1);
@@ -2516,6 +2524,7 @@ pub mod testing {
         gas_meter: &RefCell<gas_meter::GasMeter<VpGasMeter>>,
         tx: &Tx,
         cmt: &TxCommitments,
+        tx_code_hash: &Option<Hash>,
         tx_index: &TxIndex,
         verifiers: &BTreeSet<Address>,
         result_buffer: &mut Option<Vec<u8>>,
@@ -2539,6 +2548,7 @@ pub mod testing {
             gas_meter,
             tx,
             cmt,
+            tx_code_hash,
             tx_index,
             iterators,
             verifiers,

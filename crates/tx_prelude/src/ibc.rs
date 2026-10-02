@@ -14,6 +14,9 @@ pub use namada_ibc::storage::{
     upgraded_consensus_state_key,
 };
 pub use namada_ibc::trace::ibc_token;
+// Re-export the underlying `ibc` crate modules so that wasm transactions
+// (e.g. governance proposal txs) can construct IBC messages
+pub use namada_ibc::{apps, core, primitives};
 pub use namada_ibc::{
     IbcActions, IbcCommonContext, IbcStorageContext, NftTransferModule,
     ProofSpec, TransferModule,

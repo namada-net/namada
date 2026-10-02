@@ -85,6 +85,9 @@ pub enum ProtocolTxType {
     BridgePoolVext,
     /// Validator set update signed by some validator
     ValSetUpdateVext,
+    /// The software version of the node that proposed a block,
+    /// used to check consensus compatibility
+    ConsensusVersionMarker,
 }
 
 impl ProtocolTxType {

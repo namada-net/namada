@@ -5,10 +5,10 @@ use data_encoding::HEXUPPER;
 use namada_sdk::parameters;
 use namada_sdk::proof_of_stake::storage::find_validator_by_raw_hash;
 use namada_sdk::tx::data::protocol::ProtocolTxType;
-use namada_vote_ext::ethereum_tx_data_variants;
+use namada_vote_ext::protocol_tx_data_variants;
 
 use super::block_alloc::{BlockGas, BlockSpace};
-use super::*;
+use super::{version_compat, *};
 use crate::shell::block_alloc::{AllocFailure, TxBin};
 use crate::shims::abcipp_shim_types::shim::TxBytes;
 use crate::shims::abcipp_shim_types::shim::response::ProcessProposal;
@@ -79,6 +79,7 @@ where
                 )
         };
 
+        let mut found_marker = false;
         let tx_results = self.process_txs(
             &req.txs,
             req.time
@@ -86,7 +87,21 @@ where
                 .try_into()
                 .expect("Failed conversion of Comet timestamp"),
             &native_block_proposer_address,
+            &mut found_marker,
         );
+
+        // Every proposal must carry a consensus version marker tx. A
+        // proposal without one was not built by a node running a
+        // compatible version and may cause state divergence.
+        if !found_marker {
+            tracing::error!(
+                proposer = ?HEXUPPER.encode(&req.proposer_address),
+                height = req.height,
+                hash = ?HEXUPPER.encode(&req.hash),
+                "Proposal has no consensus version marker, it will be rejected"
+            );
+            return (ProcessProposal::Reject, tx_results);
+        }
 
         // Erroneous transactions were detected when processing
         // the leader's proposal. We allow txs that are invalid at runtime
@@ -126,6 +141,7 @@ where
         txs: &[TxBytes],
         block_time: DateTimeUtc,
         block_proposer: &Address,
+        found_marker: &mut bool,
     ) -> Vec<TxResult> {
         // This is safe as neither the inner `db` nor `in_mem` are
         // actually mutable, only the `write_log` which is owned by
@@ -149,6 +165,7 @@ where
                     &mut vp_wasm_cache,
                     &mut tx_wasm_cache,
                     block_proposer,
+                    found_marker,
                 );
                 let error_code = ResultCode::from_u32(result.code).unwrap();
                 if let ResultCode::Ok = error_code {
@@ -187,6 +204,7 @@ where
     ///   10. An error in the vote extensions included in the proposal
     ///   11. Not enough block space was available for some tx
     ///   12. Tx wasm code is not allowlisted
+    ///   13. Proposal carries an incompatible software version
     ///
     /// INVARIANT: This function should not, under any circumstances, modify the
     /// state since the proposal could be rejected.
@@ -201,6 +219,7 @@ where
         vp_wasm_cache: &mut VpCache<CA>,
         tx_wasm_cache: &mut TxCache<CA>,
         block_proposer: &Address,
+        found_marker: &mut bool,
     ) -> TxResult
     where
         CA: 'static + WasmCacheAccess + Sync,
@@ -303,7 +322,7 @@ where
 
                 match protocol_tx.tx {
                     ProtocolTxType::EthEventsVext => {
-                        ethereum_tx_data_variants::EthEventsVext::try_from(&tx)
+                        protocol_tx_data_variants::EthEventsVext::try_from(&tx)
                             .map_err(|err| err.to_string())
                             .and_then(|ext| {
                                 validate_eth_events_vext::<
@@ -333,7 +352,7 @@ where
                             })
                     }
                     ProtocolTxType::BridgePoolVext => {
-                        ethereum_tx_data_variants::BridgePoolVext::try_from(&tx)
+                        protocol_tx_data_variants::BridgePoolVext::try_from(&tx)
                             .map_err(|err| err.to_string())
                             .and_then(|ext| {
                                 validate_bp_roots_vext::<
@@ -363,7 +382,7 @@ where
                             })
                     }
                     ProtocolTxType::ValSetUpdateVext => {
-                        ethereum_tx_data_variants::ValSetUpdateVext::try_from(
+                        protocol_tx_data_variants::ValSetUpdateVext::try_from(
                             &tx,
                         )
                         .map_err(|err| err.to_string())
@@ -408,6 +427,22 @@ where
                                in Namada"
                             .to_string(),
                     },
+                    ProtocolTxType::ConsensusVersionMarker => {
+                        // The marker must be the first tx of the proposal.
+                        // This also precludes duplicate markers, as only
+                        // one tx can occupy the first position.
+                        if tx_index.0 != 0 {
+                            TxResult {
+                                code: ResultCode::InvalidTx.into(),
+                                info: "Process proposal rejected this \
+                                       proposal because its consensus version \
+                                       marker is not the first transaction"
+                                    .into(),
+                            }
+                        } else {
+                            check_version_marker(&tx, found_marker)
+                        }
+                    }
                 }
             }
             TxType::Wrapper(wrapper) => {
@@ -570,6 +605,56 @@ where
     }
 }
 
+/// Evaluate the consensus version marker tx of a proposal, flagging
+/// its presence in `found_marker` if it is compatible.
+fn check_version_marker(tx: &Tx, found_marker: &mut bool) -> TxResult {
+    match version_compat::extract_marker_version(tx) {
+        Some(version) => {
+            if version_compat::is_version_compatible(
+                namada_sdk::consensus_version(),
+                &version,
+            ) {
+                *found_marker = true;
+                TxResult {
+                    code: ResultCode::Ok.into(),
+                    info: "Process proposal accepted the consensus version \
+                           marker"
+                        .into(),
+                }
+            } else {
+                tracing::error!(
+                    proposer_version = %version.0,
+                    this_version = namada_sdk::consensus_version(),
+                    "Proposal carries an incompatible consensus version, it \
+                     will be rejected"
+                );
+                TxResult {
+                    code: ResultCode::IncompatibleVersion.into(),
+                    info: format!(
+                        "Process proposal rejected this proposal because it \
+                         carries an incompatible software version: expected \
+                         {}, found {}",
+                        namada_sdk::consensus_version(),
+                        version.0
+                    ),
+                }
+            }
+        }
+        None => {
+            tracing::error!(
+                "Proposal carries a consensus version marker that could not \
+                 be deserialized, it will be rejected"
+            );
+            TxResult {
+                code: ResultCode::InvalidTx.into(),
+                info: "Process proposal rejected this proposal because the \
+                       consensus version marker was not deserializable"
+                    .into(),
+            }
+        }
+    }
+}
+
 fn process_proposal_fee_check<D, H, CA>(
     wrapper: &WrapperTx,
     tx: &Tx,
@@ -628,8 +713,34 @@ mod test_process_proposal {
         get_bp_bytes_to_sign,
     };
     use crate::shims::abcipp_shim_types::shim::request::ProcessedTx;
+    use crate::tendermint_proto::google::protobuf::Timestamp;
 
     const GAS_LIMIT: u64 = 100_000;
+
+    /// Build a [`RequestProcessProposal`] with the given txs, as if
+    /// proposed by the default test validator.
+    #[allow(clippy::cast_possible_wrap)]
+    fn proposal_request(txs: Vec<Vec<u8>>) -> RequestProcessProposal {
+        #[allow(clippy::disallowed_methods)]
+        let time = DateTimeUtc::now();
+        RequestProcessProposal {
+            txs: txs.into_iter().map(Into::into).collect(),
+            proposer_address: HEXUPPER
+                .decode(
+                    wallet::defaults::validator_keypair()
+                        .to_public()
+                        .tm_raw_hash()
+                        .as_bytes(),
+                )
+                .unwrap()
+                .into(),
+            time: Some(Timestamp {
+                seconds: time.0.timestamp(),
+                nanos: time.0.timestamp_subsec_nanos() as i32,
+            }),
+            ..Default::default()
+        }
+    }
 
     /// Check that we reject a validator set update protocol tx
     /// if the bridge is not active.
@@ -670,7 +781,7 @@ mod test_process_proposal {
         let request = {
             let protocol_key =
                 shell.mode.get_protocol_key().expect("Test failed");
-            let tx = EthereumTxData::ValSetUpdateVext(ext)
+            let tx = ProtocolTxData::ValSetUpdateVext(ext)
                 .sign(protocol_key, shell.chain_id.clone())
                 .to_bytes();
             ProcessProposal { txs: vec![tx] }
@@ -710,7 +821,7 @@ mod test_process_proposal {
             ethereum_events: vec![event],
         }
         .sign(protocol_key);
-        let tx = EthereumTxData::EthEventsVext(ext.into())
+        let tx = ProtocolTxData::EthEventsVext(ext.into())
             .sign(protocol_key, shell.chain_id.clone())
             .to_bytes();
         let request = ProcessProposal { txs: vec![tx] };
@@ -763,7 +874,7 @@ mod test_process_proposal {
             sig,
         }
         .sign(shell.mode.get_protocol_key().expect("Test failed"));
-        let tx = EthereumTxData::BridgePoolVext(vote_ext)
+        let tx = ProtocolTxData::BridgePoolVext(vote_ext)
             .sign(protocol_key, shell.chain_id.clone())
             .to_bytes();
         let request = ProcessProposal { txs: vec![tx] };
@@ -800,7 +911,7 @@ mod test_process_proposal {
         vote_extension: ethereum_events::SignedVext,
         protocol_key: common::SecretKey,
     ) {
-        let tx = EthereumTxData::EthEventsVext(vote_extension)
+        let tx = ProtocolTxData::EthEventsVext(vote_extension)
             .sign(&protocol_key, shell.chain_id.clone())
             .to_bytes();
         let request = ProcessProposal { txs: vec![tx] };
@@ -1383,7 +1494,7 @@ mod test_process_proposal {
         wrapper.sign_wrapper(keypair);
 
         let protocol_key = shell.mode.get_protocol_key().expect("Test failed");
-        let protocol_tx = EthereumTxData::EthEventsVext({
+        let protocol_tx = ProtocolTxData::EthEventsVext({
             let bertha_key = wallet::defaults::bertha_keypair();
             let bertha_addr = wallet::defaults::bertha_address();
             ethereum_events::Vext::empty(1234_u64.into(), bertha_addr)
@@ -1892,7 +2003,7 @@ mod test_process_proposal {
                 assert!(ext.verify(&protocol_key.ref_to()).is_ok());
                 ext
             };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
+            let tx = ProtocolTxData::EthEventsVext(ext.into())
                 .sign(&protocol_key, shell.chain_id.clone())
                 .to_bytes();
             let req = ProcessProposal { txs: vec![tx] };
@@ -1920,7 +2031,7 @@ mod test_process_proposal {
                 assert!(ext.verify(&protocol_key.ref_to()).is_ok());
                 ext
             };
-            let tx = EthereumTxData::EthEventsVext(ext.into())
+            let tx = ProtocolTxData::EthEventsVext(ext.into())
                 .sign(&protocol_key, shell.chain_id.clone())
                 .to_bytes();
             let req = ProcessProposal { txs: vec![tx] };
@@ -1980,5 +2091,125 @@ mod test_process_proposal {
             response.result.info,
             format!("Tx contains more than {MAX_TX_SECTIONS_LEN} sections."),
         );
+    }
+
+    /// Check that a proposal carrying a consensus version marker with
+    /// the node's own consensus version is accepted.
+    #[test]
+    fn test_accept_matching_consensus_version() {
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let marker = version_compat::build_version_marker_tx(
+            namada_sdk::consensus_version(),
+            shell.chain_id.clone(),
+        )
+        .to_bytes();
+
+        let (response, tx_results) =
+            shell.shell.process_proposal(proposal_request(vec![marker]));
+
+        assert_eq!(
+            response,
+            crate::shims::abcipp_shim_types::shim::response::ProcessProposal::Accept
+        );
+        let [result] = tx_results.as_slice() else {
+            panic!("Expected exactly one tx result")
+        };
+        assert_eq!(result.code, u32::from(ResultCode::Ok));
+    }
+
+    /// Check that a proposal carrying a consensus version marker with
+    /// a version incompatible with the node's own is rejected.
+    #[test]
+    fn test_reject_incompatible_consensus_version() {
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let marker = version_compat::build_version_marker_tx(
+            namada_sdk::consensus_version() + 1,
+            shell.chain_id.clone(),
+        )
+        .to_bytes();
+
+        let (response, tx_results) =
+            shell.shell.process_proposal(proposal_request(vec![marker]));
+
+        assert_eq!(
+            response,
+            crate::shims::abcipp_shim_types::shim::response::ProcessProposal::Reject
+        );
+        let [result] = tx_results.as_slice() else {
+            panic!("Expected exactly one tx result")
+        };
+        assert_eq!(result.code, u32::from(ResultCode::IncompatibleVersion));
+    }
+
+    /// Check that a proposal without a consensus version marker is
+    /// rejected.
+    #[test]
+    fn test_reject_missing_version_marker() {
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let (response, _tx_results) =
+            shell.shell.process_proposal(proposal_request(vec![]));
+
+        assert_eq!(
+            response,
+            crate::shims::abcipp_shim_types::shim::response::ProcessProposal::Reject
+        );
+    }
+
+    /// Check that a proposal whose consensus version marker cannot be
+    /// deserialized is rejected.
+    #[test]
+    fn test_reject_malformed_version_marker() {
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let mut marker = version_compat::build_version_marker_tx(
+            namada_sdk::consensus_version(),
+            shell.chain_id.clone(),
+        );
+        // A single byte cannot be deserialized as a `u64` consensus
+        // version
+        marker.set_data(Data::new(vec![0xFF]));
+
+        let (response, tx_results) = shell
+            .shell
+            .process_proposal(proposal_request(vec![marker.to_bytes()]));
+
+        assert_eq!(
+            response,
+            crate::shims::abcipp_shim_types::shim::response::ProcessProposal::Reject
+        );
+        let [result] = tx_results.as_slice() else {
+            panic!("Expected exactly one tx result")
+        };
+        assert_eq!(result.code, u32::from(ResultCode::InvalidTx));
+    }
+
+    /// Check that a proposal with a second consensus version marker is
+    /// rejected: only the first tx of the proposal may be a marker.
+    #[test]
+    fn test_reject_duplicate_version_marker() {
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let marker = version_compat::build_version_marker_tx(
+            namada_sdk::consensus_version(),
+            shell.chain_id.clone(),
+        )
+        .to_bytes();
+
+        let (response, tx_results) = shell
+            .shell
+            .process_proposal(proposal_request(vec![marker.clone(), marker]));
+
+        assert_eq!(
+            response,
+            crate::shims::abcipp_shim_types::shim::response::ProcessProposal::Reject
+        );
+        let [first, second] = tx_results.as_slice() else {
+            panic!("Expected exactly two tx results")
+        };
+        assert_eq!(first.code, u32::from(ResultCode::Ok));
+        assert_eq!(second.code, u32::from(ResultCode::InvalidTx));
     }
 }

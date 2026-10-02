@@ -34,6 +34,20 @@ const SIGNATURE_LENGTH: usize = 64;
 )]
 pub struct PublicKey(pub ed25519_consensus::VerificationKey);
 
+impl PublicKey {
+    /// Construct a dummy public key. This must never be used for signing
+    /// or verification — only where the protocol requires a key
+    /// structurally, such as the unsigned consensus version marker tx.
+    pub fn dummy() -> Self {
+        // The all-zero encoding is a valid curve point and thus
+        // decompresses successfully.
+        Self(
+            ed25519_consensus::VerificationKey::try_from([0u8; 32])
+                .expect("All-zero public key must decompress"),
+        )
+    }
+}
+
 impl super::PublicKey for PublicKey {
     const TYPE: SchemeType = SigScheme::TYPE;
 

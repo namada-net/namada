@@ -477,6 +477,7 @@ pub fn display_batch_resp(context: &impl Namada, resp: &TxResponse) {
             ResultCode::InvalidVoteExtension => "invalid vote extension",
             ResultCode::TooLarge => "transaction too large",
             ResultCode::TxNotAllowlisted => "transaction not allowlisted",
+            ResultCode::IncompatibleVersion => "incompatible version",
         };
         let err_msg = if resp.info.is_empty() {
             err.to_string()

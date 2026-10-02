@@ -25,6 +25,7 @@ use namada_migrations::*;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::data::protocol::ProtocolTxType;
 use crate::data::{Fee, GasLimit, TxType, WrapperTx};
 use crate::sign::{SignatureIndex, VerifySigError};
 use crate::{
@@ -702,6 +703,17 @@ impl Tx {
                             err
                         ))
                     })
+            }
+            // The consensus version marker is only ever injected directly
+            // into a proposal by the block proposer and never broadcast to
+            // the mempool, so it carries no signature.
+            TxType::Protocol(protocol)
+                if matches!(
+                    protocol.tx,
+                    ProtocolTxType::ConsensusVersionMarker
+                ) =>
+            {
+                Ok(None)
             }
             // verify signature and extract signed data
             TxType::Protocol(protocol) => self

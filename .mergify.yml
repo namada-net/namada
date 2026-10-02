@@ -8,24 +8,18 @@ queue_rules:
       - "#approved-reviews-by >= 1"
       - base = main
     merge_method: merge
-    autosquash: true   
-
   - name: backport-apps-101.1-queue
     batch_size: 3
     queue_conditions:
       - "#approved-reviews-by >= 1"
       - base = maint-101.1
     merge_method: merge
-    autosquash: true   
-
   - name: backport-libs-0.150-queue
     batch_size: 3
     queue_conditions:
       - "#approved-reviews-by >= 1"
       - base = maint-libs-0.150
     merge_method: merge
-    autosquash: true   
-
 pull_request_rules:
   - name: automatic merge to main or backport branch
     conditions:
@@ -33,9 +27,9 @@ pull_request_rules:
       - label != "do-not-merge"
       - "#approved-reviews-by >= 1"
       - or:
-        - base = main
-        - base = maint-101.1
-        - base = maint-libs-0.150
+          - base = main
+          - base = maint-101.1
+          - base = maint-libs-0.150
     actions:
       queue:
 
@@ -67,3 +61,5 @@ pull_request_rules:
       backport:
         branches:
           - "maint-libs-0.150"
+merge_protections_settings:
+  reporting_method: check-runs

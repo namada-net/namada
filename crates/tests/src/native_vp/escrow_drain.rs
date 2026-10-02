@@ -22,10 +22,8 @@
 mod escrow_drain_tests {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
-    use std::path::PathBuf;
 
     use namada_apps_lib::wasm_loader;
-    use namada_sdk::account::AccountPublicKeysMap;
     use namada_sdk::address::testing::established_address_1;
     use namada_sdk::address::{self, Address, InternalAddress};
     use namada_sdk::chain::ChainId;
@@ -38,7 +36,6 @@ mod escrow_drain_tests {
     };
     use namada_sdk::ibc::primitives::Timestamp;
     use namada_sdk::ibc::{IBC_ESCROW_ADDRESS, MsgTransfer};
-    use namada_sdk::key::{self, RefTo};
     use namada_sdk::proof_of_stake::OwnedPosParams;
     use namada_sdk::proof_of_stake::test_utils::get_dummy_genesis_validator;
     use namada_sdk::storage::Epoch;
@@ -47,31 +44,9 @@ mod escrow_drain_tests {
     use namada_sdk::validation::{MultitokenVp, PosVp};
     use namada_tx_prelude::BorshSerializeExt;
 
-    use crate::native_vp::TestNativeVpEnv;
+    use crate::native_vp::{TestNativeVpEnv, sign_tx, wasm_dir};
     use crate::tx::{TestTxEnv, tx_host_env};
     use crate::vm_host_env::ibc;
-
-    /// Gets the absolute path to wasm directory
-    fn wasm_dir() -> PathBuf {
-        let mut current_path = std::env::current_dir()
-            .expect("Current directory should exist")
-            .canonicalize()
-            .expect("Current directory should exist");
-        while current_path.file_name().unwrap() != "tests" {
-            current_path.pop();
-        }
-        // Two-dirs up to root
-        current_path.pop();
-        current_path.pop();
-        current_path.join("wasm")
-    }
-
-    fn sign_tx(tx: &mut Tx) {
-        let keypair = key::testing::keypair_1();
-        let pks_map = AccountPublicKeysMap::from_iter([keypair.ref_to()]);
-        tx.sign_raw(vec![keypair.clone()], pks_map, None)
-            .sign_wrapper(keypair);
-    }
 
     /// Build the Escrowdrian attack payload: a plain transparent transfer
     /// whose only source is the PoS internal account.

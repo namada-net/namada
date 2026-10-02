@@ -112,3 +112,77 @@ impl TestNativeVpEnv {
         )
     }
 }
+
+#[cfg(test)]
+mod test_inner_tx_sections {
+    use namada_sdk::gas::TxGasMeter;
+    use namada_sdk::tx::data::TxType;
+    use namada_sdk::tx::{Code, Data, Tx};
+    use namada_vm::wasm::compilation_cache::common::testing::vp_cache;
+    use namada_vp::VpEnv;
+
+    use super::*;
+
+    /// Check that a native VP ctx with the inner tx sections looked up from
+    /// the batch indices behaves exactly like one looking them up from the tx,
+    /// including the gas it charges
+    #[test]
+    fn test_native_ctx_inner_tx_sections_equivalent() {
+        let state = TestState::default();
+        let (vp_wasm_cache, _dir) = vp_cache();
+        let address = namada_sdk::address::testing::established_address_1();
+        let tx_index = storage::TxIndex::default();
+        let keys_changed = BTreeSet::new();
+        let verifiers = BTreeSet::new();
+
+        let mut tx = Tx::from_type(TxType::Raw);
+        tx.set_code(Code::new(b"code 1".to_vec(), None));
+        tx.set_data(Data::new(b"data 1".to_vec()));
+        tx.push_default_inner_tx();
+        tx.set_code(Code::new(b"code 2".to_vec(), None));
+        tx.set_data(Data::new(b"data 2".to_vec()));
+        // An inner tx with neither code nor data sections
+        tx.push_default_inner_tx();
+        assert_eq!(tx.commitments().len(), 3);
+
+        let batch_sections = tx.batch_sections();
+
+        for cmt in tx.commitments() {
+            let run = |with_sections: bool| {
+                let gas_meter = RefCell::new(VpGasMeter::new_from_tx_meter(
+                    &TxGasMeter::new(u64::MAX, 1),
+                ));
+                let mut ctx = NativeVpCtx::new(
+                    &address,
+                    &state,
+                    &tx,
+                    cmt,
+                    &tx_index,
+                    &gas_meter,
+                    &keys_changed,
+                    &verifiers,
+                    vp_wasm_cache.clone(),
+                    GasMeterKind::MutGlobal,
+                );
+                if with_sections {
+                    ctx = ctx
+                        .with_inner_tx_sections(batch_sections.inner_tx(cmt));
+                }
+                let code_hash = ctx.get_tx_code_hash().unwrap();
+                // The data of every inner tx, including the ones that are not
+                // being validated by this ctx
+                let data: Vec<_> = tx
+                    .commitments()
+                    .iter()
+                    .map(|other| ctx.get_tx_data(&tx.batch_ref_tx(other)))
+                    .collect();
+                drop(ctx);
+                let gas = gas_meter.into_inner().get_vp_consumed_gas();
+                (code_hash, data, gas)
+            };
+            let expected = run(false);
+            assert_eq!(run(true), expected);
+            assert_eq!(expected.1.len(), 3);
+        }
+    }
+}

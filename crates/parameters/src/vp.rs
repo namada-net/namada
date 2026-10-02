@@ -29,9 +29,10 @@ where
         keys_changed: &BTreeSet<Key>,
         _verifiers: &BTreeSet<Address>,
     ) -> Result<()> {
+        let tx_data = ctx.get_tx_data(batched_tx);
         keys_changed.iter().try_for_each(|key| {
             let key_type: KeyType = key.into();
-            let data = if let Some(data) = batched_tx.tx.data(batched_tx.cmt) {
+            let data = if let Some(data) = &tx_data {
                 data
             } else {
                 return Err(Error::new_const(
@@ -40,7 +41,7 @@ where
             };
             match key_type {
                 KeyType::PARAMETER | KeyType::UNKNOWN_PARAMETER => {
-                    let is_gov = Gov::is_proposal_accepted(&ctx.pre(), &data)?
+                    let is_gov = Gov::is_proposal_accepted(&ctx.pre(), data)?
                         .ok_or_else(|| {
                             Error::new_alloc(format!(
                                 "Attempted to change a protocol parameter \

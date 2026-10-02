@@ -247,6 +247,10 @@ mod native_vp_host_env {
                                 vp_cache_dir: _,
                             }: &mut TestVpEnv| {
 
+                            let tx_code_hash = batched_tx
+                                .tx
+                                .inner_tx_sections(&batched_tx.cmt)
+                                .code_hash();
                             let mut env = namada_vm::host_env::testing::vp_env(
                                 addr,
                                 state,
@@ -254,6 +258,7 @@ mod native_vp_host_env {
                                 gas_meter,
                                 &batched_tx.tx,
                                 &batched_tx.cmt,
+                                &tx_code_hash,
                                 tx_index,
                                 verifiers,
                                 result_buffer,
@@ -292,6 +297,10 @@ mod native_vp_host_env {
                                 vp_cache_dir: _,
                             }: &mut TestVpEnv| {
 
+                            let tx_code_hash = batched_tx
+                                .tx
+                                .inner_tx_sections(&batched_tx.cmt)
+                                .code_hash();
                             let mut env = namada_vm::host_env::testing::vp_env(
                                 addr,
                                 state,
@@ -299,6 +308,7 @@ mod native_vp_host_env {
                                 gas_meter,
                                 &batched_tx.tx,
                                 &batched_tx.cmt,
+                                &tx_code_hash,
                                 tx_index,
                                 verifiers,
                                 result_buffer,

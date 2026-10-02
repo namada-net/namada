@@ -87,7 +87,7 @@ where
                 "Rejecting transaction, since the Ethereum bridge is disabled.",
             ));
         }
-        let Some(tx_data) = batched_tx.tx.data(batched_tx.cmt) else {
+        let Some(tx_data) = ctx.get_tx_data(batched_tx) else {
             return Err(Error::new_const("No transaction data found"));
         };
         let transfer: PendingTransfer =

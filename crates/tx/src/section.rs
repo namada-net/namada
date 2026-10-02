@@ -133,13 +133,25 @@ impl Header {
 }
 
 impl Section {
+    /// Get the Borsh discriminant of this variant without serializing the
+    /// whole section. This must match the declaration order of the variants.
+    fn discriminant(&self) -> u8 {
+        match self {
+            Self::Data(_) => 0,
+            Self::ExtraData(_) => 1,
+            Self::Code(_) => 2,
+            Self::Authorization(_) => 3,
+            Self::MaspTx(_) => 4,
+            Self::MaspBuilder(_) => 5,
+            Self::Header(_) => 6,
+        }
+    }
+
     /// Hash this section. Section hashes are useful for signatures and also for
     /// allowing transaction sections to cross reference.
     pub fn hash<'a>(&self, hasher: &'a mut Sha256) -> &'a mut Sha256 {
-        // Get the index corresponding to this variant
-        let discriminant = self.serialize_to_vec()[0];
         // Use Borsh's discriminant in the Section's hash
-        hasher.update([discriminant]);
+        hasher.update([self.discriminant()]);
         match self {
             Self::Data(data) => data.hash(hasher),
             Self::ExtraData(extra) => extra.hash(hasher),
@@ -1051,6 +1063,55 @@ mod test {
     use testing::gen_keypair;
 
     use super::*;
+
+    /// Check that `Section::discriminant` matches the Borsh discriminants, so
+    /// that section hashes are unchanged from when the discriminant was read
+    /// from the serialized section
+    #[test]
+    fn section_discriminant_matches_borsh() {
+        let container = namada_core::borsh::schema_container_of::<Section>();
+        let Some(namada_core::borsh::schema::Definition::Enum {
+            variants, ..
+        }) = container.get_definition(&Section::declaration())
+        else {
+            panic!("Section must be an enum");
+        };
+        let variants: Vec<_> = variants
+            .iter()
+            .map(|(discriminant, name, _)| (*discriminant, name.as_str()))
+            .collect();
+        assert_eq!(
+            variants,
+            vec![
+                (0, "Data"),
+                (1, "ExtraData"),
+                (2, "Code"),
+                (3, "Authorization"),
+                (4, "MaspTx"),
+                (5, "MaspBuilder"),
+                (6, "Header"),
+            ]
+        );
+
+        let sections = [
+            Section::Data(Data::new(vec![1, 2, 3])),
+            Section::ExtraData(Code::new(vec![4, 5], Some("tag".to_string()))),
+            Section::Code(Code::from_hash(
+                namada_core::hash::Hash::sha256(b"code"),
+                None,
+            )),
+            Section::Authorization(Authorization {
+                targets: vec![],
+                signer: Signer::PubKeys(vec![]),
+                signatures: Default::default(),
+            }),
+            Section::Header(Header::new(TxType::Raw)),
+        ];
+        for section in sections {
+            let serialized_discriminant = section.serialize_to_vec()[0];
+            assert_eq!(section.discriminant(), serialized_discriminant);
+        }
+    }
 
     #[test]
     fn auth_verify_sig_cannot_overflow() {

@@ -10,6 +10,7 @@ use std::rc::Rc;
 
 use borsh::BorshDeserialize;
 use namada_core::address::Address;
+use namada_core::collections::HashSet;
 use namada_core::hash::{Error as TxHashError, Hash};
 use namada_core::internal::HostEnvResult;
 use namada_core::storage::{Key, TxIndex};
@@ -19,7 +20,9 @@ use namada_gas::{GasMetering, TxGasMeter, VpGasMeter, WASM_MEMORY_PAGE_GAS};
 use namada_state::prefix_iter::PrefixIterators;
 use namada_state::{DB, DBIter, State, StateRead, StorageHasher, StorageRead};
 use namada_tx::data::{TxSentinel, TxType};
-use namada_tx::{BatchedTxRef, Commitment, Section, Tx, TxCommitments};
+use namada_tx::{
+    BatchedTxRef, CodeSections, Commitment, InnerTxSections, Tx, TxCommitments,
+};
 use namada_vp::vp_host_fns;
 use parity_wasm::elements::Instruction::*;
 use parity_wasm::elements::{self, SignExtInstruction};
@@ -118,34 +121,56 @@ pub enum Error {
 /// Result for functions that may fail
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Returns [`Error::DisallowedTx`] when the given tx is a user tx and its code
-/// `Hash` is not included in the `tx_allowlist` parameter.
+/// Returns [`Error::DisallowedTx`] when the given tx is a user tx and the code
+/// of any of its inner txs is not included in the `tx_allowlist` parameter.
+///
+/// Inner txs are checked in order, each distinct code section only once.
 pub fn check_tx_allowed<S>(
-    batched_tx: &BatchedTxRef<'_>,
+    tx: &Tx,
+    code_sections: &CodeSections<'_>,
     storage: &S,
 ) -> Result<()>
 where
     S: StorageRead,
 {
-    let BatchedTxRef { tx, cmt } = batched_tx;
-    if let TxType::Wrapper(_) = tx.header().tx_type {
-        if let Some(code_sec) = tx
-            .get_section(cmt.code_sechash())
-            .and_then(|x| Section::code_sec(&x))
-        {
-            if namada_parameters::is_tx_allowed(storage, &code_sec.code.hash())
-                .map_err(|e| Error::Error(e.to_string()))?
-            {
-                return Ok(());
-            }
+    if !is_user_tx(tx) {
+        return Ok(());
+    }
+    let mut checked = HashSet::new();
+    for cmt in tx.commitments() {
+        let code_sechash = cmt.code_sechash();
+        if checked.insert(code_sechash) {
+            let (_, code_hash) =
+                code_sections.get(code_sechash).ok_or(Error::DisallowedTx)?;
+            check_code_allowed(&code_hash, storage)?;
         }
-        return Err(Error::DisallowedTx);
     }
     Ok(())
 }
 
+/// Whether the given tx is a user tx, i.e. a wrapper, which is subject to the
+/// `tx_allowlist` parameter
+fn is_user_tx(tx: &Tx) -> bool {
+    matches!(tx.header.tx_type, TxType::Wrapper(_))
+}
+
+/// Returns [`Error::DisallowedTx`] when the given code hash is not included in
+/// the `tx_allowlist` parameter.
+fn check_code_allowed<S>(code_hash: &Hash, storage: &S) -> Result<()>
+where
+    S: StorageRead,
+{
+    if namada_parameters::is_tx_allowed(storage, code_hash)
+        .map_err(|e| Error::Error(e.to_string()))?
+    {
+        Ok(())
+    } else {
+        Err(Error::DisallowedTx)
+    }
+}
+
 /// Execute a transaction code. Returns the set verifiers addresses requested by
-/// the transaction.
+/// the transaction. The `sections` must have been looked up for `cmt`.
 #[allow(clippy::too_many_arguments)]
 pub fn tx<S, CA>(
     state: &mut S,
@@ -154,6 +179,7 @@ pub fn tx<S, CA>(
     tx_index: &TxIndex,
     tx: &Tx,
     cmt: &TxCommitments,
+    sections: InnerTxSections<'_>,
     vp_wasm_cache: &mut VpCache<CA>,
     tx_wasm_cache: &mut TxCache<CA>,
     gas_meter_kind: GasMeterKind,
@@ -163,16 +189,16 @@ where
     S: StateRead + State + StorageRead,
     CA: 'static + WasmCacheAccess,
 {
-    let tx_code = tx
-        .get_section(cmt.code_sechash())
-        .and_then(|x| Section::code_sec(x.as_ref()))
+    let (tx_code, tx_code_hash) = sections
+        .code
         .ok_or(Error::MissingSection(cmt.code_sechash().to_string()))?;
 
     // Check if the tx code is allowed (to be done after the check on the code
     // section commitment to let the replay protection mechanism run some
     // optimizations)
-    let batched_tx = tx.batch_ref_tx(cmt);
-    check_tx_allowed(&batched_tx, state)?;
+    if is_user_tx(tx) {
+        check_code_allowed(&tx_code_hash, state)?;
+    }
 
     // If the transaction code has a tag, ensure that the tag hash equals the
     // transaction code's hash.
@@ -194,7 +220,6 @@ where
                 ))
             })?;
         // Ensure that the queried code hash equals the transaction's code hash
-        let tx_code_hash = tx_code.code.hash();
         if tx_code_hash != hash_value {
             return Err(Error::LoadWasmCode(format!(
                 "Transaction code hash does not correspond to tag: tx hash \
@@ -308,7 +333,7 @@ where
             &instance,
             &mut *store,
             guest_memory,
-            &batched_tx,
+            &tx.batch_ref_tx(cmt),
         )
         .map_err(Error::MemoryError)?
     };
@@ -399,11 +424,13 @@ fn extract_tx_error(
 
 /// Execute a validity predicate code. Returns whether the validity
 /// predicate accepted storage modifications performed by the transaction
-/// that triggered the execution.
+/// that triggered the execution. The `sections` must have been looked up for
+/// the inner tx of `batched_tx`.
 #[allow(clippy::too_many_arguments)]
 pub fn vp<S, CA>(
     vp_code_hash: Hash,
     batched_tx: &BatchedTxRef<'_>,
+    sections: InnerTxSections<'_>,
     tx_index: &TxIndex,
     address: &Address,
     state: &S,
@@ -439,6 +466,7 @@ where
             cache_access: PhantomData,
         };
     let BatchedTxRef { tx, cmt } = batched_tx;
+    let tx_code_hash = sections.code_hash();
 
     let wasm_gas_meter = RefCell::new(GasMeter::new(
         gas_meter_kind,
@@ -456,6 +484,7 @@ where
         &wasm_gas_meter,
         tx,
         cmt,
+        &tx_code_hash,
         tx_index,
         &mut iterators,
         verifiers,
@@ -702,6 +731,10 @@ where
         let mut result_buffer: Option<Vec<u8>> = None;
         let mut yielded_value: Option<Vec<u8>> = None;
         let mut vp_wasm_cache = native_ctx.vp_wasm_cache.clone();
+        let tx_code_hash = native_ctx
+            .inner_tx_sections
+            .unwrap_or_else(|| native_ctx.tx.inner_tx_sections(native_ctx.cmt))
+            .code_hash();
 
         let wasm_gas_meter = RefCell::new(GasMeter::new(
             GasMeterKind::MutGlobal,
@@ -717,6 +750,7 @@ where
             &wasm_gas_meter,
             native_ctx.tx,
             native_ctx.cmt,
+            &tx_code_hash,
             native_ctx.tx_index,
             &mut iterators,
             native_ctx.verifiers,
@@ -1627,6 +1661,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -1648,6 +1683,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -1717,6 +1753,8 @@ mod tests {
             vp(
                 code_hash,
                 &outer_tx.batch_ref_first_tx().unwrap(),
+                outer_tx
+                    .inner_tx_sections(outer_tx.first_commitments().unwrap(),),
                 &tx_index,
                 &addr,
                 &state,
@@ -1751,6 +1789,8 @@ mod tests {
             vp(
                 code_hash,
                 &outer_tx.batch_ref_first_tx().unwrap(),
+                outer_tx
+                    .inner_tx_sections(outer_tx.first_commitments().unwrap(),),
                 &tx_index,
                 &addr,
                 &state,
@@ -1803,6 +1843,7 @@ mod tests {
         let result = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,
@@ -1824,6 +1865,7 @@ mod tests {
         let error = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,
@@ -1881,6 +1923,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -1934,6 +1977,7 @@ mod tests {
         let result = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,
@@ -2002,6 +2046,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2056,6 +2101,7 @@ mod tests {
         let error = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,
@@ -2135,6 +2181,8 @@ mod tests {
             vp(
                 code_hash,
                 &outer_tx.batch_ref_first_tx().unwrap(),
+                outer_tx
+                    .inner_tx_sections(outer_tx.first_commitments().unwrap(),),
                 &tx_index,
                 &addr,
                 &state,
@@ -2180,7 +2228,6 @@ mod tests {
         wrapper_tx.add_serialized_data(vec![]);
         let mut raw_tx = wrapper_tx.clone();
         raw_tx.update_header(TxType::Raw);
-        let batched_tx = wrapper_tx.batch_ref_first_tx().unwrap();
 
         // Check that using a disallowed wrapper tx leads to an error, but a raw
         // tx is ok even if not allowlisted
@@ -2192,10 +2239,14 @@ mod tests {
             .unwrap();
             state.commit_tx_batch();
 
-            let result = check_tx_allowed(&batched_tx, &state);
+            let result = check_tx_allowed(
+                &wrapper_tx,
+                &wrapper_tx.code_sections(),
+                &state,
+            );
             assert_matches!(result.unwrap_err(), Error::DisallowedTx);
-            let batched_raw_tx = raw_tx.batch_ref_first_tx().unwrap();
-            let result = check_tx_allowed(&batched_raw_tx, &state);
+            let result =
+                check_tx_allowed(&raw_tx, &raw_tx.code_sections(), &state);
             if let Err(result) = result {
                 assert!(!matches!(result, Error::DisallowedTx));
             }
@@ -2211,7 +2262,11 @@ mod tests {
             .unwrap();
             state.commit_tx_batch();
 
-            let result = check_tx_allowed(&batched_tx, &state);
+            let result = check_tx_allowed(
+                &wrapper_tx,
+                &wrapper_tx.code_sections(),
+                &state,
+            );
             if let Err(result) = result {
                 assert!(!matches!(result, Error::DisallowedTx));
             }
@@ -2252,6 +2307,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2295,6 +2351,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,
@@ -2335,6 +2392,7 @@ mod tests {
         let result = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,
@@ -2381,6 +2439,7 @@ mod tests {
         let result = vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,
@@ -2558,6 +2617,7 @@ mod tests {
         vp(
             code_hash,
             &outer_tx.batch_ref_first_tx().unwrap(),
+            outer_tx.inner_tx_sections(outer_tx.first_commitments().unwrap()),
             &tx_index,
             &addr,
             &state,
@@ -2611,6 +2671,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             vp_cache,
             tx_cache,
             GasMeterKind::MutGlobal,
@@ -2667,6 +2728,7 @@ mod tests {
             &tx_index,
             batched_tx.tx,
             batched_tx.cmt,
+            batched_tx.tx.inner_tx_sections(batched_tx.cmt),
             &mut vp_cache,
             &mut tx_cache,
             GasMeterKind::MutGlobal,

@@ -112,6 +112,13 @@ where
     /// Get a tx hash
     fn get_tx_code_hash(&self) -> Result<Option<Hash>>;
 
+    /// Get the data of the given inner tx, if any. Environments that have
+    /// already looked up the data of the inner tx being validated may override
+    /// this to avoid looking it up again.
+    fn get_tx_data(&self, batched_tx: &BatchedTxRef<'_>) -> Option<Vec<u8>> {
+        batched_tx.tx.data(batched_tx.cmt)
+    }
+
     /// Charge the provided gas for the current vp
     fn charge_gas(&self, used_gas: Gas) -> Result<()>;
 

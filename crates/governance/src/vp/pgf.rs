@@ -58,11 +58,7 @@ where
         // Is VP triggered by a governance proposal?
         if is_proposal_accepted(
             &ctx.pre(),
-            batched_tx
-                .tx
-                .data(batched_tx.cmt)
-                .unwrap_or_default()
-                .as_ref(),
+            ctx.get_tx_data(batched_tx).unwrap_or_default().as_ref(),
         )? {
             return Ok(());
         }
@@ -195,7 +191,7 @@ where
         ctx: &'ctx CTX,
         batched_tx: &BatchedTxRef<'_>,
     ) -> Result<()> {
-        batched_tx.tx.data(batched_tx.cmt).map_or_else(
+        ctx.get_tx_data(batched_tx).map_or_else(
             || {
                 Err(Error::new_const(
                     "PGF parameter changes require tx data to be present",

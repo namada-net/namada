@@ -424,7 +424,8 @@ where
                 let code_key = Key::wasm_code(&code_hash);
                 let code_len_key = Key::wasm_code_len(&code_hash);
                 let hash_key = Key::wasm_hash(name);
-                let code_name_key = Key::wasm_code_name(name.to_owned());
+                let code_hash_key = Key::wasm_code_hash(name.to_owned());
+                let code_name_key = Key::wasm_code_name(&code_hash);
 
                 self.state.write(&code_key, code).unwrap();
                 self.state.write(&code_len_key, code_len).unwrap();
@@ -432,7 +433,8 @@ where
                 if &Some(code_hash) == implicit_vp_code_hash {
                     is_implicit_vp_stored = true;
                 }
-                self.state.write(&code_name_key, code_hash).unwrap();
+                self.state.write(&code_hash_key, code_hash).unwrap();
+                self.state.write(&code_name_key, name).unwrap();
             } else {
                 tracing::warn!("The wasm {name} isn't allowed.");
                 self.warn(Warning::DisallowedWasm(name.to_string()));

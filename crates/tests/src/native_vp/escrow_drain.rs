@@ -9,6 +9,10 @@
 //!   names the IBC escrow (`#IBC`) as its source can drain the escrow with a
 //!   zero-amount packet. The IBC VP must reject any escrow balance change that
 //!   isn't reproduced by the protocol's pseudo-execution of the IBC message.
+//! - IBC escrow self-send: a `tx_ibc` whose ICS20 packet sender is the IBC
+//!   escrow (`#IBC`) itself turns the escrow of the sent tokens into a no-op
+//!   transfer from the escrow to itself, while still committing the packet. The
+//!   IBC VP must reject any transfer sent from an internal address.
 //!
 //! Conversely, native token inflows into the protocol-owned accounts must
 //! remain allowed for plain transfers whenever the native token is
@@ -36,6 +40,7 @@ mod escrow_drain_tests {
     use namada_sdk::ibc::core::channel::types::timeout::{
         TimeoutHeight, TimeoutTimestamp,
     };
+    use namada_sdk::ibc::core::host::types::identifiers::{ChannelId, PortId};
     use namada_sdk::ibc::primitives::Timestamp;
     use namada_sdk::ibc::{IBC_ESCROW_ADDRESS, MsgTransfer};
     use namada_sdk::key::{self, RefTo};
@@ -310,38 +315,60 @@ mod escrow_drain_tests {
         .expect("PoS VP must allow the inflow into the PoS escrow");
     }
 
-    /// Set up the IBC state (client, connection, channel) with a funded
-    /// escrow, and build the drain attack message: an ICS20 `MsgTransfer`
-    /// whose packet declares zero units and whose inner Namada transfer
-    /// moves the escrow's full balance to the attacker.
-    fn ibc_drain_setup(
-        attacker: &Address,
-        drain: Amount,
-    ) -> (Address, Vec<u8>) {
+    /// The IBC state set up by [`init_ibc_channel`]
+    struct IbcChannel {
+        /// The token held in escrow
+        token: Address,
+        /// An account funded with the token
+        account: Address,
+        port_id: PortId,
+        channel_id: ChannelId,
+    }
+
+    /// Set up the IBC state (client, connection, channel) with an escrow
+    /// holding `escrowed` tokens
+    fn init_ibc_channel(escrowed: Amount) -> IbcChannel {
         tx_host_env::init();
 
-        let (token, _account) = ibc::init_storage();
+        let (token, account) = ibc::init_storage();
         let (client_id, _client_state, mut writes) = ibc::prepare_client();
         let (conn_id, conn_writes) = ibc::prepare_opened_connection(&client_id);
         writes.extend(conn_writes);
         let (port_id, channel_id, channel_writes) =
             ibc::prepare_opened_channel(&conn_id, false);
         writes.extend(channel_writes);
-        writes.into_iter().for_each(|(key, val)| {
-            tx_host_env::with(|env| {
-                env.state.db_write(&key, val.clone()).expect("write error");
-            });
+        let escrow_key =
+            token::storage_key::balance_key(&token, &IBC_ESCROW_ADDRESS);
+        writes.insert(escrow_key, escrowed.serialize_to_vec());
+        tx_host_env::with(|env| {
+            for (key, val) in &writes {
+                env.state.db_write(key, val.clone()).expect("write error");
+            }
         });
 
-        // Fund the IBC escrow
-        tx_host_env::with(|env| {
-            env.spawn_accounts([attacker]);
-            let escrow_key =
-                token::storage_key::balance_key(&token, &IBC_ESCROW_ADDRESS);
-            env.state
-                .db_write(&escrow_key, drain.serialize_to_vec())
-                .unwrap();
-        });
+        IbcChannel {
+            token,
+            account,
+            port_id,
+            channel_id,
+        }
+    }
+
+    /// Set up the IBC state with a funded escrow, and build the drain attack
+    /// message: an ICS20 `MsgTransfer` whose packet declares zero units and
+    /// whose inner Namada transfer moves the escrow's full balance to the
+    /// attacker.
+    fn ibc_drain_setup(
+        attacker: &Address,
+        drain: Amount,
+    ) -> (Address, Vec<u8>) {
+        let IbcChannel {
+            token,
+            port_id,
+            channel_id,
+            ..
+        } = init_ibc_channel(drain);
+        tx_host_env::with(|env| env.spawn_accounts([attacker]));
 
         // Zero-amount packet: the handler's own escrow move becomes a no-op
         let timestamp =
@@ -471,5 +498,91 @@ mod escrow_drain_tests {
                 // is blocked before any state change is applied
             }
         }
+    }
+
+    /// Set up the IBC state with an escrow holding `escrowed` tokens, and
+    /// build an ICS20 `MsgTransfer` sending `amount` tokens from the given
+    /// sender, or from the funded account if `None`
+    fn ibc_send_setup(
+        sender: Option<Address>,
+        escrowed: Amount,
+        amount: Amount,
+    ) -> Vec<u8> {
+        let IbcChannel {
+            token,
+            account,
+            port_id,
+            channel_id,
+        } = init_ibc_channel(escrowed);
+        let sender = sender.unwrap_or(account);
+        let timestamp =
+            (Timestamp::now() + core::time::Duration::from_secs(100)).unwrap();
+        let message = IbcMsgTransfer {
+            port_id_on_a: port_id,
+            chan_id_on_a: channel_id,
+            packet_data: PacketData {
+                token: PrefixedCoin {
+                    denom: token.to_string().parse().expect("invalid denom"),
+                    amount: amount.into(),
+                },
+                sender: sender.to_string().into(),
+                receiver: "receiver".to_string().into(),
+                memo: Memo::from("".to_string()),
+            },
+            timeout_height_on_b: TimeoutHeight::Never,
+            timeout_timestamp_on_b: TimeoutTimestamp::At(timestamp),
+        };
+        MsgTransfer::<Transfer> {
+            message,
+            transfer: None,
+        }
+        .serialize_to_vec()
+    }
+
+    /// Run the given IBC message through the real `tx_ibc.wasm`, then the IBC
+    /// VP
+    fn run_ibc_tx(tx_data: Vec<u8>) -> namada_sdk::state::Result<()> {
+        let wasm_code = wasm_loader::read_wasm_or_exit(wasm_dir(), TX_IBC_WASM);
+        let mut tx = Tx::new(ChainId::default(), None);
+        tx.add_code(wasm_code, None).add_serialized_data(tx_data);
+        sign_tx(&mut tx);
+        let batched_tx = tx.batch_first_tx();
+        tx_host_env::with(|env| {
+            env.batched_tx = batched_tx.clone();
+        });
+
+        let mut tx_env = tx_host_env::take();
+        tx_env
+            .execute_tx()
+            .expect("wasm tx execution should succeed");
+        ibc::validate_ibc_vp_from_tx(&tx_env, &tx_env.batched_tx.to_ref())
+    }
+
+    /// An ICS20 transfer sent from the IBC escrow itself commits a packet
+    /// without debiting anything, which the IBC VP must reject
+    #[test]
+    fn test_ibc_escrow_self_send_blocked_by_vp() {
+        let escrowed = Amount::from_u64(50);
+        let tx_data = ibc_send_setup(
+            Some(Address::Internal(InternalAddress::Ibc)),
+            escrowed,
+            escrowed,
+        );
+
+        let err = run_ibc_tx(tx_data)
+            .expect_err("IBC VP must reject a transfer sent from the escrow");
+        assert!(
+            err.to_string().contains("Transfer from internal address"),
+            "unexpected rejection reason: {err}"
+        );
+    }
+
+    /// A regular ICS20 transfer must still be accepted by the IBC VP
+    #[test]
+    fn test_ibc_send_from_account_allowed() {
+        let tx_data =
+            ibc_send_setup(None, Amount::from_u64(50), Amount::from_u64(10));
+
+        run_ibc_tx(tx_data).expect("IBC VP must accept a regular transfer");
     }
 }

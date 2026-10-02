@@ -8,7 +8,6 @@ queue_rules:
       - "#approved-reviews-by >= 1"
       - base = main
     merge_method: merge
-    autosquash: true   
 
   - name: backport-apps-201.0-queue
     batch_size: 3
@@ -16,7 +15,6 @@ queue_rules:
       - "#approved-reviews-by >= 1"
       - base = maint-201.0
     merge_method: merge
-    autosquash: true   
 
   - name: backport-libs-0.251-queue
     batch_size: 3
@@ -24,7 +22,6 @@ queue_rules:
       - "#approved-reviews-by >= 1"
       - base = maint-libs-0.251
     merge_method: merge
-    autosquash: true   
 
 pull_request_rules:
   - name: automatic merge to main or backport branch

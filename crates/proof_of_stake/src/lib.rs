@@ -63,7 +63,7 @@ pub use namada_state::{
 pub use namada_systems::proof_of_stake::*;
 use namada_systems::{governance, trans_token};
 pub use parameters::{OwnedPosParams, PosParams};
-use storage::write_validator_name;
+use storage::{update_total_active_deltas, write_validator_name};
 pub use types::GenesisValidator;
 use types::{DelegationEpochs, into_tm_voting_power};
 
@@ -2181,7 +2181,8 @@ where
     }
 
     // Re-insert the validator into the validator set and update its state
-    let pipeline_epoch = checked!(current_epoch + params.pipeline_len)?;
+    let offset = params.pipeline_len;
+    let pipeline_epoch = checked!(current_epoch + offset)?;
     let stake =
         read_validator_stake(storage, &params, validator, pipeline_epoch)?;
 
@@ -2191,8 +2192,20 @@ where
         validator,
         stake,
         current_epoch,
-        params.pipeline_len,
+        offset,
     )?;
+
+    // Add the validator's stake to active total
+    let stake =
+        read_validator_stake(storage, &params, validator, pipeline_epoch)?;
+    update_total_active_deltas::<S, Gov>(
+        storage,
+        &params,
+        stake.change(),
+        current_epoch,
+        Some(offset),
+    )?;
+
     Ok(())
 }
 
@@ -2545,6 +2558,22 @@ where
         params.pipeline_len,
     )?;
 
+    // Remove the validator's stake from active total
+    let stake =
+        read_validator_stake(storage, &params, validator, pipeline_epoch)?;
+    if stake.is_positive() {
+        update_total_active_deltas::<S, Gov>(
+            storage,
+            &params,
+            stake
+                .change()
+                .negate()
+                .expect("Negative stake cannot overflow"),
+            current_epoch,
+            Some(params.pipeline_len),
+        )?;
+    }
+
     Ok(())
 }
 
@@ -2607,6 +2636,17 @@ where
         stake,
         current_epoch,
         params.pipeline_len,
+    )?;
+
+    // Add the validator's stake to active total
+    let stake =
+        read_validator_stake(storage, &params, validator, pipeline_epoch)?;
+    update_total_active_deltas::<S, Gov>(
+        storage,
+        &params,
+        stake.change(),
+        current_epoch,
+        Some(params.pipeline_len),
     )?;
 
     Ok(())
@@ -3009,6 +3049,23 @@ where
             offset,
         )?;
     }
+
+    // Remove the validator's stake from active total
+    let offset_epoch = checked!(current_epoch + start_offset)?;
+    let stake = read_validator_stake(storage, params, validator, offset_epoch)?;
+    if stake.is_positive() {
+        update_total_active_deltas::<S, Gov>(
+            storage,
+            params,
+            stake
+                .change()
+                .negate()
+                .expect("Negative stake cannot overflow"),
+            current_epoch,
+            Some(start_offset),
+        )?;
+    }
+
     Ok(())
 }
 
@@ -3216,6 +3273,47 @@ fn prune_old_delegations(
     delegations
         .prev_ranges
         .retain(|_start, end| *end >= oldest_to_keep);
+
+    Ok(())
+}
+
+/// Temporary migration code to fix the total active stake value
+pub fn fix_total_active_stake<S, Gov>(storage: &mut S) -> Result<()>
+where
+    S: StorageRead + StorageWrite,
+    Gov: governance::Read<S>,
+{
+    let epoch = storage.get_block_epoch()?;
+    let validators = storage::read_all_validator_addresses(storage, epoch)?;
+    let mut total_stake = token::Amount::zero();
+    let params = read_pos_params::<_, Gov>(storage)?;
+    for validator in validators {
+        let state = storage::read_validator_state::<_, Gov>(
+            storage, &validator, epoch,
+        )?;
+        let is_active = matches!(
+            state,
+            Some(
+                ValidatorState::Consensus
+                    | ValidatorState::BelowCapacity
+                    | ValidatorState::BelowThreshold,
+            )
+        );
+        if is_active {
+            let stake =
+                read_validator_stake(storage, &params, &validator, epoch)?;
+            total_stake =
+                total_stake.checked_add(stake).expect("Must not overflow");
+        }
+    }
+
+    let total_active_deltas = storage::total_active_deltas_handle();
+    total_active_deltas.set::<S, Gov>(
+        storage,
+        total_stake.change(),
+        epoch,
+        0,
+    )?;
 
     Ok(())
 }

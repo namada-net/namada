@@ -95,8 +95,12 @@ fn permissioned_channels_genesis(
 ) -> templates::All<templates::Unvalidated> {
     genesis.parameters.parameters.epochs_per_year =
         epochs_per_year_from_min_duration(20);
-    // for the trusting period of IBC client
+    // for the trusting period of IBC client: it is derived from
+    // `unbonding_len * epoch min duration` and must be long enough for the
+    // relayer to complete a handshake (`unbonding_len` must also be greater
+    // than `pipeline_len`)
     genesis.parameters.pos_params.pipeline_len = GOV_CHANNEL_PIPELINE_LEN;
+    genesis.parameters.pos_params.unbonding_len = 10;
     genesis.parameters.gov_params.min_proposal_grace_epochs = 3;
     genesis.parameters.gov_params.max_proposal_code_size = 3_000_000;
     genesis
@@ -1547,7 +1551,6 @@ fn ibc_permissioned_channels() -> Result<()> {
         test.net.chain_id.as_str(),
         "--b-chain",
         test_gaia.net.chain_id.as_str(),
-        "--yes",
     ];
     let mut hermes = run_hermes_cmd(&hermes_dir, args, Some(240))?;
     hermes.assert_success();
@@ -2832,7 +2835,6 @@ fn create_channel_with_hermes(
         test_a.net.chain_id.as_str(),
         "--b-chain",
         test_b.net.chain_id.as_str(),
-        "--yes",
     ];
     let mut hermes = run_hermes_cmd(hermes_dir, args, Some(240))?;
     hermes.assert_success();

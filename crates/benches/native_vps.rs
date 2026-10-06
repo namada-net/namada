@@ -466,14 +466,18 @@ fn ibc(c: &mut Criterion) {
 
         group.bench_function(bench_name, |b| {
             b.iter(|| {
-                assert!(
-                    ibc.validate_tx(
-                        &signed_tx.to_ref(),
-                        ibc.ctx.keys_changed,
-                        ibc.ctx.verifiers,
-                    )
-                    .is_ok()
-                )
+                let res = ibc.validate_tx(
+                    &signed_tx.to_ref(),
+                    ibc.ctx.keys_changed,
+                    ibc.ctx.verifiers,
+                );
+                // Permissionless `ChanOpenInit` is rejected by the VP; a
+                // channel can only be opened via a governance proposal.
+                if bench_name == "open_channel" {
+                    assert!(res.is_err());
+                } else {
+                    assert!(res.is_ok());
+                }
             })
         });
     }
@@ -1761,7 +1765,20 @@ fn ibc_vp_validate_action(c: &mut Criterion) {
         actions.add_transfer_module(module);
 
         group.bench_function(bench_name, |b| {
-            b.iter(|| actions.validate::<Transfer>(&tx_data).unwrap())
+            b.iter(|| {
+                let res = actions.validate::<Transfer>(&tx_data);
+                // Permissionless `ChanOpenInit` is rejected by the VP; a
+                // channel can only be opened via a governance proposal.
+                if bench_name == "open_channel" {
+                    let err = res.unwrap_err();
+                    assert!(
+                        err.to_string().contains("governance proposal"),
+                        "Unexpected error: {err}"
+                    );
+                } else {
+                    res.unwrap();
+                }
+            })
         });
     }
 

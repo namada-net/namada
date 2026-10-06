@@ -13,5 +13,8 @@ namada_tx_prelude.workspace = true
 rlsf.workspace = true
 getrandom.workspace = true
 
+[features]
+debug-panic-hook = []
+
 [lib]
 crate-type = ["cdylib"]

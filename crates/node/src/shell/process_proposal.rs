@@ -520,19 +520,17 @@ where
                         info: err,
                     };
                 }
-                for cmt in tx.commitments() {
-                    // Tx allowlist
-                    if let Err(err) =
-                        check_tx_allowed(&tx.batch_ref_tx(cmt), &self.state)
-                    {
-                        return TxResult {
-                            code: ResultCode::TxNotAllowlisted.into(),
-                            info: format!(
-                                "Tx code didn't pass the allowlist check: {}",
-                                err
-                            ),
-                        };
-                    }
+                // Tx allowlist
+                if let Err(err) =
+                    check_tx_allowed(&tx, &tx.code_sections(), &self.state)
+                {
+                    return TxResult {
+                        code: ResultCode::TxNotAllowlisted.into(),
+                        info: format!(
+                            "Tx code didn't pass the allowlist check: {}",
+                            err
+                        ),
+                    };
                 }
 
                 // Check that the fee payer has sufficient balance.
@@ -1980,5 +1978,44 @@ mod test_process_proposal {
             response.result.info,
             format!("Tx contains more than {MAX_TX_SECTIONS_LEN} sections."),
         );
+    }
+
+    /// The mempool cap on the batch length is a local policy, so Process
+    /// Proposal must accept a block containing a batch exceeding it
+    #[test]
+    fn test_max_mempool_batch_len_exceeded_tx_accepted() {
+        use crate::shell::MAX_MEMPOOL_BATCH_LEN;
+
+        let (shell, _recv, _, _) = test_utils::setup();
+
+        let keypair = namada_apps_lib::wallet::defaults::daewon_keypair();
+
+        let mut wrapper =
+            Tx::from_type(TxType::Wrapper(Box::new(WrapperTx::new(
+                Fee {
+                    amount_per_gas_unit: DenominatedAmount::native(100.into()),
+                    token: shell.state.in_mem().native_token.clone(),
+                },
+                keypair.ref_to(),
+                GAS_LIMIT.into(),
+            ))));
+        wrapper.header.chain_id = shell.chain_id.clone();
+        for i in 0..=MAX_MEMPOOL_BATCH_LEN {
+            wrapper.push_default_inner_tx();
+            wrapper
+                .set_code(Code::new("wasm_code".as_bytes().to_owned(), None));
+            wrapper.set_data(Data::new(i.to_le_bytes().to_vec()));
+        }
+        wrapper.sign_wrapper(keypair);
+        assert_eq!(wrapper.commitments().len(), MAX_MEMPOOL_BATCH_LEN + 1);
+
+        // Run validation
+        let request = ProcessProposal {
+            txs: vec![wrapper.to_bytes()],
+        };
+        match shell.process_proposal(request) {
+            Ok(received) => assert_eq!(received.len(), 1),
+            Err(err) => panic!("Test failed: {err:?}"),
+        }
     }
 }

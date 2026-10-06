@@ -12,7 +12,7 @@ use namada_core::borsh::BorshDeserialize;
 use namada_core::chain::{ChainId, Epochs};
 use namada_gas::{Gas, GasMeterKind, GasMetering, VpGasMeter};
 use namada_state::{ConversionState, ReadConversionState};
-use namada_tx::{BatchedTxRef, Tx, TxCommitments};
+use namada_tx::{BatchedTxRef, InnerTxSections, Tx, TxCommitments};
 
 use super::vp_host_fns;
 use crate::state::prefix_iter::PrefixIterators;
@@ -70,6 +70,11 @@ where
     pub eval: PhantomData<EVAL>,
     /// WASM instructions gas meter kind
     pub gas_meter_kind: GasMeterKind,
+    /// The sections of the inner tx being validated, if they were already
+    /// looked up. Looking them up from the tx rehashes the whole tx, so they
+    /// should be looked up once for all the VPs (and all the inner txs of a
+    /// batch, with [`Tx::batch_sections`]).
+    pub inner_tx_sections: Option<InnerTxSections<'a>>,
 }
 
 /// A Validity predicate runner for calls from the host env `vp_eval` function.
@@ -144,7 +149,18 @@ where
             vp_wasm_cache,
             eval: PhantomData,
             gas_meter_kind,
+            inner_tx_sections: None,
         }
+    }
+
+    /// Set the sections of the inner tx being validated that were already
+    /// looked up. These must have been looked up from `tx` for `cmt`.
+    pub fn with_inner_tx_sections(
+        mut self,
+        inner_tx_sections: InnerTxSections<'a>,
+    ) -> Self {
+        self.inner_tx_sections = Some(inner_tx_sections);
+        self
     }
 
     /// Read access to the prior storage (state before tx execution)
@@ -430,11 +446,28 @@ where
     }
 
     fn get_tx_code_hash(&self) -> Result<Option<Hash>> {
+        if let Some(sections) = self.inner_tx_sections {
+            vp_host_fns::charge_tx_code_hash_gas(self.gas_meter)
+                .into_storage_result()?;
+            return Ok(sections.code_hash());
+        }
         vp_host_fns::get_tx_code_hash(
             self.gas_meter,
             &self.tx.batch_ref_tx(self.cmt),
         )
         .into_storage_result()
+    }
+
+    fn get_tx_data(&self, batched_tx: &BatchedTxRef<'_>) -> Option<Vec<u8>> {
+        // Only reuse the sections if they belong to the given inner tx
+        let is_validated_tx =
+            std::ptr::eq(batched_tx.tx, self.tx) && batched_tx.cmt == self.cmt;
+        match self.inner_tx_sections {
+            Some(sections) if is_validated_tx => {
+                sections.data.map(<[u8]>::to_vec)
+            }
+            _ => batched_tx.tx.data(batched_tx.cmt),
+        }
     }
 
     fn read_pre<T: borsh::BorshDeserialize>(

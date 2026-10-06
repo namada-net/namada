@@ -25,6 +25,7 @@ mod escrow_drain_tests {
     use std::path::PathBuf;
 
     use namada_apps_lib::wasm_loader;
+    use namada_core::ibc::primitives::ToProto;
     use namada_sdk::account::AccountPublicKeysMap;
     use namada_sdk::address::testing::established_address_1;
     use namada_sdk::address::{self, Address, InternalAddress};
@@ -36,7 +37,6 @@ mod escrow_drain_tests {
     use namada_sdk::ibc::core::channel::types::timeout::{
         TimeoutHeight, TimeoutTimestamp,
     };
-    use namada_core::ibc::primitives::ToProto;
     use namada_sdk::ibc::core::host::types::identifiers::PortId;
     use namada_sdk::ibc::primitives::Timestamp;
     use namada_sdk::ibc::{IBC_ESCROW_ADDRESS, MsgTransfer};
@@ -499,15 +499,16 @@ mod escrow_drain_tests {
         let tx_data = msg.to_any().encode_to_vec();
 
         let mut tx = Tx::new(ChainId::default(), None);
-        tx.add_code(vec![], None).add_serialized_data(tx_data.clone());
+        tx.add_code(vec![], None)
+            .add_serialized_data(tx_data.clone());
         sign_tx(&mut tx);
         let batched_tx = tx.batch_first_tx();
         tx_host_env::with(|env| {
             env.batched_tx = batched_tx.clone();
         });
 
-        // 1. Run the IBC handler (what `tx_ibc.wasm` does): the channel
-        //    open executes and writes the channel state
+        // 1. Run the IBC handler (what `tx_ibc.wasm` does): the channel open
+        //    executes and writes the channel state
         tx_host_env::ibc::ibc_actions(tx_host_env::ctx())
             .execute::<token::Transfer>(&tx_data)
             .expect("IBC handler should execute the channel open");

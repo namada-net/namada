@@ -2021,11 +2021,13 @@ mod tests {
         // the governance proposal is being executed (see
         // `execute_default_proposal` in namada_governance)
         const PROPOSAL_ID: u64 = 1;
-        let proposal_execution_key = namada_governance::storage::keys::get_proposal_execution_key(PROPOSAL_ID);
-        state
+        let proposal_execution_key =
+            namada_governance::storage::keys::get_proposal_execution_key(
+                PROPOSAL_ID,
+            );
+        _ = state
             .write_log_mut()
-            .write(&proposal_execution_key, Vec::new())
-            .expect("write failed");
+            .write(&proposal_execution_key, Vec::new());
         state.write_log_mut().commit_batch_and_current_tx();
         state.commit_block().expect("commit failed");
         // for next block

@@ -15,6 +15,7 @@ wasms += tx_no_op
 wasms += tx_no_op_event
 wasms += tx_proposal_code
 wasms += tx_proposal_ibc_channel_init
+wasms += tx_proposal_ibc_channel_init_nft
 wasms += tx_proposal_ibc_token_inflation
 wasms += tx_proposal_ibc_unlimited_channel
 wasms += tx_proposal_masp_reward

@@ -32,6 +32,8 @@ pub enum VpError {
         "Action {0} not authorized by {1} which is not part of verifier set"
     )]
     Unauthorized(&'static str, Address),
+    #[error("Action {0} cannot be authorized by internal address {1}")]
+    UnauthorizedInternal(&'static str, Address),
 }
 
 impl From<VpError> for Error {
@@ -172,6 +174,21 @@ where
                             source: source.unwrap_or_else(|| validator.clone()),
                             validator,
                         };
+                        // An internal address cannot authorize a bond: a tx
+                        // can add any address to the verifiers set, and
+                        // bonding from the PoS address itself would be a no-op
+                        // transfer creating stake not backed by any tokens
+                        if bond_id.source.is_internal() {
+                            tracing::info!(
+                                "Unauthorized PosAction::Bond from internal \
+                                 address"
+                            );
+                            return Err(VpError::UnauthorizedInternal(
+                                "Bond",
+                                bond_id.source,
+                            )
+                            .into());
+                        }
                         if !verifiers.contains(&bond_id.source) {
                             tracing::info!("Unauthorized PosAction::Bond");
                             return Err(VpError::Unauthorized(

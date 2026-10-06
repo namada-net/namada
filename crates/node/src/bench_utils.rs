@@ -1427,12 +1427,23 @@ impl BenchShieldedCtx {
         let now: IbcTimestamp = now.into_timestamp().unwrap();
         let timeout_timestamp =
             (now + std::time::Duration::new(3600, 0)).unwrap();
+        // The ICS20 packet sender must be a transparent address: the IBC VP
+        // rejects internal addresses as senders, and when the source is
+        // shielded the SDK uses a transparent refund address as the packet
+        // sender. The funds are still drawn from the MASP via the shielded
+        // section of the tx.
+        let sender = match &source {
+            TransferSource::Address(addr) => addr.clone(),
+            // The spending key used in the bench belongs to Albert, so use
+            // Albert's transparent address as the refund address
+            TransferSource::ExtendedKey(_) => defaults::albert_address(),
+        };
         let msg = IbcMsgTransfer {
             port_id_on_a: PortId::transfer(),
             chan_id_on_a: ChannelId::new(5),
             packet_data: PacketData {
                 token,
-                sender: source.effective_address().to_string().into(),
+                sender: sender.to_string().into(),
                 receiver: target.into(),
                 memo: "".parse().unwrap(),
             },

@@ -846,7 +846,6 @@ pub mod testing {
         prop_oneof![
             arb_established_address().prop_map(Address::Established),
             arb_implicit_address().prop_map(Address::Implicit),
-            arb_whitelisted_address(),
         ]
     }
 

@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod test_bridge_pool_vp {
     use std::cell::RefCell;
-    use std::path::PathBuf;
 
     use borsh::BorshDeserialize;
     use namada_apps_lib::wallet::defaults::{albert_address, bertha_address};
@@ -25,7 +24,7 @@ mod test_bridge_pool_vp {
     use namada_sdk::validation::EthBridgePoolVp;
     use namada_tx_prelude::BatchedTx;
 
-    use crate::native_vp::TestNativeVpEnv;
+    use crate::native_vp::{TestNativeVpEnv, wasm_dir};
     use crate::tx::{TestTxEnv, tx_host_env};
     const ASSET: EthAddress = EthAddress([1; 20]);
     const BERTHA_WEALTH: u64 = 1_000_000;
@@ -45,21 +44,6 @@ mod test_bridge_pool_vp {
         ];
         let ed_sk = ed25519::SecretKey::try_from_slice(&bytes).unwrap();
         ed_sk.try_to_sk().unwrap()
-    }
-
-    /// Gets the absolute path to wasm directory
-    fn wasm_dir() -> PathBuf {
-        let mut current_path = std::env::current_dir()
-            .expect("Current directory should exist")
-            .canonicalize()
-            .expect("Current directory should exist");
-        while current_path.file_name().unwrap() != "tests" {
-            current_path.pop();
-        }
-        // Two-dirs up to root
-        current_path.pop();
-        current_path.pop();
-        current_path.join("wasm")
     }
 
     /// Create necessary accounts and balances for the test.

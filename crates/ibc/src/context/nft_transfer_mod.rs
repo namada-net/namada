@@ -99,9 +99,8 @@ where
         // permissionless channels from being opened to forge vouchers
         // draining the pooled IBC escrow.
         Err(ChannelError::AppSpecific {
-            description:
-                "IBC channel creation requires a governance proposal"
-                    .to_string(),
+            description: "IBC channel creation requires a governance proposal"
+                .to_string(),
         })
     }
 
@@ -142,10 +141,9 @@ where
         // proposal executing `ChanOpenInit`), in which case Namada never
         // processes a `ChanOpenTry`. See `on_chan_open_init_validate` above.
         Err(ChannelError::AppSpecific {
-            description:
-                "IBC channel creation is not permitted from the counterparty \
-                 side"
-                    .to_string(),
+            description: "IBC channel creation is not permitted from the \
+                          counterparty side"
+                .to_string(),
         })
     }
 

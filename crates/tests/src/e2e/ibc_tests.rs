@@ -30,12 +30,8 @@ use namada_sdk::governance::cli::onchain::PgfFunding;
 use namada_sdk::governance::pgf::ADDRESS as PGF_ADDRESS;
 use namada_sdk::governance::storage::proposal::{PGFIbcTarget, PGFTarget};
 use namada_sdk::ibc::IbcShieldingData;
-use namada_sdk::ibc::apps::nft_transfer::types::{
-    PORT_ID_STR as NFT_PORT_ID, VERSION as NFT_CHANNEL_VERSION,
-};
-use namada_sdk::ibc::apps::transfer::types::{
-    PORT_ID_STR as FT_PORT_ID, VERSION as FT_CHANNEL_VERSION,
-};
+use namada_sdk::ibc::apps::nft_transfer::types::PORT_ID_STR as NFT_PORT_ID;
+use namada_sdk::ibc::apps::transfer::types::PORT_ID_STR as FT_PORT_ID;
 use namada_sdk::ibc::clients::tendermint::client_state::ClientState as TmClientState;
 use namada_sdk::ibc::core::client::types::Height;
 use namada_sdk::ibc::core::host::types::identifiers::{
@@ -76,6 +72,36 @@ const CW721_WASM: &str = "cw721_base.wasm";
 const ICS721_WASM: &str = "ics721_base.wasm";
 const NFT_ID: &str = "test_nft";
 
+/// Number of PoS pipeline epochs required for the delegation used by the
+/// governance-driven channel creation flow to become active
+const GOV_CHANNEL_PIPELINE_LEN: u64 = 5;
+
+/// Number of epochs between the voting end and the activation of the
+/// channel init governance proposal. This must be at least
+/// `min_proposal_grace_epochs` as set by `permissioned_channels_genesis`
+const GOV_CHANNEL_ACTIVATION_EPOCHS: u64 = 6;
+
+/// Genesis parameters required by the governance-driven channel creation
+/// flow used by `create_channel_with_hermes`:
+/// - short epochs so that the proposal lifecycle completes quickly
+/// - a long enough PoS pipeline length for the IBC client trusting period to
+///   outlive the proposal execution wait
+/// - `min_proposal_grace_epochs` matching the proposal timing (voting end
+///   + 3, activation + 6)
+/// - `max_proposal_code_size` fitting the channel init proposal wasm, which
+///   embeds the IBC machinery and exceeds the default limit
+fn permissioned_channels_genesis(
+    mut genesis: templates::All<templates::Unvalidated>,
+) -> templates::All<templates::Unvalidated> {
+    genesis.parameters.parameters.epochs_per_year =
+        epochs_per_year_from_min_duration(20);
+    // for the trusting period of IBC client
+    genesis.parameters.pos_params.pipeline_len = GOV_CHANNEL_PIPELINE_LEN;
+    genesis.parameters.gov_params.min_proposal_grace_epochs = 3;
+    genesis.parameters.gov_params.max_proposal_code_size = 3_000_000;
+    genesis
+}
+
 /// IBC transfer tests:
 /// 1. Transparent transfers
 ///   - Namada -> Gaia -> Namada
@@ -96,18 +122,16 @@ const NFT_ID: &str = "test_nft";
 ///   - Wrong memo
 #[test]
 fn ibc_transfers() -> Result<()> {
-    let update_genesis =
-        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
-            genesis.parameters.parameters.epochs_per_year =
-                epochs_per_year_from_min_duration(1800);
-            genesis.parameters.ibc_params.default_mint_limit =
-                Amount::max_signed();
-            genesis
-                .parameters
-                .ibc_params
-                .default_per_epoch_throughput_limit = Amount::max_signed();
-            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
-        };
+    let update_genesis = |genesis: templates::All<templates::Unvalidated>,
+                          base_dir: &_| {
+        let mut genesis = permissioned_channels_genesis(genesis);
+        genesis.parameters.ibc_params.default_mint_limit = Amount::max_signed();
+        genesis
+            .parameters
+            .ibc_params
+            .default_per_epoch_throughput_limit = Amount::max_signed();
+        setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+    };
     let (ledger, gaia, test, test_gaia) =
         run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
     let _bg_ledger = ledger.background();
@@ -122,6 +146,7 @@ fn ibc_transfers() -> Result<()> {
         &test_gaia,
         &port_id_namada,
         &port_id_gaia,
+        0,
     )?;
 
     // Start relaying
@@ -551,18 +576,16 @@ fn ibc_transfers() -> Result<()> {
 
 #[test]
 fn ibc_nft_transfers() -> Result<()> {
-    let update_genesis =
-        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
-            genesis.parameters.parameters.epochs_per_year =
-                epochs_per_year_from_min_duration(1800);
-            genesis.parameters.ibc_params.default_mint_limit =
-                Amount::max_signed();
-            genesis
-                .parameters
-                .ibc_params
-                .default_per_epoch_throughput_limit = Amount::max_signed();
-            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
-        };
+    let update_genesis = |genesis: templates::All<templates::Unvalidated>,
+                          base_dir: &_| {
+        let mut genesis = permissioned_channels_genesis(genesis);
+        genesis.parameters.ibc_params.default_mint_limit = Amount::max_signed();
+        genesis
+            .parameters
+            .ibc_params
+            .default_per_epoch_throughput_limit = Amount::max_signed();
+        setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+    };
     let (ledger, cosmwasm, test, test_cosmwasm) =
         run_namada_cosmos(CosmosChainType::CosmWasm, update_genesis)?;
     let _bg_ledger = ledger.background();
@@ -584,6 +607,7 @@ fn ibc_nft_transfers() -> Result<()> {
         &test_cosmwasm,
         &port_id_namada,
         &port_id_cosmwasm,
+        0,
     )?;
 
     let nft = format!("{cw721_contract}/{NFT_ID}");
@@ -703,20 +727,15 @@ fn ibc_nft_transfers() -> Result<()> {
 
 #[test]
 fn pgf_over_ibc() -> Result<()> {
-    const PIPELINE_LEN: u64 = 5;
-    let update_genesis =
-        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
-            genesis.parameters.parameters.epochs_per_year =
-                epochs_per_year_from_min_duration(20);
-            // for the trusting period of IBC client
-            genesis.parameters.pos_params.pipeline_len = PIPELINE_LEN;
-            genesis.parameters.gov_params.min_proposal_grace_epochs = 3;
-            genesis
-                .parameters
-                .ibc_params
-                .default_per_epoch_throughput_limit = Amount::max_signed();
-            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
-        };
+    let update_genesis = |genesis: templates::All<templates::Unvalidated>,
+                          base_dir: &_| {
+        let mut genesis = permissioned_channels_genesis(genesis);
+        genesis
+            .parameters
+            .ibc_params
+            .default_per_epoch_throughput_limit = Amount::max_signed();
+        setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+    };
     let (ledger, gaia, test, test_gaia) =
         run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
     let _bg_ledger = ledger.background();
@@ -731,6 +750,7 @@ fn pgf_over_ibc() -> Result<()> {
         &test_gaia,
         &port_id_namada,
         &port_id_gaia,
+        0,
     )?;
 
     // Start relaying
@@ -754,7 +774,7 @@ fn pgf_over_ibc() -> Result<()> {
     delegate_token(&test)?;
     let rpc = get_actor_rpc(&test, Who::Validator(0));
     let mut epoch = get_epoch(&test, &rpc).unwrap();
-    let delegated = epoch + PIPELINE_LEN;
+    let delegated = epoch + GOV_CHANNEL_PIPELINE_LEN;
     while epoch < delegated {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }
@@ -773,7 +793,7 @@ fn pgf_over_ibc() -> Result<()> {
     while epoch < start_epoch {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }
-    submit_votes(&test)?;
+    submit_votes(&test, 1)?;
 
     // wait for the grace
     let grace_epoch = start_epoch + 6u64;
@@ -803,23 +823,20 @@ fn pgf_over_ibc() -> Result<()> {
 // 3. Transparent transfer in Namada with ibc token gas payment
 #[test]
 fn fee_payment_with_ibc_token() -> Result<()> {
-    const PIPELINE_LEN: u64 = 2;
-    let update_genesis =
-        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
-            genesis.parameters.parameters.epochs_per_year =
-                epochs_per_year_from_min_duration(30);
-            genesis.parameters.ibc_params.default_mint_limit =
-                Amount::max_signed();
-            genesis.parameters.gov_params.min_proposal_grace_epochs = 1;
-            genesis
-                .parameters
-                .ibc_params
-                .default_per_epoch_throughput_limit = Amount::max_signed();
-            // Artificially increase the gas scale to allow for fee payment with
-            // the limited ibc tokens available
-            genesis.parameters.parameters.gas_scale = 10_000_000;
-            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
-        };
+    const PIPELINE_LEN: u64 = 5;
+    let update_genesis = |genesis: templates::All<templates::Unvalidated>,
+                          base_dir: &_| {
+        let mut genesis = permissioned_channels_genesis(genesis);
+        genesis.parameters.ibc_params.default_mint_limit = Amount::max_signed();
+        genesis
+            .parameters
+            .ibc_params
+            .default_per_epoch_throughput_limit = Amount::max_signed();
+        // Artificially increase the gas scale to allow for fee payment with
+        // the limited ibc tokens available
+        genesis.parameters.parameters.gas_scale = 10_000_000;
+        setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+    };
     let (ledger, gaia, test, test_gaia) =
         run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
     let _bg_ledger = ledger.background();
@@ -841,7 +858,7 @@ fn fee_payment_with_ibc_token() -> Result<()> {
     while epoch < start_epoch {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }
-    submit_votes(&test)?;
+    submit_votes(&test, 0)?;
 
     // Create an IBC channel while waiting the grace epoch
     let hermes_dir = setup_hermes(&test, &test_gaia)?;
@@ -853,6 +870,7 @@ fn fee_payment_with_ibc_token() -> Result<()> {
         &test_gaia,
         &port_id_namada,
         &port_id_gaia,
+        1,
     )?;
     let ibc_token_on_namada =
         format!("{port_id_namada}/{channel_id_namada}/{COSMOS_COIN}");
@@ -910,23 +928,20 @@ fn fee_payment_with_ibc_token() -> Result<()> {
 /// - Check the inflation
 #[test]
 fn ibc_token_inflation() -> Result<()> {
-    const PIPELINE_LEN: u64 = 2;
+    const PIPELINE_LEN: u64 = 5;
     const MASP_EPOCH_MULTIPLIER: u64 = 2;
-    let update_genesis =
-        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
-            genesis.parameters.parameters.epochs_per_year =
-                epochs_per_year_from_min_duration(60);
-            genesis.parameters.parameters.masp_epoch_multiplier =
-                MASP_EPOCH_MULTIPLIER;
-            genesis.parameters.gov_params.min_proposal_grace_epochs = 3;
-            genesis.parameters.ibc_params.default_mint_limit =
-                Amount::max_signed();
-            genesis
-                .parameters
-                .ibc_params
-                .default_per_epoch_throughput_limit = Amount::max_signed();
-            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
-        };
+    let update_genesis = |genesis: templates::All<templates::Unvalidated>,
+                          base_dir: &_| {
+        let mut genesis = permissioned_channels_genesis(genesis);
+        genesis.parameters.parameters.masp_epoch_multiplier =
+            MASP_EPOCH_MULTIPLIER;
+        genesis.parameters.ibc_params.default_mint_limit = Amount::max_signed();
+        genesis
+            .parameters
+            .ibc_params
+            .default_per_epoch_throughput_limit = Amount::max_signed();
+        setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+    };
     let (ledger, gaia, test, test_gaia) =
         run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
     let _bg_ledger = ledger.background();
@@ -948,7 +963,7 @@ fn ibc_token_inflation() -> Result<()> {
     while epoch < start_epoch {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }
-    submit_votes(&test)?;
+    submit_votes(&test, 0)?;
 
     // Create an IBC channel while waiting the grace epoch
     let hermes_dir = setup_hermes(&test, &test_gaia)?;
@@ -960,6 +975,7 @@ fn ibc_token_inflation() -> Result<()> {
         &test_gaia,
         &port_id_namada,
         &port_id_gaia,
+        1,
     )?;
     // Start relaying
     let hermes = run_hermes(&hermes_dir)?;
@@ -1019,12 +1035,16 @@ fn ibc_token_inflation() -> Result<()> {
 fn ibc_upgrade_client() -> Result<()> {
     const UPGRADE_HEIGHT_OFFSET: u64 = 20;
 
-    let update_genesis =
-        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
-            genesis.parameters.parameters.epochs_per_year =
-                epochs_per_year_from_min_duration(1800);
-            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
-        };
+    let update_genesis = |genesis: templates::All<templates::Unvalidated>,
+                          base_dir: &_| {
+        setup::set_validators(
+            1,
+            permissioned_channels_genesis(genesis),
+            base_dir,
+            |_| 0,
+            vec![],
+        )
+    };
     let (ledger, gaia, test, test_gaia) =
         run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
     let _bg_ledger = ledger.background();
@@ -1040,6 +1060,7 @@ fn ibc_upgrade_client() -> Result<()> {
         &test_gaia,
         &port_id_namada,
         &port_id_gaia,
+        0,
     )?;
 
     let height = query_height(&test_gaia)?;
@@ -1088,18 +1109,16 @@ fn ibc_rate_limit() -> Result<()> {
     const DEFAULT_MINT_LIMIT: Amount = Amount::from_u64(1);
 
     // Mint limit 2 transfer/channel-0/nam, per-epoch throughput limit 1 NAM
-    let update_genesis =
-        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
-            genesis.parameters.parameters.epochs_per_year =
-                epochs_per_year_from_min_duration(50);
-            genesis.parameters.ibc_params.default_mint_limit =
-                DEFAULT_MINT_LIMIT;
-            genesis
-                .parameters
-                .ibc_params
-                .default_per_epoch_throughput_limit = DEFAULT_RATE_LIMIT;
-            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
-        };
+    let update_genesis = |genesis: templates::All<templates::Unvalidated>,
+                          base_dir: &_| {
+        let mut genesis = permissioned_channels_genesis(genesis);
+        genesis.parameters.ibc_params.default_mint_limit = DEFAULT_MINT_LIMIT;
+        genesis
+            .parameters
+            .ibc_params
+            .default_per_epoch_throughput_limit = DEFAULT_RATE_LIMIT;
+        setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+    };
     let (ledger, gaia, test, test_gaia) =
         run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
     let _bg_ledger = ledger.background();
@@ -1114,6 +1133,7 @@ fn ibc_rate_limit() -> Result<()> {
         &test_gaia,
         &port_id_namada,
         &port_id_gaia,
+        0,
     )?;
 
     // Start relaying
@@ -1266,15 +1286,16 @@ fn ibc_rate_limit() -> Result<()> {
 fn ibc_unlimited_channel() -> Result<()> {
     const PIPELINE_LEN: u64 = 5;
     // No IBC transfer is allowed first
-    let update_genesis =
-        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
-            genesis.parameters.parameters.epochs_per_year =
-                epochs_per_year_from_min_duration(20);
-            // for the trusting period of IBC client
-            genesis.parameters.pos_params.pipeline_len = PIPELINE_LEN;
-            genesis.parameters.gov_params.min_proposal_grace_epochs = 3;
-            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
-        };
+    let update_genesis = |genesis: templates::All<templates::Unvalidated>,
+                          base_dir: &_| {
+        setup::set_validators(
+            1,
+            permissioned_channels_genesis(genesis),
+            base_dir,
+            |_| 0,
+            vec![],
+        )
+    };
     let (ledger, gaia, test, test_gaia) =
         run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
     let _bg_ledger = ledger.background();
@@ -1289,6 +1310,7 @@ fn ibc_unlimited_channel() -> Result<()> {
         &test_gaia,
         &port_id_namada,
         &port_id_gaia,
+        0,
     )?;
 
     // Start relaying
@@ -1359,7 +1381,7 @@ fn ibc_unlimited_channel() -> Result<()> {
     while epoch < start_epoch {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }
-    submit_votes(&test)?;
+    submit_votes(&test, 1)?;
 
     // wait for the grace
     let grace_epoch = start_epoch + 6u64;
@@ -1489,27 +1511,24 @@ fn ibc_unlimited_channel() -> Result<()> {
 
 /// Permissioned IBC channel creation test:
 /// 1. Opening a channel with a regular (non-governance) transaction must be
-///    rejected by the IBC VP. This prevents permissionless channels from
-///    being opened to mount the forged-voucher escrow drain attack.
-/// 2. A governance proposal can initiate the channel handshake
-///    (`ChanOpenInit`) over a permissionlessly created connection.
+///    rejected by the IBC VP. This prevents permissionless channels from being
+///    opened to mount the forged-voucher escrow drain attack.
+/// 2. A governance proposal can initiate the channel handshake (`ChanOpenInit`)
+///    over a permissionlessly created connection.
 /// 3. The remaining handshake steps are permissionless.
 /// 4. Transfers work over the governance-created channel.
 #[test]
 fn ibc_permissioned_channels() -> Result<()> {
-    const PIPELINE_LEN: u64 = 5;
-    let update_genesis =
-        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
-            genesis.parameters.parameters.epochs_per_year =
-                epochs_per_year_from_min_duration(20);
-            // for the trusting period of IBC client
-            genesis.parameters.pos_params.pipeline_len = PIPELINE_LEN;
-            genesis.parameters.gov_params.min_proposal_grace_epochs = 3;
-            // The proposal wasm embeds the IBC machinery and exceeds the
-            // default limit
-            genesis.parameters.gov_params.max_proposal_code_size = 3_000_000;
-            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
-        };
+    let update_genesis = |genesis: templates::All<templates::Unvalidated>,
+                          base_dir: &_| {
+        setup::set_validators(
+            1,
+            permissioned_channels_genesis(genesis),
+            base_dir,
+            |_| 0,
+            vec![],
+        )
+    };
     let (ledger, gaia, test, test_gaia) =
         run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
     let _bg_ledger = ledger.background();
@@ -1556,21 +1575,22 @@ fn ibc_permissioned_channels() -> Result<()> {
     delegate_token(&test)?;
     let rpc = get_actor_rpc(&test, Who::Validator(0));
     let mut epoch = get_epoch(&test, &rpc).unwrap();
-    let delegated = epoch + PIPELINE_LEN;
+    let delegated = epoch + GOV_CHANNEL_PIPELINE_LEN;
     while epoch < delegated {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }
-    let start_epoch = propose_channel_init(&test)?;
+    let start_epoch =
+        propose_channel_init(&test, TestWasms::TxProposalIbcChannelInit)?;
     let mut epoch = get_epoch(&test, &rpc).unwrap();
     // Vote
     while epoch < start_epoch {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }
-    submit_votes(&test)?;
+    submit_votes(&test, 0)?;
 
     // wait for the activation epoch, when the proposal is executed and the
     // channel enters the INIT state
-    let activation_epoch = start_epoch + 6u64;
+    let activation_epoch = start_epoch + GOV_CHANNEL_ACTIVATION_EPOCHS;
     while epoch < activation_epoch {
         epoch = epoch_sleep(&test, &rpc, 120)?;
     }
@@ -1844,6 +1864,7 @@ fn ibc_pfm_happy_flows() -> Result<()> {
         &test,
         &port_id_namada,
         &port_id_gaia_1,
+        0,
     )?;
     let (channel_id_gaia_2, channel_id_namada_2) = create_channel_with_hermes(
         &hermes_namada_gaia2,
@@ -1851,6 +1872,7 @@ fn ibc_pfm_happy_flows() -> Result<()> {
         &test,
         &port_id_namada,
         &port_id_gaia_2,
+        0,
     )?;
 
     // Start relaying
@@ -2148,6 +2170,7 @@ fn ibc_pfm_unhappy_flows() -> Result<()> {
         &test,
         &port_id_namada,
         &port_id_gaia_1,
+        0,
     )?;
     let (channel_id_gaia_2, channel_id_namada_2) = create_channel_with_hermes(
         &hermes_namada_gaia2,
@@ -2155,6 +2178,7 @@ fn ibc_pfm_unhappy_flows() -> Result<()> {
         &test,
         &port_id_namada,
         &port_id_gaia_2,
+        0,
     )?;
 
     // Start relaying
@@ -2570,6 +2594,7 @@ fn ibc_shielded_recv_middleware_happy_flow() -> Result<()> {
         &test_gaia,
         &port_id_namada,
         &port_id_gaia,
+        0,
     )?;
 
     // Start relaying
@@ -2699,6 +2724,7 @@ fn ibc_shielded_recv_middleware_unhappy_flow() -> Result<()> {
         &test_gaia,
         &port_id_namada,
         &port_id_gaia,
+        0,
     )?;
 
     // Start relaying
@@ -2795,50 +2821,117 @@ fn create_channel_with_hermes(
     test_b: &Test,
     port_id_a: &PortId,
     port_id_b: &PortId,
+    proposal_id: u64,
 ) -> Result<(ChannelId, ChannelId)> {
-    let channel_version = if port_id_a.as_str() == NFT_PORT_ID
-        || port_id_b.as_str() == NFT_PORT_ID
-    {
-        NFT_CHANNEL_VERSION
-    } else {
-        FT_CHANNEL_VERSION
-    };
-
+    // Create a client and a connection. Client and connection creation
+    // is not permissioned.
     let args = [
         "create",
-        "channel",
+        "connection",
         "--a-chain",
         test_a.net.chain_id.as_str(),
         "--b-chain",
         test_b.net.chain_id.as_str(),
-        "--a-port",
-        port_id_a.as_str(),
-        "--b-port",
-        port_id_b.as_str(),
-        "--channel-version",
-        channel_version,
-        "--new-client-connection",
         "--yes",
     ];
-
     let mut hermes = run_hermes_cmd(hermes_dir, args, Some(240))?;
-    let (channel_id_a, channel_id_b) =
-        get_channel_ids_from_hermes_output(&mut hermes)?;
     hermes.assert_success();
 
-    Ok((channel_id_a, channel_id_b))
-}
+    // Opening a channel with a regular tx is rejected by the IBC VP:
+    // submit a governance proposal whose wasm executes `ChanOpenInit`
+    // over the connection
+    delegate_token(test_a)?;
+    let rpc = get_actor_rpc(test_a, Who::Validator(0));
+    let mut epoch = get_epoch(test_a, &rpc).unwrap();
+    let delegated = epoch + GOV_CHANNEL_PIPELINE_LEN;
+    while epoch < delegated {
+        epoch = epoch_sleep(test_a, &rpc, 120)?;
+    }
+    let channel_wasm = if port_id_a.as_str() == NFT_PORT_ID {
+        TestWasms::TxProposalIbcChannelInitNft
+    } else {
+        TestWasms::TxProposalIbcChannelInit
+    };
+    let start_epoch = propose_channel_init(test_a, channel_wasm)?;
+    let mut epoch = get_epoch(test_a, &rpc).unwrap();
+    // Vote
+    while epoch < start_epoch {
+        epoch = epoch_sleep(test_a, &rpc, 120)?;
+    }
+    submit_votes(test_a, proposal_id)?;
 
-fn get_channel_ids_from_hermes_output(
-    hermes: &mut NamadaCmd,
-) -> Result<(ChannelId, ChannelId)> {
-    let (_, matched) =
-        hermes.exp_regex("channel handshake already finished .*")?;
+    // wait for the activation epoch, when the proposal is executed and the
+    // channel enters the INIT state
+    let activation_epoch = start_epoch + GOV_CHANNEL_ACTIVATION_EPOCHS;
+    while epoch < activation_epoch {
+        epoch = epoch_sleep(test_a, &rpc, 120)?;
+    }
 
-    let regex = regex::Regex::new(r"channel-[0-9]+").unwrap();
-    let mut iter = regex.find_iter(&matched);
-    let channel_id_a = iter.next().unwrap().as_str().parse().unwrap();
-    let channel_id_b = iter.next().unwrap().as_str().parse().unwrap();
+    // Relay the rest of the handshake. The channel opened by the proposal
+    // is the first channel on a fresh chain, on both sides
+    let channel_id_a: ChannelId = "channel-0".parse().unwrap();
+    let channel_id_b: ChannelId = "channel-0".parse().unwrap();
+
+    let args = [
+        "tx",
+        "chan-open-try",
+        "--src-chain",
+        test_a.net.chain_id.as_str(),
+        "--dst-chain",
+        test_b.net.chain_id.as_str(),
+        "--dst-connection",
+        "connection-0",
+        "--src-port",
+        port_id_a.as_str(),
+        "--dst-port",
+        port_id_b.as_str(),
+        "--src-channel",
+        channel_id_a.as_str(),
+    ];
+    let mut hermes = run_hermes_cmd(hermes_dir, args, Some(240))?;
+    hermes.assert_success();
+
+    let args = [
+        "tx",
+        "chan-open-ack",
+        "--src-chain",
+        test_a.net.chain_id.as_str(),
+        "--dst-chain",
+        test_b.net.chain_id.as_str(),
+        "--dst-connection",
+        "connection-0",
+        "--src-port",
+        port_id_a.as_str(),
+        "--dst-port",
+        port_id_b.as_str(),
+        "--src-channel",
+        channel_id_a.as_str(),
+        "--dst-channel",
+        channel_id_b.as_str(),
+    ];
+    let mut hermes = run_hermes_cmd(hermes_dir, args, Some(240))?;
+    hermes.assert_success();
+
+    let args = [
+        "tx",
+        "chan-open-confirm",
+        "--src-chain",
+        test_a.net.chain_id.as_str(),
+        "--dst-chain",
+        test_b.net.chain_id.as_str(),
+        "--dst-connection",
+        "connection-0",
+        "--src-port",
+        port_id_a.as_str(),
+        "--dst-port",
+        port_id_b.as_str(),
+        "--src-channel",
+        channel_id_a.as_str(),
+        "--dst-channel",
+        channel_id_b.as_str(),
+    ];
+    let mut hermes = run_hermes_cmd(hermes_dir, args, Some(240))?;
+    hermes.assert_success();
 
     Ok((channel_id_a, channel_id_b))
 }
@@ -3459,7 +3552,7 @@ fn propose_unlimited_channel(test: &Test) -> Result<Epoch> {
 
 /// Submit a governance proposal whose wasm executes `ChanOpenInit` to open
 /// a channel over connection-0 (see `tx_proposal_ibc_channel_init.wasm`)
-fn propose_channel_init(test: &Test) -> Result<Epoch> {
+fn propose_channel_init(test: &Test, wasm: TestWasms) -> Result<Epoch> {
     let albert = find_address(test, ALBERT)?;
     let rpc = get_actor_rpc(test, Who::Validator(0));
     let epoch = get_epoch(test, &rpc)?;
@@ -3482,7 +3575,7 @@ fn propose_channel_init(test: &Test) -> Result<Epoch> {
             "voting_end_epoch": start_epoch + 3_u64,
             "activation_epoch": start_epoch + 6_u64,
         },
-        "data": TestWasms::TxProposalIbcChannelInit.read_bytes()
+        "data": wasm.read_bytes()
     });
 
     let proposal_json_path = test.test_dir.path().join("proposal.json");
@@ -3542,13 +3635,14 @@ fn vote_on_gaia(test: &Test) -> Result<()> {
     Ok(())
 }
 
-fn submit_votes(test: &Test) -> Result<()> {
+fn submit_votes(test: &Test, proposal_id: u64) -> Result<()> {
     let rpc = get_actor_rpc(test, Who::Validator(0));
+    let proposal_id = proposal_id.to_string();
 
     let submit_proposal_vote = vec![
         "vote-proposal",
         "--proposal-id",
-        "0",
+        &proposal_id,
         "--vote",
         "yay",
         "--address",
@@ -3570,7 +3664,7 @@ fn submit_votes(test: &Test) -> Result<()> {
     let submit_proposal_vote_delagator = apply_use_device(vec![
         "vote-proposal",
         "--proposal-id",
-        "0",
+        &proposal_id,
         "--vote",
         "yay",
         "--address",
@@ -4181,18 +4275,16 @@ fn nft_transfer_from_cosmos(
 // originating from a foreign chain
 #[test]
 fn frontend_sus_fee() -> Result<()> {
-    let update_genesis =
-        |mut genesis: templates::All<templates::Unvalidated>, base_dir: &_| {
-            genesis.parameters.parameters.epochs_per_year =
-                epochs_per_year_from_min_duration(1800);
-            genesis.parameters.ibc_params.default_mint_limit =
-                Amount::max_signed();
-            genesis
-                .parameters
-                .ibc_params
-                .default_per_epoch_throughput_limit = Amount::max_signed();
-            setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
-        };
+    let update_genesis = |genesis: templates::All<templates::Unvalidated>,
+                          base_dir: &_| {
+        let mut genesis = permissioned_channels_genesis(genesis);
+        genesis.parameters.ibc_params.default_mint_limit = Amount::max_signed();
+        genesis
+            .parameters
+            .ibc_params
+            .default_per_epoch_throughput_limit = Amount::max_signed();
+        setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
+    };
     let (ledger, gaia, test, test_gaia) =
         run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
     let _bg_ledger = ledger.background();
@@ -4207,6 +4299,7 @@ fn frontend_sus_fee() -> Result<()> {
         &test_gaia,
         &port_id_namada,
         &port_id_gaia,
+        0,
     )?;
 
     // Start relaying
@@ -4464,6 +4557,7 @@ fn osmosis_xcs() -> Result<()> {
             &test_namada,
             &PortId::transfer(),
             &PortId::transfer(),
+            0,
         )?;
 
     // Osmosis currently uses an older version of the Cosmos SDK
@@ -4477,6 +4571,7 @@ fn osmosis_xcs() -> Result<()> {
             &test_osmosis,
             &PortId::transfer(),
             &PortId::transfer(),
+            0,
         )?;
 
     let (channel_from_namada_to_osmosis, channel_from_osmosis_to_namada) =
@@ -4486,6 +4581,7 @@ fn osmosis_xcs() -> Result<()> {
             &test_osmosis,
             &PortId::transfer(),
             &PortId::transfer(),
+            0,
         )?;
 
     // Start relaying

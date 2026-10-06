@@ -371,7 +371,9 @@ pub mod testing {
     use masp_primitives::transaction::components::{TxOut, U64Sum};
     use masp_primitives::transaction::fees::fixed::FeeRule;
     use masp_primitives::zip32::PseudoExtendedKey;
-    use namada_core::address::testing::arb_non_internal_address;
+    use namada_core::address::testing::{
+        arb_non_internal_address, arb_whitelisted_address,
+    };
     use namada_core::address::{Address, MASP};
     use namada_core::collections::HashMap;
     use namada_core::masp::{AssetData, TAddrData, encode_asset_type};
@@ -398,7 +400,12 @@ pub mod testing {
         fn arb_single_transparent_transfer()(
             source in arb_non_internal_address(),
             target in arb_non_internal_address(),
-            token in arb_non_internal_address(),
+            token in prop_oneof![
+                arb_non_internal_address(),
+                // Include whitelisted tokens, some of which are internal
+                // addresses, to generate Ledger test vectors for them
+                arb_whitelisted_address(),
+            ],
             amount in arb_denominated_amount(),
         ) -> (Address, Address, Address, DenominatedAmount) {
             (

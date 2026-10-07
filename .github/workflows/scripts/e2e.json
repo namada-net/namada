@@ -9,6 +9,7 @@
     "e2e::ibc_tests::ibc_rate_limit": 650,
     "e2e::ibc_tests::ibc_unlimited_channel": 650,
     "e2e::ibc_tests::ibc_upgrade_client": 500,
+    "e2e::ibc_tests::ibc_permissioned_channels": 500,
     "e2e::eth_bridge_tests::test_add_to_bridge_pool": 10,
     "e2e::ledger_tests::double_signing_gets_slashed": 12,
     "e2e::ledger_tests::ledger_many_txs_in_a_block": 55,

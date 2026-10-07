@@ -11,6 +11,8 @@ members = [
     "tx_no_op",
     "tx_no_op_event",
     "tx_proposal_code",
+    "tx_proposal_ibc_channel_init",
+    "tx_proposal_ibc_channel_init_nft",
     "tx_proposal_ibc_token_inflation",
     "tx_proposal_ibc_unlimited_channel",
     "tx_proposal_masp_reward",

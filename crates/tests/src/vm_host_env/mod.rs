@@ -933,15 +933,18 @@ mod tests {
             .execute::<token::Transfer>(&tx_data)
             .expect("creating a channel failed");
 
-        // Check
+        // Check: channel creation is permissioned, the IBC VP must reject a
+        // `ChanOpenInit` from a regular (non-governance) tx
         let mut env = tx_host_env::take();
         let result = ibc::validate_ibc_vp_from_tx(
             &env,
             &tx.batch_ref_first_tx().unwrap(),
         );
-        assert!(result.is_ok());
+        assert!(result.is_err());
 
-        // Commit
+        // Commit the channel state as a governance proposal execution would
+        // (the proposal tx bypasses the IBC VP) and proceed to the next
+        // permissionless handshake step
         env.commit_tx_and_block();
         // for the next block
         env.state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
@@ -966,7 +969,7 @@ mod tests {
             .execute::<token::Transfer>(&tx_data)
             .expect("opening the channel failed");
 
-        // Check
+        // Check: completing an opened handshake is permissionless
         let env = tx_host_env::take();
         let result = ibc::validate_ibc_vp_from_tx(
             &env,
@@ -1005,54 +1008,26 @@ mod tests {
         let mut tx = Tx::new(ChainId::default(), None);
         tx.add_code(vec![], None)
             .add_serialized_data(tx_data.clone())
-            .sign_raw(keypairs.clone(), pks_map.clone(), None)
+            .sign_raw(keypairs, pks_map, None)
             .sign_wrapper(keypair.clone());
         // try open a channel with the message
         tx_host_env::ibc::ibc_actions(tx::ctx())
             .execute::<token::Transfer>(&tx_data)
             .expect("creating a channel failed");
 
-        // Check
+        // Check: counterparty-initiated channels are not allowed at all, the
+        // IBC VP must reject a `ChanOpenTry` from a regular tx
         let mut env = tx_host_env::take();
         let result = ibc::validate_ibc_vp_from_tx(
             &env,
             &tx.batch_ref_first_tx().unwrap(),
         );
-        assert!(result.is_ok());
+        assert!(result.is_err());
 
-        // Commit
-        env.commit_tx_and_block();
-        // for the next block
-        env.state.in_mem_mut().begin_block(BlockHeight(2)).unwrap();
-        env.state
-            .in_mem_mut()
-            .set_header(get_dummy_header())
-            .unwrap();
+        // The handshake never proceeds to the confirmation: the channel
+        // created by a rejected `ChanOpenTry` is discarded
+        env.state.write_log_mut().drop_batch();
         tx_host_env::set(env);
-
-        // Start the next transaction for ChannelOpenConfirm
-        let channel_id = ibc::ChannelId::new(0);
-        let msg = ibc::msg_channel_open_confirm(port_id, channel_id);
-        let mut tx_data = vec![];
-        msg.to_any().encode(&mut tx_data).expect("encoding failed");
-
-        let mut tx = Tx::new(ChainId::default(), None);
-        tx.add_code(vec![], None)
-            .add_serialized_data(tx_data.clone())
-            .sign_raw(keypairs, pks_map, None)
-            .sign_wrapper(keypair);
-        // open a channel with the message
-        tx_host_env::ibc::ibc_actions(tx::ctx())
-            .execute::<token::Transfer>(&tx_data)
-            .expect("opening the channel failed");
-
-        // Check
-        let env = tx_host_env::take();
-        let result = ibc::validate_ibc_vp_from_tx(
-            &env,
-            &tx.batch_ref_first_tx().unwrap(),
-        );
-        assert!(result.is_ok());
     }
 
     #[test]

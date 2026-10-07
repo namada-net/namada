@@ -18,6 +18,9 @@ pub use namada_ibc::{
     IbcActions, IbcCommonContext, IbcStorageContext, NftTransferModule,
     ProofSpec, TransferModule,
 };
+// Re-export the underlying `ibc` crate modules so that wasm transactions
+// (e.g. governance proposal txs) can construct IBC messages
+pub use namada_ibc::{apps, core, primitives};
 use namada_tx_env::TxEnv;
 
 use crate::{Ctx, Result, parameters, token};

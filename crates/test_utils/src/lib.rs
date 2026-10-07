@@ -28,6 +28,8 @@ pub enum TestWasms {
     TxInfiniteHostGas,
     TxProposalCode,
     TxProposalMaspRewards,
+    TxProposalIbcChannelInit,
+    TxProposalIbcChannelInitNft,
     TxProposalIbcTokenInflation,
     TxProposalIbcUnlimitedChannel,
     TxProposalTokenGas,
@@ -58,6 +60,12 @@ impl TestWasms {
             TestWasms::TxInfiniteHostGas => "tx_infinite_host_gas.wasm",
             TestWasms::TxProposalCode => "tx_proposal_code.wasm",
             TestWasms::TxProposalMaspRewards => "tx_proposal_masp_reward.wasm",
+            TestWasms::TxProposalIbcChannelInit => {
+                "tx_proposal_ibc_channel_init.wasm"
+            }
+            TestWasms::TxProposalIbcChannelInitNft => {
+                "tx_proposal_ibc_channel_init_nft.wasm"
+            }
             TestWasms::TxProposalIbcTokenInflation => {
                 "tx_proposal_ibc_token_inflation.wasm"
             }

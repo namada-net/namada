@@ -810,14 +810,18 @@ fn pos_bonds() -> Result<()> {
 /// 7. Check the new validator's bonded stake
 #[test]
 fn pos_init_validator() -> Result<()> {
-    let pipeline_len = 1;
+    // The pipeline length must be at least 2. The validator set update for
+    // the next epoch is sent to CometBFT before the last blocks of an epoch,
+    // so with a shorter pipeline a bond applied in these blocks would change
+    // the stake without updating the CometBFT voting power.
+    let pipeline_len = 2;
     let validator_stake = token::Amount::native_whole(100000_u64);
     let test = setup::network(
         |mut genesis, base_dir: &_| {
             genesis.parameters.parameters.min_num_of_blocks = 4;
             genesis.parameters.parameters.epochs_per_year = 31_536_000;
             genesis.parameters.pos_params.pipeline_len = pipeline_len;
-            genesis.parameters.pos_params.unbonding_len = 2;
+            genesis.parameters.pos_params.unbonding_len = 3;
             let genesis = setup::set_validators(
                 1,
                 genesis,
@@ -1005,7 +1009,7 @@ fn pos_init_validator() -> Result<()> {
     );
     #[allow(clippy::disallowed_methods)]
     let start = Instant::now();
-    let loop_timeout = Duration::new(20, 0);
+    let loop_timeout = Duration::new(40, 0);
     loop {
         if {
             #[allow(clippy::disallowed_methods)]

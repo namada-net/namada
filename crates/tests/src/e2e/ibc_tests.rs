@@ -81,6 +81,9 @@ const GOV_CHANNEL_PIPELINE_LEN: u64 = 5;
 /// `min_proposal_grace_epochs` as set by `permissioned_channels_genesis`
 const GOV_CHANNEL_ACTIVATION_EPOCHS: u64 = 6;
 
+/// Number of attempts to relay a channel handshake step with Hermes
+const HERMES_HANDSHAKE_ATTEMPTS: u64 = 3;
+
 /// Max size in bytes of a tx, matching the mainnet value. The channel init
 /// governance proposal tx is larger than the 1 MiB localnet default
 const GOV_CHANNEL_MAX_TX_BYTES: u32 = 2_000_000;
@@ -1536,13 +1539,13 @@ fn ibc_unlimited_channel() -> Result<()> {
 fn ibc_permissioned_channels() -> Result<()> {
     let update_genesis = |genesis: templates::All<templates::Unvalidated>,
                           base_dir: &_| {
-        setup::set_validators(
-            1,
-            permissioned_channels_genesis(genesis),
-            base_dir,
-            |_| 0,
-            vec![],
-        )
+        let mut genesis = permissioned_channels_genesis(genesis);
+        genesis.parameters.ibc_params.default_mint_limit = Amount::max_signed();
+        genesis
+            .parameters
+            .ibc_params
+            .default_per_epoch_throughput_limit = Amount::max_signed();
+        setup::set_validators(1, genesis, base_dir, |_| 0, vec![])
     };
     let (ledger, gaia, test, test_gaia) =
         run_namada_cosmos(CosmosChainType::Gaia(None), update_genesis)?;
@@ -1636,8 +1639,7 @@ fn ibc_permissioned_channels() -> Result<()> {
         "--src-channel",
         channel_id_namada.as_str(),
     ];
-    let mut hermes = run_hermes_cmd(&hermes_dir, args, Some(240))?;
-    hermes.assert_success();
+    relay_channel_handshake_step(&hermes_dir, &args)?;
 
     // The ack goes to the chain on which the channel was initialized
     let args = [
@@ -1658,8 +1660,7 @@ fn ibc_permissioned_channels() -> Result<()> {
         "--dst-channel",
         channel_id_namada.as_str(),
     ];
-    let mut hermes = run_hermes_cmd(&hermes_dir, args, Some(240))?;
-    hermes.assert_success();
+    relay_channel_handshake_step(&hermes_dir, &args)?;
 
     let args = [
         "tx",
@@ -1679,8 +1680,7 @@ fn ibc_permissioned_channels() -> Result<()> {
         "--dst-channel",
         channel_id_gaia.as_str(),
     ];
-    let mut hermes = run_hermes_cmd(&hermes_dir, args, Some(240))?;
-    hermes.assert_success();
+    relay_channel_handshake_step(&hermes_dir, &args)?;
 
     // Start relaying
     let hermes = run_hermes(&hermes_dir)?;
@@ -2846,6 +2846,30 @@ fn setup_and_boot_cosmos(
     Ok((cosmos, test_cosmos))
 }
 
+/// Relay a channel handshake step with the given Hermes command, retrying it
+/// on failure.
+///
+/// The relayer takes the proofs at the latest height reported by CometBFT,
+/// which the ledger may have not committed yet. The proofs then don't match
+/// the height they are submitted for and the counterparty rejects them.
+fn relay_channel_handshake_step(
+    hermes_dir: &TestDir,
+    args: &[&str],
+) -> Result<()> {
+    for _ in 0..HERMES_HANDSHAKE_ATTEMPTS {
+        let mut hermes =
+            run_hermes_cmd(hermes_dir, args.iter().copied(), Some(240))?;
+        if hermes.exited_with_success() {
+            return Ok(());
+        }
+        sleep(1);
+    }
+    Err(eyre!(
+        "Hermes command failed after {HERMES_HANDSHAKE_ATTEMPTS} attempts: {}",
+        args.join(" ")
+    ))
+}
+
 fn create_channel_with_hermes(
     hermes_dir: &TestDir,
     test_a: &Test,
@@ -2918,8 +2942,7 @@ fn create_channel_with_hermes(
         "--src-channel",
         channel_id_a.as_str(),
     ];
-    let mut hermes = run_hermes_cmd(hermes_dir, args, Some(240))?;
-    hermes.assert_success();
+    relay_channel_handshake_step(hermes_dir, &args)?;
 
     // The ack goes to the chain on which the channel was initialized
     let args = [
@@ -2940,8 +2963,7 @@ fn create_channel_with_hermes(
         "--dst-channel",
         channel_id_a.as_str(),
     ];
-    let mut hermes = run_hermes_cmd(hermes_dir, args, Some(240))?;
-    hermes.assert_success();
+    relay_channel_handshake_step(hermes_dir, &args)?;
 
     let args = [
         "tx",
@@ -2961,8 +2983,7 @@ fn create_channel_with_hermes(
         "--dst-channel",
         channel_id_b.as_str(),
     ];
-    let mut hermes = run_hermes_cmd(hermes_dir, args, Some(240))?;
-    hermes.assert_success();
+    relay_channel_handshake_step(hermes_dir, &args)?;
 
     Ok((channel_id_a, channel_id_b))
 }

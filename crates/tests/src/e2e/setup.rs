@@ -949,6 +949,16 @@ impl NamadaCmd {
         assert_eq!(WaitStatus::Exited(process.pid(), 0), status);
     }
 
+    /// Wait for the process to exit and check if it exited with success
+    pub fn exited_with_success(&mut self) -> bool {
+        // Make sure that there is no unread output first
+        let _ = self.exp_eof().unwrap();
+
+        let process = self.session.get_process();
+        let status = process.wait().unwrap();
+        WaitStatus::Exited(process.pid(), 0) == status
+    }
+
     /// Assert that the process exited with failure
     #[allow(dead_code)]
     pub fn assert_failure(&mut self) {

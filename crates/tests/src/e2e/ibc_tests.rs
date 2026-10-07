@@ -1566,22 +1566,27 @@ fn ibc_permissioned_channels() -> Result<()> {
     let mut hermes = run_hermes_cmd(&hermes_dir, args, Some(240))?;
     hermes.assert_success();
 
-    // Opening a channel with a regular tx must be rejected
+    // Opening a channel with a regular tx must be rejected. Hermes submits
+    // the message to the `--dst-chain`, which must be Namada for the IBC VP
+    // to reject it
     let args = [
         "tx",
         "chan-open-init",
         "--src-chain",
-        test.net.chain_id.as_str(),
-        "--dst-chain",
         test_gaia.net.chain_id.as_str(),
+        "--dst-chain",
+        test.net.chain_id.as_str(),
         "--dst-connection",
         "connection-0",
         "--src-port",
-        port_id_namada.as_str(),
-        "--dst-port",
         port_id_gaia.as_str(),
+        "--dst-port",
+        port_id_namada.as_str(),
     ];
     let mut hermes = run_hermes_cmd(&hermes_dir, args, Some(240))?;
+    // The failure must come from the permissioned channel creation, rather
+    // than from any other relayer error
+    hermes.exp_string("IBC channel creation requires a governance proposal")?;
     hermes.assert_failure();
 
     // Submit a governance proposal whose wasm executes `ChanOpenInit` over
@@ -1634,23 +1639,24 @@ fn ibc_permissioned_channels() -> Result<()> {
     let mut hermes = run_hermes_cmd(&hermes_dir, args, Some(240))?;
     hermes.assert_success();
 
+    // The ack goes to the chain on which the channel was initialized
     let args = [
         "tx",
         "chan-open-ack",
         "--src-chain",
-        test.net.chain_id.as_str(),
-        "--dst-chain",
         test_gaia.net.chain_id.as_str(),
+        "--dst-chain",
+        test.net.chain_id.as_str(),
         "--dst-connection",
         "connection-0",
         "--src-port",
-        port_id_namada.as_str(),
-        "--dst-port",
         port_id_gaia.as_str(),
+        "--dst-port",
+        port_id_namada.as_str(),
         "--src-channel",
-        channel_id_namada.as_str(),
-        "--dst-channel",
         channel_id_gaia.as_str(),
+        "--dst-channel",
+        channel_id_namada.as_str(),
     ];
     let mut hermes = run_hermes_cmd(&hermes_dir, args, Some(240))?;
     hermes.assert_success();
@@ -2915,23 +2921,24 @@ fn create_channel_with_hermes(
     let mut hermes = run_hermes_cmd(hermes_dir, args, Some(240))?;
     hermes.assert_success();
 
+    // The ack goes to the chain on which the channel was initialized
     let args = [
         "tx",
         "chan-open-ack",
         "--src-chain",
-        test_a.net.chain_id.as_str(),
-        "--dst-chain",
         test_b.net.chain_id.as_str(),
+        "--dst-chain",
+        test_a.net.chain_id.as_str(),
         "--dst-connection",
         "connection-0",
         "--src-port",
-        port_id_a.as_str(),
-        "--dst-port",
         port_id_b.as_str(),
+        "--dst-port",
+        port_id_a.as_str(),
         "--src-channel",
-        channel_id_a.as_str(),
-        "--dst-channel",
         channel_id_b.as_str(),
+        "--dst-channel",
+        channel_id_a.as_str(),
     ];
     let mut hermes = run_hermes_cmd(hermes_dir, args, Some(240))?;
     hermes.assert_success();

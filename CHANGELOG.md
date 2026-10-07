@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## v201.0.12
+
+Namada apps v201.0.12
+
+### BUG FIXES
+
+- Fixed the quadratic section hashing over batch commitments, and the
+  repeated lookups of inner transaction sections in native VPs, which
+  made validation of large transaction batches unnecessarily slow. The
+  transaction code hash is now also cached for VP `get_tx_code_hash`
+  calls, and the mempool rejects wrappers with more than 100 inner
+  transactions as defense in depth (a local policy that does not affect
+  consensus).
+  ([\#5050](https://github.com/namada-net/namada/pull/5050))
+- Fixed the PoS VP to reject bonds whose source is an internal address.
+  Previously, a bond naming the PoS internal address as the source was
+  accepted: the token transfer was a no-op, while the bond, validator
+  deltas and total stake were still written, creating unbacked stake.
+  ([\#5051](https://github.com/namada-net/namada/pull/5051))
+- Fixed the IBC VP to reject (NFT) transfers whose packet sender is an
+  internal address, such as the IBC escrow. Previously, such transfers
+  were a no-op for the escrow balance while still writing the withdraw
+  counter and packet commitment, allowing vouchers minted by the
+  counterparty to be returned in exchange for genuine escrowed tokens,
+  with rate limits skipped.
+  ([\#5052](https://github.com/namada-net/namada/pull/5052))
+- Restricted IBC channel open init requests to channels initialized
+  through governance proposals: the IBC VP now rejects `ChanOpenInit`
+  requests that are not submitted by the execution of a governance
+  proposal.
+  ([\#5053](https://github.com/namada-net/namada/pull/5053))
+
 ## v201.0.11
 
 Namada apps v201.0.11

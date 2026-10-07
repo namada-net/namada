@@ -81,6 +81,10 @@ const GOV_CHANNEL_PIPELINE_LEN: u64 = 5;
 /// `min_proposal_grace_epochs` as set by `permissioned_channels_genesis`
 const GOV_CHANNEL_ACTIVATION_EPOCHS: u64 = 6;
 
+/// Max size in bytes of a tx, matching the mainnet value. The channel init
+/// governance proposal tx is larger than the 1 MiB localnet default
+const GOV_CHANNEL_MAX_TX_BYTES: u32 = 2_000_000;
+
 /// Genesis parameters required by the governance-driven channel creation
 /// flow used by `create_channel_with_hermes`:
 /// - short epochs so that the proposal lifecycle completes quickly
@@ -88,8 +92,9 @@ const GOV_CHANNEL_ACTIVATION_EPOCHS: u64 = 6;
 ///   outlive the proposal execution wait
 /// - `min_proposal_grace_epochs` matching the proposal timing (voting end
 ///   + 3, activation + 6)
-/// - `max_proposal_code_size` fitting the channel init proposal wasm, which
-///   embeds the IBC machinery and exceeds the default limit
+/// - `max_proposal_code_size`, `max_tx_bytes` and `max_block_gas` set to the
+///   mainnet values, to fit the channel init proposal wasm, which embeds the
+///   IBC machinery and exceeds the localnet limits
 fn permissioned_channels_genesis(
     mut genesis: templates::All<templates::Unvalidated>,
 ) -> templates::All<templates::Unvalidated> {
@@ -102,7 +107,10 @@ fn permissioned_channels_genesis(
     genesis.parameters.pos_params.pipeline_len = GOV_CHANNEL_PIPELINE_LEN;
     genesis.parameters.pos_params.unbonding_len = 10;
     genesis.parameters.gov_params.min_proposal_grace_epochs = 3;
-    genesis.parameters.gov_params.max_proposal_code_size = 3_000_000;
+    genesis.parameters.gov_params.max_proposal_code_size =
+        GOV_CHANNEL_MAX_TX_BYTES.into();
+    genesis.parameters.parameters.max_tx_bytes = GOV_CHANNEL_MAX_TX_BYTES;
+    genesis.parameters.parameters.max_block_gas = 10_000_000;
     genesis
 }
 
@@ -831,6 +839,8 @@ fn fee_payment_with_ibc_token() -> Result<()> {
     let update_genesis = |genesis: templates::All<templates::Unvalidated>,
                           base_dir: &_| {
         let mut genesis = permissioned_channels_genesis(genesis);
+        // the gas token proposal activates 1 epoch after the voting end
+        genesis.parameters.gov_params.min_proposal_grace_epochs = 1;
         genesis.parameters.ibc_params.default_mint_limit = Amount::max_signed();
         genesis
             .parameters
@@ -2801,6 +2811,17 @@ fn run_namada_cosmos(
         Who::Validator(0),
         ethereum_bridge::ledger::Mode::Off,
         None,
+    );
+    // The CometBFT mempool has its own tx size limit, which is local to
+    // the node rather than set by the genesis
+    setup::update_actor_config(
+        &test,
+        &test.net.chain_id,
+        Who::Validator(0),
+        |config| {
+            config.ledger.cometbft.mempool.max_tx_bytes =
+                GOV_CHANNEL_MAX_TX_BYTES.into();
+        },
     );
 
     let ledger = start_namada_ledger_node_wait_wasm(&test, Some(0), Some(40))?;

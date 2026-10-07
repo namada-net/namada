@@ -100,12 +100,13 @@ fn permissioned_channels_genesis(
 ) -> templates::All<templates::Unvalidated> {
     genesis.parameters.parameters.epochs_per_year =
         epochs_per_year_from_min_duration(20);
-    // for the trusting period of IBC client: it is derived from
-    // `unbonding_len * epoch min duration` and must be long enough for the
-    // relayer to complete a handshake (`unbonding_len` must also be greater
-    // than `pipeline_len`)
+    // for the trusting period of IBC client: the relayer sets it to 2/3 of
+    // `unbonding_len * epoch min duration` and it must be long enough for
+    // the client to not expire between the connection creation and the
+    // channel handshake, while the channel init proposal goes through
+    // governance (`unbonding_len` must also be greater than `pipeline_len`)
     genesis.parameters.pos_params.pipeline_len = GOV_CHANNEL_PIPELINE_LEN;
-    genesis.parameters.pos_params.unbonding_len = 10;
+    genesis.parameters.pos_params.unbonding_len = 40;
     genesis.parameters.gov_params.min_proposal_grace_epochs = 3;
     genesis.parameters.gov_params.max_proposal_code_size =
         GOV_CHANNEL_MAX_TX_BYTES.into();

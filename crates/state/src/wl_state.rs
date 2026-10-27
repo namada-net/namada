@@ -709,7 +709,31 @@ where
             self.db.prune_non_persisted_diffs(&mut batch, height)?;
         }
         self.db.exec_batch(batch)?;
+        if is_full_commit {
+            self.compact_last_epoch_diffs()?;
+        }
         Ok(())
+    }
+
+    /// On the first block of a new epoch, compact the diffs of the epoch
+    /// that just ended. See [`DB::compact_diffs`].
+    ///
+    /// Compaction doesn't change the stored data, only how it's laid out in
+    /// files, so it doesn't affect the state or the merkle tree.
+    fn compact_last_epoch_diffs(&self) -> Result<()> {
+        let height = self.in_mem.block.height;
+        let Some(last_epoch_height) = height.prev_height() else {
+            return Ok(());
+        };
+        let Some(from) = self
+            .in_mem
+            .block
+            .pred_epochs
+            .get_epoch_start_height(last_epoch_height)
+        else {
+            return Ok(());
+        };
+        self.db.compact_diffs(from, height).map_err(Into::into)
     }
 
     /// A full commit is executed only at the first height or one a new epoch.

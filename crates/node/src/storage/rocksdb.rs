@@ -78,7 +78,8 @@ use namada_sdk::{decode, encode, ethereum_events};
 use rayon::prelude::*;
 use regex::Regex;
 use rocksdb::{
-    BlockBasedOptions, ColumnFamily, ColumnFamilyDescriptor, DBCompactionStyle,
+    BlockBasedOptions, BottommostLevelCompaction, ColumnFamily,
+    ColumnFamilyDescriptor, CompactOptions, DBCompactionStyle,
     DBCompressionType, Direction, FlushOptions, IteratorMode, Options,
     ReadOptions, WriteBatch,
 };
@@ -266,6 +267,43 @@ impl Drop for RocksDB {
 }
 
 impl RocksDB {
+    /// Run a manual compaction of the given column family over the key range
+    /// `[start, end]` (`None` means unbounded).
+    ///
+    /// The bottommost level is always rewritten, so that small table files
+    /// which were only ever moved down the levels (never merged) are merged
+    /// into files of the target size. Automatic compactions keep running
+    /// while this is in progress.
+    pub fn compact_cf_range(
+        &self,
+        cf: &ColumnFamily,
+        start: Option<&[u8]>,
+        end: Option<&[u8]>,
+    ) {
+        let mut opts = CompactOptions::default();
+        opts.set_bottommost_level_compaction(
+            BottommostLevelCompaction::ForceOptimized,
+        );
+        opts.set_exclusive_manual_compaction(false);
+        self.inner.compact_range_cf_opt(cf, start, end, &opts);
+    }
+
+    /// Number of live table files in the given column family.
+    pub fn cf_num_files(&self, cf: &ColumnFamily) -> Result<u64> {
+        // RocksDB uses 7 levels by default
+        (0..7).try_fold(0_u64, |acc, level| {
+            let files = self
+                .inner
+                .property_int_value_cf(
+                    cf,
+                    &format!("rocksdb.num-files-at-level{level}"),
+                )
+                .map_err(|e| Error::DBError(e.into_string()))?
+                .unwrap_or(0);
+            Ok(acc.saturating_add(files))
+        })
+    }
+
     fn get_column_family(&self, cf_name: &str) -> Result<&ColumnFamily> {
         self.inner
             .cf_handle(cf_name)
@@ -1761,6 +1799,22 @@ impl DB for RocksDB {
         Ok(())
     }
 
+    fn compact_diffs(&self, from: BlockHeight, to: BlockHeight) -> Result<()> {
+        let diffs_cf = self.get_column_family(DIFFS_CF)?;
+        // Diffs keys are prefixed with the height, which is encoded so that
+        // the lexicographic order matches the numeric order
+        let start = Key::from(from.to_db_key()).to_string();
+        let end = Key::from(to.to_db_key()).to_string();
+        tracing::info!("Compacting diffs of heights [{from}, {to})");
+        self.compact_cf_range(
+            diffs_cf,
+            Some(start.as_bytes()),
+            Some(end.as_bytes()),
+        );
+        tracing::info!("Done compacting diffs of heights [{from}, {to})");
+        Ok(())
+    }
+
     fn prune_non_persisted_diffs(
         &mut self,
         batch: &mut Self::WriteBatch,
@@ -2632,6 +2686,58 @@ mod test {
                     !db.has_replay_protection_entry(&Hash::sha256(tx)).unwrap()
                 );
             }
+        }
+    }
+
+    /// Diffs written at increasing heights end up in many small table files
+    /// that leveled compaction never merges. `compact_diffs` must merge them
+    /// without changing their content.
+    #[test]
+    fn test_compact_diffs() {
+        let dir = tempdir().unwrap();
+        let db = RocksDB::open(dir.path(), None);
+        let key = Key::parse("with_diffs").unwrap();
+
+        const NUM_BLOCKS: u64 = 50;
+        for height in 1..=NUM_BLOCKS {
+            let mut batch = RocksDB::batch();
+            db.batch_write_subspace_val(
+                &mut batch,
+                BlockHeight(height),
+                &key,
+                height.to_le_bytes(),
+                true,
+            )
+            .unwrap();
+            db.exec_batch(batch).unwrap();
+            // Every flush writes a new table file
+            db.flush(true).unwrap();
+        }
+        // Let automatic compactions settle
+        db.inner.wait_for_compact(&Default::default()).unwrap();
+
+        let diffs_cf = db.get_column_family(DIFFS_CF).unwrap();
+        let files_before = db.cf_num_files(diffs_cf).unwrap();
+        // Automatic compactions may have merged some of them, but they must
+        // not have merged all of them
+        assert!(
+            files_before > 1,
+            "expected more than 1 file, got {files_before}"
+        );
+
+        db.compact_diffs(BlockHeight(0), BlockHeight(NUM_BLOCKS + 1))
+            .unwrap();
+
+        // All the (tiny) diffs fit in a single file
+        let files_after = db.cf_num_files(diffs_cf).unwrap();
+        assert_eq!(files_after, 1);
+
+        // All the diffs are still there
+        for height in 1..=NUM_BLOCKS {
+            let (_old, new) =
+                old_and_new_diff_key(&key, BlockHeight(height)).unwrap();
+            let val = db.inner.get_cf(diffs_cf, new).unwrap().unwrap();
+            assert_eq!(val, height.to_le_bytes());
         }
     }
 

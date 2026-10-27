@@ -88,6 +88,11 @@ use crate::config::utils::num_of_threads;
 
 // TODO the DB schema will probably need some kind of versioning
 
+/// Number of blocks covered by a single manual compaction when compacting all
+/// the diffs. This bounds the extra disk space and the time taken by each
+/// step.
+const DIFFS_FULL_COMPACTION_CHUNK: u64 = 100_000;
+
 /// Env. var to set a number of Rayon global worker threads
 const ENV_VAR_ROCKSDB_COMPACTION_THREADS: &str =
     "NAMADA_ROCKSDB_COMPACTION_THREADS";
@@ -286,6 +291,59 @@ impl RocksDB {
         );
         opts.set_exclusive_manual_compaction(false);
         self.inner.compact_range_cf_opt(cf, start, end, &opts);
+    }
+
+    /// Compact the whole diffs column family, one range of heights at a time.
+    pub fn compact_all_diffs(&self) -> Result<()> {
+        let Some(last_height) = self.read_last_block()?.map(|b| b.height)
+        else {
+            return Ok(());
+        };
+        let diffs_cf = self.get_column_family(DIFFS_CF)?;
+        tracing::info!(
+            "Compacting diffs up to height {last_height} in chunks of \
+             {DIFFS_FULL_COMPACTION_CHUNK} heights"
+        );
+        let mut from = 0_u64;
+        while from <= last_height.0 {
+            let to = from.saturating_add(DIFFS_FULL_COMPACTION_CHUNK);
+            self.compact_diffs(BlockHeight(from), BlockHeight(to))?;
+            from = to;
+        }
+        // Compact anything above the last range
+        let start = Key::from(BlockHeight(from).to_db_key()).to_string();
+        self.compact_cf_range(diffs_cf, Some(start.as_bytes()), None);
+        Ok(())
+    }
+
+    /// Compact the whole diffs column family if it has at least `min_files`
+    /// table files.
+    pub fn compact_diffs_if_fragmented(&self, min_files: u64) -> Result<()> {
+        let diffs_cf = self.get_column_family(DIFFS_CF)?;
+        let files_before = self.cf_num_files(diffs_cf)?;
+        if files_before < min_files {
+            tracing::info!(
+                "Skipping diffs compaction: {} table files is below the \
+                 threshold of {}",
+                files_before,
+                min_files
+            );
+            return Ok(());
+        }
+        tracing::info!(
+            "Compacting diffs: {} table files (threshold {}). This may take a \
+             while.",
+            files_before,
+            min_files
+        );
+        self.compact_all_diffs()?;
+        let files_after = self.cf_num_files(diffs_cf)?;
+        tracing::info!(
+            "Done compacting diffs: {} -> {} table files",
+            files_before,
+            files_after
+        );
+        Ok(())
     }
 
     /// Number of live table files in the given column family.
@@ -2739,6 +2797,21 @@ mod test {
             let val = db.inner.get_cf(diffs_cf, new).unwrap().unwrap();
             assert_eq!(val, height.to_le_bytes());
         }
+    }
+
+    /// Compacting all the diffs on a DB without any block is a no-op and the
+    /// threshold is respected.
+    #[test]
+    fn test_compact_diffs_if_fragmented() {
+        let dir = tempdir().unwrap();
+        let db = RocksDB::open(dir.path(), None);
+        let diffs_cf = db.get_column_family(DIFFS_CF).unwrap();
+        assert_eq!(db.cf_num_files(diffs_cf).unwrap(), 0);
+        // Below the threshold
+        db.compact_diffs_if_fragmented(1).unwrap();
+        // Always compact, but there's no block yet
+        db.compact_diffs_if_fragmented(0).unwrap();
+        assert_eq!(db.cf_num_files(diffs_cf).unwrap(), 0);
     }
 
     #[test]

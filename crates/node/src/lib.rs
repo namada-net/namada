@@ -77,6 +77,15 @@ const ENV_VAR_TOKIO_THREADS: &str = "NAMADA_TOKIO_THREADS";
 /// Env. var to set a number of Rayon global worker threads
 const ENV_VAR_RAYON_THREADS: &str = "NAMADA_RAYON_THREADS";
 
+/// Env. var to set the minimum number of table files in the diffs column
+/// family that triggers a full compaction of it before the ledger starts. Set
+/// it to 0 to always compact.
+const ENV_VAR_COMPACT_DIFFS_ON_BOOT_MIN_FILES: &str =
+    "NAMADA_COMPACT_DIFFS_ON_BOOT_MIN_FILES";
+
+/// Default for [`ENV_VAR_COMPACT_DIFFS_ON_BOOT_MIN_FILES`].
+const DEFAULT_COMPACT_DIFFS_ON_BOOT_MIN_FILES: u64 = 10_000;
+
 // Until ABCI++ is ready, the shim provides the service implementation.
 // We will add this part back in once the shim is no longer needed.
 //```
@@ -473,6 +482,9 @@ async fn run_aux(
     let setup_data =
         run_aux_setup(&config, &wasm_dir, scheduled_migration).await;
 
+    // Compact the diffs before anything else uses the DB
+    compact_diffs_on_boot(&config).await;
+
     // Create an `AbortableSpawner` for signalling shut down from the shell or
     // from Tendermint
     let mut spawner = AbortableSpawner::new();
@@ -503,6 +515,35 @@ async fn run_aux(
     );
 
     spawner.run_to_completion().await;
+}
+
+/// Compact the diffs column family if it has accumulated too many table
+/// files. See [`ENV_VAR_COMPACT_DIFFS_ON_BOOT_MIN_FILES`].
+async fn compact_diffs_on_boot(config: &config::Ledger) {
+    let min_files = match std::env::var(ENV_VAR_COMPACT_DIFFS_ON_BOOT_MIN_FILES)
+    {
+        Ok(value) => value.parse::<u64>().unwrap_or_else(|_| {
+            tracing::warn!(
+                "Invalid {ENV_VAR_COMPACT_DIFFS_ON_BOOT_MIN_FILES} value \
+                 {value:?}, using the default of \
+                 {DEFAULT_COMPACT_DIFFS_ON_BOOT_MIN_FILES}"
+            );
+            DEFAULT_COMPACT_DIFFS_ON_BOOT_MIN_FILES
+        }),
+        Err(_) => DEFAULT_COMPACT_DIFFS_ON_BOOT_MIN_FILES,
+    };
+    let db_path = config.shell.db_dir(&config.chain_id);
+    if !db_path.exists() {
+        return;
+    }
+    tokio::task::spawn_blocking(move || {
+        let db = storage::PersistentDB::open(db_path, None);
+        if let Err(err) = db.compact_diffs_if_fragmented(min_files) {
+            tracing::error!("Failed to compact diffs on boot: {err}");
+        }
+    })
+    .await
+    .expect("Diffs compaction task must not panic");
 }
 
 /// A [`RunAuxSetup`] stores some variables used to start child

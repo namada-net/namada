@@ -2229,19 +2229,65 @@ mod imp {
 
     const DEFAULT_NOFILE_LIMIT: u64 = 16384;
 
+    /// Upper bound used for the NOFILE soft limit when computing the RocksDB
+    /// `max_open_files`. A process can never open more files than the
+    /// kernel's `fs.nr_open` (1048576 by default on Linux), even when the
+    /// limit is reported as unlimited.
+    const MAX_EFFECTIVE_NOFILE: u64 = 1 << 20;
+
+    /// Minimum number of file descriptors kept out of RocksDB's reach so that
+    /// the rest of the node (P2P and RPC sockets, WAL and newly created SST
+    /// files, wasm caches, logs, ...) can still open files.
+    const MIN_RESERVED_FDS: u64 = 1024;
+
+    /// Never configure RocksDB with fewer open files than this.
+    const MIN_ROCKSDB_OPEN_FILES: u64 = 256;
+
     pub fn set_max_open_files(cf_opts: &mut rocksdb::Options) {
-        let max_open_files = match increase_nofile_limit() {
-            Ok(max_open_files) => Some(max_open_files),
+        let soft_limit = match increase_nofile_limit() {
+            Ok(soft_limit) => soft_limit,
             Err(err) => {
                 tracing::error!("Failed to increase NOFILE limit: {}", err);
-                None
+                // Still bound RocksDB by the current limit, otherwise it'd be
+                // left unlimited
+                match Resource::NOFILE.get() {
+                    Ok((soft, _hard)) => soft,
+                    Err(err) => {
+                        tracing::error!(
+                            "Failed to read NOFILE limit: {}. Assuming {}",
+                            err,
+                            DEFAULT_NOFILE_LIMIT
+                        );
+                        DEFAULT_NOFILE_LIMIT
+                    }
+                }
             }
         };
-        if let Some(max_open_files) =
-            max_open_files.and_then(|max| max.try_into().ok())
-        {
-            cf_opts.set_max_open_files(max_open_files);
-        }
+        let max_open_files = rocksdb_max_open_files(soft_limit);
+        tracing::info!(
+            "Setting RocksDB max_open_files to {} (NOFILE soft limit {})",
+            max_open_files,
+            soft_limit
+        );
+        cf_opts.set_max_open_files(max_open_files);
+    }
+
+    /// Compute the RocksDB `max_open_files` from the process' NOFILE soft
+    /// limit.
+    ///
+    /// RocksDB keeps table files open up to `max_open_files`. If it is equal
+    /// to the process limit (or unlimited, i.e. `-1`), a database with many
+    /// SST files can use up every file descriptor, and the node panics with
+    /// "Too many open files" as soon as anything else needs one. We keep a
+    /// quarter of the limit (at least `MIN_RESERVED_FDS`) out of RocksDB's
+    /// reach. Once RocksDB reaches its own limit it evicts table readers from
+    /// its cache instead of failing.
+    pub(super) fn rocksdb_max_open_files(soft_limit: u64) -> i32 {
+        let limit = soft_limit.min(MAX_EFFECTIVE_NOFILE);
+        let reserved = (limit / 4).max(MIN_RESERVED_FDS);
+        let max_open_files =
+            limit.saturating_sub(reserved).max(MIN_ROCKSDB_OPEN_FILES);
+        i32::try_from(max_open_files).unwrap_or(i32::MAX)
     }
 
     /// Try to increase NOFILE limit and return the current soft limit.
@@ -2266,6 +2312,34 @@ mod imp {
                 hard
             );
             Ok(soft)
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod test_max_open_files {
+    use super::imp::rocksdb_max_open_files;
+
+    #[test]
+    fn test_rocksdb_max_open_files_keeps_headroom() {
+        // default systemd/namada limits
+        assert_eq!(rocksdb_max_open_files(16384), 12288);
+        assert_eq!(rocksdb_max_open_files(32000), 24000);
+        // small limits still reserve at least 1024 fds
+        assert_eq!(rocksdb_max_open_files(2048), 1024);
+        // but RocksDB always gets a minimum number of files
+        assert_eq!(rocksdb_max_open_files(1024), 256);
+        assert_eq!(rocksdb_max_open_files(0), 256);
+    }
+
+    #[test]
+    fn test_rocksdb_max_open_files_unlimited() {
+        // "unlimited" must not translate into RocksDB's own unlimited (-1)
+        let max = rocksdb_max_open_files(u64::MAX);
+        assert_eq!(max, 786432);
+        for limit in [16384_u64, 32000, 65536, 1 << 20, u64::MAX] {
+            let max = u64::try_from(rocksdb_max_open_files(limit)).unwrap();
+            assert!(max < limit);
         }
     }
 }

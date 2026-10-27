@@ -316,6 +316,34 @@ impl RocksDB {
         Ok(())
     }
 
+    /// Compact the whole diffs column family and, if `all_column_families` is
+    /// set, every other column family too.
+    pub fn compact(&self, all_column_families: bool) -> Result<()> {
+        for (cf_name, cf) in self.column_families() {
+            let is_diffs = cf_name == DIFFS_CF;
+            if !is_diffs && !all_column_families {
+                continue;
+            }
+            let files_before = self.cf_num_files(cf)?;
+            tracing::info!(
+                "Compacting column family {cf_name} ({files_before} table \
+                 files)"
+            );
+            if is_diffs {
+                // In chunks of heights, to bound the extra disk space needed
+                self.compact_all_diffs()?;
+            } else {
+                self.compact_cf_range(cf, None, None);
+            }
+            let files_after = self.cf_num_files(cf)?;
+            tracing::info!(
+                "Done compacting column family {cf_name}: {files_before} -> \
+                 {files_after} table files"
+            );
+        }
+        Ok(())
+    }
+
     /// Compact the whole diffs column family if it has at least `min_files`
     /// table files.
     pub fn compact_diffs_if_fragmented(&self, min_files: u64) -> Result<()> {
@@ -2812,6 +2840,18 @@ mod test {
         // Always compact, but there's no block yet
         db.compact_diffs_if_fragmented(0).unwrap();
         assert_eq!(db.cf_num_files(diffs_cf).unwrap(), 0);
+    }
+
+    /// Compacting a DB without any block succeeds and leaves it empty.
+    #[test]
+    fn test_compact_empty_db() {
+        let dir = tempdir().unwrap();
+        let db = RocksDB::open(dir.path(), None);
+        db.compact(false).unwrap();
+        db.compact(true).unwrap();
+        for (_, cf) in db.column_families() {
+            assert_eq!(db.cf_num_files(cf).unwrap(), 0);
+        }
     }
 
     #[test]

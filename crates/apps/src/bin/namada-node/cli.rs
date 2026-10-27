@@ -57,6 +57,11 @@ pub fn main() -> Result<()> {
                 let chain_ctx = ctx.take_chain_or_exit();
                 node::dump_db(chain_ctx.config.ledger, args);
             }
+            cmds::Ledger::CompactDb(cmds::LedgerCompactDb(args)) => {
+                let chain_ctx = ctx.take_chain_or_exit();
+                node::compact_db(chain_ctx.config.ledger, args)
+                    .wrap_err("Failed to compact the Namada node's DB")?;
+            }
             cmds::Ledger::RollBack(_) => {
                 let chain_ctx = ctx.take_chain_or_exit();
                 node::rollback(chain_ctx.config.ledger)

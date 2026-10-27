@@ -910,6 +910,7 @@ pub mod cmds {
         DumpDb(LedgerDumpDb),
         QueryDB(LedgerQueryDB),
         RollBack(LedgerRollBack),
+        CompactDb(LedgerCompactDb),
     }
 
     impl SubCmd for Ledger {
@@ -923,11 +924,13 @@ pub mod cmds {
                 let query_db = SubCmd::parse(matches).map(Self::QueryDB);
                 let rollback = SubCmd::parse(matches).map(Self::RollBack);
                 let run_until = SubCmd::parse(matches).map(Self::RunUntil);
+                let compact_db = SubCmd::parse(matches).map(Self::CompactDb);
                 run.or(reset)
                     .or(dump_db)
                     .or(query_db)
                     .or(rollback)
                     .or(run_until)
+                    .or(compact_db)
                     // The `run` command is the default if no sub-command given
                     .or(Some(Self::Run(LedgerRun(args::LedgerRun {
                         start_time: None,
@@ -950,6 +953,7 @@ pub mod cmds {
                 .subcommand(LedgerDumpDb::def())
                 .subcommand(LedgerQueryDB::def())
                 .subcommand(LedgerRollBack::def())
+                .subcommand(LedgerCompactDb::def())
         }
     }
 
@@ -1078,6 +1082,31 @@ pub mod cmds {
                  Tendermint state before execution: for extra safety, it is \
                  recommended to make a backup in advance."
             ))
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct LedgerCompactDb(pub args::LedgerCompactDb);
+
+    impl SubCmd for LedgerCompactDb {
+        const CMD: &'static str = "compact-db";
+
+        fn parse(matches: &ArgMatches) -> Option<Self> {
+            matches
+                .subcommand_matches(Self::CMD)
+                .map(|matches| Self(args::LedgerCompactDb::parse(matches)))
+        }
+
+        fn def() -> App {
+            App::new(Self::CMD)
+                .about(wrap!(
+                    "Compact Namada ledger node's DB while the ledger is not \
+                     running. By default, only the diffs column family is \
+                     compacted, which merges the many small table files it \
+                     accumulates over time. This can take a long time and \
+                     needs extra disk space for the duration of each step."
+                ))
+                .add_args::<args::LedgerCompactDb>()
         }
     }
 
@@ -3449,6 +3478,7 @@ pub mod args {
     pub const ALIAS: Arg<String> = arg("alias");
     pub const ALIAS_FORCE: ArgFlag = flag("alias-force");
     pub const ALIAS_MANY: ArgMulti<String, GlobPlus> = arg_multi("aliases");
+    pub const ALL_COLUMN_FAMILIES: ArgFlag = flag("all-column-families");
     pub const ALLOW_DUPLICATE_IP: ArgFlag = flag("allow-duplicate-ip");
     pub const AMOUNT: Arg<token::DenominatedAmount> = arg("amount");
     pub const ARCHIVE_DIR: ArgOpt<PathBuf> = arg_opt("archive-dir");
@@ -3947,6 +3977,25 @@ pub mod args {
                 "CAUTION: This will delete the wallet, make sure to back it \
                  up.\nDelete the chain's wallet including local and genesis \
                  configuration and validator key, if any."
+            )))
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct LedgerCompactDb {
+        pub all_column_families: bool,
+    }
+
+    impl Args for LedgerCompactDb {
+        fn parse(matches: &ArgMatches) -> Self {
+            Self {
+                all_column_families: ALL_COLUMN_FAMILIES.parse(matches),
+            }
+        }
+
+        fn def(app: App) -> App {
+            app.arg(ALL_COLUMN_FAMILIES.def().help(wrap!(
+                "Compact every column family of the DB, not only the diffs."
             )))
         }
     }

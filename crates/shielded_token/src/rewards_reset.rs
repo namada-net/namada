@@ -38,11 +38,11 @@ pub struct StripStats {
 /// Reset the MASP rewards and strip the rewards published at MASP epoch
 /// `reset_from` or later out of every conversion.
 ///
-/// - Sets the max reward rate and the last inflation of every token in the
-///   MASP token map to zero, so no further shielded rewards are computed.
+/// - Sets the max reward rate and the last inflation of every token in the MASP
+///   token map to zero, so no further shielded rewards are computed.
 /// - Strips the rewards out of the conversion leaves, see [`strip_rewards`].
-/// - Rebuilds the conversion tree and writes the new convert anchor and
-///   assets hash.
+/// - Rebuilds the conversion tree and writes the new convert anchor and assets
+///   hash.
 ///
 /// Notes of any epoch stay spendable and convertible to the latest epoch.
 pub fn reset_masp_rewards_and_conversions<S, TransToken>(
@@ -107,11 +107,11 @@ where
 /// reward terms are changed, so every leaf keeps converting to the latest
 /// epoch and later conversion updates keep working. With
 /// `cut = reset_from - 1`:
-/// - a leaf of an epoch before `cut` loses the rewards held by its token's
-///   leaf at `cut`, which are exactly the ones published from `reset_from`;
+/// - a leaf of an epoch before `cut` loses the rewards held by its token's leaf
+///   at `cut`, which are exactly the ones published from `reset_from`;
 /// - a leaf of epoch `cut` or later loses all its rewards;
-/// - a leaf whose token has no leaf at `cut` (it stopped being rewarded
-///   before it) is left as is.
+/// - a leaf whose token has no leaf at `cut` (it stopped being rewarded before
+///   it) is left as is.
 ///
 /// With `reset_from` at zero every leaf loses all its rewards.
 ///

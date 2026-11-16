@@ -310,8 +310,8 @@ where
                 .unwrap_or_else(|| {
                     tracing::warn!(
                         "MASP inflation for {} assumed to be 0 because the \
-                     computed value is too large. Please check the inflation \
-                     parameters.",
+                         computed value is too large. Please check the \
+                         inflation parameters.",
                         *token
                     );
                     0u128

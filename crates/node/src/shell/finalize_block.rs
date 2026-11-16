@@ -107,9 +107,9 @@ where
         )?;
         // - Token
         token_finalize_block(&mut self.state, emit_events, is_masp_new_epoch)?;
-        // - One-off MASP rewards reset at the configured height. Runs after
-        //   the token update so that it overrides any conversions computed
-        //   at this block.
+        // - One-off MASP rewards reset at the configured height. Runs after the
+        //   token update so that it overrides any conversions computed at this
+        //   block.
         masp_rewards_reset::reset_at_height(&mut self.state, height)?;
         // - PoS
         //    - Must be applied after governance in case it changes PoS params

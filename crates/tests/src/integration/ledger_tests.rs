@@ -2235,6 +2235,14 @@ fn apply_snapshot() -> Result<()> {
     // DB must be flushed before checkpoint
     namada_sdk::state::DB::flush(node.shell.lock().unwrap().state.db(), true)
         .unwrap();
+    // The flush may have triggered background compactions, which rewrite and
+    // delete table files while running. Wait for those to settle before
+    // opening a second (read-only) instance of the DB for the checkpoint,
+    // otherwise it may try to access a file that was just deleted
+    namada_sdk::state::DB::wait_for_compact(
+        node.shell.lock().unwrap().state.db(),
+    )
+    .unwrap();
 
     let base_dir = node.test_dir.path();
     let db = namada_node::storage::open(node.db_path(), true, None)

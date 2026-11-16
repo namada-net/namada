@@ -1815,6 +1815,12 @@ impl DB for RocksDB {
         Ok(())
     }
 
+    fn wait_for_compact(&self) -> Result<()> {
+        self.inner
+            .wait_for_compact(&Default::default())
+            .map_err(|e| Error::DBError(e.into_string()))
+    }
+
     fn prune_non_persisted_diffs(
         &mut self,
         batch: &mut Self::WriteBatch,

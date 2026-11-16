@@ -117,10 +117,7 @@ where
 ///
 /// The native token's own reward is not a separate term but the growth of
 /// its precision, which cannot be stripped. This fails if the native
-/// precision changed from `cut` on, see [`check_native_precision_unchanged`].
-///
-/// Leaf positions and the tree are left stale, see
-/// [`rebuild_conversion_tree`].
+/// precision changed from `cut` on. Leaf positions and the tree are left stale.
 pub fn strip_rewards(
     state: &mut ConversionState,
     native_token: &Address,

@@ -285,6 +285,36 @@ pub trait DB: Debug {
         batch: &mut Self::WriteBatch,
     ) -> Result<()>;
 
+    /// Compact the diffs of the blocks in the height range `[from, to)`.
+    ///
+    /// Diffs keys are prefixed with the block height, so every flush writes a
+    /// small table file that doesn't overlap any older file. With leveled
+    /// compaction such files are only moved to lower levels and never merged,
+    /// so their number grows without bound. A manual compaction over a range
+    /// of heights merges them into larger files.
+    ///
+    /// The default implementation does nothing.
+    fn compact_diffs(
+        &self,
+        _from: BlockHeight,
+        _to: BlockHeight,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Wait for all background compactions to finish.
+    ///
+    /// A flush only waits for the memtables to be persisted, while the
+    /// compactions it triggers may still be running, rewriting and deleting
+    /// table files. Wait for those to settle before opening another instance
+    /// of the DB (e.g. to create a checkpoint), so that the new instance
+    /// doesn't try to read a file that gets deleted concurrently.
+    ///
+    /// The default implementation does nothing.
+    fn wait_for_compact(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Prune non-persisted diffs that are only kept for one block for rollback
     fn prune_non_persisted_diffs(
         &mut self,

@@ -213,13 +213,18 @@ where
 
 /// Compute the MASP rewards by applying the PD-controller to the genesis
 /// parameters and the last inflation and last locked rewards ratio values.
+///
+/// Returns the noterized reward per `precision` units, the precision and the
+/// rewardable (dated) balance of the token in the pool that the reward was
+/// computed from. Callers must mint the reward backing from that same balance
+/// so that the minted amount always matches what the conversions pay out.
 pub fn calculate_masp_rewards<S, TransToken>(
     storage: &mut S,
     token: &Address,
     denomination: Denomination,
     precision: Precision,
     masp_epochs_per_year: u64,
-) -> Result<(u128, Precision)>
+) -> Result<(u128, Precision, Amount)>
 where
     S: StorageWrite + StorageRead,
     TransToken: trans_token::Keys + trans_token::Read<S>,
@@ -288,25 +293,30 @@ where
     // ∴ n = (inflation * PRECISION) / locked tokens
     // Since we must put the notes in a compatible format with the
     // note format, we must make the inflation amount discrete.
-    let noterized_inflation = if rewardable_tokens_in_masp.is_zero() {
-        0u128
-    } else {
-        inflation
-            .checked_mul_div(
-                Uint::from(precision),
-                rewardable_tokens_in_masp.raw_amount(),
-            )
-            .and_then(|x| x.0.try_into().ok())
-            .unwrap_or_else(|| {
-                tracing::warn!(
-                    "MASP inflation for {} assumed to be 0 because the \
+    //
+    // Only pay a reward when the pool holds at least one precision unit of
+    // the token. With less than that, `inflation * precision / locked` blows
+    // up into an enormous per-unit reward that a tiny pool can amplify.
+    let noterized_inflation =
+        if rewardable_tokens_in_masp.raw_amount() < Uint::from(precision) {
+            0u128
+        } else {
+            inflation
+                .checked_mul_div(
+                    Uint::from(precision),
+                    rewardable_tokens_in_masp.raw_amount(),
+                )
+                .and_then(|x| x.0.try_into().ok())
+                .unwrap_or_else(|| {
+                    tracing::warn!(
+                        "MASP inflation for {} assumed to be 0 because the \
                      computed value is too large. Please check the inflation \
                      parameters.",
-                    *token
-                );
-                0u128
-            })
-    };
+                        *token
+                    );
+                    0u128
+                })
+        };
     let inflation_amount = Amount::from_uint(
         checked!(
             rewardable_tokens_in_masp.raw_amount() / precision.into()
@@ -353,7 +363,7 @@ where
         total_tokens_in_masp,
     )?;
 
-    Ok((noterized_inflation, precision))
+    Ok((noterized_inflation, precision, rewardable_tokens_in_masp))
 }
 
 /// Update the conversions for native tokens. Namely calculate the reward using
@@ -370,7 +380,7 @@ fn update_native_conversions<S, TransToken>(
         (Address, Denomination, MaspDigitPos),
         AllowedConversion,
     >,
-) -> Result<(Denomination, (u128, u128))>
+) -> Result<(Denomination, (u128, u128), Amount)>
 where
     S: StorageWrite + StorageRead + WithConversionState,
     TransToken:
@@ -380,13 +390,14 @@ where
         masp_epoch.prev().ok_or_err_msg("MASP epoch underflow")?;
     let denom = TransToken::read_denom(storage, token)?
         .expect("failed to read token denomination");
-    let (reward, _precision) = calculate_masp_rewards::<S, TransToken>(
-        storage,
-        token,
-        denom,
-        *current_precision,
-        masp_epochs_per_year,
-    )?;
+    let (reward, _precision, rewardable_balance) =
+        calculate_masp_rewards::<S, TransToken>(
+            storage,
+            token,
+            denom,
+            *current_precision,
+            masp_epochs_per_year,
+        )?;
     // The amount that will be given of the new native token for
     // every amount of the native token given in the
     // previous epoch
@@ -458,7 +469,7 @@ where
     let reward_precision_key = masp_reward_precision_key::<TransToken>(token);
     storage.write(&reward_precision_key, new_precision)?;
     *current_precision = new_precision;
-    Ok((denom, reward_frac))
+    Ok((denom, reward_frac, rewardable_balance))
 }
 
 /// Update the conversions for non-native tokens. Namely calculate the reward,
@@ -491,13 +502,14 @@ where
         .expect("failed to read token denomination");
     let precision =
         calculate_masp_rewards_precision::<S, TransToken>(storage, token)?;
-    let (reward, precision) = calculate_masp_rewards::<S, TransToken>(
-        storage,
-        token,
-        denom,
-        precision,
-        masp_epochs_per_year,
-    )?;
+    let (reward, precision, rewardable_balance) =
+        calculate_masp_rewards::<S, TransToken>(
+            storage,
+            token,
+            denom,
+            precision,
+            masp_epochs_per_year,
+        )?;
     // Express the inflation reward in real terms, that is, with
     // respect to the native asset in the zeroth epoch
     let reward_uint = Uint::from(reward);
@@ -561,13 +573,13 @@ where
             },
         );
     }
-    // Dispense a transparent reward in parallel to the shielded rewards
-    let addr_bal = get_masp_dated_balance::<S, TransToken>(storage, token)?;
+    // Dispense a transparent reward in parallel to the shielded rewards. Mint
+    // from the same balance the reward was computed from.
     // The reward for each reward.1 units of the current asset
     // is reward.0 units of the reward token
     *total_reward = total_reward
         .checked_add(
-            addr_bal
+            rewardable_balance
                 .u128_eucl_div_rem((real_reward, precision))
                 .ok_or_else(|| {
                     Error::new_const("Total reward calculation overflow")
@@ -675,7 +687,6 @@ where
 {
     use std::cmp::Ordering;
 
-    use masp_primitives::bls12_381;
     use masp_primitives::ff::PrimeField;
     use masp_primitives::merkle_tree::FrozenCommitmentTree;
     use masp_primitives::sapling::Node;
@@ -747,16 +758,17 @@ where
         // Generate conversions from the last epoch to the current and update
         // the reward backing accumulator
         if *token == native_token {
-            let (denom, frac) = update_native_conversions::<_, TransToken>(
-                storage,
-                token,
-                &mut current_native_precision,
-                masp_epochs_per_year,
-                masp_epoch,
-                &mut current_convs,
-            )?;
+            let (denom, frac, rewardable_balance) =
+                update_native_conversions::<_, TransToken>(
+                    storage,
+                    token,
+                    &mut current_native_precision,
+                    masp_epochs_per_year,
+                    masp_epoch,
+                    &mut current_convs,
+                )?;
             masp_reward_denoms.insert(token.clone(), denom);
-            native_reward_frac = Some(frac);
+            native_reward_frac = Some((frac, rewardable_balance));
         } else {
             let denom = update_non_native_conversions::<_, TransToken>(
                 storage,
@@ -785,9 +797,10 @@ where
     let mut total_reward = Amount::from(non_native_reward.0);
     // And finally accumulate the fractional parts of the native and non-native
     // rewards if their sum is more than one
-    if let Some(native_reward_frac) = native_reward_frac {
-        // Dispense a transparent reward in parallel to the shielded rewards
-        let addr_bal = TransToken::read_balance(storage, &native_token, &MASP)?;
+    if let Some((native_reward_frac, addr_bal)) = native_reward_frac {
+        // Dispense a transparent reward in parallel to the shielded rewards.
+        // Mint from the same (dated) balance the native reward was computed
+        // from, not from the whole pool balance.
         // The reward for each reward.1 units of the current asset is reward.0
         // units of the reward token
         let native_reward = addr_bal
@@ -883,14 +896,7 @@ where
     // obtained
     storage.conversion_state_mut().tree =
         FrozenCommitmentTree::merge(&tree_parts);
-    // Update the anchor in storage
-    storage.write(
-        &crate::storage_key::masp_convert_anchor_key(),
-        namada_core::hash::Hash(
-            bls12_381::Scalar::from(storage.conversion_state().tree.root())
-                .to_bytes_le(),
-        ),
-    )?;
+    write_convert_anchor(storage)?;
 
     if !masp_reward_keys.contains(&native_token) {
         // Since MASP rewards are denominated in NAM tokens, ensure that clients
@@ -921,12 +927,36 @@ where
             );
         }
     }
-    // store only the assets hash because the size is quite large
-    let assets_hash =
-        Hash::sha256(storage.conversion_state().assets.serialize_to_vec());
-    storage.write(&masp_assets_hash_key(), assets_hash)?;
+    write_assets_hash(storage)?;
 
     Ok(())
+}
+
+/// Write the root of the in-memory conversion tree as the convert anchor
+#[cfg(any(feature = "multicore", test))]
+pub(crate) fn write_convert_anchor<S>(storage: &mut S) -> Result<()>
+where
+    S: StorageWrite + WithConversionState,
+{
+    use masp_primitives::bls12_381;
+
+    let anchor = Hash(
+        bls12_381::Scalar::from(storage.conversion_state().tree.root())
+            .to_bytes_le(),
+    );
+    storage.write(&crate::storage_key::masp_convert_anchor_key(), anchor)
+}
+
+/// Write the hash of the in-memory conversion assets. Only the hash is
+/// stored because the assets map is quite large.
+#[cfg(any(feature = "multicore", test))]
+pub(crate) fn write_assets_hash<S>(storage: &mut S) -> Result<()>
+where
+    S: StorageWrite + WithConversionState,
+{
+    let assets_hash =
+        Hash::sha256(storage.conversion_state().assets.serialize_to_vec());
+    storage.write(&masp_assets_hash_key(), assets_hash)
 }
 
 // This is only enabled when "wasm-runtime" is on, because we're using rayon
@@ -943,15 +973,122 @@ where
     Ok(())
 }
 
+/// Helpers shared by the MASP conversion and rewards reset tests
+#[allow(clippy::arithmetic_side_effects)]
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use std::str::FromStr;
+
+    use masp_primitives::bls12_381;
+    use namada_core::address;
+    use namada_core::collections::HashMap;
+    use namada_state::ReadConversionState;
+    use namada_state::testing::TestStorage;
+    use namada_trans_token::storage_key::{balance_key, minted_balance_key};
+    use namada_trans_token::write_denom;
+
+    use super::*;
+    use crate::ShieldedParams;
+
+    /// Build a storage with the given tokens registered as MASP reward
+    /// tokens, each with `minted` total supply and `in_masp` held by the pool.
+    pub(crate) fn init_reward_storage(
+        tokens: &[(Address, &'static str, Denomination)],
+        minted: Amount,
+        in_masp: Amount,
+    ) -> TestStorage {
+        let mut s = TestStorage::default();
+        namada_parameters::init_test_storage(&mut s).unwrap();
+        let token_params = ShieldedParams {
+            max_reward_rate: Dec::from_str("0.1").unwrap(),
+            kp_gain_nom: Dec::from_str("0.1").unwrap(),
+            kd_gain_nom: Dec::from_str("0.1").unwrap(),
+            locked_amount_target: 10_000_u64,
+        };
+        for (token_addr, alias, denom) in tokens {
+            namada_trans_token::write_params(&mut s, token_addr).unwrap();
+            crate::write_params::<_, namada_trans_token::Store<()>>(
+                &token_params,
+                &mut s,
+                token_addr,
+                denom,
+            )
+            .unwrap();
+            write_denom(&mut s, token_addr, *denom).unwrap();
+            s.write(&minted_balance_key(token_addr), minted).unwrap();
+            s.write(&balance_key(token_addr, &address::MASP), in_masp)
+                .unwrap();
+            let token_map_key = masp_token_map_key();
+            let mut token_map: namada_core::masp::TokenMap =
+                s.read(&token_map_key).unwrap().unwrap_or_default();
+            token_map.insert(alias.to_string(), token_addr.clone());
+            s.write(&token_map_key, token_map).unwrap();
+        }
+        s
+    }
+
+    /// Move to the next MASP epoch and update the conversions
+    pub(crate) fn next_masp_epoch(s: &mut TestStorage) {
+        let multiplier =
+            namada_parameters::read_masp_epoch_multiplier_parameter(s).unwrap();
+        let epoch = s.get_block_epoch().unwrap();
+        s.set_block_epoch(namada_core::chain::Epoch(epoch.0 + multiplier));
+        update_allowed_conversions::<
+            _,
+            namada_parameters::Store<_>,
+            namada_trans_token::Store<_>,
+        >(s)
+        .unwrap();
+    }
+
+    pub(crate) fn native_minted(s: &TestStorage) -> Amount {
+        let nam = s.get_native_token().unwrap();
+        s.read(&minted_balance_key(&nam))
+            .unwrap()
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn tokens() -> HashMap<Address, (&'static str, Denomination)> {
+        vec![
+            (address::testing::nam(), ("nam", 6.into())),
+            (address::testing::btc(), ("btc", 8.into())),
+            (address::testing::eth(), ("eth", 18.into())),
+            (address::testing::dot(), ("dot", 10.into())),
+            (address::testing::schnitzel(), ("schnitzel", 6.into())),
+            (address::testing::apfel(), ("apfel", 6.into())),
+            (address::testing::kartoffel(), ("kartoffel", 6.into())),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    /// Assert that the stored convert anchor and assets hash match the
+    /// in-memory conversion state
+    pub(crate) fn assert_conversion_state_committed(s: &TestStorage) {
+        let state = s.conversion_state();
+        let anchor: Hash = s
+            .read(&crate::storage_key::masp_convert_anchor_key())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            anchor,
+            Hash(bls12_381::Scalar::from(state.tree.root()).to_bytes_le())
+        );
+        let assets_hash: Hash =
+            s.read(&masp_assets_hash_key()).unwrap().unwrap();
+        assert_eq!(assets_hash, Hash::sha256(state.assets.serialize_to_vec()));
+    }
+}
+
 #[allow(clippy::arithmetic_side_effects)]
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
 
     use namada_core::address;
-    use namada_core::collections::HashMap;
     use namada_core::dec::testing::arb_non_negative_dec;
     use namada_core::token::testing::arb_amount;
+    use namada_state::ReadConversionState;
     use namada_state::testing::TestStorage;
     use namada_trans_token::storage_key::{balance_key, minted_balance_key};
     use namada_trans_token::write_denom;
@@ -959,6 +1096,7 @@ mod tests {
     use proptest::test_runner::Config;
     use test_log::test;
 
+    use super::test_utils::*;
     use super::*;
     use crate::ShieldedParams;
 
@@ -1042,18 +1180,87 @@ mod tests {
         }
     }
 
-    pub fn tokens() -> HashMap<Address, (&'static str, Denomination)> {
-        vec![
-            (address::testing::nam(), ("nam", 6.into())),
-            (address::testing::btc(), ("btc", 8.into())),
-            (address::testing::eth(), ("eth", 18.into())),
-            (address::testing::dot(), ("dot", 10.into())),
-            (address::testing::schnitzel(), ("schnitzel", 6.into())),
-            (address::testing::apfel(), ("apfel", 6.into())),
-            (address::testing::kartoffel(), ("kartoffel", 6.into())),
-        ]
-        .into_iter()
-        .collect()
+    /// A pool holding less than one precision unit of a token must not pay
+    /// any reward, however big the PD controller output is.
+    #[test]
+    fn test_no_reward_below_one_precision_unit() {
+        let btc = address::testing::btc();
+        let denom: Denomination = 6.into();
+        const PRECISION: u64 = 1_000;
+        let precision = Precision::from(PRECISION);
+        let minted = Amount::from_u64(1_000_000_000_000);
+
+        for (in_masp, expect_reward) in [
+            (Amount::zero(), false),
+            (Amount::from_u64(1), false),
+            (Amount::from_u64(PRECISION - 1), false),
+            (Amount::from_u64(PRECISION), true),
+            (Amount::from_u64(1_000 * PRECISION), true),
+        ] {
+            // NAM is registered too: the controller scales by its supply
+            let mut s = init_reward_storage(
+                &[
+                    (address::testing::nam(), "nam", denom),
+                    (btc.clone(), "btc", denom),
+                ],
+                minted,
+                in_masp,
+            );
+            let (reward, prec, balance) =
+                calculate_masp_rewards::<_, namada_trans_token::Store<_>>(
+                    &mut s, &btc, denom, precision, 365,
+                )
+                .unwrap();
+            assert_eq!(prec, precision);
+            assert_eq!(balance, in_masp);
+            let last_inflation: Amount = s
+                .read(
+                    &masp_last_inflation_key::<namada_trans_token::Store<()>>(
+                        &btc,
+                    ),
+                )
+                .unwrap()
+                .unwrap();
+            if expect_reward {
+                assert!(reward > 0, "expected a reward for {in_masp:?}");
+            } else {
+                assert_eq!(reward, 0, "unexpected reward for {in_masp:?}");
+                assert_eq!(last_inflation, Amount::zero());
+            }
+        }
+    }
+
+    /// A tiny non-native pool must not cause any NAM to be minted and must
+    /// not publish a reward conversion.
+    #[test]
+    fn test_tiny_pool_mints_nothing() {
+        let nam = address::testing::nam();
+        let btc = address::testing::btc();
+        let minted = Amount::from_u64(1_000_000_000_000);
+        // Less than one precision unit (1000 for 6 decimals)
+        let mut s = init_reward_storage(
+            &[
+                (nam.clone(), "nam", 6.into()),
+                (btc.clone(), "btc", 6.into()),
+            ],
+            minted,
+            Amount::from_u64(999),
+        );
+        let before = native_minted(&s);
+        for _ in 0..5 {
+            next_masp_epoch(&mut s);
+        }
+        assert_eq!(native_minted(&s), before);
+        let reward_assets =
+            namada_core::masp::encode_reward_asset_types(&nam).unwrap();
+        for leaf in s.conversion_state().assets.values() {
+            if leaf.token == btc {
+                let conv = MaspAmount::from(leaf.conversion.clone());
+                for asset in &reward_assets {
+                    assert_eq!(conv.get(asset), 0);
+                }
+            }
+        }
     }
 
     #[test]

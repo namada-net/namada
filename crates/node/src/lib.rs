@@ -456,6 +456,28 @@ pub fn query_db(
     );
 }
 
+/// Compact Namada ledger node's DB. The ledger must not be running.
+pub fn compact_db(
+    config: config::Ledger,
+    args::LedgerCompactDb {
+        all_column_families,
+    }: args::LedgerCompactDb,
+) -> Result<(), shell::Error> {
+    let chain_id = config.chain_id;
+    let db_path = config.shell.db_dir(&chain_id);
+    if !db_path.exists() {
+        tracing::info!(
+            "No DB found at {}, nothing to compact",
+            db_path.display()
+        );
+        return Ok(());
+    }
+
+    let db = storage::PersistentDB::open(db_path, None);
+    db.compact(all_column_families)
+        .map_err(|e| shell::Error::Storage(namada_sdk::state::Error::new(e)))
+}
+
 /// Roll Namada state back to the previous height
 pub fn rollback(config: config::Ledger) -> Result<(), shell::Error> {
     shell::rollback(config)

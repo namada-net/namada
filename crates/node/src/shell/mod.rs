@@ -8,6 +8,7 @@
 pub mod block_alloc;
 mod finalize_block;
 mod init_chain;
+mod masp_rewards_reset;
 pub use init_chain::InitChainValidation;
 use namada_apps_lib::config::NodeLocalConfig;
 use namada_sdk::state::StateRead;

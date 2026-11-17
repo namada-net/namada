@@ -18,6 +18,8 @@
 )]
 
 pub mod conversion;
+#[cfg(any(feature = "multicore", test))]
+pub mod rewards_reset;
 
 #[cfg(feature = "masp")]
 pub mod masp;

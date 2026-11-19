@@ -13,8 +13,11 @@ use namada_governance::parameters::GovernanceParameters;
 use namada_macros::BorshDeserializer;
 #[cfg(feature = "migrations")]
 use namada_migrations::*;
+use namada_state::{Result, StorageRead, StorageWrite};
 use serde::Serialize;
 use thiserror::Error;
+
+use crate::storage_key;
 
 /// Proof-of-Stake system parameters. This includes parameters that are used in
 /// PoS but are read from other accounts storage (governance).
@@ -80,6 +83,343 @@ pub struct OwnedPosParams {
     pub rewards_gain_p: Dec,
     /// PoS gain d (read only)
     pub rewards_gain_d: Dec,
+}
+
+/// Read "max_validator_slots" parameter
+pub fn read_max_validator_slots_param<S>(storage: &S) -> Result<u64>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_max_validator_slots_key())?
+        .expect("Required \"max_validator_slots\" param"))
+}
+
+/// Read "pipeline_len" parameter
+pub fn read_pipeline_len_param<S>(storage: &S) -> Result<u64>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_pipeline_len_key())?
+        .expect("Required \"pipeline_len\" param"))
+}
+
+/// Read "unbonding_len" parameter
+pub fn read_unbonding_len_param<S>(storage: &S) -> Result<u64>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_unbonding_len_key())?
+        .expect("Required \"unbonding_len\" param"))
+}
+
+/// Read "tm_votes_per_token" parameter
+pub fn read_tm_votes_per_token_param<S>(storage: &S) -> Result<Dec>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_tm_votes_per_token_key())?
+        .expect("Required \"tm_votes_per_token\" param"))
+}
+
+/// Read "block_proposer_reward" parameter
+pub fn read_block_proposer_reward_param<S>(storage: &S) -> Result<Dec>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_block_proposer_reward_key())?
+        .expect("Required \"block_proposer_reward\" param"))
+}
+
+/// Read "block_vote_reward" parameter
+pub fn read_block_vote_reward_param<S>(storage: &S) -> Result<Dec>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_block_vote_reward_key())?
+        .expect("Required \"block_vote_reward\" param"))
+}
+
+/// Read "max_inflation_rate" parameter
+pub fn read_max_inflation_rate_param<S>(storage: &S) -> Result<Dec>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_max_inflation_rate_key())?
+        .expect("Required \"max_inflation_rate\" param"))
+}
+
+/// Read "target_staked_ratio" parameter
+pub fn read_target_staked_ratio_param<S>(storage: &S) -> Result<Dec>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_target_staked_ratio_key())?
+        .expect("Required \"target_staked_ratio\" param"))
+}
+
+/// Read "duplicate_vote_min_slash_rate" parameter
+pub fn read_duplicate_vote_min_slash_rate_param<S>(storage: &S) -> Result<Dec>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_duplicate_vote_min_slash_rate_key())?
+        .expect("Required \"duplicate_vote_min_slash_rate\" param"))
+}
+
+/// Read "light_client_attack_min_slash_rate" parameter
+pub fn read_light_client_attack_min_slash_rate_param<S>(
+    storage: &S,
+) -> Result<Dec>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_light_client_attack_min_slash_rate_key())?
+        .expect("Required \"light_client_attack_min_slash_rate\" param"))
+}
+
+/// Read "cubic_slashing_window_length" parameter
+pub fn read_cubic_slashing_window_length_param<S>(storage: &S) -> Result<u64>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_cubic_slashing_window_length_key())?
+        .expect("Required \"cubic_slashing_window_length\" param"))
+}
+
+/// Read "validator_stake_threshold" parameter
+pub fn read_validator_stake_threshold_param<S>(
+    storage: &S,
+) -> Result<token::Amount>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_validator_stake_threshold_key())?
+        .expect("Required \"validator_stake_threshold\" param"))
+}
+
+/// Read "liveness_window_check" parameter
+pub fn read_liveness_window_check_param<S>(storage: &S) -> Result<u64>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_liveness_window_check_key())?
+        .expect("Required \"liveness_window_check\" param"))
+}
+
+/// Read "liveness_threshold" parameter
+pub fn read_liveness_threshold_param<S>(storage: &S) -> Result<Dec>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_liveness_threshold_key())?
+        .expect("Required \"liveness_threshold\" param"))
+}
+
+/// Read "rewards_gain_p" parameter
+pub fn read_rewards_gain_p_param<S>(storage: &S) -> Result<Dec>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_rewards_gain_p_key())?
+        .expect("Required \"rewards_gain_p\" param"))
+}
+
+/// Read "rewards_gain_d" parameter
+pub fn read_rewards_gain_d_param<S>(storage: &S) -> Result<Dec>
+where
+    S: StorageRead,
+{
+    Ok(storage
+        .read(&storage_key::param_rewards_gain_d_key())?
+        .expect("Required \"rewards_gain_d\" param"))
+}
+
+/// Write "max_validator_slots" parameter
+pub fn write_max_validator_slots_param<S>(
+    storage: &mut S,
+    value: u64,
+) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(&storage_key::param_max_validator_slots_key(), value)
+}
+
+/// Write "pipeline_len" parameter
+pub fn write_pipeline_len_param<S>(storage: &mut S, value: u64) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(&storage_key::param_pipeline_len_key(), value)
+}
+
+/// Write "unbonding_len" parameter
+pub fn write_unbonding_len_param<S>(storage: &mut S, value: u64) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(&storage_key::param_unbonding_len_key(), value)
+}
+
+/// Write "tm_votes_per_token" parameter
+pub fn write_tm_votes_per_token_param<S>(
+    storage: &mut S,
+    value: Dec,
+) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(&storage_key::param_tm_votes_per_token_key(), value)
+}
+
+/// Write "block_proposer_reward" parameter
+pub fn write_block_proposer_reward_param<S>(
+    storage: &mut S,
+    value: Dec,
+) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(&storage_key::param_block_proposer_reward_key(), value)
+}
+
+/// Write "block_vote_reward" parameter
+pub fn write_block_vote_reward_param<S>(
+    storage: &mut S,
+    value: Dec,
+) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(&storage_key::param_block_vote_reward_key(), value)
+}
+
+/// Write "max_inflation_rate" parameter
+pub fn write_max_inflation_rate_param<S>(
+    storage: &mut S,
+    value: Dec,
+) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(&storage_key::param_max_inflation_rate_key(), value)
+}
+
+/// Write "target_staked_ratio" parameter
+pub fn write_target_staked_ratio_param<S>(
+    storage: &mut S,
+    value: Dec,
+) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(&storage_key::param_target_staked_ratio_key(), value)
+}
+
+/// Write "duplicate_vote_min_slash_rate" parameter
+pub fn write_duplicate_vote_min_slash_rate_param<S>(
+    storage: &mut S,
+    value: Dec,
+) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(
+        &storage_key::param_duplicate_vote_min_slash_rate_key(),
+        value,
+    )
+}
+
+/// Write "light_client_attack_min_slash_rate" parameter
+pub fn write_light_client_attack_min_slash_rate_param<S>(
+    storage: &mut S,
+    value: Dec,
+) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(
+        &storage_key::param_light_client_attack_min_slash_rate_key(),
+        value,
+    )
+}
+
+/// Write "cubic_slashing_window_length" parameter
+pub fn write_cubic_slashing_window_length_param<S>(
+    storage: &mut S,
+    value: u64,
+) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(
+        &storage_key::param_cubic_slashing_window_length_key(),
+        value,
+    )
+}
+
+/// Write "validator_stake_threshold" parameter
+pub fn write_validator_stake_threshold_param<S>(
+    storage: &mut S,
+    value: token::Amount,
+) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(&storage_key::param_validator_stake_threshold_key(), value)
+}
+
+/// Write "liveness_window_check" parameter
+pub fn write_liveness_window_check_param<S>(
+    storage: &mut S,
+    value: u64,
+) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(&storage_key::param_liveness_window_check_key(), value)
+}
+
+/// Write "liveness_threshold" parameter
+pub fn write_liveness_threshold_param<S>(
+    storage: &mut S,
+    value: Dec,
+) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(&storage_key::param_liveness_threshold_key(), value)
+}
+
+/// Write "rewards_gain_p" parameter
+pub fn write_rewards_gain_p_param<S>(storage: &mut S, value: Dec) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(&storage_key::param_rewards_gain_p_key(), value)
+}
+
+/// Write "rewards_gain_d" parameter
+pub fn write_rewards_gain_d_param<S>(storage: &mut S, value: Dec) -> Result<()>
+where
+    S: StorageWrite + StorageRead,
+{
+    storage.write(&storage_key::param_rewards_gain_d_key(), value)
 }
 
 impl Default for OwnedPosParams {

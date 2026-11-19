@@ -26,7 +26,7 @@ use namada_sdk::governance::pgf::parameters::PgfParameters;
 use namada_sdk::governance::pgf::storage::steward::StewardDetail;
 use namada_sdk::governance::storage::keys as governance_storage;
 use namada_sdk::governance::storage::proposal::{
-    StoragePgfFunding, StorageProposal,
+    StorageProposal, StoredContPGFTarget,
 };
 use namada_sdk::governance::utils::{ProposalVotes, VotePower};
 use namada_sdk::hash::Hash;
@@ -705,11 +705,11 @@ pub async fn query_pgf(context: &impl Namada, _args: args::QueryPgf) {
         true => {
             display_line!(
                 context.io(),
-                "Pgf stewards: no stewards are currently set."
+                "PGF stewards: no stewards are currently set."
             )
         }
         false => {
-            display_line!(context.io(), "Pgf stewards:");
+            display_line!(context.io(), "PGF stewards:");
             for steward in stewards {
                 display_line!(context.io(), "{:4}- {}", "", steward.address);
                 display_line!(context.io(), "{:4}  Reward distribution:", "");
@@ -730,19 +730,39 @@ pub async fn query_pgf(context: &impl Namada, _args: args::QueryPgf) {
         true => {
             display_line!(
                 context.io(),
-                "Pgf fundings: no fundings are currently set."
+                "\nNo continous PGF distributions exist currently."
             )
         }
         false => {
-            display_line!(context.io(), "Pgf fundings:");
-            for funding in fundings {
-                display_line!(
-                    context.io(),
-                    "{:4}- {} for {}",
-                    "",
-                    funding.detail.target(),
-                    funding.detail.amount().to_string_native()
-                );
+            display_line!(
+                context.io(),
+                "\nContinuous PGF distributions (per epoch):"
+            );
+            // Group by target address and proposal ID
+            let mut grouped =
+                HashMap::<String, HashMap<u64, StoredContPGFTarget>>::new();
+            for target in fundings.into_iter() {
+                grouped
+                    .entry(target.target.target())
+                    .or_default()
+                    .insert(target.proposal_id, target);
+            }
+            for (str_addr, targets) in grouped {
+                display_line!(context.io(), "{:4}- {}", "", str_addr);
+                for (proposal_id, c_target) in targets {
+                    display_line!(
+                        context.io(),
+                        "{:6}- Prop {}: {} native tokens, end epoch = {}",
+                        "",
+                        proposal_id,
+                        c_target.target.amount().to_string_native(),
+                        if let Some(ep) = c_target.end_epoch {
+                            ep.to_string()
+                        } else {
+                            "None".to_string()
+                        }
+                    );
+                }
             }
         }
     }
@@ -1184,7 +1204,7 @@ pub async fn query_pgf_stewards<C: Client + Sync>(
 
 pub async fn query_pgf_fundings<C: Client + Sync>(
     client: &C,
-) -> Vec<StoragePgfFunding> {
+) -> Vec<StoredContPGFTarget> {
     unwrap_client_response::<C, _>(RPC.vp().pgf().funding(client).await)
 }
 

@@ -1247,14 +1247,15 @@ mod test {
             .expect("Test failed");
         client.state.in_mem_mut().block.height = height + 1;
 
-        let claimed = namada_proof_of_stake::claim_reward_tokens::<
-            _,
-            governance::Store<_>,
-            namada_token::Store<_>,
-        >(
-            &mut client.state, Some(&delegator), &validator, epoch
-        )
-        .expect("Claiming rewards failed");
+        let claimed =
+            namada_proof_of_stake::claim_reward_tokens::<
+                _,
+                governance::Store<_>,
+                namada_token::Store<_>,
+            >(
+                &mut client.state, Some(&delegator), &validator, None, epoch
+            )
+            .expect("Claiming rewards failed");
 
         assert_eq!(claimed, del_reward_epoch_3 + del_reward_epoch_2);
 
@@ -1263,7 +1264,7 @@ mod test {
                 _,
                 governance::Store<_>,
                 namada_token::Store<_>,
-            >(&mut client.state, None, &validator, epoch)
+            >(&mut client.state, None, &validator, None, epoch)
             .expect("Claiming validator rewards failed");
 
         assert_eq!(claimed_validator, val_reward_epoch_3 + val_reward_epoch_2);

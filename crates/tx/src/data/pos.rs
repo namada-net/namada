@@ -128,6 +128,8 @@ pub struct ClaimRewards {
     /// Source address for claiming rewards from a bond. For self-bonds, the
     /// validator is also the source
     pub source: Option<Address>,
+    /// Optional rewards receiver address
+    pub receiver: Option<Address>,
 }
 
 /// A redelegation of bonded tokens from one validator to another.

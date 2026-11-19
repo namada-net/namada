@@ -3616,31 +3616,32 @@ async fn get_masp_fee_payment_amount<N: Namada>(
     })
 }
 
-// Extract the validate amount for the masp frontend sustainability fee
-async fn compute_masp_frontend_sus_fee(
+/// Extract the validate amount for the masp frontend sustainability fee
+pub async fn compute_masp_frontend_sus_fee(
     context: &impl Namada,
     input_amount: &namada_token::DenominatedAmount,
     percentage: &namada_core::dec::Dec,
     token: &Address,
     force: bool,
 ) -> Result<namada_token::DenominatedAmount> {
-    let sus_fee_amt = namada_token::Amount::from_uint(
-        input_amount
-            .amount()
-            .raw_amount()
-            .checked_mul_div(
-                percentage.abs(),
-                namada_core::uint::Uint::exp10(POS_DECIMAL_PRECISION as _),
+    let (mut amount, remainder) = input_amount
+        .amount()
+        .raw_amount()
+        .checked_mul_div(
+            percentage.abs(),
+            namada_core::uint::Uint::exp10(POS_DECIMAL_PRECISION as _),
+        )
+        .ok_or_else(|| {
+            Error::Other(
+                "Overflow in masp frontend fee computation".to_string(),
             )
-            .ok_or_else(|| {
-                Error::Other(
-                    "Overflow in masp frontend fee computation".to_string(),
-                )
-            })?
-            .0,
-        0,
-    )
-    .map_err(|e| Error::Other(e.to_string()))?;
+        })?;
+    if !remainder.is_zero() {
+        // Round up the fee
+        amount += 1.into();
+    }
+    let sus_fee_amt = namada_token::Amount::from_uint(amount, 0)
+        .map_err(|e| Error::Other(e.to_string()))?;
 
     // Validate the amount given
     validate_amount(

@@ -1944,8 +1944,7 @@ pub mod cmds {
             App::new(Self::CMD)
                 .about(wrap!(
                     "Estimate the amount of MASP rewards for the \
-                     next MASP epoch. Please run shielded-sync first for best \
-                     results."
+                     next MASP epoch." 
                 ))
                 .add_args::<args::QueryShieldingRewardsEstimate<args::CliTypes>>()
         }
@@ -4913,6 +4912,8 @@ pub mod args {
 
             let gas_spending_key =
                 self.gas_spending_key.map(|key| chain_ctx.get_cached(&key));
+            let shielded_sync =
+                self.shielded_sync.map(|sync| sync.to_sdk(ctx).unwrap());
 
             Ok(TxShieldedTransfer::<SdkTypes> {
                 tx,
@@ -4920,6 +4921,7 @@ pub mod args {
                 targets,
                 gas_spending_key,
                 tx_code_path: self.tx_code_path.to_path_buf(),
+                shielded_sync,
             })
         }
     }
@@ -4943,6 +4945,7 @@ pub mod args {
                 amount,
             }];
             let gas_spending_key = GAS_SPENDING_KEY.parse(matches);
+            let shielded_sync = Some(ShieldedSync::parse(matches));
 
             Self {
                 tx,
@@ -4950,11 +4953,13 @@ pub mod args {
                 targets,
                 gas_spending_key,
                 tx_code_path,
+                shielded_sync,
             }
         }
 
         fn def(app: App) -> App {
             app.add_args::<Tx<CliTypes>>()
+                .add_args::<ShieldedSync<CliTypes>>()
                 .arg(
                     SPENDING_KEY_SOURCE
                         .def()
@@ -5121,6 +5126,8 @@ pub mod args {
 
             let gas_spending_key =
                 self.gas_spending_key.map(|key| chain_ctx.get_cached(&key));
+            let shielded_sync =
+                self.shielded_sync.map(|sync| sync.to_sdk(ctx).unwrap());
 
             Ok(TxUnshieldingTransfer::<SdkTypes> {
                 tx,
@@ -5129,6 +5136,7 @@ pub mod args {
                 sources,
                 tx_code_path: self.tx_code_path.to_path_buf(),
                 frontend_sus_fee,
+                shielded_sync,
             })
         }
     }
@@ -5159,6 +5167,7 @@ pub mod args {
                     // Take a constant fee of 10% on top of the input amount
                     (target, Dec::new(1, 1).unwrap())
                 });
+            let shielded_sync = Some(ShieldedSync::parse(matches));
 
             Self {
                 tx,
@@ -5167,11 +5176,13 @@ pub mod args {
                 gas_spending_key,
                 tx_code_path,
                 frontend_sus_fee,
+                shielded_sync,
             }
         }
 
         fn def(app: App) -> App {
             app.add_args::<Tx<CliTypes>>()
+                .add_args::<ShieldedSync<CliTypes>>()
                 .arg(
                     SPENDING_KEY_SOURCE
                         .def()
@@ -5213,6 +5224,8 @@ pub mod args {
             ctx: &mut Context,
         ) -> Result<TxIbcTransfer<SdkTypes>, Self::Error> {
             let tx = self.tx.to_sdk(ctx)?;
+            let shielded_sync =
+                self.shielded_sync.map(|sync| sync.to_sdk(ctx).unwrap());
             let chain_ctx = ctx.borrow_mut_chain_or_exit();
             let gas_spending_key =
                 self.gas_spending_key.map(|key| chain_ctx.get_cached(&key));
@@ -5237,6 +5250,7 @@ pub mod args {
                 gas_spending_key,
                 tx_code_path: self.tx_code_path.to_path_buf(),
                 frontend_sus_fee,
+                shielded_sync,
             })
         }
     }
@@ -5270,6 +5284,7 @@ pub mod args {
                     // Take a constant fee of 10% on top of the input amount
                     (target, Dec::new(1, 1).unwrap())
                 });
+            let shielded_sync = Some(ShieldedSync::parse(matches));
 
             Self {
                 tx,
@@ -5287,11 +5302,13 @@ pub mod args {
                 gas_spending_key,
                 tx_code_path,
                 frontend_sus_fee,
+                shielded_sync,
             }
         }
 
         fn def(app: App) -> App {
             app.add_args::<Tx<CliTypes>>()
+                .add_args::<ShieldedSync<CliTypes>>()
                 .arg(SOURCE.def().help(wrap!(
                     "The source account address. The source's key is used to \
                      produce the signature."
@@ -6714,6 +6731,8 @@ pub mod args {
             ctx: &mut Context,
         ) -> Result<QueryBalance<SdkTypes>, Self::Error> {
             let query = self.query.to_sdk(ctx)?;
+            let shielded_sync =
+                self.shielded_sync.map(|sync| sync.to_sdk(ctx).unwrap());
             let chain_ctx = ctx.borrow_mut_chain_or_exit();
 
             Ok(QueryBalance::<SdkTypes> {
@@ -6722,6 +6741,7 @@ pub mod args {
                 token: chain_ctx.get(&self.token),
                 no_conversions: self.no_conversions,
                 height: self.height,
+                shielded_sync,
             })
         }
     }
@@ -6733,17 +6753,21 @@ pub mod args {
             let token = TOKEN.parse(matches);
             let no_conversions = NO_CONVERSIONS.parse(matches);
             let height = BLOCK_HEIGHT_OPT.parse(matches);
+            let shielded_sync = Some(ShieldedSync::parse(matches));
+
             Self {
                 query,
                 owner,
                 token,
                 no_conversions,
                 height,
+                shielded_sync,
             }
         }
 
         fn def(app: App) -> App {
             app.add_args::<Query<CliTypes>>()
+                .add_args::<ShieldedSync<CliTypes>>()
                 .arg(
                     BALANCE_OWNER.def().help(wrap!(
                         "The account address whose balance to query."
@@ -6775,11 +6799,14 @@ pub mod args {
         ) -> Result<QueryShieldingRewardsEstimate<SdkTypes>, Self::Error>
         {
             let query = self.query.to_sdk(ctx)?;
+            let shielded_sync =
+                self.shielded_sync.map(|sync| sync.to_sdk(ctx).unwrap());
             let chain_ctx = ctx.borrow_mut_chain_or_exit();
 
             Ok(QueryShieldingRewardsEstimate::<SdkTypes> {
                 query,
                 owner: chain_ctx.get_cached(&self.owner),
+                shielded_sync,
             })
         }
     }
@@ -6788,15 +6815,23 @@ pub mod args {
         fn parse(matches: &ArgMatches) -> Self {
             let query = Query::parse(matches);
             let owner = VIEWING_KEY.parse(matches);
-            Self { query, owner }
+            let shielded_sync = Some(ShieldedSync::parse(matches));
+
+            Self {
+                query,
+                owner,
+                shielded_sync,
+            }
         }
 
         fn def(app: App) -> App {
-            app.add_args::<Query<CliTypes>>().arg(
-                VIEWING_KEY
-                    .def()
-                    .help(wrap!("The viewing key whose rewards to estimate.")),
-            )
+            app.add_args::<Query<CliTypes>>()
+                .add_args::<ShieldedSync<CliTypes>>()
+                .arg(
+                    VIEWING_KEY.def().help(wrap!(
+                        "The viewing key whose rewards to estimate."
+                    )),
+                )
         }
     }
 
@@ -7230,7 +7265,6 @@ pub mod args {
 
     impl Args for ShieldedSync<CliTypes> {
         fn parse(matches: &ArgMatches) -> Self {
-            let ledger_address = CONFIG_RPC_LEDGER_ADDRESS.parse(matches);
             let last_query_height = BLOCK_HEIGHT_TO_OPT.parse(matches);
             let spending_keys = DATED_SPENDING_KEYS.parse(matches);
             let viewing_keys = DATED_VIEWING_KEYS.parse(matches);
@@ -7244,7 +7278,6 @@ pub mod args {
             };
             let block_batch_size = BLOCK_BATCH.parse(matches);
             Self {
-                ledger_address,
                 last_query_height,
                 spending_keys,
                 viewing_keys,
@@ -7257,43 +7290,41 @@ pub mod args {
         }
 
         fn def(app: App) -> App {
-            app.arg(CONFIG_RPC_LEDGER_ADDRESS.def().help(LEDGER_ADDRESS_ABOUT))
-                .arg(BLOCK_HEIGHT_TO_OPT.def().help(wrap!(
-                    "Option block height to sync up to. Default is latest."
-                )))
-                .arg(DATED_SPENDING_KEYS.def().help(wrap!(
-                    "List of new spending keys with which to check note \
-                     ownership. These will be added to the shielded context. \
-                     Appending \"<<$BLOCKHEIGHT\" to the end of each key adds \
-                     a birthday."
-                )))
-                .arg(DATED_VIEWING_KEYS.def().help(wrap!(
-                    "List of new viewing keys with which to check note \
-                     ownership. These will be added to the shielded context. \
-                     Appending \"<<$BLOCKHEIGHT\" to the end of each key adds \
-                     a birthday."
-                )))
-                .arg(WITH_INDEXER.def().help(wrap!(
-                    "Address of a `namada-masp-indexer` live instance. If \
-                     present, the shielded sync will be performed using data \
-                     retrieved from the given indexer."
-                )))
-                .arg(WAIT_FOR_LAST_QUERY_HEIGHT.def().help(wrap!(
-                    "Wait until the last height to sync is available instead \
-                     of returning early from the shielded sync."
-                )))
-                .arg(MAX_CONCURRENT_FETCHES.def().help(wrap!(
-                    "Maximum number of fetch jobs that will ever execute \
-                     concurrently during the shielded sync."
-                )))
-                .arg(RETRIES.def().help(wrap!(
-                    "Maximum number of times to retry fetching. If no \
-                     argument is provided, defaults to retrying forever."
-                )))
-                .arg(BLOCK_BATCH.def().help(wrap!(
-                    "Number of blocks fetched per concurrent fetch job. The \
-                     default is 10."
-                )))
+            app.arg(BLOCK_HEIGHT_TO_OPT.def().help(wrap!(
+                "Option block height to sync up to. Default is latest."
+            )))
+            .arg(DATED_SPENDING_KEYS.def().help(wrap!(
+                "List of new spending keys with which to check note \
+                 ownership. These will be added to the shielded context. \
+                 Appending \"<<$BLOCKHEIGHT\" to the end of each key adds a \
+                 birthday."
+            )))
+            .arg(DATED_VIEWING_KEYS.def().help(wrap!(
+                "List of new viewing keys with which to check note ownership. \
+                 These will be added to the shielded context. Appending \
+                 \"<<$BLOCKHEIGHT\" to the end of each key adds a birthday."
+            )))
+            .arg(WITH_INDEXER.def().help(wrap!(
+                "Address of a `namada-masp-indexer` live instance. If \
+                 present, the shielded sync will be performed using data \
+                 retrieved from the given indexer."
+            )))
+            .arg(WAIT_FOR_LAST_QUERY_HEIGHT.def().help(wrap!(
+                "Wait until the last height to sync is available instead of \
+                 returning early from the shielded sync."
+            )))
+            .arg(MAX_CONCURRENT_FETCHES.def().help(wrap!(
+                "Maximum number of fetch jobs that will ever execute \
+                 concurrently during the shielded sync."
+            )))
+            .arg(RETRIES.def().help(wrap!(
+                "Maximum number of times to retry fetching. If no argument is \
+                 provided, defaults to retrying forever."
+            )))
+            .arg(BLOCK_BATCH.def().help(wrap!(
+                "Number of blocks fetched per concurrent fetch job. The \
+                 default is 10."
+            )))
         }
     }
 
@@ -7310,7 +7341,6 @@ pub mod args {
                 block_batch_size: self.block_batch_size,
                 max_concurrent_fetches: self.max_concurrent_fetches,
                 wait_for_last_query_height: self.wait_for_last_query_height,
-                ledger_address: chain_ctx.get(&self.ledger_address),
                 last_query_height: self.last_query_height,
                 spending_keys: self
                     .spending_keys

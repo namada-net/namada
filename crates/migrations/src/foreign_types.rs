@@ -8,6 +8,7 @@ use namada_macros::derive_typehash;
 
 use crate::TypeHash;
 
+derive_typehash!(String);
 derive_typehash!(Vec::<u8>);
 derive_typehash!(Vec::<String>);
 derive_typehash!(u64);

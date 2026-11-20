@@ -223,6 +223,75 @@ mod tests {
         }
     }
 
+    /// Test that PoS VP rejects a tx that leaves a new validator with a
+    /// non-Ed25519 consensus key, even when the tx code doesn't check it
+    #[test]
+    fn test_non_ed25519_consensus_key_rejected_by_vp() {
+        init_tx_env_with_pos();
+
+        let validator = established_address_2();
+        tx_host_env::with(|tx_env| {
+            tx_env.spawn_accounts([validator.clone()]);
+        });
+        let account_key = key::testing::keypair_1();
+        let consensus_key = key::testing::keypair_2();
+        let protocol_key = key::testing::keypair_3();
+
+        let eth_hot_key =
+            key::testing::gen_keypair::<key::secp256k1::SigScheme>();
+        let eth_cold_key =
+            key::testing::gen_keypair::<key::secp256k1::SigScheme>();
+        let become_validator = BecomeValidator {
+            address: validator.clone(),
+            consensus_key: consensus_key.to_public(),
+            eth_cold_key: eth_cold_key.ref_to(),
+            eth_hot_key: eth_hot_key.ref_to(),
+            protocol_key: protocol_key.to_public(),
+            commission_rate: Dec::new(5, 2).unwrap(),
+            max_commission_rate_change: Dec::new(1, 2).unwrap(),
+            email: "bang@my.bong".to_owned(),
+            description: None,
+            website: None,
+            discord_handle: None,
+            avatar: None,
+            name: None,
+        };
+
+        apply_become_validator_tx(
+            become_validator,
+            account_key,
+            vec![
+                consensus_key,
+                protocol_key,
+                common::SecretKey::Secp256k1(eth_hot_key),
+                common::SecretKey::Secp256k1(eth_cold_key),
+            ],
+        )
+        .unwrap();
+
+        // Replace the new validator's consensus key with a secp256k1 key
+        let secp_consensus_key = key::testing::keypair_4().to_public();
+        let current_epoch = ctx().get_block_epoch().unwrap();
+        let pipeline_len = OwnedPosParams::default().pipeline_len;
+        proof_of_stake::storage::validator_consensus_key_handle(&validator)
+            .set::<_, governance::Store<_>>(
+                ctx(),
+                secp_consensus_key,
+                current_epoch,
+                pipeline_len,
+            )
+            .unwrap();
+
+        let result = run_pos_vp();
+        let err = result.expect_err(
+            "PoS Validity predicate must reject a non-Ed25519 consensus key",
+        );
+        assert!(
+            err.to_string().contains("must be an Ed25519 key"),
+            "unexpected rejection reason: {err}"
+        );
+    }
+
     /// Init tx env with a single genesis PoS validator
     fn init_tx_env_with_pos() {
         tx_host_env::init();

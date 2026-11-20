@@ -7,6 +7,7 @@ use namada_controller::Dec;
 use namada_core::address::Address;
 use namada_core::arith::checked;
 use namada_core::booleans::BoolResultUnitExt;
+use namada_core::key::common;
 use namada_core::storage::Key;
 use namada_systems::{governance, trans_token};
 use namada_tx::BatchedTxRef;
@@ -19,7 +20,7 @@ use thiserror::Error;
 use crate::storage::{
     read_owned_pos_params, read_pos_params,
     read_validator_max_commission_rate_change, read_validator_metadata,
-    validator_commission_rate_handle,
+    validator_commission_rate_handle, validator_consensus_key_handle,
 };
 use crate::storage_key::is_params_key;
 use crate::types::BondId;
@@ -374,6 +375,38 @@ where
                     "The per-epoch maximum commission rate change provided \
                      must be a decimal between 0 and 1.",
                 ));
+            }
+        }
+
+        // Validate new and changed validator consensus keys: CometBFT only
+        // accepts Ed25519 validator keys, so any other key would be rejected
+        // once it gets into the validator set updates at the pipeline epoch
+        let validators_with_new_consensus_key: BTreeSet<&Address> =
+            keys_changed
+                .iter()
+                .filter_map(storage_key::is_validator_consensus_key_key)
+                .chain(&became_validator)
+                .chain(&changed_consensus_key)
+                .collect();
+        for validator in validators_with_new_consensus_key {
+            let consensus_key = validator_consensus_key_handle(validator).get(
+                &ctx.post(),
+                pipeline_epoch,
+                &params,
+            )?;
+            match consensus_key {
+                Some(common::PublicKey::Ed25519(_)) => {}
+                Some(common::PublicKey::Secp256k1(_)) => {
+                    return Err(Error::new_alloc(format!(
+                        "The consensus key of the validator with address \
+                         {validator} must be an Ed25519 key"
+                    )));
+                }
+                None => {
+                    return Err(Error::new_alloc(format!(
+                        "Missing validator {validator} consensus key"
+                    )));
+                }
             }
         }
 

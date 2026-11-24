@@ -420,6 +420,11 @@ pub mod testing {
         ) {
             self.mock_block_headers.insert(height, header);
         }
+
+        /// Set the current epoch of [`TestStorage`].
+        pub fn set_block_epoch(&mut self, epoch: Epoch) {
+            self.epoch = epoch;
+        }
     }
 
     impl StorageRead for TestStorage {

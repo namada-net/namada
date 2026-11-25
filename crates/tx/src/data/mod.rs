@@ -772,7 +772,7 @@ mod test_process_tx {
 
         let batched_result = BatchedTxResult {
             changed_keys: [
-                namada_account::Key::wasm_code_name("test-name".to_string()),
+                namada_account::Key::wasm_code_hash("test-name".to_string()),
                 namada_account::Key::wasm_hash("test-name"),
             ]
             .into(),

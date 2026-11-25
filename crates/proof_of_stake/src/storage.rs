@@ -14,6 +14,27 @@ use namada_core::token;
 use namada_systems::governance;
 
 use crate::lazy_map::NestedSubKey;
+pub use crate::parameters::{
+    read_block_proposer_reward_param, read_block_vote_reward_param,
+    read_cubic_slashing_window_length_param,
+    read_duplicate_vote_min_slash_rate_param,
+    read_light_client_attack_min_slash_rate_param,
+    read_liveness_threshold_param, read_liveness_window_check_param,
+    read_max_inflation_rate_param, read_max_validator_slots_param,
+    read_pipeline_len_param, read_rewards_gain_d_param,
+    read_rewards_gain_p_param, read_target_staked_ratio_param,
+    read_tm_votes_per_token_param, read_unbonding_len_param,
+    read_validator_stake_threshold_param, write_block_proposer_reward_param,
+    write_block_vote_reward_param, write_cubic_slashing_window_length_param,
+    write_duplicate_vote_min_slash_rate_param,
+    write_light_client_attack_min_slash_rate_param,
+    write_liveness_threshold_param, write_liveness_window_check_param,
+    write_max_inflation_rate_param, write_max_validator_slots_param,
+    write_pipeline_len_param, write_rewards_gain_d_param,
+    write_rewards_gain_p_param, write_target_staked_ratio_param,
+    write_tm_votes_per_token_param, write_unbonding_len_param,
+    write_validator_stake_threshold_param,
+};
 use crate::storage_key::consensus_keys_key;
 use crate::types::{
     BelowCapacityValidatorSets, BondId, Bonds, CommissionRates,
@@ -265,9 +286,45 @@ pub fn read_owned_pos_params<S>(storage: &S) -> Result<OwnedPosParams>
 where
     S: StorageRead,
 {
-    Ok(storage
-        .read(&storage_key::params_key())?
-        .expect("PosParams should always exist in storage after genesis"))
+    let max_validator_slots = read_max_validator_slots_param(storage)?;
+    let pipeline_len = read_pipeline_len_param(storage)?;
+    let unbonding_len = read_unbonding_len_param(storage)?;
+    let tm_votes_per_token = read_tm_votes_per_token_param(storage)?;
+    let block_proposer_reward = read_block_proposer_reward_param(storage)?;
+    let block_vote_reward = read_block_vote_reward_param(storage)?;
+    let max_inflation_rate = read_max_inflation_rate_param(storage)?;
+    let target_staked_ratio = read_target_staked_ratio_param(storage)?;
+    let duplicate_vote_min_slash_rate =
+        read_duplicate_vote_min_slash_rate_param(storage)?;
+    let light_client_attack_min_slash_rate =
+        read_light_client_attack_min_slash_rate_param(storage)?;
+    let cubic_slashing_window_length =
+        read_cubic_slashing_window_length_param(storage)?;
+    let validator_stake_threshold =
+        read_validator_stake_threshold_param(storage)?;
+    let liveness_window_check = read_liveness_window_check_param(storage)?;
+    let liveness_threshold = read_liveness_threshold_param(storage)?;
+    let rewards_gain_p = read_rewards_gain_p_param(storage)?;
+    let rewards_gain_d = read_rewards_gain_d_param(storage)?;
+
+    Ok(OwnedPosParams {
+        max_validator_slots,
+        pipeline_len,
+        unbonding_len,
+        tm_votes_per_token,
+        block_proposer_reward,
+        block_vote_reward,
+        max_inflation_rate,
+        target_staked_ratio,
+        duplicate_vote_min_slash_rate,
+        light_client_attack_min_slash_rate,
+        cubic_slashing_window_length,
+        validator_stake_threshold,
+        liveness_window_check,
+        liveness_threshold,
+        rewards_gain_p,
+        rewards_gain_d,
+    })
 }
 
 /// Read PoS parameters
@@ -305,8 +362,52 @@ pub fn write_pos_params<S>(
 where
     S: StorageRead + StorageWrite,
 {
-    let key = storage_key::params_key();
-    storage.write(&key, params)
+    let OwnedPosParams {
+        max_validator_slots,
+        pipeline_len,
+        unbonding_len,
+        tm_votes_per_token,
+        block_proposer_reward,
+        block_vote_reward,
+        max_inflation_rate,
+        target_staked_ratio,
+        duplicate_vote_min_slash_rate,
+        light_client_attack_min_slash_rate,
+        cubic_slashing_window_length,
+        validator_stake_threshold,
+        liveness_window_check,
+        liveness_threshold,
+        rewards_gain_p,
+        rewards_gain_d,
+    } = params;
+
+    write_max_validator_slots_param(storage, *max_validator_slots)?;
+    write_pipeline_len_param(storage, *pipeline_len)?;
+    write_unbonding_len_param(storage, *unbonding_len)?;
+    write_tm_votes_per_token_param(storage, *tm_votes_per_token)?;
+    write_block_proposer_reward_param(storage, *block_proposer_reward)?;
+    write_block_vote_reward_param(storage, *block_vote_reward)?;
+    write_max_inflation_rate_param(storage, *max_inflation_rate)?;
+    write_target_staked_ratio_param(storage, *target_staked_ratio)?;
+    write_duplicate_vote_min_slash_rate_param(
+        storage,
+        *duplicate_vote_min_slash_rate,
+    )?;
+    write_light_client_attack_min_slash_rate_param(
+        storage,
+        *light_client_attack_min_slash_rate,
+    )?;
+    write_cubic_slashing_window_length_param(
+        storage,
+        *cubic_slashing_window_length,
+    )?;
+    write_validator_stake_threshold_param(storage, *validator_stake_threshold)?;
+    write_liveness_window_check_param(storage, *liveness_window_check)?;
+    write_liveness_threshold_param(storage, *liveness_threshold)?;
+    write_rewards_gain_p_param(storage, *rewards_gain_p)?;
+    write_rewards_gain_d_param(storage, *rewards_gain_d)?;
+
+    Ok(())
 }
 
 /// Get the validator address given the raw hash of the Tendermint consensus key

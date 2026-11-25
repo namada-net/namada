@@ -37,7 +37,9 @@ jobs:
         git fetch --tags --force origin # WA: https://github.com/actions/checkout/issues/882
     - name: Switch to tag if specified
       if: "${{ github.event.inputs.tag != '' }}"
-      run: git checkout ${{ github.event.inputs.tag }}
+      env:
+        RELEASE_TAG: ${{ github.event.inputs.tag }}
+      run: git checkout "$RELEASE_TAG"
     - name: Build wasm
       run: make build-wasm-scripts
     - name: Upload wasm artifacts 
@@ -67,7 +69,9 @@ jobs:
           git fetch --tags --force origin # WA: https://github.com/actions/checkout/issues/882
       - name: Switch to tag if specified
         if: "${{ github.event.inputs.tag != '' }}"
-        run: git checkout ${{ github.event.inputs.tag }}
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag }}
+        run: git checkout "$RELEASE_TAG"
       - name: Install dependencies
         if: startsWith(runner.os, 'Linux')
         run: sudo apt-get update && sudo apt-get -y install libudev-dev

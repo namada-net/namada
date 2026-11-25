@@ -15,7 +15,7 @@ use namada_core::storage::KeySeg;
 use namada_core::{address, storage};
 
 pub use crate::data::pos::{
-    Bond, ClaimRewards, Redelegation, Unbond, Withdraw,
+    Bond, ClaimRewardsCompat as ClaimRewards, Redelegation, Unbond, Withdraw,
 };
 
 /// Actions applied from txs.

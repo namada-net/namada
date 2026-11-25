@@ -17,7 +17,9 @@ pub enum VersionedWallet<U: ShieldedUtils> {
     /// Version 1
     V1(v1::ShieldedWallet<U>),
     /// Version 2
-    V2(ShieldedWallet<U>),
+    V2(v2::ShieldedWallet<U>),
+    /// Version 3
+    V3(ShieldedWallet<U>),
 }
 
 impl<U: ShieldedUtils> VersionedWallet<U> {
@@ -27,7 +29,8 @@ impl<U: ShieldedUtils> VersionedWallet<U> {
         match self {
             VersionedWallet::V0(w) => Ok(w.into()),
             VersionedWallet::V1(w) => Ok(w.into()),
-            VersionedWallet::V2(w) => Ok(w),
+            VersionedWallet::V2(w) => Ok(w.into()),
+            VersionedWallet::V3(w) => Ok(w),
         }
     }
 }
@@ -40,10 +43,13 @@ pub enum VersionedWalletRef<'w, U: ShieldedUtils> {
     /// Version 1
     V1(&'w v1::ShieldedWallet<U>),
     /// Version 2
-    V2(&'w ShieldedWallet<U>),
+    V2(&'w v2::ShieldedWallet<U>),
+    /// Version 3
+    V3(&'w ShieldedWallet<U>),
 }
 
 mod migrations {
+    use borsh::{BorshDeserialize, BorshSerialize};
     use masp_primitives::merkle_tree::CommitmentTree;
     use masp_primitives::sapling::{Diversifier, Node, Note};
     use namada_core::collections::HashMap;
@@ -162,6 +168,17 @@ mod migrations {
             );
         }
     }
+
+    #[derive(Copy, Clone, BorshSerialize, BorshDeserialize, Debug, Default)]
+    /// The possible sync states of the shielded context
+    pub enum ContextSyncStatus {
+        /// The context contains data that has been confirmed by the protocol
+        #[default]
+        Confirmed,
+        /// The context possibly contains data that has not yet been confirmed
+        /// by the protocol and could be incomplete or invalid
+        Speculative,
+    }
 }
 
 pub mod v0 {
@@ -179,10 +196,9 @@ pub mod v0 {
     use namada_core::collections::{HashMap, HashSet};
     use namada_core::masp::AssetData;
 
+    use super::migrations::ContextSyncStatus;
     use crate::masp::utils::MaspIndexedTx;
-    use crate::masp::{
-        ContextSyncStatus, NoteIndex, ShieldedUtils, WitnessMap,
-    };
+    use crate::masp::{NoteIndex, ShieldedUtils, WitnessMap};
 
     #[derive(BorshSerialize, BorshDeserialize, Debug)]
     #[allow(missing_docs)]
@@ -301,7 +317,6 @@ pub mod v0 {
                     asset_types: wallet.asset_types,
                     conversions: Default::default(),
                     note_index: wallet.note_index,
-                    sync_status: wallet.sync_status,
                 }
             }
             #[cfg(feature = "historic")]
@@ -333,11 +348,10 @@ pub mod v1 {
     use namada_core::collections::{HashMap, HashSet};
     use namada_core::masp::AssetData;
 
+    use super::migrations::ContextSyncStatus;
     use crate::masp::shielded_wallet::EpochedConversions;
     use crate::masp::utils::MaspIndexedTx;
-    use crate::masp::{
-        ContextSyncStatus, NoteIndex, ShieldedUtils, WitnessMap,
-    };
+    use crate::masp::{NoteIndex, ShieldedUtils, WitnessMap};
 
     #[derive(BorshSerialize, BorshDeserialize, Debug)]
     pub struct ShieldedWallet<U: ShieldedUtils> {
@@ -441,7 +455,6 @@ pub mod v1 {
                     asset_types: wallet.asset_types,
                     conversions: wallet.conversions,
                     note_index: wallet.note_index,
-                    sync_status: wallet.sync_status,
                 }
             }
             #[cfg(feature = "historic")]
@@ -451,6 +464,97 @@ pub mod v1 {
                 // NB: Need to return an empty wallet because
                 // we can not rebuild the shielded history.
                 Default::default()
+            }
+        }
+    }
+}
+
+pub mod v2 {
+    //! Version 2 of the shielded wallet, which is used for migration purposes.
+
+    #![allow(missing_docs)]
+
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use masp_primitives::asset_type::AssetType;
+    use masp_primitives::memo::MemoBytes;
+    use masp_primitives::sapling::{Nullifier, ViewingKey};
+    use namada_core::borsh::{BorshDeserialize, BorshSerialize};
+    use namada_core::collections::{HashMap, HashSet};
+    use namada_core::masp::AssetData;
+    use namada_state::BlockHeight;
+    #[cfg(feature = "historic")]
+    use namada_tx::IndexedTx;
+
+    use super::migrations::ContextSyncStatus;
+    use crate::masp::bridge_tree::BridgeTree;
+    #[cfg(feature = "historic")]
+    use crate::masp::shielded_wallet::TxHistoryEntry;
+    use crate::masp::shielded_wallet::{CompactNote, EpochedConversions};
+    use crate::masp::{NoteIndex, NotePosition, ShieldedUtils};
+
+    #[derive(BorshSerialize, BorshDeserialize, Debug)]
+    pub struct ShieldedWallet<U: ShieldedUtils> {
+        #[borsh(skip)]
+        pub utils: U,
+        pub tree: BridgeTree,
+        pub synced_height: BlockHeight,
+        pub spents: HashSet<NotePosition>,
+        pub pos_map: HashMap<ViewingKey, BTreeSet<NotePosition>>,
+        pub nf_map: HashMap<Nullifier, NotePosition>,
+        pub note_map: HashMap<NotePosition, CompactNote>,
+        pub memo_map: HashMap<NotePosition, MemoBytes>,
+        pub asset_types: HashMap<AssetType, AssetData>,
+        pub conversions: EpochedConversions,
+        pub note_index: NoteIndex,
+        #[cfg(feature = "historic")]
+        pub vk_map: HashMap<NotePosition, ViewingKey>,
+        #[cfg(feature = "historic")]
+        pub history: HashMap<ViewingKey, HashMap<IndexedTx, TxHistoryEntry>>,
+        pub sync_status: ContextSyncStatus,
+    }
+
+    impl<U: ShieldedUtils + Default> Default for ShieldedWallet<U> {
+        fn default() -> ShieldedWallet<U> {
+            ShieldedWallet::<U> {
+                utils: U::default(),
+                tree: BridgeTree::empty(),
+                synced_height: Default::default(),
+                spents: HashSet::default(),
+                pos_map: HashMap::default(),
+                nf_map: HashMap::default(),
+                note_map: HashMap::default(),
+                memo_map: HashMap::default(),
+                asset_types: HashMap::default(),
+                conversions: Default::default(),
+                note_index: BTreeMap::default(),
+                #[cfg(feature = "historic")]
+                vk_map: HashMap::default(),
+                #[cfg(feature = "historic")]
+                history: HashMap::default(),
+                sync_status: Default::default(),
+            }
+        }
+    }
+
+    impl<U: ShieldedUtils> From<ShieldedWallet<U>> for super::ShieldedWallet<U> {
+        fn from(wallet: ShieldedWallet<U>) -> Self {
+            Self {
+                utils: wallet.utils,
+                tree: wallet.tree,
+                synced_height: wallet.synced_height,
+                pos_map: wallet.pos_map,
+                nf_map: wallet.nf_map,
+                note_map: wallet.note_map,
+                memo_map: wallet.memo_map,
+                spents: wallet.spents,
+                asset_types: wallet.asset_types,
+                conversions: wallet.conversions,
+                note_index: wallet.note_index,
+                #[cfg(feature = "historic")]
+                vk_map: wallet.vk_map,
+                #[cfg(feature = "historic")]
+                history: wallet.history,
             }
         }
     }

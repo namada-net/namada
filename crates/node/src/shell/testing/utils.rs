@@ -71,6 +71,7 @@ lazy_static! {
     AtomicBuffer(std::sync::Arc::new(std::sync::Mutex::new(vec![])));
 }
 
+#[derive(Copy, Clone)]
 pub struct TestingIo;
 
 #[async_trait::async_trait(?Send)]

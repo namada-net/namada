@@ -2371,6 +2371,7 @@ mod test_signing {
     use namada_core::token::{Denomination, MaspDigitPos};
     use namada_governance::storage::proposal::PGFInternalTarget;
     use namada_io::client::EncodedResponseQuery;
+    use namada_token::masp::ShieldedUtils;
     use namada_tx::{Code, Data};
     use namada_wallet::test_utils::TestWalletUtils;
     use tendermint_rpc::SimpleRequest;
@@ -2524,6 +2525,16 @@ mod test_signing {
         async fn shielded_mut(
             &self,
         ) -> RwLockWriteGuard<'_, ShieldedContext<Self::ShieldedUtils>>
+        {
+            unimplemented!()
+        }
+
+        async fn update_shielded_context<U>(
+            self,
+            _shielded: ShieldedContext<U>,
+        ) -> Self
+        where
+            U: ShieldedUtils + MaybeSend + MaybeSync,
         {
             unimplemented!()
         }

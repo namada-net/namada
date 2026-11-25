@@ -18,6 +18,7 @@ use namada_node::shell::ResultCode;
 use namada_node::shell::testing::client::run;
 use namada_node::shell::testing::node::NodeResults;
 use namada_node::shell::testing::utils::{Bin, CapturedOutput};
+use namada_sdk::DEFAULT_GAS_LIMIT;
 use namada_sdk::account::AccountPublicKeysMap;
 #[cfg(feature = "historic-masp")]
 use namada_sdk::collections::HashMap;
@@ -36,7 +37,6 @@ use namada_sdk::token::{self, Amount, DenominatedAmount, MaspEpoch};
 #[cfg(feature = "historic-masp")]
 use namada_sdk::tx::IndexedTx;
 use namada_sdk::tx::{Section, Tx};
-use namada_sdk::{DEFAULT_GAS_LIMIT, tx};
 use test_log::test;
 
 use super::{helpers, setup};
@@ -140,19 +140,6 @@ fn init_null_rewards() -> Result<()> {
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // Fetch the latest test token notes
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
-
     // Check that we have some shielded test tokens
     let captured = CapturedOutput::of(|| {
         run(
@@ -253,18 +240,6 @@ fn init_null_rewards() -> Result<()> {
             .shielded_converts
             .is_empty()
     );
-    // Invalidate the speculative shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
 
     // Now, let us increase the max reward rate
     token::write_params(
@@ -351,19 +326,6 @@ fn init_null_rewards() -> Result<()> {
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // Fetch latest shielded state
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
-
     // Check that we now have half of the rewards
     let captured = CapturedOutput::of(|| {
         run(
@@ -408,19 +370,6 @@ fn init_null_rewards() -> Result<()> {
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // Fetch latest shielded state
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
-
     // Check that we now a null NAM balance
     let captured = CapturedOutput::of(|| {
         run(
@@ -464,19 +413,6 @@ fn init_null_rewards() -> Result<()> {
     });
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // Fetch latest shielded state
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
 
     // Check test token balance
     let captured = CapturedOutput::of(|| {
@@ -574,19 +510,6 @@ fn values_spanning_multiple_masp_digits() -> Result<()> {
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // Fetch the note we just created containing test tokens
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
-
     // Check the test token balance corresponds 1:1 to what
     // we shielded
     let captured = CapturedOutput::of(|| {
@@ -657,19 +580,6 @@ fn values_spanning_multiple_masp_digits() -> Result<()> {
     });
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // Run shielded sync
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
 
     // Check test token balance is null
     let captured = CapturedOutput::of(|| {
@@ -742,19 +652,6 @@ fn values_spanning_multiple_masp_digits() -> Result<()> {
     });
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // Fetch the note we just created containing test tokens
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
 
     // Check the test token balance
     let captured = CapturedOutput::of(|| {
@@ -832,19 +729,6 @@ fn values_spanning_multiple_masp_digits() -> Result<()> {
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // Fetch latest shielded state
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
-
     // Check that we now have half of the rewards
     let captured = CapturedOutput::of(|| {
         run(
@@ -888,20 +772,6 @@ fn values_spanning_multiple_masp_digits() -> Result<()> {
     });
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // Fetch latest shielded state
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AC_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
 
     // Check the shielded NAM balance
     let captured = CapturedOutput::of(|| {
@@ -949,20 +819,6 @@ fn values_spanning_multiple_masp_digits() -> Result<()> {
     });
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // Fetch latest shielded state
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AC_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
 
     // Check that we now have a null NAM balance
     let captured = CapturedOutput::of(|| {
@@ -1050,19 +906,6 @@ fn enable_rewards_after_shielding() -> Result<()> {
     });
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // Fetch the note we just created containing test tokens
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
 
     // Check the test token balance corresponds 1:1 to what
     // we shielded
@@ -1216,19 +1059,6 @@ fn enable_rewards_after_shielding() -> Result<()> {
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // Fetch the latest test token notes
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
-
     // Check that the balance is now 0
     let captured = CapturedOutput::of(|| {
         run(
@@ -1273,19 +1103,6 @@ fn enable_rewards_after_shielding() -> Result<()> {
     });
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // Fetch the latest test token notes
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
 
     // Check that we have some shielded test tokens once more
     let captured = CapturedOutput::of(|| {
@@ -1378,19 +1195,6 @@ fn enable_rewards_after_shielding() -> Result<()> {
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // Fetch latest shielded state
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
-
     // Check that we now have half of the rewards
     let captured = CapturedOutput::of(|| {
         run(
@@ -1435,19 +1239,6 @@ fn enable_rewards_after_shielding() -> Result<()> {
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // Fetch latest shielded state
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
-
     // Check that we now a null NAM balance
     let captured = CapturedOutput::of(|| {
         run(
@@ -1491,19 +1282,6 @@ fn enable_rewards_after_shielding() -> Result<()> {
     });
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // Fetch latest shielded state
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            RPC,
-        ],
-    )?;
 
     // Check test token balance
     let captured = CapturedOutput::of(|| {
@@ -1588,20 +1366,6 @@ fn auto_compounding() -> Result<()> {
     });
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
 
     // Assert that the actual and estimated balances are equal to the parameters
     // of this closure. Also assert that the total MASP balance is equal to the
@@ -1776,20 +1540,6 @@ fn auto_compounding() -> Result<()> {
             assert!(captured.result.is_ok());
             assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-            // sync the shielded context
-            run(
-                &node,
-                Bin::Client,
-                vec![
-                    "shielded-sync",
-                    "--viewing-keys",
-                    AA_VIEWING_KEY,
-                    AB_VIEWING_KEY,
-                    "--node",
-                    validator_one_rpc,
-                ],
-            )?;
-
             // Send bal_b NAM from Albert to Bertha's shielded key
             let captured = CapturedOutput::of(|| {
                 run(
@@ -1814,20 +1564,6 @@ fn auto_compounding() -> Result<()> {
             });
             assert!(captured.result.is_ok());
             assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-            // sync the shielded context
-            run(
-                &node,
-                Bin::Client,
-                vec![
-                    "shielded-sync",
-                    "--viewing-keys",
-                    AA_VIEWING_KEY,
-                    AB_VIEWING_KEY,
-                    "--node",
-                    validator_one_rpc,
-                ],
-            )?;
 
             // Wait till epoch boundary
             node.next_masp_epoch();
@@ -1918,20 +1654,6 @@ fn base_precision_effective() -> Result<()> {
     });
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
 
     // Assert NAM balance at Albert's viewing key is 0.1
     let captured = CapturedOutput::of(|| {
@@ -2085,20 +1807,6 @@ fn reset_conversions() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-
     // Assert BTC balance at VK(A) is 1
     let captured = CapturedOutput::of(|| {
         run(
@@ -2160,13 +1868,6 @@ fn reset_conversions() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert BTC balance at VK(A) is still 1
     let captured = CapturedOutput::of(|| {
@@ -2248,13 +1949,6 @@ fn reset_conversions() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert BTC balance at VK(A) is still 1
     let captured = CapturedOutput::of(|| {
@@ -2562,20 +2256,6 @@ fn dynamic_precision() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-
     // Assert BTC balance at VK(A) is 1
     let captured = CapturedOutput::of(|| {
         run(
@@ -2637,13 +2317,6 @@ fn dynamic_precision() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert BTC balance at VK(A) is still 1
     let captured = CapturedOutput::of(|| {
@@ -2734,13 +2407,6 @@ fn dynamic_precision() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert BTC balance at VK(A) is still 1
     let captured = CapturedOutput::of(|| {
@@ -2850,13 +2516,6 @@ fn dynamic_precision() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
-
     // Assert NAM balance at VK(A) is now 0
     let captured = CapturedOutput::of(|| {
         run(
@@ -2920,20 +2579,6 @@ fn dynamic_precision() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-
     // Assert BTC balance at VK(A) is 1
     let captured = CapturedOutput::of(|| {
         run(
@@ -2974,13 +2619,6 @@ fn dynamic_precision() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert BTC balance at VK(A) is 1
     let captured = CapturedOutput::of(|| {
@@ -3047,13 +2685,6 @@ fn dynamic_precision() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
-
     // Check that unshielding the 0.25316 NAM reward also works
     let captured = CapturedOutput::of(|| {
         run(
@@ -3078,13 +2709,6 @@ fn dynamic_precision() -> Result<()> {
     });
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Unfortunately, changing the precision after non-zero rewards have already
     // been distributed leaves unclaimable NAM in the pool
@@ -3144,20 +2768,6 @@ fn masp_incentives() -> Result<()> {
     });
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
 
     // Assert BTC balance at VK(A) is 1
     let captured = CapturedOutput::of(|| {
@@ -3220,13 +2830,6 @@ fn masp_incentives() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert BTC balance at VK(A) is still 1
     let captured = CapturedOutput::of(|| {
@@ -3308,13 +2911,6 @@ fn masp_incentives() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert BTC balance at VK(A) is still 1
     let captured = CapturedOutput::of(|| {
@@ -3425,13 +3021,6 @@ fn masp_incentives() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
-
     // Assert ETH balance at VK(B) is 0.001
     let captured = CapturedOutput::of(|| {
         run(
@@ -3472,13 +3061,6 @@ fn masp_incentives() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert ETH balance at VK(B) is still 0.001
     let captured = CapturedOutput::of(|| {
@@ -3566,13 +3148,6 @@ fn masp_incentives() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
-
     // Assert ETH balance at VK(B) is 0
     let captured = CapturedOutput::of(|| {
         run(
@@ -3593,12 +3168,6 @@ fn masp_incentives() -> Result<()> {
     assert!(captured.contains("eth: 0"));
 
     node.next_masp_epoch();
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert VK(B) retains the NAM rewards dispensed in the correct
     // amount.
@@ -3621,12 +3190,6 @@ fn masp_incentives() -> Result<()> {
     assert!(captured.contains("nam: 1.502496"));
 
     node.next_masp_epoch();
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert NAM balance at MASP pool is
     // the accumulation of rewards from the shielded assets (BTC and ETH)
@@ -3675,13 +3238,6 @@ fn masp_incentives() -> Result<()> {
     });
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert BTC balance at VK(A) is 0
     let captured = CapturedOutput::of(|| {
@@ -3743,12 +3299,6 @@ fn masp_incentives() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert NAM balance at VK(A) is the rewards dispensed earlier
     // (since VK(A) has no shielded assets, no further rewards should
@@ -3815,12 +3365,6 @@ fn masp_incentives() -> Result<()> {
     // Wait till epoch boundary to prevent conversion expiry during transaction
     // construction
     node.next_masp_epoch();
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
     // Send all NAM rewards from SK(B) to Christel
     let captured = CapturedOutput::of(|| {
         run(
@@ -3850,12 +3394,6 @@ fn masp_incentives() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
     // Send all NAM rewards from SK(A) to Bertha
     let captured = CapturedOutput::of(|| {
         run(
@@ -3881,13 +3419,6 @@ fn masp_incentives() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
-
     // Assert NAM balance at VK(A) is 0
     let captured = CapturedOutput::of(|| {
         run(
@@ -3907,12 +3438,6 @@ fn masp_incentives() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains("nam: 0"));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
     // Assert NAM balance at VK(B) is 0
     let captured = CapturedOutput::of(|| {
         run(
@@ -4024,19 +3549,6 @@ fn spend_unconverted_asset_type() -> Result<()> {
     for _ in 0..5 {
         node.next_epoch();
     }
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
     // 4. Check the shielded balance
     let captured = CapturedOutput::of(|| {
         run(
@@ -4116,20 +3628,6 @@ fn masp_txs_and_queries() -> Result<()> {
 
     let (mut node, _services) = setup::setup()?;
     _ = node.next_epoch();
-
-    // add necessary viewing keys to shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
 
     let txs_args = vec![
         // 0. Attempt to spend 10 BTC at SK(A) to PA(B)
@@ -4357,12 +3855,6 @@ fn masp_txs_and_queries() -> Result<()> {
             vec![false]
         };
         for &dry_run in &dry_run_args {
-            // sync shielded context
-            run(
-                &node,
-                Bin::Client,
-                vec!["shielded-sync", "--node", validator_one_rpc],
-            )?;
             let tx_args = if dry_run && is_use_device() {
                 continue;
             } else if dry_run {
@@ -4431,247 +3923,6 @@ fn masp_txs_and_queries() -> Result<()> {
     Ok(())
 }
 
-/// Tests that multiple transactions can be constructed (without fetching) from
-/// the shielded context and executed in the same block
-#[test]
-fn multiple_unfetched_txs_same_block() -> Result<()> {
-    // This address doesn't matter for tests. But an argument is required.
-    let validator_one_rpc = "http://127.0.0.1:26567";
-    // Download the shielded pool parameters before starting node
-    let _ = FsShieldedUtils::new(PathBuf::new());
-    let (mut node, _services) = setup::setup()?;
-    _ = node.next_epoch();
-
-    // Initialize accounts we can access the secret keys of
-    let (cooper_alias, cooper_key) =
-        make_temp_account(&node, validator_one_rpc, "Cooper", NAM, 500_000)?;
-
-    // 1. Shield tokens
-    _ = node.next_epoch();
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            apply_use_device(vec![
-                "shield",
-                "--source",
-                ALBERT_KEY,
-                "--target",
-                AA_PAYMENT_ADDRESS,
-                "--token",
-                NAM,
-                "--amount",
-                "100",
-                "--ledger-address",
-                validator_one_rpc,
-            ]),
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains(TX_APPLIED_SUCCESS));
-    _ = node.next_epoch();
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            apply_use_device(vec![
-                "shield",
-                "--source",
-                ALBERT_KEY,
-                "--target",
-                AA_PAYMENT_ADDRESS,
-                "--token",
-                NAM,
-                "--amount",
-                "200",
-                "--ledger-address",
-                validator_one_rpc,
-            ]),
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains(TX_APPLIED_SUCCESS));
-    _ = node.next_epoch();
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            apply_use_device(vec![
-                "shield",
-                "--source",
-                ALBERT_KEY,
-                "--target",
-                AB_PAYMENT_ADDRESS,
-                "--token",
-                NAM,
-                "--amount",
-                "100",
-                "--ledger-address",
-                validator_one_rpc,
-            ]),
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
-
-    // 2. Shielded operations without fetching. Dump the txs to then reload and
-    // submit in the same block
-    let tempdir = tempfile::tempdir().unwrap();
-    let mut txs_bytes = vec![];
-
-    _ = node.next_epoch();
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            apply_use_device(vec![
-                "transfer",
-                "--source",
-                A_SPENDING_KEY,
-                "--target",
-                AC_PAYMENT_ADDRESS,
-                "--token",
-                NAM,
-                "--amount",
-                "50",
-                "--output-folder-path",
-                tempdir.path().to_str().unwrap(),
-                "--dump-tx",
-                "--ledger-address",
-                validator_one_rpc,
-            ]),
-        )
-    });
-    assert!(captured.result.is_ok());
-
-    let file_path = tempdir
-        .path()
-        .read_dir()
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
-    txs_bytes.push(std::fs::read(&file_path).unwrap());
-    std::fs::remove_file(&file_path).unwrap();
-
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            apply_use_device(vec![
-                "transfer",
-                "--source",
-                A_SPENDING_KEY,
-                "--target",
-                AC_PAYMENT_ADDRESS,
-                "--token",
-                NAM,
-                "--amount",
-                "50",
-                "--gas-payer",
-                cooper_alias,
-                "--output-folder-path",
-                tempdir.path().to_str().unwrap(),
-                "--dump-tx",
-                "--ledger-address",
-                validator_one_rpc,
-            ]),
-        )
-    });
-    assert!(captured.result.is_ok());
-
-    let file_path = tempdir
-        .path()
-        .read_dir()
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
-    txs_bytes.push(std::fs::read(&file_path).unwrap());
-    std::fs::remove_file(&file_path).unwrap();
-
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            apply_use_device(vec![
-                "transfer",
-                "--source",
-                B_SPENDING_KEY,
-                "--target",
-                AC_PAYMENT_ADDRESS,
-                "--token",
-                NAM,
-                "--amount",
-                "50",
-                "--gas-payer",
-                cooper_alias,
-                "--output-folder-path",
-                tempdir.path().to_str().unwrap(),
-                "--dump-tx",
-                "--ledger-address",
-                validator_one_rpc,
-            ]),
-        )
-    });
-    assert!(captured.result.is_ok());
-
-    let file_path = tempdir
-        .path()
-        .read_dir()
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
-    txs_bytes.push(std::fs::read(&file_path).unwrap());
-    std::fs::remove_file(&file_path).unwrap();
-
-    let sk = cooper_key;
-    let pk = sk.to_public();
-
-    let native_token = node
-        .shell
-        .lock()
-        .unwrap()
-        .state
-        .in_mem()
-        .native_token
-        .clone();
-    let mut txs = vec![];
-    for bytes in txs_bytes {
-        let mut tx = Tx::try_from_json_bytes(&bytes).unwrap();
-        tx.add_wrapper(
-            tx::data::wrapper::Fee {
-                amount_per_gas_unit: DenominatedAmount::native(100.into()),
-                token: native_token.clone(),
-            },
-            pk.clone(),
-            DEFAULT_GAS_LIMIT.into(),
-        );
-        tx.sign_wrapper(sk.clone());
-
-        txs.push(tx.to_bytes());
-    }
-
-    node.clear_results();
-    node.submit_txs(txs);
-    // If empty then failed in process proposal
-    assert!(!node.tx_result_codes.lock().unwrap().is_empty());
-    node.assert_success();
-
-    Ok(())
-}
-
 /// Tests that an expired masp tx is rejected by the vp. The transaction is
 /// applied at the first invalid height, i.e. block_height = expiration_height +
 /// 1
@@ -4685,7 +3936,7 @@ fn masp_tx_expiration_first_invalid_block_height() -> Result<()> {
     _ = node.next_epoch();
 
     // Initialize accounts we can access the secret keys of
-    let (cooper_alias, cooper_key) =
+    let (_, cooper_key) =
         make_temp_account(&node, validator_one_rpc, "Cooper", NAM, 500_000)?;
 
     // 1. Shield tokens
@@ -4707,18 +3958,18 @@ fn masp_tx_expiration_first_invalid_block_height() -> Result<()> {
             validator_one_rpc,
         ]),
     )?;
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // 2. Shielded operation to avoid the need of a signature on the inner tx.
     //    Dump the tx to then reload and submit
     let tempdir = tempfile::tempdir().unwrap();
 
     _ = node.next_epoch();
+    // Expiration a few seconds in the future since we'll need to run
+    // shielded-sync before building the tx and we must ensure we don't
+    // overshoot the expiration time in the process
+    #[allow(clippy::disallowed_methods)]
+    let expiration =
+        DateTimeUtc::now().next_second().next_second().next_second();
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -4733,8 +3984,6 @@ fn masp_tx_expiration_first_invalid_block_height() -> Result<()> {
                 NAM,
                 "--amount",
                 "50",
-                "--gas-payer",
-                cooper_alias,
                 // We want to create an expired masp tx. Doing so will also set
                 // the expiration field of the header which can
                 // be a problem because this would lead to the
@@ -4745,8 +3994,7 @@ fn masp_tx_expiration_first_invalid_block_height() -> Result<()> {
                 // to overwrite the header with one having no
                 // expiration
                 "--expiration",
-                #[allow(clippy::disallowed_methods)]
-                &DateTimeUtc::now().to_string(),
+                &expiration.to_string(),
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-tx",
@@ -4870,7 +4118,7 @@ fn masp_tx_expiration_first_invalid_block_height_with_fee_payment() -> Result<()
 
     // Initialize account we can access the secret keys of. The account must
     // have no balance to be used as a disposable gas payer
-    let (cooper_alias, cooper_key) =
+    let (_, cooper_key) =
         make_temp_account(&node, validator_one_rpc, "Cooper", NAM, 0)?;
 
     // 1. Shield tokens
@@ -4892,18 +4140,18 @@ fn masp_tx_expiration_first_invalid_block_height_with_fee_payment() -> Result<()
             validator_one_rpc,
         ]),
     )?;
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // 2. Shielded operation to avoid the need of a signature on the inner tx.
     //    Dump the tx to then reload and submit
     let tempdir = tempfile::tempdir().unwrap();
 
     _ = node.next_epoch();
+    // Expiration a few seconds in the future since we'll need to run
+    // shielded-sync before building the tx and we must ensure we don't
+    // overshoot the expiration time in the process
+    #[allow(clippy::disallowed_methods)]
+    let expiration =
+        DateTimeUtc::now().next_second().next_second().next_second();
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -4918,10 +4166,6 @@ fn masp_tx_expiration_first_invalid_block_height_with_fee_payment() -> Result<()
                 NAM,
                 "--amount",
                 "50",
-                // This gas payer has no funds so we are going to use it as a
-                // disposable gas payer via the MASP
-                "--gas-payer",
-                cooper_alias,
                 // We want to create an expired masp tx. Doing so will also set
                 // the expiration field of the header which can
                 // be a problem because this would lead to the
@@ -4932,8 +4176,7 @@ fn masp_tx_expiration_first_invalid_block_height_with_fee_payment() -> Result<()
                 // to overwrite the header with one having no
                 // expiration
                 "--expiration",
-                #[allow(clippy::disallowed_methods)]
-                &DateTimeUtc::now().to_string(),
+                &expiration.to_string(),
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-tx",
@@ -5035,7 +4278,7 @@ fn masp_tx_expiration_last_valid_block_height() -> Result<()> {
     _ = node.next_epoch();
 
     // Initialize accounts we can access the secret keys of
-    let (cooper_alias, cooper_key) =
+    let (_, cooper_key) =
         make_temp_account(&node, validator_one_rpc, "Cooper", NAM, 500_000)?;
 
     // 1. Shield tokens
@@ -5057,18 +4300,18 @@ fn masp_tx_expiration_last_valid_block_height() -> Result<()> {
             validator_one_rpc,
         ]),
     )?;
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // 2. Shielded operation to avoid the need of a signature on the inner tx.
     //    Dump the tx to then reload and submit
     let tempdir = tempfile::tempdir().unwrap();
 
     _ = node.next_epoch();
+    // Expiration a few seconds in the future since we'll need to run
+    // shielded-sync before building the tx and we must ensure we don't
+    // overshoot the expiration time in the process
+    #[allow(clippy::disallowed_methods)]
+    let expiration =
+        DateTimeUtc::now().next_second().next_second().next_second();
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -5083,8 +4326,6 @@ fn masp_tx_expiration_last_valid_block_height() -> Result<()> {
                 NAM,
                 "--amount",
                 "50",
-                "--gas-payer",
-                cooper_alias,
                 // We want to create an expired masp tx. Doing so will also set
                 // the expiration field of the header which can
                 // be a problem because this would lead to the
@@ -5095,8 +4336,7 @@ fn masp_tx_expiration_last_valid_block_height() -> Result<()> {
                 // to overwrite the header with one having no
                 // expiration
                 "--expiration",
-                #[allow(clippy::disallowed_methods)]
-                &DateTimeUtc::now().to_string(),
+                &expiration.to_string(),
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-tx",
@@ -5234,19 +4474,6 @@ fn cross_epoch_unshield() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-
     // 2. Generate the tx in the current epoch
     let tempdir = tempfile::tempdir().unwrap();
     let captured = CapturedOutput::of(|| {
@@ -5339,18 +4566,6 @@ fn dynamic_assets() -> Result<()> {
             .unwrap();
         test_tokens
     };
-    // add necessary viewing keys to shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
     // Wait till epoch boundary
     node.next_masp_epoch();
     // Send 1 BTC from Albert to PA
@@ -5375,13 +4590,6 @@ fn dynamic_assets() -> Result<()> {
     });
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert BTC balance at VK(A) is 1
     let captured = CapturedOutput::of(|| {
@@ -5443,12 +4651,6 @@ fn dynamic_assets() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert BTC balance at VK(A) is still 1
     let captured = CapturedOutput::of(|| {
@@ -5512,13 +4714,6 @@ fn dynamic_assets() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
-
     // Assert BTC balance at VK(A) is now 2
     let captured = CapturedOutput::of(|| {
         run(
@@ -5559,12 +4754,6 @@ fn dynamic_assets() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert that VK(A) has now received a NAM rewward for second deposit
     let captured = CapturedOutput::of(|| {
@@ -5619,12 +4808,6 @@ fn dynamic_assets() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert BTC balance at VK(A) is still 2
     let captured = CapturedOutput::of(|| {
@@ -5685,12 +4868,6 @@ fn dynamic_assets() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert BTC balance at VK(A) is still 2
     let captured = CapturedOutput::of(|| {
@@ -5732,12 +4909,6 @@ fn dynamic_assets() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
     // Assert BTC balance at VK(A) is still 2
     let captured = CapturedOutput::of(|| {
         run(
@@ -5791,12 +4962,6 @@ fn dynamic_assets() -> Result<()> {
 
     // Wait till epoch boundary
     node.next_masp_epoch();
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
     // Assert BTC balance at VK(A) is still 2
     let captured = CapturedOutput::of(|| {
         run(
@@ -5860,13 +5025,6 @@ fn dynamic_assets() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
-
     // Assert that the NAM at VK(A) is now null
     let captured = CapturedOutput::of(|| {
         run(
@@ -5910,13 +5068,6 @@ fn dynamic_assets() -> Result<()> {
     });
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert that the principal's balance is now null
     let captured = CapturedOutput::of(|| {
@@ -5981,12 +5132,6 @@ fn masp_fee_payment() -> Result<()> {
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
     _ = node.next_masp_epoch();
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -6031,12 +5176,6 @@ fn masp_fee_payment() -> Result<()> {
     });
     assert!(captured.result.is_err());
     _ = node.next_masp_epoch();
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -6169,12 +5308,6 @@ fn masp_fee_payment() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
     // Check the exact balance of the tx source to ensure that the masp fee
     // payment transaction was executed only once
     let captured = CapturedOutput::of(|| {
@@ -6256,13 +5389,6 @@ fn masp_fee_payment_gas_limit() -> Result<()> {
 
     _ = node.next_masp_epoch();
 
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
-
     // Check that the balance hasn't changed
     let captured = CapturedOutput::of(|| {
         run(
@@ -6308,13 +5434,6 @@ fn masp_fee_payment_gas_limit() -> Result<()> {
     assert!(captured.result.is_err());
 
     _ = node.next_masp_epoch();
-
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Check that the balance hasn't changed
     let captured = CapturedOutput::of(|| {
@@ -6377,13 +5496,6 @@ fn masp_fee_payment_with_non_disposable() -> Result<()> {
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
     _ = node.next_masp_epoch();
-
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     let captured = CapturedOutput::of(|| {
         run(
@@ -6451,13 +5563,6 @@ fn masp_fee_payment_with_non_disposable() -> Result<()> {
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
     _ = node.next_masp_epoch();
-
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     let captured = CapturedOutput::of(|| {
         run(
@@ -6556,13 +5661,6 @@ fn masp_fee_payment_with_custom_spending_key() -> Result<()> {
 
     _ = node.next_masp_epoch();
 
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
-
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -6628,13 +5726,6 @@ fn masp_fee_payment_with_custom_spending_key() -> Result<()> {
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
     _ = node.next_masp_epoch();
-
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     let captured = CapturedOutput::of(|| {
         run(
@@ -6782,13 +5873,6 @@ fn masp_fee_payment_with_different_token() -> Result<()> {
 
     _ = node.next_masp_epoch();
 
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
-
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -6873,13 +5957,6 @@ fn masp_fee_payment_with_different_token() -> Result<()> {
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
     _ = node.next_masp_epoch();
-
-    // sync shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     let captured = CapturedOutput::of(|| {
         run(
@@ -7093,19 +6170,6 @@ fn identical_output_descriptions() -> Result<()> {
             }
         }
     }
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
 
     // Assert NAM balance at VK(A) is 2000
     let captured = CapturedOutput::of(|| {
@@ -7465,19 +6529,6 @@ fn masp_batch() -> Result<()> {
 
     node.clear_results();
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-
     // Assert NAM balances at VK(A), Bob and Bertha
     for (owner, balance) in [
         (AA_VIEWING_KEY, 2_000),
@@ -7729,19 +6780,6 @@ fn masp_atomic_batch() -> Result<()> {
 
     node.clear_results();
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-
     // Assert NAM balances at VK(A), Albert and Bertha are unchanged
     for (owner, balance) in [
         (AA_VIEWING_KEY, 0),
@@ -7834,19 +6872,7 @@ fn masp_failing_atomic_batch() -> Result<()> {
         assert!(captured.contains(TX_APPLIED_SUCCESS));
     }
 
-    // Sync the shielded context and check the balance
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AC_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
+    // Check the balance
     for owner in [AA_VIEWING_KEY, AC_VIEWING_KEY] {
         let captured = CapturedOutput::of(|| {
             run(
@@ -8045,21 +7071,6 @@ fn masp_failing_atomic_batch() -> Result<()> {
             .as_ref();
         assert!(inner_tx_result.is_err());
     }
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            AC_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
 
     // Assert NAM balances at VK(A), Albert and Bertha are unchanged
     for (owner, balance) in [
@@ -8298,19 +7309,6 @@ fn tricky_masp_txs() -> Result<()> {
     node.submit_txs(txs);
     node.assert_success();
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-
     // Assert NAM balances at VK(A), Albert, Bertha and Christel
     for (owner, balance) in [
         (AA_VIEWING_KEY, 1_000),
@@ -8341,408 +7339,6 @@ fn tricky_masp_txs() -> Result<()> {
     Ok(())
 }
 
-// Test generation of transactions and querying balance with the speculative
-// context. Also checks that the shielded history is not updated when in a
-// speculative context.
-#[cfg(feature = "historic-masp")]
-#[test]
-fn speculative_context() -> Result<()> {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-
-    // This address doesn't matter for tests. But an argument is required.
-    let validator_one_rpc = "http://127.0.0.1:26567";
-    // Download the shielded pool parameters before starting node
-    let _ = FsShieldedUtils::new(PathBuf::new());
-    let (mut node, _services) = setup::setup()?;
-    // Generate the shielded wallet in a fixed path to retrieve it later
-    let mut shielded_wallet = FsShieldedUtils::new(node.genesis_dir());
-    // Assert that the shielded history is empty
-    assert!(shielded_wallet.history.is_empty());
-
-    _ = node.next_masp_epoch();
-
-    // 1. Shield some tokens in two steps two generate two different output
-    //    notes
-    for _ in 0..2 {
-        let captured = CapturedOutput::of(|| {
-            run(
-                &node,
-                Bin::Client,
-                apply_use_device(vec![
-                    "shield",
-                    "--source",
-                    ALBERT,
-                    "--target",
-                    AA_PAYMENT_ADDRESS,
-                    "--token",
-                    NAM,
-                    "--amount",
-                    "100",
-                    "--node",
-                    validator_one_rpc,
-                ]),
-            )
-        });
-        assert!(captured.result.is_ok());
-        assert!(captured.contains(TX_APPLIED_SUCCESS));
-    }
-
-    // 2. Sync the shielded context and check the balance
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            vec![
-                "balance",
-                "--owner",
-                AA_VIEWING_KEY,
-                "--token",
-                NAM,
-                "--node",
-                validator_one_rpc,
-            ],
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 200"));
-
-    let native_token = node
-        .shell
-        .lock()
-        .unwrap()
-        .state
-        .in_mem()
-        .native_token
-        .clone();
-    // Load the updated shielded wallet
-    rt.block_on(shielded_wallet.load_confirmed());
-    // Assert that the shielded history has been updated with the corresponding
-    // entries
-    assert_eq!(shielded_wallet.history.len(), 1);
-    let aa_history = shielded_wallet.history.first().unwrap().1;
-    assert_eq!(aa_history.len(), 2);
-    let first_aa_history_entry = aa_history
-        .get(&IndexedTx {
-            block_height: 11.into(),
-            block_index: 0.into(),
-            batch_index: 0.into(),
-        })
-        .unwrap();
-    assert!(first_aa_history_entry.inputs.is_empty());
-    let expected_outputs: HashMap<Address, Amount> =
-        [(native_token.clone(), Amount::from(100_000_000))]
-            .into_iter()
-            .collect();
-    assert_eq!(expected_outputs, first_aa_history_entry.outputs);
-    let second_aa_history_entry = aa_history
-        .get(&IndexedTx {
-            block_height: 13.into(),
-            block_index: 0.into(),
-            batch_index: 0.into(),
-        })
-        .unwrap();
-    assert!(second_aa_history_entry.inputs.is_empty());
-    let expected_outputs: HashMap<Address, Amount> =
-        [(native_token.clone(), Amount::from(100_000_000))]
-            .into_iter()
-            .collect();
-    assert_eq!(expected_outputs, second_aa_history_entry.outputs);
-
-    // 3. Spend an amount of tokens which is less than the amount of every
-    //    single note
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            apply_use_device(vec![
-                "transfer",
-                "--source",
-                A_SPENDING_KEY,
-                "--target",
-                AB_PAYMENT_ADDRESS,
-                "--token",
-                NAM,
-                "--amount",
-                "90",
-                "--gas-payer",
-                ALBERT_KEY,
-                "--node",
-                validator_one_rpc,
-            ]),
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // 4. Check the balance without calling shielded-sync to check the response
-    //    of the speculative context
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            vec![
-                "balance",
-                "--owner",
-                AA_VIEWING_KEY,
-                "--token",
-                NAM,
-                "--node",
-                validator_one_rpc,
-            ],
-        )
-    });
-    assert!(captured.result.is_ok());
-    // The speculative context invalidates the entire note spent so we expect to
-    // see the balance coming only from the second unspent note
-    assert!(captured.contains("nam: 100"));
-    // Load the updated shielded wallet
-    rt.block_on(shielded_wallet.load_confirmed());
-    // Assert that the shielded history has not been updated
-    assert_eq!(shielded_wallet.history.len(), 1);
-    let aa_history = shielded_wallet.history.first().unwrap().1;
-    assert_eq!(aa_history.len(), 2);
-
-    // 5. Try to spend some amount from the remaining note with a tx that will
-    //    fail
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            apply_use_device(vec![
-                "transfer",
-                "--source",
-                A_SPENDING_KEY,
-                "--target",
-                AB_PAYMENT_ADDRESS,
-                "--token",
-                NAM,
-                "--amount",
-                "90",
-                "--gas-payer",
-                ALBERT_KEY,
-                // Force failure with low gas limit
-                "--gas-limit",
-                "10000",
-                "--node",
-                validator_one_rpc,
-            ]),
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains(
-        "Gas error: Transaction gas exceeded the limit of 10000 gas units"
-    ));
-
-    // 6. Check that the speculative context was not updated
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            vec![
-                "balance",
-                "--owner",
-                AA_VIEWING_KEY,
-                "--token",
-                NAM,
-                "--node",
-                validator_one_rpc,
-            ],
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 100"));
-    // Load the updated shielded wallet
-    rt.block_on(shielded_wallet.load_confirmed());
-    // Assert that the shielded history has not been updated
-    assert_eq!(shielded_wallet.history.len(), 1);
-    let aa_history = shielded_wallet.history.first().unwrap().1;
-    assert_eq!(aa_history.len(), 2);
-
-    // 7. Try to spend some amount from the remaining note
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            apply_use_device(vec![
-                "transfer",
-                "--source",
-                A_SPENDING_KEY,
-                "--target",
-                AB_PAYMENT_ADDRESS,
-                "--token",
-                NAM,
-                "--amount",
-                "90",
-                "--gas-payer",
-                ALBERT_KEY,
-                "--node",
-                validator_one_rpc,
-            ]),
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // 8. Check the balance without calling shielded-sync to check the response
-    //    of the speculative context
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            vec![
-                "balance",
-                "--owner",
-                AA_VIEWING_KEY,
-                "--token",
-                NAM,
-                "--node",
-                validator_one_rpc,
-            ],
-        )
-    });
-    assert!(captured.result.is_ok());
-    // The speculative context invalidates the entire note spent so we expect to
-    // see an empty balance
-    assert!(captured.contains("nam: 0"));
-    // Load the updated shielded wallet
-    rt.block_on(shielded_wallet.load_confirmed());
-    // Assert that the shielded history has not been updated
-    assert_eq!(shielded_wallet.history.len(), 1);
-    let aa_history = shielded_wallet.history.first().unwrap().1;
-    assert_eq!(aa_history.len(), 2);
-
-    // 9. Finally, sync the shielded context and check the confirmed balances
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            vec![
-                "balance",
-                "--owner",
-                AA_VIEWING_KEY,
-                "--token",
-                NAM,
-                "--node",
-                validator_one_rpc,
-            ],
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 20"));
-    let captured = CapturedOutput::of(|| {
-        run(
-            &node,
-            Bin::Client,
-            vec![
-                "balance",
-                "--owner",
-                AB_VIEWING_KEY,
-                "--token",
-                NAM,
-                "--node",
-                validator_one_rpc,
-            ],
-        )
-    });
-    assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 180"));
-
-    // Load the updated shielded wallet
-    rt.block_on(shielded_wallet.load_confirmed());
-    // Assert that the shielded history has been updated with the corresponding
-    // entries
-    assert_eq!(shielded_wallet.history.len(), 2);
-    let aa_history = shielded_wallet.history.first().unwrap().1;
-    assert_eq!(aa_history.len(), 4);
-    let third_aa_history_entry = aa_history
-        .get(&IndexedTx {
-            block_height: 15.into(),
-            block_index: 0.into(),
-            batch_index: 0.into(),
-        })
-        .unwrap();
-    let expected_inputs: HashMap<Address, Amount> =
-        [(native_token.clone(), Amount::from(100_000_000))]
-            .into_iter()
-            .collect();
-    assert_eq!(expected_inputs, third_aa_history_entry.inputs);
-    let expected_outputs: HashMap<Address, Amount> =
-        [(native_token.clone(), Amount::from(10_000_000))]
-            .into_iter()
-            .collect();
-    assert_eq!(expected_outputs, third_aa_history_entry.outputs);
-    let fourth_aa_history_entry = aa_history
-        .get(&IndexedTx {
-            block_height: 19.into(),
-            block_index: 0.into(),
-            batch_index: 0.into(),
-        })
-        .unwrap();
-    let expected_inputs: HashMap<Address, Amount> =
-        [(native_token.clone(), Amount::from(100_000_000))]
-            .into_iter()
-            .collect();
-    assert_eq!(expected_inputs, fourth_aa_history_entry.inputs);
-    let expected_outputs: HashMap<Address, Amount> =
-        [(native_token.clone(), Amount::from(10_000_000))]
-            .into_iter()
-            .collect();
-    assert_eq!(expected_outputs, fourth_aa_history_entry.outputs);
-    let ab_history = shielded_wallet.history.get_index(1).unwrap().1;
-    assert_eq!(ab_history.len(), 2);
-    let first_ab_history_entry = ab_history
-        .get(&IndexedTx {
-            block_height: 15.into(),
-            block_index: 0.into(),
-            batch_index: 0.into(),
-        })
-        .unwrap();
-    assert!(first_ab_history_entry.inputs.is_empty());
-    let expected_outputs: HashMap<Address, Amount> =
-        [(native_token.clone(), Amount::from(90_000_000))]
-            .into_iter()
-            .collect();
-    assert_eq!(expected_outputs, first_ab_history_entry.outputs);
-    let second_ab_history_entry = ab_history
-        .get(&IndexedTx {
-            block_height: 19.into(),
-            block_index: 0.into(),
-            batch_index: 0.into(),
-        })
-        .unwrap();
-    assert!(second_ab_history_entry.inputs.is_empty());
-    let expected_outputs: HashMap<Address, Amount> =
-        [(native_token.clone(), Amount::from(90_000_000))]
-            .into_iter()
-            .collect();
-    assert_eq!(expected_outputs, second_ab_history_entry.outputs);
-
-    Ok(())
-}
-
 // Test that mixed masp tranfers and fee payments are correctly labeld by the
 // protocol (by means of events) and reconstructed in the correct order by the
 // client
@@ -8767,7 +7363,7 @@ fn masp_events() -> Result<()> {
 
     // 1. Shield some tokens in two steps two generate two different output
     //    notes
-    for target in [AA_PAYMENT_ADDRESS, AC_PAYMENT_ADDRESS] {
+    for target in [AA_PAYMENT_ADDRESS, AB_PAYMENT_ADDRESS, AC_PAYMENT_ADDRESS] {
         for _ in 0..2 {
             let captured = CapturedOutput::of(|| {
                 run(
@@ -8793,20 +7389,8 @@ fn masp_events() -> Result<()> {
         }
     }
 
-    // 2. Sync the shielded context and check the balance
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AC_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-    for owner in [AA_VIEWING_KEY, AC_VIEWING_KEY] {
+    // 2. Check the balance
+    for owner in [AA_VIEWING_KEY, AB_VIEWING_KEY, AC_VIEWING_KEY] {
         let captured = CapturedOutput::of(|| {
             run(
                 &node,
@@ -8844,8 +7428,8 @@ fn masp_events() -> Result<()> {
         .read(&tree_key)
         .unwrap()
         .unwrap();
-    // We've produced 4 notes so far from the previous shielding operations
-    assert_eq!(commitment_tree.size(), 4);
+    // We've produced 6 notes so far from the previous shielding operations
+    assert_eq!(commitment_tree.size(), 6);
 
     _ = node.next_epoch();
     let captured = CapturedOutput::of(|| {
@@ -8903,7 +7487,7 @@ fn masp_events() -> Result<()> {
             apply_use_device(vec![
                 "unshield",
                 "--source",
-                C_SPENDING_KEY,
+                B_SPENDING_KEY,
                 "--target",
                 cooper_alias,
                 "--token",
@@ -8917,7 +7501,7 @@ fn masp_events() -> Result<()> {
                 "--gas-payer",
                 cooper_alias,
                 "--gas-spending-key",
-                C_SPENDING_KEY,
+                B_SPENDING_KEY,
                 "--output-folder-path",
                 tempdir.path().to_str().unwrap(),
                 "--dump-wrapper-tx",
@@ -9137,20 +7721,7 @@ fn masp_events() -> Result<()> {
         .unwrap();
     assert_eq!(commitment_tree, storage_commitment_tree);
 
-    // 4. Sync the shielded context and check the balances
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            AC_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
+    // 4. Check the balances
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -9184,7 +7755,7 @@ fn masp_events() -> Result<()> {
         )
     });
     assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 2"));
+    assert!(captured.contains("nam: 1000"));
     let captured = CapturedOutput::of(|| {
         run(
             &node,
@@ -9201,7 +7772,7 @@ fn masp_events() -> Result<()> {
         )
     });
     assert!(captured.result.is_ok());
-    assert!(captured.contains("nam: 997"));
+    assert!(captured.contains("nam: 999"));
 
     // 5. Spend all the tokens in the pool (this verifies that the client
     //    reconstructs the correct shielded state)
@@ -9244,7 +7815,7 @@ fn masp_events() -> Result<()> {
                 "--token",
                 NAM,
                 "--amount",
-                "2",
+                "1000",
                 "--gas-limit",
                 "100000",
                 "--gas-payer",
@@ -9270,7 +7841,7 @@ fn masp_events() -> Result<()> {
                 "--token",
                 NAM,
                 "--amount",
-                "997",
+                "999",
                 "--gas-limit",
                 "100000",
                 "--gas-payer",
@@ -9284,20 +7855,6 @@ fn masp_events() -> Result<()> {
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
     // 6. Check that all the shielded balances are 0
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            AC_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-
     for owner in [AA_VIEWING_KEY, AB_VIEWING_KEY, AC_VIEWING_KEY] {
         let captured = CapturedOutput::of(|| {
             run(
@@ -9364,20 +7921,6 @@ fn multiple_inputs_from_single_note() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-
     // Assert BTC balance at VK(A) is 10
     let captured = CapturedOutput::of(|| {
         run(
@@ -9418,13 +7961,6 @@ fn multiple_inputs_from_single_note() -> Result<()> {
 
     // Skip masp epoch for rewards
     node.next_masp_epoch();
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec!["shielded-sync", "--node", validator_one_rpc],
-    )?;
 
     // Assert BTC balance at VK(A) is still 10
     let captured = CapturedOutput::of(|| {
@@ -9525,20 +8061,6 @@ fn multiple_inputs_from_single_note() -> Result<()> {
     });
     assert!(captured.result.is_ok(), "{:?}", captured.result);
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
 
     // Assert NAM balance at VK(A) is 0
     let captured = CapturedOutput::of(|| {
@@ -9673,21 +8195,8 @@ fn history() -> Result<()> {
 
     // Load the updated shielded wallet and check that the history is empty
     // since we haven't run shielded-sync yet
-    rt.block_on(shielded_wallet.load_confirmed());
+    rt.block_on(shielded_wallet.load());
     assert!(shielded_wallet.history.is_empty());
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
 
     // Assert NAM balance at VK(A) is 10
     let captured = CapturedOutput::of(|| {
@@ -9746,7 +8255,7 @@ fn history() -> Result<()> {
         .unwrap_or_default();
     let btc_addr = tokens[&BTC.to_lowercase()].clone();
     // Load the updated shielded wallet
-    rt.block_on(shielded_wallet.load_confirmed());
+    rt.block_on(shielded_wallet.load());
     // Assert that the shielded history has been updated with the corresponding
     // entries
     assert_eq!(shielded_wallet.history.len(), 1);
@@ -9805,20 +8314,6 @@ fn history() -> Result<()> {
     });
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
 
     // Assert NAM balance at VK(A) is 5
     let captured = CapturedOutput::of(|| {
@@ -9897,7 +8392,7 @@ fn history() -> Result<()> {
     assert!(captured.contains("btc: 0"));
 
     // Load the updated shielded wallet
-    rt.block_on(shielded_wallet.load_confirmed());
+    rt.block_on(shielded_wallet.load());
     // Assert that the shielded history has been updated with the corresponding
     // entries
     assert_eq!(shielded_wallet.history.len(), 2);
@@ -10015,21 +8510,8 @@ fn history_with_conversions() -> Result<()> {
 
     // Load the updated shielded wallet and check that the history is empty
     // since we haven't run shielded-sync yet
-    rt.block_on(shielded_wallet.load_confirmed());
+    rt.block_on(shielded_wallet.load());
     assert!(shielded_wallet.history.is_empty());
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
 
     // Assert BTC balance at VK(A) is 10
     let captured = CapturedOutput::of(|| {
@@ -10051,7 +8533,7 @@ fn history_with_conversions() -> Result<()> {
     assert!(captured.contains("btc: 10"));
 
     // Load the updated shielded wallet
-    rt.block_on(shielded_wallet.load_confirmed());
+    rt.block_on(shielded_wallet.load());
     // Assert that the shielded history has been updated with the corresponding
     // entries
     assert_eq!(shielded_wallet.history.len(), 1);
@@ -10119,20 +8601,6 @@ fn history_with_conversions() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AB_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
-
     // Assert BTC balance at VK(A) is 0
     let captured = CapturedOutput::of(|| {
         run(
@@ -10199,7 +8667,7 @@ fn history_with_conversions() -> Result<()> {
         .native_token
         .clone();
     // Load the updated shielded wallet
-    rt.block_on(shielded_wallet.load_confirmed());
+    rt.block_on(shielded_wallet.load());
     // Assert that the shielded history has been updated with the corresponding
     // entries
     assert_eq!(shielded_wallet.history.len(), 2);
@@ -10324,20 +8792,6 @@ fn frontend_sus_fee() -> Result<()> {
         assert!(captured.result.is_ok());
         assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-        // sync the shielded context
-        run(
-            &node,
-            Bin::Client,
-            vec![
-                "shielded-sync",
-                "--viewing-keys",
-                AA_VIEWING_KEY,
-                AC_VIEWING_KEY,
-                "--node",
-                validator_one_rpc,
-            ],
-        )?;
-
         // Assert token balance at VK(A) is 40
         let captured = CapturedOutput::of(|| {
             run(
@@ -10460,20 +8914,6 @@ fn frontend_sus_fee() -> Result<()> {
         assert!(captured.result.is_ok());
         assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-        // sync the shielded context
-        run(
-            &node,
-            Bin::Client,
-            vec![
-                "shielded-sync",
-                "--viewing-keys",
-                AA_VIEWING_KEY,
-                AC_VIEWING_KEY,
-                "--node",
-                validator_one_rpc,
-            ],
-        )?;
-
         // Assert token balance at VK(A) is 20.6
         let captured = CapturedOutput::of(|| {
             run(
@@ -10563,20 +9003,6 @@ fn frontend_sus_fee() -> Result<()> {
     });
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
-
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            AC_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
 
     // Assert BTC balance at VK(A) is 9.6
     let captured = CapturedOutput::of(|| {
@@ -10793,18 +9219,6 @@ fn frontend_sus_fee_client_checks() -> Result<()> {
     assert!(captured.result.is_ok());
     assert!(captured.contains(TX_APPLIED_SUCCESS));
 
-    // sync the shielded context
-    run(
-        &node,
-        Bin::Client,
-        vec![
-            "shielded-sync",
-            "--viewing-keys",
-            AA_VIEWING_KEY,
-            "--node",
-            validator_one_rpc,
-        ],
-    )?;
     let captured = CapturedOutput::of(|| {
         run(
             &node,

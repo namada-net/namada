@@ -1539,6 +1539,20 @@ pub async fn query_rewards<C: Client + Sync>(
     )
 }
 
+/// Query validator rewards products for a given validator and epoch.
+pub async fn query_validator_rewards_product<C: Client + Sync>(
+    client: &C,
+    validator: &Address,
+    epoch: Option<Epoch>,
+) -> Vec<(Epoch, Dec)> {
+    unwrap_client_response::<C, _>(
+        RPC.vp()
+            .pos()
+            .rewards_products(client, validator, &epoch)
+            .await,
+    )
+}
+
 /// Query token total supply.
 pub async fn query_total_supply<N: Namada>(
     context: &N,

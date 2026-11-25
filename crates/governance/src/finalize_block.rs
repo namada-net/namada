@@ -10,17 +10,19 @@ use namada_core::encode;
 use namada_core::ibc::PGFIbcTarget;
 use namada_events::extend::{ComposeEvent, Height};
 use namada_events::{EmitEvents, EventLevel};
-use namada_state::{Key, Result, State, StateRead, StorageRead, StorageWrite};
+use namada_state::{
+    Error, Key, Result, State, StateRead, StorageRead, StorageWrite,
+};
 use namada_systems::{proof_of_stake, trans_token as token};
 use namada_tx::data::TxType;
 use namada_tx::{Code, Data, Tx};
 
 use crate::event::GovernanceEvent;
-use crate::pgf::storage::keys as pgf_keys;
 use crate::pgf::storage::steward::StewardDetail;
+use crate::pgf::storage::{keys as pgf_keys, remove_cpgf_target};
 use crate::pgf::{ADDRESS as PGF_ADDRESS, storage as pgf_storage};
 use crate::storage::proposal::{
-    AddRemove, PGFAction, PGFTarget, ProposalType, StoragePgfFunding,
+    AddRemove, PGFAction, PGFTarget, ProposalType, StoredContPGFTarget,
 };
 use crate::storage::{keys, load_proposals};
 use crate::utils::{
@@ -449,29 +451,51 @@ where
         match funding {
             PGFAction::Continuous(action) => match action {
                 AddRemove::Add(target) => {
-                    pgf_keys::fundings_handle().insert(
-                        storage,
-                        target.target().clone(),
-                        StoragePgfFunding::new(target.clone(), proposal_id),
-                    )?;
+                    let target_addr = target.target.target();
                     tracing::info!(
-                        "Added/Updated Continuous PGF from proposal id {}: \
-                         set {} to {}.",
+                        "Adding Continuous PGF for {} from Proposal {} in the \
+                         amount of {} per epoch, {}.",
+                        target_addr,
                         proposal_id,
-                        target.amount().to_string_native(),
-                        target.target()
+                        target.target.amount().to_string_native(),
+                        if let Some(ep) = target.end_epoch {
+                            format!("until epoch {}", ep)
+                        } else {
+                            "indefinitely".to_string()
+                        }
                     );
+                    let target = StoredContPGFTarget {
+                        target: target.target,
+                        end_epoch: target.end_epoch,
+                        proposal_id,
+                    };
+                    pgf_keys::fundings_handle().at(&target_addr).insert(
+                        storage,
+                        proposal_id,
+                        target,
+                    )?;
                 }
                 AddRemove::Remove(target) => {
-                    pgf_keys::fundings_handle()
-                        .remove(storage, &target.target())?;
+                    let proposal_id = target.proposal_id.ok_or_else(|| {
+                        Error::new_const(
+                            "Continuous PGF target to remove must have \
+                             proposal ID set",
+                        )
+                    })?;
+                    let target_addr = target.target.target();
                     tracing::info!(
-                        "Removed Continuous PGF from proposal id {}: set {} \
-                         to {}.",
+                        "Removing Continuous PGF for {} from Proposal {} (set \
+                         to {} native tokens, end epoch: {}).",
+                        target_addr,
                         proposal_id,
-                        target.amount().to_string_native(),
-                        target.target()
+                        target.target.amount().to_string_native(),
+                        if let Some(ep) = target.end_epoch {
+                            format!("{}", ep)
+                        } else {
+                            "None".to_string()
+                        }
                     );
+                    remove_cpgf_target(storage, proposal_id, &target_addr)?;
                 }
             },
             PGFAction::Retro(target) => {
@@ -525,16 +549,16 @@ where
                 match result {
                     Ok(()) => {
                         tracing::info!(
-                            "Execute Retroactive PGF from proposal id {}: \
-                             sent {} to {}.",
+                            "Execute Retroactive PGF from Proposal {}: {}  \
+                             native tokens transferred to {}.",
                             proposal_id,
                             target.amount().to_string_native(),
                             target.target()
                         );
                     }
                     Err(e) => tracing::warn!(
-                        "Error in Retroactive PGF transfer from proposal id \
-                         {}, amount {} to {}: {}",
+                        "Error in Retroactive PGF transfer from Proposal {}, \
+                         attempt to transfer {} native tokens to {}: {}",
                         proposal_id,
                         target.amount().to_string_native(),
                         target.target(),

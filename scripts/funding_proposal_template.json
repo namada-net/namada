@@ -16,7 +16,43 @@
     "activation_epoch": 0
   },
   "data": {
-    "continuous/retro": [
+    "continuous": {
+      "add": [
+        {
+          "Internal": {
+            "amount": "0",
+            "target": "tnamXXX"
+          }
+        },
+        {
+          "IBC": {
+            "amount": "0",
+            "target": "<address-on-IBC-chain>",
+            "port_id": "<port-id>",
+            "channel_id": "<channel-id>"
+          }
+        }
+      ],
+      "remove": [
+        {
+          "Internal": {
+            "amount": "0",
+            "target": "tnamXXX",
+            "proposal_id": 0
+          }
+        },
+        {
+          "IBC": {
+            "amount": "0",
+            "target": "<address-on-IBC-chain>",
+            "port_id": "<port-id>",
+            "channel_id": "<channel-id>",
+            "proposal_id": 0
+          }
+        }
+      ]
+    },
+    "retro": [
       {
         "Internal": {
           "amount": "0",

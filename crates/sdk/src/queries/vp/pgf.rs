@@ -1,7 +1,7 @@
 use namada_core::address::Address;
 use namada_governance::pgf::parameters::PgfParameters;
 use namada_governance::pgf::storage::steward::StewardDetail;
-use namada_governance::storage::proposal::StoragePgfFunding;
+use namada_governance::storage::proposal::StoredContPGFTarget;
 use namada_state::{DB, DBIter, StorageHasher};
 
 use crate::queries::types::RequestCtx;
@@ -10,7 +10,7 @@ use crate::queries::types::RequestCtx;
 router! {PGF,
     ( "stewards" / [ address: Address ] ) -> bool = is_steward,
     ( "stewards" ) -> Vec<StewardDetail> = stewards,
-    ( "fundings" ) -> Vec<StoragePgfFunding> = funding,
+    ( "fundings" ) -> Vec<StoredContPGFTarget> = funding,
     ( "parameters" ) -> PgfParameters = parameters,
 }
 
@@ -40,7 +40,7 @@ where
 /// Query the continuous pgf fundings
 fn funding<D, H, V, T>(
     ctx: RequestCtx<'_, D, H, V, T>,
-) -> namada_storage::Result<Vec<StoragePgfFunding>>
+) -> namada_storage::Result<Vec<StoredContPGFTarget>>
 where
     D: 'static + DB + for<'iter> DBIter<'iter> + Sync,
     H: 'static + StorageHasher + Sync,

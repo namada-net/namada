@@ -529,6 +529,7 @@ pub trait Namada: NamadaIo {
         args::ClaimRewards {
             validator,
             source: None,
+            receiver: None,
             tx_code_path: PathBuf::from(TX_CLAIM_REWARDS_WASM),
             tx: self.tx_builder(),
         }

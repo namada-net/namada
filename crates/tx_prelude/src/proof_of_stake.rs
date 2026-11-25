@@ -203,6 +203,7 @@ impl Ctx {
         &mut self,
         source: Option<&Address>,
         validator: &Address,
+        receiver: Option<&Address>,
     ) -> Result<token::Amount> {
         // The tx must be authorized by the source address
         let verifier = source.as_ref().unwrap_or(&validator);
@@ -211,6 +212,7 @@ impl Ctx {
         self.push_action(Action::Pos(PosAction::ClaimRewards(ClaimRewards {
             validator: validator.clone(),
             source: source.cloned(),
+            receiver: receiver.cloned(),
         })))?;
 
         let current_epoch = self.get_block_epoch()?;
@@ -218,6 +220,7 @@ impl Ctx {
             self,
             source,
             validator,
+            receiver,
             current_epoch,
         )
     }
